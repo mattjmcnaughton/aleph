@@ -18,6 +18,8 @@ half-finished features.
 
 ## Phase 1 — The generated path (MVP)
 
+> 📄 **Full spec:** [Phase 1 PRD — Path generation](prds/phase-1-path-generation.md)
+
 The MVP is the first complete vertical slice: name a topic and skill level, and
 Aleph generates a structured path you can immediately start learning. Onboarding
 takes a topic (or a goal) plus a rough self-assessment — "new to it," "some
@@ -35,7 +37,7 @@ tutor — one AI feature, but a whole one — and it establishes the data model
 Because that durable, per-learner data underpins the whole loop, this phase also
 introduces **accounts** — authentication and server-side persistence — pulled
 forward from "Beyond" rather than retrofitted later. The full specification lives in
-the [Phase 1 PRD](prds/phase-1-generated-path.md), which also defines the phase's
+the [Phase 1 PRD](prds/phase-1-path-generation.md), which also defines the phase's
 success metrics, end-to-end workflows, and AI evals.
 
 ## Phase 2 — The tutor

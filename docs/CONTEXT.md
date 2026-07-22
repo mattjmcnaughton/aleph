@@ -6,7 +6,7 @@ synonym (say **path**, not "course"; **Quick check**, not "quiz question").
 
 > Status: **living document, started at the Phase 1 PRD.** It will be refined and extended during the
 > TDD (data types, IDs, states, storage). References: [`README.md`](../README.md) ·
-> [`roadmap.md`](roadmap.md) · [Phase 1 PRD](prds/phase-1-generated-path.md).
+> [`roadmap.md`](roadmap.md) · [Phase 1 PRD](prds/phase-1-path-generation.md).
 
 ## Core domain
 
