@@ -31,7 +31,12 @@ up more than one — Learn TypeScript, SQL performance, Rust ownership — and s
 between them from the "Your paths" list or the sidebar switcher, each remembering
 its own progress. This is deliberately the smallest thing that already feels like a
 tutor — one AI feature, but a whole one — and it establishes the data model
-(learner → paths → units → lessons → checks) that every later phase builds on.
+(account → paths → units → lessons → quick checks) that every later phase builds on.
+Because that durable, per-learner data underpins the whole loop, this phase also
+introduces **accounts** — authentication and server-side persistence — pulled
+forward from "Beyond" rather than retrofitted later. The full specification lives in
+the [Phase 1 PRD](prds/phase-1-generated-path.md), which also defines the phase's
+success metrics, end-to-end workflows, and AI evals.
 
 ## Phase 2 — The tutor
 
@@ -83,10 +88,12 @@ the learning loop, not to bolt a game onto it.
 ## Beyond
 
 Once the core loop is proven end to end, natural extensions open up: richer lesson
-formats (diagrams, worked examples, code you can run), accounts and cross-device
-sync, sharing or importing paths, and deeper analytics on how a learner is
-progressing. These are deliberately out of scope for the phases above and will be
-sequenced later against real usage rather than guessed at now.
+formats (diagrams, worked examples, code you can run), cross-device sync, sharing or
+importing paths, and deeper analytics on how a learner is progressing. (Accounts
+themselves are no longer here — Phase 1 pulls them forward, since the learning loop
+needs durable per-learner data from the start.) These are deliberately out of scope
+for the phases above and will be sequenced later against real usage rather than
+guessed at now.
 
 ## Cross-cutting concerns
 

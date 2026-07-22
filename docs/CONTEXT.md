@@ -43,7 +43,7 @@ synonym (say **path**, not "course"; **Quick check**, not "quiz question").
 | --- | --- |
 | **Progression** | Moving through a path's lessons linearly; the next lesson unlocks as the prior completes. |
 | **Mark complete** | The learner action that records a lesson as done. Completion, not correctness, is what counts (the Quick check is non-gating). |
-| **Unlock state** | Where a lesson sits on the learner's path: *locked* → *available* (a.k.a. *current*) → *complete*. Mirrors the mock's rail states. The learner-facing axis. |
+| **Unlock state** | Where a lesson sits on the learner's path: *locked* → *available* → *complete*. The learner-facing axis. (The mock's rail labels this state "current" for the available lesson; *available* is the term, "current" is only a UI label.) |
 | **Generation state** | Whether a lesson's content exists yet: *ungenerated* → *generated*. The system/AI axis, driven by on-demand generation. Orthogonal to Unlock state — a lesson can be *available but ungenerated* (generated the moment the learner reaches it). |
 | **Progress** | The persisted record of which lessons/units are complete, per path, per account. |
 | **Switcher** | The "Your paths" UI for moving between a learner's multiple paths, each keeping its own progress. |
@@ -54,11 +54,13 @@ synonym (say **path**, not "course"; **Quick check**, not "quiz question").
 | Term | Meaning |
 | --- | --- |
 | **Eval** | An automated quality check on generated content, run as a regression suite over a seed set. |
-| **Judge** | The trained model that scores a generation **binary pass/fail** against the eval rubric. |
+| **Judge** | The model that scores a generation **binary pass/fail** against the eval rubric. In MVP a prompted frontier model calibrated with few-shot examples (not fine-tuned). |
 | **Seed set** | The fixed set of representative topics × levels the eval regenerates and judges on every change. |
 | **Rubric** | The dimensions a generation must satisfy: accurate, level-appropriate, in scope, continuous, check-valid, safe. |
 | **Refusal boundary** | The safety line: any genuine learning topic is allowed; content that materially aids serious harm is refused. |
-| **Activated learner** | The north-star unit: a user who has completed **more than 3 lessons** (≥ 4). Signals real value, not curiosity. |
+| **Activated learner** | A learner who has completed **more than 3 lessons** (≥ 4) **on a single path**, each with a recorded **Attempt**, within **7 days** of signup. The unit behind the north-star **Activation rate** (% of new accounts that activate). Signals real value, not curiosity. |
+| **Session** | A run of learner activity with no gap longer than 30 minutes. Used in metrics. |
+| **Day** | A calendar day in the learner's local timezone. Used in metrics ("second distinct day"). |
 
 ## Design
 
