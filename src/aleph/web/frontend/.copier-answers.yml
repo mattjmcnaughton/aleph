@@ -1,0 +1,11 @@
+# Changes here will be overwritten by Copier; NEVER EDIT MANUALLY
+_commit: 72a28b9be899c6ccd39f06f8482d55e460556acd
+_src_path: ../templates/templates/frontend-react
+is_composed: true
+include_forms: false
+include_recharts: false
+include_shadcn: false
+include_tables: false
+include_zustand: false
+project_description: 'Mobile-friendly AI tutor: name a topic, get a generated learning path'
+project_name: aleph

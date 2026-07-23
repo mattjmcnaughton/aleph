@@ -1,0 +1,54 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "aleph"
+version = "0.1.0"
+description = "Mobile-friendly AI tutor: name a topic, get a generated learning path"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+authors = [
+    { name = "Matt McNaughton", email = "mattjmcnaughton@users.noreply.github.com" },
+]
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.34",
+    "structlog>=24.0",
+    "pydantic-settings>=2.0",
+    "opentelemetry-api>=1.20",
+    "opentelemetry-sdk>=1.20",
+    "opentelemetry-instrumentation-fastapi>=0.44b0",
+    "opentelemetry-exporter-otlp>=1.20",
+    "sqlalchemy[asyncio]>=2.0",
+    "alembic>=1.13",
+    "asyncpg>=0.29",
+    "opentelemetry-instrumentation-sqlalchemy>=0.44b0",
+]
+
+[project.urls]
+Repository = "https://github.com/mattjmcnaughton/aleph"
+
+[tool.uv]
+exclude-newer = "1 week"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.8",
+    "ty>=0.0.54",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP", "B", "A", "SIM", "TCH"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "external: tests that hit external services",
+]

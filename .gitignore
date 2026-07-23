@@ -1,0 +1,53 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+
+# Type checkers
+.mypy_cache/
+.ty_cache/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+
+# Alembic
+alembic/versions/*.py
+!alembic/versions/.gitkeep
+
+# SQLite
+*.db
+*.sqlite3
+
+# Docker
+docker-compose.override.yml
+
+# Frontend
+node_modules/
+*.tsbuildinfo
+src/aleph/web/frontend/src/routeTree.gen.ts
+src/aleph/web/frontend/test-results/
+src/aleph/web/frontend/playwright-report/
