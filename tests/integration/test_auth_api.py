@@ -11,6 +11,7 @@ asserted before any real ``/api/v1/*`` route (AL-050/051) exists.
 
 from __future__ import annotations
 
+import uuid
 from typing import TYPE_CHECKING
 
 import pytest
@@ -142,6 +143,96 @@ async def test_401_uses_the_shared_error_envelope(client: AsyncClient) -> None:
     assert body["error"]["request_id"] == response.headers["X-Request-ID"]
 
 
+async def _sign_in(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+    identity: AuthIdentity,
+) -> None:
+    monkeypatch.setattr(
+        "aleph.routers.auth.oauth.create_client",
+        lambda _provider: StubOAuthClient(),
+    )
+    monkeypatch.setattr("aleph.routers.auth.fetch_identity", lambda *_args: identity)
+    response = await client.get("/auth/callback", follow_redirects=False)
+    assert response.status_code == 303
+
+
+@pytest.mark.anyio
+async def test_session_is_anonymous_for_signed_out_requests(
+    client: AsyncClient,
+) -> None:
+    # The SPA root ``beforeLoad`` calls this signed-out; it must answer 200 with
+    # ``authenticated: false`` (never 401), so the app can render the login gate.
+    response = await client.get("/api/v1/auth/session")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "authenticated": False,
+        "provider": "keycloak",
+        "user": None,
+    }
+
+
+@pytest.mark.anyio
+async def test_session_payload_for_admin_user(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from aleph.config import settings
+
+    identity = AuthIdentity(
+        issuer="https://issuer.example.test",
+        subject="admin-subject",
+        username="admin",
+        display_name="Admin User",
+        email="admin@mattjmcnaughton.com",
+    )
+    await _sign_in(client, monkeypatch, identity)
+
+    response = await client.get("/api/v1/auth/session")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["authenticated"] is True
+    assert body["provider"] == "keycloak"
+    user = body["user"]
+    assert user["username"] == "admin"
+    assert user["display_name"] == "Admin User"
+    assert user["email"] == "admin@mattjmcnaughton.com"
+    assert user["is_admin"] is True
+    # Admins get the picker options: bare model-id strings from the allowlist.
+    assert user["model_allowlist"] == list(settings.allowlist_ids)
+    # The id is the local account UUID, serialized as a string.
+    uuid.UUID(user["id"])
+
+
+@pytest.mark.anyio
+async def test_session_payload_for_non_admin_user(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    identity = AuthIdentity(
+        issuer="https://issuer.example.test",
+        subject="dev-subject",
+        username="dev",
+        display_name="Dev User",
+        email="dev@example.com",
+    )
+    await _sign_in(client, monkeypatch, identity)
+
+    response = await client.get("/api/v1/auth/session")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["authenticated"] is True
+    assert body["provider"] == "keycloak"
+    user = body["user"]
+    assert user["username"] == "dev"
+    assert user["is_admin"] is False
+    # Non-admins never receive the picker options.
+    assert user["model_allowlist"] == []
+
+
 @pytest.mark.anyio
 async def test_logout_clears_session(
     client: AsyncClient,
@@ -167,3 +258,37 @@ async def test_logout_clears_session(
 
     assert logout_response.status_code == 204
     assert probe_response.status_code == 401
+
+
+@pytest.mark.anyio
+async def test_session_is_anonymous_when_cookied_user_was_deleted(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A stale session cookie (user row deleted) yields anonymous, never a 401."""
+    identity = AuthIdentity(
+        issuer="https://issuer.example.test",
+        subject="deleted-subject",
+        username="doomed",
+        display_name="Doomed User",
+        email="doomed@example.com",
+    )
+    await _sign_in(client, monkeypatch, identity)
+
+    from sqlalchemy import delete
+
+    from aleph import db
+    from aleph.models import User
+
+    async with db.async_session() as session:
+        await session.execute(delete(User))
+        await session.commit()
+
+    response = await client.get("/api/v1/auth/session")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "authenticated": False,
+        "provider": "keycloak",
+        "user": None,
+    }

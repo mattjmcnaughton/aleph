@@ -68,3 +68,23 @@ def test_dev_defaults_are_unaffected() -> None:
     assert settings.is_production is False
     assert settings.session_secret_key == "dev-session-secret-change-me"
     assert settings.session_cookie_secure is False
+
+
+# --- AL-021: derived-admin domains (TDD §7/D14) ---------------------------
+
+
+def test_admin_email_domains_default() -> None:
+    assert Settings().admin_email_domain_set == frozenset({"mattjmcnaughton.com"})
+
+
+def test_admin_email_domain_set_is_lowercased_stripped_and_deduped() -> None:
+    settings = Settings(
+        admin_email_domains=" MattJMcNaughton.com , aleph.test ,, aleph.test "
+    )
+    assert settings.admin_email_domain_set == frozenset(
+        {"mattjmcnaughton.com", "aleph.test"}
+    )
+
+
+def test_admin_email_domain_set_is_empty_when_unset() -> None:
+    assert Settings(admin_email_domains="").admin_email_domain_set == frozenset()
