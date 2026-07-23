@@ -1,0 +1,51 @@
+# Check formatting
+fmt:
+    pnpm biome format --check .
+
+# Fix formatting
+fmt-fix:
+    pnpm biome format --write .
+
+# Check linting
+lint:
+    pnpm biome lint .
+
+# Fix linting
+lint-fix:
+    pnpm biome lint --write .
+
+# Run type checker
+typecheck:
+    pnpm tsc --noEmit
+
+# Run all tests
+test-all: test-unit test-integration test-e2e
+
+# Run unit tests (co-located in src/)
+test-unit:
+    pnpm vitest run src/
+
+# Run integration tests
+test-integration:
+    pnpm vitest run tests/integration
+
+# Run e2e tests
+test-e2e:
+    pnpm exec playwright test
+
+# Run tests that hit external services
+test-external:
+    pnpm vitest run -t external
+
+# Fast pre-push check
+gate: fmt lint typecheck test-unit
+
+# Full check
+gate-expensive: gate test-integration test-e2e
+
+# Everything including external
+gate-external: gate-expensive test-external
+
+# Start dev server
+dev:
+    pnpm vite

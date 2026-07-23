@@ -1,0 +1,14 @@
+# Changes here will be overwritten by Copier; NEVER EDIT MANUALLY
+_commit: 72a28b9be899c6ccd39f06f8482d55e460556acd
+_src_path: ../templates/templates/python-web
+author_email: mattjmcnaughton@users.noreply.github.com
+author_name: Matt McNaughton
+database_type: postgres
+enable_otel: true
+include_clients: false
+include_database: true
+include_product_docs: false
+include_technical_docs: false
+license: MIT
+project_description: 'Mobile-friendly AI tutor: name a topic, get a generated learning path'
+project_name: aleph
