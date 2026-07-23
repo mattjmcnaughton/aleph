@@ -1,11 +1,18 @@
 """FastAPI application factory."""
 
+import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, status
+from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.middleware.sessions import SessionMiddleware
 
+from aleph.auth import register_provider
+from aleph.config import settings
+from aleph.errors import error_response
 from aleph.logging import configure_logging
-from aleph.routers import health
+from aleph.routers import auth, health
 from aleph.telemetry import setup_telemetry
 from aleph.web.serve import mount_frontend
 
@@ -21,6 +28,7 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""
+    register_provider(settings)
     app = FastAPI(
         title="aleph",
         description=DESCRIPTION,
@@ -28,14 +36,97 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    # First-party signed session cookie (TDD §7/D2): HttpOnly, SameSite=Lax,
+    # holding only the local user UUID. ``https_only`` (Secure) is on in prod.
+    # Starlette's default ``max_age`` (14 days) is inherited deliberately
+    # (habagou parity): the cookie is a signed bearer with no server-side
+    # revocation, so logout clears it client-side and a leaked cookie stays
+    # valid until it expires or the signing secret rotates — an accepted MVP
+    # trade-off, revisited if session invalidation becomes a requirement.
+    app.add_middleware(
+        SessionMiddleware,
+        secret_key=settings.session_secret_key,
+        same_site="lax",
+        https_only=settings.session_cookie_secure,
+    )
+
     setup_telemetry(app)
+    _install_request_id(app)
+    _install_error_handlers(app)
 
     app.include_router(health.router)
+    app.include_router(auth.router)
 
     # Mount frontend static files (only serves if dist/ exists)
     mount_frontend(app)
 
     return app
+
+
+def _install_request_id(app: FastAPI) -> None:
+    """Assign a request id used by the error envelope and echoed to the client.
+
+    The envelope (``errors.error_response``) reads ``request.state.request_id``;
+    this is the single place it is set. Full request-log emission is a separate
+    observability concern (not part of the AL-020 auth surface).
+    """
+
+    @app.middleware("http")
+    async def request_id_middleware(request: Request, call_next):
+        request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+        request.state.request_id = request_id
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = request_id
+        return response
+
+
+def _install_error_handlers(app: FastAPI) -> None:
+    """Render every API error through the shared envelope (ported from habagou)."""
+
+    @app.exception_handler(StarletteHTTPException)
+    async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+        message = exc.detail if isinstance(exc.detail, str) else "request failed"
+        return error_response(
+            request,
+            status_code=exc.status_code,
+            code=_http_error_code(exc.status_code),
+            message=message,
+            details=None if isinstance(exc.detail, str) else exc.detail,
+        )
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_exception_handler(
+        request: Request, exc: RequestValidationError
+    ):
+        return error_response(
+            request,
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            code="validation_error",
+            message="request validation failed",
+            details=exc.errors(),
+        )
+
+    @app.exception_handler(Exception)
+    async def unhandled_exception_handler(request: Request, _exc: Exception):
+        return error_response(
+            request,
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            code="internal_error",
+            message="internal server error",
+        )
+
+
+def _http_error_code(status_code: int) -> str:
+    return {
+        401: "unauthenticated",
+        403: "forbidden",
+        404: "not_found",
+        409: "conflict",
+        422: "validation_error",
+        429: "rate_limited",
+        502: "bad_gateway",
+        503: "service_unavailable",
+    }.get(status_code, f"http_{status_code}")
 
 
 app = create_app()

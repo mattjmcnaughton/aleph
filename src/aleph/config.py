@@ -10,6 +10,13 @@ from pydantic_settings import BaseSettings
 # model instead of an OpenRouter-backed one. Guarded out of production below.
 STUB_MODEL_ID = "stub"
 
+# The convenient dev default for ``session_secret_key``. It is published in this
+# repo, so signing production cookies with it yields forgeable sessions; the
+# production guard below rejects it (a bare emptiness check can never fire
+# against a truthy default). Shared as a constant so the field default and the
+# guard cannot drift apart.
+DEV_SESSION_SECRET_KEY = "dev-session-secret-change-me"
+
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
@@ -131,6 +138,71 @@ class Settings(BaseSettings):
                     f"The 'stub' model is not allowed in production (ENV=production); "
                     f"offending slot(s): {joined}."
                 )
+        return self
+
+    # --- AL-020: OIDC auth + session cookie (TDD §7/D2) -----------------------
+    # Appended as a self-contained block. Habagou's provider-agnostic OIDC
+    # config: Keycloak in dev/CI, Auth0 in prod (env-only later). The app is the
+    # relying party and protects its own API with a first-party signed session
+    # cookie holding only the local user UUID.
+
+    # Display + client-registration name of the provider ("keycloak" | "auth0").
+    oidc_provider: str = "keycloak"
+    # Provider issuer used for OIDC discovery (dev: local Keycloak aleph realm).
+    oidc_issuer: str = "http://127.0.0.1:18080/realms/aleph"
+    # OIDC web-application client credentials.
+    oidc_client_id: str = "aleph"
+    oidc_client_secret: str = "aleph-dev-secret"
+    # Requested identity claims.
+    oidc_scopes: str = "openid profile email"
+    # Normally empty; set only when a provider's discovery URL differs from
+    # ``<issuer>/.well-known/openid-configuration``.
+    oidc_metadata_url: str = ""
+
+    # Signs the first-party session cookie (random Fly secret in production).
+    session_secret_key: str = DEV_SESSION_SECRET_KEY
+    # Requires HTTPS for the session cookie; ``true`` in production only (forced
+    # on in production by ``_enforce_production_auth``).
+    session_cookie_secure: bool = False
+
+    @model_validator(mode="after")
+    def _enforce_production_auth(self) -> Self:
+        """Fail fast if a production deployment is missing real auth secrets.
+
+        The dev defaults are deliberately convenient (a published session
+        secret, local-Keycloak OIDC), so nothing but ``env`` distinguishes a
+        real deploy from local dev. A bare "is it set?" guard can never fire
+        against the truthy dev session secret — a prod deploy that forgets
+        ``SESSION_SECRET_KEY`` would sign cookies with a public value, forging
+        sessions and impersonating accounts. So in production we require a real
+        session secret (non-empty and not the dev default) and non-empty OIDC
+        credentials, and force ``session_cookie_secure`` on regardless of the
+        supplied value (behind Fly's TLS proxy the cookie must be ``Secure``).
+        Dev/test are untouched.
+        """
+        if not self.is_production:
+            return self
+
+        missing = [
+            name
+            for name in ("oidc_issuer", "oidc_client_id", "oidc_client_secret")
+            if not getattr(self, name).strip()
+        ]
+        if not self.session_secret_key or (
+            self.session_secret_key == DEV_SESSION_SECRET_KEY
+        ):
+            missing.append("session_secret_key")
+        if missing:
+            joined = ", ".join(missing)
+            raise ValueError(
+                "Production (ENV=production) requires real auth secrets; set a "
+                "non-default value for: "
+                f"{joined}."
+            )
+
+        # Secure-by-default in production: never emit a session cookie without
+        # the ``Secure`` attribute, even if the deploy left the flag unset.
+        self.session_cookie_secure = True
         return self
 
 

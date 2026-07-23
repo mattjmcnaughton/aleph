@@ -27,4 +27,8 @@ USER app
 
 EXPOSE 8000
 
-CMD ["uv", "run", "uvicorn", "aleph.app:app", "--host", "0.0.0.0", "--port", "8000"]
+# --proxy-headers / --forwarded-allow-ips: behind Fly's TLS-terminating proxy
+# the app sees plain HTTP; without these uvicorn ignores X-Forwarded-Proto, so
+# the OIDC callback ``redirect_uri`` is built as http:// (breaking prod login)
+# and ``Secure`` session cookies misbehave. Mirrors habagou's production CMD.
+CMD ["uv", "run", "uvicorn", "aleph.app:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "*"]

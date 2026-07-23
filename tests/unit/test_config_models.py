@@ -53,7 +53,16 @@ def test_stub_rejected_in_production(slot: str) -> None:
 
 
 def test_non_stub_production_config_is_fine() -> None:
-    settings = Settings(env="production", model_outline="anthropic/claude-sonnet-5")
+    # AL-020 added a production auth guard: a real deploy needs real secrets, so
+    # the model-routing happy path must supply them too.
+    settings = Settings(
+        env="production",
+        model_outline="anthropic/claude-sonnet-5",
+        session_secret_key="a-real-random-production-secret",
+        oidc_issuer="https://tenant.auth0.com",
+        oidc_client_id="prod-client",
+        oidc_client_secret="prod-secret",
+    )
     assert settings.env == "production"
 
 
