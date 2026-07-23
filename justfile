@@ -110,3 +110,15 @@ dev:
     just dev-be &
     just dev-fe &
     wait
+
+# Start Compose Postgres for native app development (backing service on localhost:5432)
+compose-db-up:
+    docker compose up -d --wait db
+
+# Start Compose Keycloak with the checked-in aleph dev realm (issuer on localhost:18080)
+compose-keycloak-up:
+    docker compose up -d --wait keycloak
+
+# Stop Compose services
+compose-down:
+    docker compose down
