@@ -6,11 +6,12 @@ tracking issue). Until then, this file is the source of truth.
 
 Labels: every ticket carries **`for-ai`** (an agent implements it) or **`for-human`**
 (provisioning, credentials, judgment calls only the builder can make). All `for-human`
-deployment configuration (Fly, Neon, Auth0, DNS) deliberately comes last.
+work — deployment configuration (Fly, Neon, Auth0, DNS) *and* the evals/live-smoke work
+gated on it — deliberately comes at the end of the phase.
 
 ---
 
-## AL-000 — Epic: Phase 1, the generated path (parent ticket)
+## AL-000 — epic: Phase 1, the generated path (parent ticket)
 
 This is the tracking ticket for Phase 1. It owns the ordering and the context that applies to
 every child ticket. **Read this section before starting any ticket.**
@@ -32,9 +33,9 @@ every child ticket. **Read this section before starting any ticket.**
 **Pattern-source repos.** Many tickets list **Context needed** naming files in
 [`mattjmcnaughton/templates`](https://github.com/mattjmcnaughton/templates) (the Copier
 scaffold source) and/or [`mattjmcnaughton/habagou`](https://github.com/mattjmcnaughton/habagou)
-(the reference implementation — TDD §2.2 says exactly what is copied/adapted from it). When a
-ticket lists such context, clone the repo read-only and read the named files before writing
-code; "adapt" means rename + trim habagou-specifics while keeping the pattern's shape and its
+(the reference implementation — TDD §2.2 says exactly what is copied/adapted from it). Both
+repos are public: when a ticket lists such context, clone the repo read-only from GitHub and
+read the named files before writing code; "adapt" means rename + trim habagou-specifics while keeping the pattern's shape and its
 tests' shape. Tickets with no **Context needed** line need only this repo and its docs.
 
 **Working conventions (definition of done for every `for-ai` ticket):**
@@ -43,6 +44,12 @@ tests' shape. Tickets with no **Context needed** line need only this repo and it
   refactor. Exempt: mechanical scaffolding (AL-001), near-verbatim copies from habagou (still
   port/adapt the habagou tests that cover them), and visual styling — though frontend *behavior*
   (state machines, polling, reveal logic) still gets tests first.
+- **Fakes over mocks.** Design for clean interfaces/protocols and test against
+  deterministic *fakes* behind them — the stub `FunctionModel` at the model-resolution seam,
+  real per-test Postgres databases (not mocked repositories), fake HTTP handlers (MSW) for
+  frontend tests, compose Keycloak for auth flows. Reserve mocks/spies for the rare case
+  where *observing an interaction* is the point of the test (e.g. asserting an event was
+  emitted); never mock what a fake or the real thing can stand in for.
 - `just gate` green before every merge; `just gate-expensive` for tickets touching
   integration/e2e surface.
 - [Conventional Commits](https://www.conventionalcommits.org/). Until first deploy, prefer
@@ -60,7 +67,7 @@ tests' shape. Tickets with no **Context needed** line need only this repo and it
 
 ```mermaid
 flowchart TD
-  subgraph E0["Epic 0 — Foundations"]
+  subgraph E0["epic: foundations"]
     AL001[AL-001 scaffold] --> AL002[AL-002 CLAUDE.md]
     AL001 --> AL003[AL-003 CI + test harness]
     AL001 --> AL004[AL-004 dev services]
@@ -117,8 +124,9 @@ flowchart TD
   AL091 --> AL105
 ```
 
-**Serialized spine:** AL-001 → AL-010 → AL-011 → AL-040 → AL-050 → AL-051 → AL-090 → AL-100 →
-AL-101/102/103 → AL-105.
+**Serialized spine:** AL-001 → AL-010 → AL-011 → AL-040 → AL-050 → AL-051 → AL-090 → AL-100,
+then the end-of-phase block: AL-080 → evals (AL-081/082/083) ∥ AL-091 ∥ infra provisioning
+(AL-101–104) → AL-105.
 
 **Parallel lanes** (independent once AL-001 lands):
 - **Lane A — data/domain:** AL-010 → AL-011; AL-012 anytime.
@@ -127,14 +135,16 @@ AL-101/102/103 → AL-105.
 - **Lane D — frontend shell:** AL-060 can start from the mocks immediately; AL-061–065 then
   consume APIs as they land.
 - **Lane E — foundations polish:** AL-002, AL-003, AL-005 alongside everything.
-- Evals (AL-081/082) parallel to the API/FE epics once agents exist.
 
-**The one mid-stream human dependency** is AL-080 (OpenRouter key + repo secrets) — needed
-before eval runs and live smoke, cheap to do early. Everything else `for-human` sits at the end.
+**All human work and everything gated on it sits at the end of the phase.** Evals
+(AL-081/082/083) and live smoke (AL-091) are deliberately scheduled in the end-of-phase
+block behind AL-080 (OpenRouter key + secrets), alongside infra provisioning — no
+`for-human` ticket blocks the build-out. Until then, generation quality rides on the
+deterministic validators and the stub-driven test suite.
 
 ---
 
-## Epic 0 — Foundations
+## epic: foundations
 
 ### AL-001 — Scaffold repo from templates `for-ai`
 Deps: none. TDD: §2.1.
@@ -153,13 +163,16 @@ respond; frontend dev proxy reaches the backend; existing docs untouched.
 ### AL-002 — CLAUDE.md / AGENTS.md: progressive disclosure `for-ai`
 Deps: AL-001. TDD: §2.4.
 Rewrite the scaffold-generated CLAUDE.md (AGENTS.md symlinked) into the short root file
-described in TDD §2.4: just-command table, layering rules, commit conventions, test
-organization, and *pointers* into `docs/` (TDD, PRD, CONTEXT.md) rather than inlined content.
-Make CONTEXT.md's vocabulary authority explicit and prominent. This lands early because every
-subsequent agent-implemented ticket reads it.
+described in TDD §2.4, carrying only what every task needs: the just-command table, layering
+rules, test organization, the testing philosophy (red-green; **fakes over mocks**, clean
+interfaces), and an explicit instruction to **always use Conventional Commits** (with the
+release-effect table once the release pipeline exists). Point to `docs/` generally for
+deeper context — no links to specific PRD/TDD files. Make CONTEXT.md's vocabulary authority
+explicit and prominent. This lands early because every subsequent agent-implemented ticket
+reads it.
 **Context needed:** `habagou/CLAUDE.md` — the shape to match.
-**AC:** Root CLAUDE.md fits the habagou size envelope (~1 screen of load-bearing content +
-links); a cold agent can find the TDD, the vocabulary, and the gate commands from it alone;
+**AC:** Root CLAUDE.md fits the habagou size envelope (~1 screen of load-bearing content);
+a cold agent can find the gate commands, the conventions, and the vocabulary from it alone;
 AGENTS.md symlink intact.
 
 ### AL-003 — CI pipeline & test-harness skeleton `for-ai`
@@ -198,7 +211,7 @@ with FastAPI + SQLAlchemy spans; structlog events carry structured fields into L
 
 ---
 
-## Epic 1 — Domain & data layer
+## epic: domain & data layer
 
 ### AL-010 — Schema, models & initial migration `for-ai`
 Deps: AL-001. TDD: §4.
@@ -239,7 +252,7 @@ and incorrect outcomes.
 
 ---
 
-## Epic 2 — Auth & accounts
+## epic: auth & accounts
 
 ### AL-020 — OIDC auth (Keycloak dev / Auth0-ready) `for-ai`
 Deps: AL-010, AL-004. TDD: §7 (D2).
@@ -264,7 +277,7 @@ contract test for the session payload for admin and non-admin users.
 
 ---
 
-## Epic 3 — Model access & agents
+## epic: model access & agents
 
 ### AL-030 — OpenRouter seam + deterministic stub model `for-ai`
 Deps: AL-001. TDD: §5.3, §12 (D9).
@@ -308,7 +321,7 @@ appear in order with titles.
 
 ---
 
-## Epic 4 — Generation orchestration
+## epic: generation orchestration
 
 ### AL-040 — Orchestrator: trigger + poll, prefetch chain, failure semantics `for-ai`
 Deps: AL-011, AL-031, AL-032. TDD: §5.4, §5.5, §5.2.
@@ -350,7 +363,7 @@ exemption; integration test on `POST /paths`.
 
 ---
 
-## Epic 5 — API
+## epic: api
 
 ### AL-050 — Paths API `for-ai`
 Deps: AL-040, AL-020, AL-042. TDD: §6.
@@ -386,12 +399,13 @@ routes the stub/allowlisted model (asserted via stub instrumentation).
 
 ---
 
-## Epic 6 — Frontend (Nocturne)
+## epic: frontend (nocturne)
 
 *All FE tickets: mobile-first per the mocks, dark/teal Nocturne system, Phase-1 surfaces only
 (no tutor rail, streaks, stats). Poll-driven server state (TanStack Query), 2s → 5s backoff
 per TDD §14. FE behavior (state machines, polling, reveal) is red-green tested with Vitest +
-mocked API; visual styling is exempt but must match the mocks.*
+**fake API handlers (MSW)** serving contract-shaped payloads — no hand-mocked fetch clients;
+visual styling is exempt but must match the mocks.*
 
 ### AL-060 — Design system, app shell, auth screens, polling infra `for-ai`
 Deps: AL-001 (start immediately from mocks); AL-020 for live auth wiring. TDD: §8.
@@ -445,7 +459,7 @@ the session endpoint, not hardcoded.
 
 ---
 
-## Epic 7 — Instrumentation & metrics
+## epic: instrumentation & metrics
 
 ### AL-070 — Product events + saved metric queries `for-ai`
 Deps: AL-051 (all emitting services exist), AL-005. TDD: §9; PRD §5.7, §7.
@@ -461,13 +475,31 @@ each §7 metric to its query.
 
 ---
 
-## Epic 8 — Evals
+## epic: e2e regression
+
+### AL-090 — Playwright e2e: W1–W8 on the stub `for-ai`
+Deps: AL-061–AL-064 (AL-065 optional), AL-003. TDD: §12; PRD §8.
+The eight PRD workflows as tagged user journeys (`@w1`…`@w8`) on the phone viewport against a
+real server process running `MODEL_OUTLINE=stub`/`MODEL_LESSON=stub`: W7 via
+`[force-refusal]`, W8 via failure sentinels then retry. "Real content renders" asserts
+structure/invariants (passage present, 3–4 options, feedback shown), not text. Wire into the
+CI e2e job and `just gate-expensive`.
+**AC:** W1–W8 green in CI on the phone viewport, no flakes across 3 consecutive runs; each
+journey tagged; suite runs against compose Keycloak for auth steps.
+
+---
+
+## epic: evals & live verification (end of phase)
+
+*This whole epic is scheduled at the end of the phase, gated on AL-080 (`for-human`). No
+`for-ai` build-out ticket depends on it; until it runs, generation quality rides on the
+deterministic validators and the stub-driven test suite.*
 
 ### AL-080 — Provision OpenRouter key + repo secrets `for-human` 👤
-Deps: none (do anytime; blocks AL-081 live runs and AL-091).
+Deps: none (gates this whole epic).
 Create/confirm the OpenRouter API key for aleph; add `OPENROUTER_API_KEY` to GitHub Actions
 secrets (for the dispatch-only Evals workflow and any external-test workflow) and to local
-`.env`. This is the only mid-stream human dependency.
+`.env`.
 **AC:** `just evals --smoke` runs without the key; a dispatched eval run and `just
 test-external` can read the secret.
 
@@ -503,20 +535,6 @@ Builder labels ~30–50 generations pass/fail into `evals/human_labels.yaml`; ru
 **AC:** `human_labels.yaml` committed; agreement figure recorded in `docs/evals.md` (create
 as part of AL-081/082 docs).
 
----
-
-## Epic 9 — E2E & external smoke
-
-### AL-090 — Playwright e2e: W1–W8 on the stub `for-ai`
-Deps: AL-061–AL-064 (AL-065 optional), AL-003. TDD: §12; PRD §8.
-The eight PRD workflows as tagged user journeys (`@w1`…`@w8`) on the phone viewport against a
-real server process running `MODEL_OUTLINE=stub`/`MODEL_LESSON=stub`: W7 via
-`[force-refusal]`, W8 via failure sentinels then retry. "Real content renders" asserts
-structure/invariants (passage present, 3–4 options, feedback shown), not text. Wire into the
-CI e2e job and `just gate-expensive`.
-**AC:** W1–W8 green in CI on the phone viewport, no flakes across 3 consecutive runs; each
-journey tagged; suite runs against compose Keycloak for auth steps.
-
 ### AL-091 — External live smoke `for-ai`
 Deps: AL-081 (key via AL-080), AL-040. TDD: §12.
 `tests/external/` + `just test-external` (opt-in, `@pytest.mark.external`): one live outline
@@ -527,7 +545,7 @@ measure. Assert structure and state transitions only.
 
 ---
 
-## Epic 10 — Deployment & ship (end of phase)
+## epic: deployment & ship
 
 ### AL-100 — Deploy artifacts in-repo `for-ai`
 Deps: AL-090 (app is real), AL-003. TDD: §13 (D3).
@@ -584,41 +602,41 @@ queries, eval report, screenshots).
 
 | Ticket | Title | Label | Epic |
 | --- | --- | --- | --- |
-| AL-001 | Scaffold repo from templates | for-ai | 0 |
-| AL-002 | CLAUDE.md / AGENTS.md progressive disclosure | for-ai | 0 |
-| AL-003 | CI pipeline & test-harness skeleton | for-ai | 0 |
-| AL-004 | Dev services: Postgres + Keycloak realm | for-ai | 0 |
-| AL-005 | Logfire + structlog wiring | for-ai | 0 |
-| AL-010 | Schema, models & initial migration | for-ai | 1 |
-| AL-011 | Repositories + atomic claim & stale recovery | for-ai | 1 |
-| AL-012 | Pure domains: progression & grading | for-ai | 1 |
-| AL-020 | OIDC auth | for-ai | 2 |
-| AL-021 | Derived admin & session endpoint | for-ai | 2 |
-| AL-030 | OpenRouter seam + stub model | for-ai | 3 |
-| AL-031 | Outline agent | for-ai | 3 |
-| AL-032 | Lesson agent + shared validators | for-ai | 3 |
-| AL-040 | Orchestrator: trigger+poll, prefetch, failures | for-ai | 4 |
-| AL-041 | Reconciler, registry, semaphore, shutdown | for-ai | 4 |
-| AL-042 | Rate limiting | for-ai | 4 |
-| AL-050 | Paths API | for-ai | 5 |
-| AL-051 | Lessons API | for-ai | 5 |
-| AL-052 | Admin model-picker enforcement | for-ai | 5 |
-| AL-060 | FE: design system, shell, auth, polling | for-ai | 6 |
-| AL-061 | FE: onboarding + refusal/error states | for-ai | 6 |
-| AL-062 | FE: path view | for-ai | 6 |
-| AL-063 | FE: lesson view | for-ai | 6 |
-| AL-064 | FE: switcher, new path, delete | for-ai | 6 |
-| AL-065 | FE: admin model picker | for-ai | 6 |
-| AL-070 | Product events + saved metric queries | for-ai | 7 |
-| AL-080 | OpenRouter key + repo secrets | **for-human** | 8 |
-| AL-081 | Eval harness: seed set + pre-filters | for-ai | 8 |
-| AL-082 | LLM judge + agreement mode | for-ai | 8 |
-| AL-083 | Label the calibration set | **for-human** | 8 |
-| AL-090 | Playwright e2e W1–W8 | for-ai | 9 |
-| AL-091 | External live smoke | for-ai | 9 |
-| AL-100 | Deploy artifacts in-repo | for-ai | 10 |
-| AL-101 | Provision Fly + Neon + secrets | **for-human** | 10 |
-| AL-102 | Auth0 production tenant | **for-human** | 10 |
-| AL-103 | Logfire production project | **for-human** | 10 |
-| AL-104 | Custom domain | **for-human** | 10 |
-| AL-105 | Ship verification (release criteria) | **for-human** | 10 |
+| AL-001 | Scaffold repo from templates | for-ai | foundations |
+| AL-002 | CLAUDE.md / AGENTS.md progressive disclosure | for-ai | foundations |
+| AL-003 | CI pipeline & test-harness skeleton | for-ai | foundations |
+| AL-004 | Dev services: Postgres + Keycloak realm | for-ai | foundations |
+| AL-005 | Logfire + structlog wiring | for-ai | foundations |
+| AL-010 | Schema, models & initial migration | for-ai | domain & data |
+| AL-011 | Repositories + atomic claim & stale recovery | for-ai | domain & data |
+| AL-012 | Pure domains: progression & grading | for-ai | domain & data |
+| AL-020 | OIDC auth | for-ai | auth |
+| AL-021 | Derived admin & session endpoint | for-ai | auth |
+| AL-030 | OpenRouter seam + stub model | for-ai | model access & agents |
+| AL-031 | Outline agent | for-ai | model access & agents |
+| AL-032 | Lesson agent + shared validators | for-ai | model access & agents |
+| AL-040 | Orchestrator: trigger+poll, prefetch, failures | for-ai | orchestration |
+| AL-041 | Reconciler, registry, semaphore, shutdown | for-ai | orchestration |
+| AL-042 | Rate limiting | for-ai | orchestration |
+| AL-050 | Paths API | for-ai | api |
+| AL-051 | Lessons API | for-ai | api |
+| AL-052 | Admin model-picker enforcement | for-ai | api |
+| AL-060 | FE: design system, shell, auth, polling | for-ai | frontend |
+| AL-061 | FE: onboarding + refusal/error states | for-ai | frontend |
+| AL-062 | FE: path view | for-ai | frontend |
+| AL-063 | FE: lesson view | for-ai | frontend |
+| AL-064 | FE: switcher, new path, delete | for-ai | frontend |
+| AL-065 | FE: admin model picker | for-ai | frontend |
+| AL-070 | Product events + saved metric queries | for-ai | instrumentation |
+| AL-090 | Playwright e2e W1–W8 | for-ai | e2e regression |
+| AL-080 | OpenRouter key + repo secrets | **for-human** | evals & live verification |
+| AL-081 | Eval harness: seed set + pre-filters | for-ai | evals & live verification |
+| AL-082 | LLM judge + agreement mode | for-ai | evals & live verification |
+| AL-083 | Label the calibration set | **for-human** | evals & live verification |
+| AL-091 | External live smoke | for-ai | evals & live verification |
+| AL-100 | Deploy artifacts in-repo | for-ai | deployment & ship |
+| AL-101 | Provision Fly + Neon + secrets | **for-human** | deployment & ship |
+| AL-102 | Auth0 production tenant | **for-human** | deployment & ship |
+| AL-103 | Logfire production project | **for-human** | deployment & ship |
+| AL-104 | Custom domain | **for-human** | deployment & ship |
+| AL-105 | Ship verification (release criteria) | **for-human** | deployment & ship |

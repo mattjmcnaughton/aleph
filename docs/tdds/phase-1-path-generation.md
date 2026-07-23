@@ -495,6 +495,13 @@ packaged, `just evals` locally, dispatch-only `Evals` GitHub Actions workflow �
 
 **Deterministic stub in CI, live smoke opt-in** (D9).
 
+Testing philosophy: **fakes over mocks.** Design for clean seams and test against
+deterministic stand-ins at those seams — the stub model at model resolution, real per-test
+Postgres databases (never mocked repositories), a real server process under Playwright,
+compose Keycloak for auth flows, MSW-style fake API handlers for frontend tests. Mocks/spies
+are reserved for the rare test whose assertion *is* an interaction (e.g. an event was
+emitted); never mock what a fake or the real thing can stand in for.
+
 - **Stub model** (not a stub agent — the real agents in `agents/` run unchanged): a
   pydantic-ai `FunctionModel` injected at the model-resolution seam, producing
   schema-valid outlines/lessons deterministically from the topic string. This is the
