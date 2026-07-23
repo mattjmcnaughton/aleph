@@ -71,7 +71,7 @@ test-unit-fe:
 
 # Run integration tests
 test-integration:
-    uv run pytest tests/integration
+    uv run pytest -n auto tests/integration
 
 # Run e2e tests
 test-e2e:

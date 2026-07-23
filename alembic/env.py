@@ -6,8 +6,10 @@ from logging.config import fileConfig
 from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
+import aleph.models  # noqa: F401
 from alembic import context
 from aleph.config import settings
+from aleph.db import Base
 
 config = context.config
 # ConfigParser treats percent signs as interpolation markers. Database URLs for
@@ -18,7 +20,7 @@ config.set_main_option("sqlalchemy.url", settings.database_url.replace("%", "%%"
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-target_metadata = None
+target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:

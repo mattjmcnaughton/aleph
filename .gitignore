@@ -34,9 +34,7 @@ Thumbs.db
 .env
 .env.local
 
-# Alembic
-alembic/versions/*.py
-!alembic/versions/.gitkeep
+# Alembic migrations are source and must be tracked.
 
 # SQLite
 *.db
