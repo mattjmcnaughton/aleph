@@ -13,7 +13,7 @@ from sqlalchemy import (
 )
 
 from aleph.config import settings
-from aleph.models import Lesson, LessonGenerationState, Path
+from aleph.models import Lesson, LessonGenerationState, Path, Unit
 from aleph.repositories._generation import (
     affected_rows,
     claimable_predicate,
@@ -307,14 +307,18 @@ class LessonRepository:
 
     async def generated_passages_before(
         self, *, path_id: uuid.UUID, position_in_path: int
-    ) -> list[tuple[str, str]]:
+    ) -> list[tuple[str, str, str]]:
         """Generated Read passages of lessons before ``position_in_path``, in order.
 
         The continuity context for generating a later lesson (D7/§5.2): only
-        already-``generated`` passages, ascending by total position.
+        already-``generated`` passages, ascending by total position. Each row is
+        ``(unit_title, lesson_title, read_passage)`` — the unit title is joined in
+        so the continuity prompt can prefix each passage with its real
+        ``[Unit / Lesson]`` locator (§5.2), not the lesson title twice.
         """
         result = await self.session.execute(
-            select(Lesson.title, Lesson.read_passage)
+            select(Unit.title, Lesson.title, Lesson.read_passage)
+            .join(Unit, Lesson.unit_id == Unit.id)
             .where(
                 Lesson.path_id == path_id,
                 Lesson.position_in_path < position_in_path,
@@ -322,7 +326,10 @@ class LessonRepository:
             )
             .order_by(Lesson.position_in_path)
         )
-        return [(title, passage) for title, passage in result.all()]
+        return [
+            (unit_title, lesson_title, passage)
+            for unit_title, lesson_title, passage in result.all()
+        ]
 
     async def progress_summaries(
         self, path_ids: Sequence[uuid.UUID]

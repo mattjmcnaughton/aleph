@@ -1088,11 +1088,12 @@ async def test_generated_passages_before_returns_ordered_continuity_context() ->
         path_id = path.id
 
     async with db.async_session() as session:
-        # Continuity context for lesson at position 3 = passages 1 and 2, in order.
+        # Continuity context for lesson at position 3 = passages 1 and 2, in
+        # order, each carrying its real (unit_title, lesson_title) locator.
         prior = await LessonRepository(session).generated_passages_before(
             path_id=path_id, position_in_path=3
         )
-        assert [(title, body) for title, body in prior] == [
-            ("L1", "passage 1"),
-            ("L2", "passage 2"),
+        assert list(prior) == [
+            ("Unit 1", "L1", "passage 1"),
+            ("Unit 1", "L2", "passage 2"),
         ]
