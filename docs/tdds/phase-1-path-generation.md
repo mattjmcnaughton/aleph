@@ -253,10 +253,10 @@ Prompt for lesson N+1 carries prior **Read passages only** (not quick checks), v
 order, each prefixed by unit/lesson title. Worst case at the 30-lesson cap with ~500-word
 passages ≈ 29 × ~650 tok ≈ **19k input tokens** for the final lesson — comfortably inside
 any candidate model's context. Cumulative input cost per full path is quadratic-ish:
-≈ 290k input + ≈ 25k output tokens across all 30 lessons; on the default lesson model
-(`anthropic/claude-haiku-4-5`, $1/$5 per MTok) a worst-case fully-generated path lands
-around **$0.45** including the Sonnet outline — and on-demand generation means typical
-paths cost less. Tracked, not assumed (§9, §10). If real data pressures cost, the
+≈ 290k input + ≈ 25k output tokens across all 30 lessons; on a Haiku-class lesson model
+($1/$5 per MTok) a worst-case fully-generated path lands around **$0.45** including the
+Sonnet outline; the all-Sonnet starting config (§5.3) runs ≈ 3× that (≈ $1.30) — still
+cents-scale, and on-demand generation means typical paths cost less. Tracked, not assumed (§9, §10). If real data pressures cost, the
 upgrade path is a running summary or retrieval (**explicitly deferred**, D7); the seam is
 a single `build_prior_context()` function in `services/generation.py`.
 
@@ -267,17 +267,20 @@ enforces this by construction (§5.4).
 ### 5.3 Model routing
 
 Three config slots (env, with per-slot defaults): `MODEL_OUTLINE`, `MODEL_LESSON`,
-`MODEL_JUDGE` — OpenRouter ids resolved through `services/openrouter.py`. Defaults
-(config, not commitments — revisit against eval results and cost data):
+`MODEL_JUDGE` — OpenRouter ids resolved through `services/openrouter.py`. **All three
+default to `anthropic/claude-sonnet-5` to start** — one strong model everywhere, no
+premature tiering; refine per-slot against eval results and cost data. The expected
+refinement directions, when data justifies them:
 
-| Slot | Default | Why |
+| Slot | Starting default | Refinement direction |
 | --- | --- | --- |
-| `MODEL_OUTLINE` | `anthropic/claude-sonnet-5` | Once per path, unrecoverable (no regenerate), gates everything downstream — worth a strong model; near-Opus on structured work at ~40% of Opus cost |
-| `MODEL_LESSON` | `anthropic/claude-haiku-4-5` | The high-volume slot (≤ 30 generations/path with growing continuity context); fast and cheap; step up to Sonnet via the admin picker if evals disappoint |
-| `MODEL_JUDGE` | `openai/gpt-5.6-terra` | **Deliberately cross-provider**: LLM judges exhibit self-preference bias, and a Claude judge grading Claude-written lessons risks inflating the release-gate pass rate. Proven in habagou's OpenRouter setup; judge↔human calibration (§11) remains the real control |
+| `MODEL_OUTLINE` | `anthropic/claude-sonnet-5` | Stays strong: once per path, unrecoverable (no regenerate), gates everything downstream |
+| `MODEL_LESSON` | `anthropic/claude-sonnet-5` | The high-volume slot (≤ 30 generations/path with growing continuity context) — step *down* (e.g. `anthropic/claude-haiku-4-5`) if evals hold and cost/latency favor it |
+| `MODEL_JUDGE` | `anthropic/claude-sonnet-5` | Likely move **cross-provider** (e.g. `openai/gpt-5.6-terra`): LLM judges exhibit self-preference bias, and a Claude judge grading Claude-written lessons risks inflating the release-gate pass rate. Judge↔human calibration (§11) is the real control either way |
 
-`MODEL_ALLOWLIST` defaults to those three plus `anthropic/claude-opus-4-8` (A/B up)
-and `minimax/minimax-m3` (A/B down).
+`MODEL_ALLOWLIST` defaults to `anthropic/claude-sonnet-5` plus the refinement candidates:
+`anthropic/claude-haiku-4-5` (lessons down), `anthropic/claude-opus-4-8` (A/B up),
+`openai/gpt-5.6-terra` (cross-provider judge), `minimax/minimax-m3` (A/B down).
 
 `services/openrouter.py` is a thin factory, not a client — pydantic-ai's
 `OpenRouterProvider` owns the protocol. The service owns what pydantic-ai can't:
@@ -560,8 +563,8 @@ All config (pydantic-settings), not constants; provisional pending real data:
 | Poll interval (frontend) | 2s → backoff to 5s | |
 | `READ_PASSAGE_WORDS` | ~200–500 | Prompt target + validator band |
 | `RATE_LIMIT_PATHS_PER_DAY` / `RATE_LIMIT_LESSON_GENERATIONS_PER_DAY` | 10 / 100 | Per account; admin-exempt |
-| `MODEL_OUTLINE` / `MODEL_LESSON` / `MODEL_JUDGE` | `anthropic/claude-sonnet-5` / `anthropic/claude-haiku-4-5` / `openai/gpt-5.6-terra` | OpenRouter ids; rationale in §5.3 |
-| `MODEL_ALLOWLIST` | the three defaults + `anthropic/claude-opus-4-8`, `minimax/minimax-m3` | Admin picker options |
+| `MODEL_OUTLINE` / `MODEL_LESSON` / `MODEL_JUDGE` | `anthropic/claude-sonnet-5` (all three) | Uniform start; per-slot refinement directions in §5.3 |
+| `MODEL_ALLOWLIST` | `anthropic/claude-sonnet-5` + `anthropic/claude-haiku-4-5`, `anthropic/claude-opus-4-8`, `openai/gpt-5.6-terra`, `minimax/minimax-m3` | Admin picker options |
 
 ## 15. Risks & open questions
 
@@ -578,11 +581,25 @@ All config (pydantic-settings), not constants; provisional pending real data:
   guardrail; summary/RAG deferred, seam ready.
 - **Judge quality bounds the gate** (PRD §11 risk) — calibration set + agreement check
   (§11) is the control.
-- **Default model ids are provisional config** (§5.3/§14): chosen from current pricing
-  and habagou's proven OpenRouter setup; the seed-set evals validate (or overturn) the
-  Haiku-for-lessons bet, and the admin picker makes swapping free.
+- **Default model ids are provisional config** (§5.3/§14): the all-Sonnet start is chosen
+  for simplicity, not economics; seed-set evals + Logfire cost data drive the per-slot
+  refinements (cheaper lessons, cross-provider judge), and the admin picker makes swapping
+  free.
 - ~~Open: CONTEXT.md state vocabulary~~ — resolved: CONTEXT.md now carries the TDD's
   state names (path status, expanded generation states, position-in-path, model slots).
+
+## 16. Tickets
+
+Implementation of this TDD is tracked in GitHub issues — **the issues are the source of
+truth for ticket content and status** (there is no tickets file in-repo):
+
+- **All Phase 1 tickets:** [`label:tdd-generated-path`](https://github.com/mattjmcnaughton/aleph/issues?q=is%3Aissue+label%3Atdd-generated-path)
+- **Parent epic** (shared context, working conventions, ordering/dependency graph, task
+  list): [#4 — epic: Phase 1 — the generated path](https://github.com/mattjmcnaughton/aleph/issues/4)
+- Every ticket is additionally labeled [`for-ai`](https://github.com/mattjmcnaughton/aleph/issues?q=is%3Aissue+label%3Atdd-generated-path+label%3Afor-ai)
+  (agent-implementable) or [`for-human`](https://github.com/mattjmcnaughton/aleph/issues?q=is%3Aissue+label%3Atdd-generated-path+label%3Afor-human)
+  (provisioning/credentials/judgment calls); all `for-human` work sits at the end of the
+  phase.
 
 ## Appendix — traceability (PRD's TDD-owned items)
 
