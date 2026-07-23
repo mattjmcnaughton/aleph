@@ -36,6 +36,7 @@ exclude-newer = "1 week"
 [dependency-groups]
 dev = [
     "pytest>=8.0",
+    "pytest-xdist>=3.6",
     "ruff>=0.8",
     "ty>=0.0.54",
 ]

@@ -9,6 +9,22 @@ on:
 jobs:
   gate-expensive:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: aleph
+          POSTGRES_USER: aleph
+          POSTGRES_PASSWORD: aleph
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U aleph -d aleph"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
+    env:
+      DATABASE_URL: postgresql+asyncpg://aleph:aleph@localhost:5432/aleph
     steps:
       - uses: actions/checkout@v4
 
