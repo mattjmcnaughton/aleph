@@ -4,9 +4,10 @@ The shared vocabulary for Aleph. These are the exact terms we use in the product
 code — same word, same meaning, everywhere. When a term here has a precise name, prefer it over a
 synonym (say **path**, not "course"; **Quick check**, not "quiz question").
 
-> Status: **living document, started at the Phase 1 PRD.** It will be refined and extended during the
-> TDD (data types, IDs, states, storage). References: [`README.md`](../README.md) ·
-> [`roadmap.md`](roadmap.md) · [Phase 1 PRD](prds/phase-1-path-generation.md).
+> Status: **living document, started at the Phase 1 PRD, extended by the Phase 1 TDD** (states,
+> generation mechanics, model slots). References: [`README.md`](../README.md) ·
+> [`roadmap.md`](roadmap.md) · [Phase 1 PRD](prds/phase-1-path-generation.md) ·
+> [Phase 1 TDD](tdds/phase-1-path-generation.md).
 
 ## Core domain
 
@@ -35,7 +36,12 @@ synonym (say **path**, not "course"; **Quick check**, not "quiz question").
 | **On-demand generation** | Generating a lesson's content when the learner reaches it, rather than all up front. |
 | **Prefetch (+N)** | Generating the next *N* lessons ahead of where the learner is, to hide generation latency. |
 | **Continuity** | The rule that lesson *N+1* is generated with awareness of the content of lessons *1…N*, so the path builds on itself and never re-teaches or contradicts earlier lessons. |
-| **Multi-model architecture** | The assumption that more than one model is used across generation (e.g. structure vs. per-lesson content). Specifics live in the TDD. |
+| **Multi-model architecture** | More than one model is used across generation. Realized in the TDD as three configurable **model slots** — *outline*, *lesson*, *judge* — each an OpenRouter model id (TDD §5.3). |
+| **Path status** | The lifecycle of a path's outline generation: *pending* → *generating* → *ready*, with *failed* (retryable) and *refused* (terminal, safety) branches (TDD §4). |
+| **Refused** | The path status when the outline agent declines an over-the-boundary topic via its structured refusal output. A first-class result with a graceful message — never conflated with *failed* (TDD D12). |
+| **Trigger + poll** | The delivery model for generated content: a POST triggers generation and returns immediately; the client polls a GET until the state resolves (TDD D5, §5.4). |
+| **Stale recovery** | A row stuck in *generating* longer than the stale timeout is treated as failed and re-claimable, so a crashed or restarted process self-heals (TDD §4). |
+| **Position in path** | A lesson's index in the path's single total order — the order continuity, prefetch, and progression all operate on (TDD §4). |
 
 ## Progress & structure
 
@@ -44,7 +50,7 @@ synonym (say **path**, not "course"; **Quick check**, not "quiz question").
 | **Progression** | Moving through a path's lessons linearly; the next lesson unlocks as the prior completes. |
 | **Mark complete** | The learner action that records a lesson as done. Completion, not correctness, is what counts (the Quick check is non-gating). |
 | **Unlock state** | Where a lesson sits on the learner's path: *locked* → *available* → *complete*. The learner-facing axis. (The mock's rail labels this state "current" for the available lesson; *available* is the term, "current" is only a UI label.) |
-| **Generation state** | Whether a lesson's content exists yet: *ungenerated* → *generated*. The system/AI axis, driven by on-demand generation. Orthogonal to Unlock state — a lesson can be *available but ungenerated* (generated the moment the learner reaches it). |
+| **Generation state** | Whether a lesson's content exists yet: *ungenerated* → *generating* → *generated*, with *failed* as the retryable error branch (TDD §4). The system/AI axis, driven by on-demand generation. Orthogonal to Unlock state — a lesson can be *available but ungenerated* (generated the moment the learner reaches it). Content is immutable once *generated*. |
 | **Progress** | The persisted record of which lessons/units are complete, per path, per account. |
 | **Switcher** | The "Your paths" UI for moving between a learner's multiple paths, each keeping its own progress. |
 | **Delete path** | Removing a path and its progress (confirmed, not undoable in MVP). Doubles as **reset**: with no regenerate, deleting and creating anew is how a learner discards an unsatisfying path. |
