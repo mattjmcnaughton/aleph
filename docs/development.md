@@ -43,15 +43,68 @@ copier update --trust
 copier update --trust src/aleph/web/frontend
 ```
 
-## Database
+## Backing services (Postgres + Keycloak)
+
+The app needs Postgres, and — once app-side auth lands (AL-020) — a Keycloak
+OIDC realm for local login and browser tests. Bring your own services if you
+already run them, or start the checked-in Docker Compose stack.
+
+### Docker Compose (default)
 
 ```sh
-# Start Postgres
-docker compose up -d
+# Postgres on localhost:5432 (waits until it accepts connections)
+just compose-db-up
 
-# Run migrations
+# Run migrations against it
 uv run alembic upgrade head
+
+# Keycloak (dev realm) on localhost:18080 — start when you need auth
+just compose-keycloak-up
+
+# Stop everything
+just compose-down
 ```
+
+`compose-db-up` matches `.env.example`
+(`DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/aleph`).
+Port clashes with an existing Postgres/Keycloak? Override the published host
+ports: `ALEPH_DB_PORT=15432 just compose-db-up`,
+`ALEPH_KEYCLOAK_PORT=28080 just compose-keycloak-up`. Overriding a port also
+means updating the matching `.env` value — `DATABASE_URL` for the db port,
+`OIDC_ISSUER` for the Keycloak port.
+
+### Keycloak dev realm
+
+`just compose-keycloak-up` starts Keycloak in dev mode and imports the realm
+from `docker/keycloak/aleph-realm.json` (mounted read-only into the container's
+`/opt/keycloak/data/import/`). It provisions:
+
+| Thing | Value |
+| ----- | ----- |
+| Realm | `aleph` — issuer `http://127.0.0.1:18080/realms/aleph` |
+| Client | `aleph` (confidential, standard authorization-code flow) |
+| Client secret | `aleph-dev-secret` (well-known dev secret, not a real credential) |
+| Redirect URIs | `http://{127.0.0.1,localhost}:{8000,5173}/auth/callback` (backend + Vite dev server) |
+| Test user | `dev` / `dev`, email `dev@example.com` (verified, non-admin) |
+| Admin test user | `admin-dev` / `admin-dev`, email `admin@mattjmcnaughton.com` (verified; admin via `ADMIN_EMAIL_DOMAINS`) |
+| Keycloak admin | `admin` / `admin` at `http://127.0.0.1:18080/` |
+
+The realm keeps direct access grants **disabled** (browser authorization-code
+flow only, matching production). Verify it is serving:
+
+```sh
+curl -fsS http://127.0.0.1:18080/realms/aleph/.well-known/openid-configuration
+```
+
+Corresponding OIDC env for the native app lives in `.env.example`
+(`OIDC_PROVIDER`, `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`). The
+app does not consume these until AL-020 wires up auth.
+
+### Using your own services
+
+If you already run Postgres 16 (and Keycloak, or another OIDC provider such as
+Auth0), skip Compose and point `DATABASE_URL` / the `OIDC_*` vars at them — see
+`.env.example`.
 
 ## Running Locally
 
