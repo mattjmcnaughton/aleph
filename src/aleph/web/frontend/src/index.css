@@ -1,3 +1,24 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  html {
+    color-scheme: dark;
+  }
+
+  body {
+    @apply bg-night text-porcelain font-sans antialiased;
+  }
+
+  ::selection {
+    background: rgba(79, 184, 196, 0.3);
+  }
+}
+
+@layer components {
+  /* Uppercase mono section kicker, e.g. "NEW PATH" / "YOUR PATHS" in the mocks. */
+  .kicker {
+    @apply font-mono text-[11px] font-medium uppercase tracking-kicker text-mist;
+  }
+}
