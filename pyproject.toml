@@ -26,6 +26,8 @@ dependencies = [
     "asyncpg>=0.29",
     "opentelemetry-instrumentation-sqlalchemy>=0.44b0",
     "pydantic-ai-slim[openai]>=2.5.0",
+    "authlib>=1.7.2",
+    "itsdangerous>=2.2.0",
 ]
 
 [project.urls]

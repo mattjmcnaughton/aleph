@@ -71,6 +71,21 @@
           "temporary": false
         }
       ]
+    },
+    {
+      "username": "unverified-dev",
+      "enabled": true,
+      "email": "unverified@example.com",
+      "firstName": "Unverified",
+      "lastName": "Dev",
+      "emailVerified": false,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "unverified-dev",
+          "temporary": false
+        }
+      ]
     }
   ]
 }

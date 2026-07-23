@@ -56,5 +56,15 @@ jobs:
       - name: Install just
         run: sudo apt-get update && sudo apt-get install -y just
 
+      # Keycloak is imported from the checked-in aleph realm, so it must start
+      # after checkout (it mounts the repo realm file). The auth integration
+      # tests (tests/integration/test_auth_keycloak.py) drive the real OIDC code
+      # flow against it. Reuse the same compose service + healthcheck developers
+      # run locally (``just compose-keycloak-up`` waits for the realm import) so
+      # CI and local dev cannot drift; ``just`` and compose v2 are already
+      # available on the runner by this point.
+      - name: Start Keycloak
+        run: just compose-keycloak-up
+
       - name: Run gate-expensive
         run: just gate-expensive

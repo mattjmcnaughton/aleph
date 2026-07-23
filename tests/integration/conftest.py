@@ -12,16 +12,19 @@ from __future__ import annotations
 import asyncio
 import os
 import uuid
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated
 
 import asyncpg
 import pytest
 from alembic.config import Config
+from fastapi import Depends, FastAPI
 from sqlalchemy.engine import URL, make_url
 
 from alembic import command
 from aleph import db
+from aleph.app import create_app
 from aleph.config import settings
+from aleph.dependencies import get_current_user
 from aleph.models import User
 
 TEMPLATE_PREFIX = "aleph_test_base"
@@ -170,6 +173,25 @@ def _database_name(url: URL) -> str:
 
 def _render_url(url: URL) -> str:
     return url.render_as_string(hide_password=False)
+
+
+def build_authprobe_app() -> FastAPI:
+    """A fresh app plus the smallest possible consumer of ``get_current_user``.
+
+    ``/api/v1/_authprobe`` exists only for the auth tests: it lets the ``401``
+    gate and a successful cookie be asserted before any real ``/api/v1/*`` route
+    (AL-050/051) exists. Shared here so the stubbed-client and the real-Keycloak
+    integration tests use one definition.
+    """
+    app = create_app()
+
+    @app.get("/api/v1/_authprobe")
+    async def _authprobe(
+        user: Annotated[User, Depends(get_current_user)],
+    ) -> dict[str, str]:
+        return {"id": str(user.id)}
+
+    return app
 
 
 async def create_user(
