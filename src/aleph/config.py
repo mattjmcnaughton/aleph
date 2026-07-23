@@ -230,5 +230,25 @@ class Settings(BaseSettings):
     read_passage_words_min: int = 200
     read_passage_words_max: int = 500
 
+    # --- AL-021: derived admin (TDD §7/D14) -----------------------------------
+    # Appended as a self-contained block. Admin status is derived from the
+    # user's email domain at request time (see ``aleph.authz.is_admin``), never
+    # stored: the email is refreshed from the identity provider on every
+    # sign-in, so classification self-heals and needs no migration or admin UI.
+
+    # Comma-separated email domains whose users are admins. Matched exactly (no
+    # subdomains) and case-insensitively against the part after the final
+    # ``@``. Default is the sole first-party operator.
+    admin_email_domains: str = "mattjmcnaughton.com"
+
+    @property
+    def admin_email_domain_set(self) -> frozenset[str]:
+        """Parsed ``admin_email_domains``: lowercased, stripped, empties dropped."""
+        return frozenset(
+            domain.strip().lower()
+            for domain in self.admin_email_domains.split(",")
+            if domain.strip()
+        )
+
 
 settings = Settings()
