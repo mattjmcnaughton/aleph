@@ -205,5 +205,30 @@ class Settings(BaseSettings):
         self.session_cookie_secure = True
         return self
 
+    # --- AL-040: orchestration caps & prefetch (TDD §5.4, §5.2, §14) ----------
+    # Appended as a self-contained block (AL-020 also appends config; keep the
+    # blocks separate). These map §14's provisional numbers onto env-overridable
+    # settings. The service (``services/generation.py``) builds ``OutlineCaps`` /
+    # ``LessonCaps`` from these explicitly and passes them to the agents as
+    # run-time deps — the agents never read config (habagou purity rule).
+
+    # Lessons generated ahead of the first incomplete one (``PREFETCH_N``, §14):
+    # the prefetch window is ``first_incomplete_position + prefetch_n``.
+    prefetch_n: int = 2
+
+    # Outline sizing (§14): ``*_target``/band are prompt targets, ``max_*`` are
+    # the hard validator caps the outline agent enforces (§5.1). Fed into
+    # ``OutlineCaps``, whose own ``__post_init__`` rejects an incoherent set.
+    outline_units_target: int = 5
+    max_units: int = 6
+    lessons_per_unit_min: int = 3
+    lessons_per_unit_max: int = 5
+    max_lessons_per_path: int = 30
+
+    # Read-passage word band (``READ_PASSAGE_WORDS`` ~200-500, §14). Fed into
+    # ``LessonCaps`` (the option count stays the fixed single-select 3-4 band).
+    read_passage_words_min: int = 200
+    read_passage_words_max: int = 500
+
 
 settings = Settings()

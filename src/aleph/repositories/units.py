@@ -28,6 +28,9 @@ class UnitRepository:
         await self.session.flush()
         return unit
 
+    async def get(self, unit_id: uuid.UUID) -> Unit | None:
+        return await self.session.get(Unit, unit_id)
+
     async def list_for_path(self, path_id: uuid.UUID) -> list[Unit]:
         """A path's units in display (``position``) order."""
         result = await self.session.execute(
