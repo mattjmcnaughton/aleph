@@ -31,7 +31,7 @@ dependencies = [
 Repository = "https://github.com/mattjmcnaughton/aleph"
 
 [tool.uv]
-exclude-newer = "1 week"
+exclude-newer = "2026-07-23T00:00:00Z"
 
 [dependency-groups]
 dev = [

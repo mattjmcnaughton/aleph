@@ -1,0 +1,222 @@
+"""Data access for paths, including the atomic outline claim (TDD §5.4)."""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+from sqlalchemy import ColumnElement, delete, func, select, update
+
+from aleph.config import settings
+from aleph.models import Path, PathStatus
+from aleph.repositories._generation import (
+    affected_rows,
+    claimable_predicate,
+    effective_state_case,
+)
+
+if TYPE_CHECKING:
+    import datetime
+    import uuid
+
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from aleph.models import Level
+
+# Statuses an outline claim may transition into ``generating`` (TDD §5.4). A
+# fresh ``pending`` path, or a ``generating`` one whose process died (stale).
+# ``failed`` is excluded here on purpose: only the explicit learner retry
+# re-claims a real failure, so a systematically failing outline never silently
+# retry-burns spend. ``ready`` and ``refused`` are terminal.
+_CLAIMABLE_STATUSES = (PathStatus.PENDING,)
+_RETRY_CLAIMABLE_STATUSES = (PathStatus.PENDING, PathStatus.FAILED)
+
+
+class PathRepository:
+    """Data access for :class:`~aleph.models.Path` rows.
+
+    Constructed per-request with the caller's :class:`AsyncSession` (habagou
+    convention); the repository never opens or commits transactions — the
+    service layer owns the unit of work. ``stale_after_seconds`` is the
+    generation stale window (TDD §5.4); it defaults to the configured value but
+    a service may inject a different policy (AL-040 wiring point).
+    """
+
+    def __init__(
+        self, session: AsyncSession, *, stale_after_seconds: float | None = None
+    ) -> None:
+        self.session = session
+        self._stale_after_seconds = (
+            stale_after_seconds
+            if stale_after_seconds is not None
+            else settings.generation_stale_after_seconds
+        )
+
+    def _effective_status_expr(self) -> ColumnElement[str]:
+        return effective_state_case(
+            state_col=Path.status,
+            started_at_col=Path.generation_started_at,
+            generating_state=PathStatus.GENERATING,
+            failed_state=PathStatus.FAILED,
+            stale_after_seconds=self._stale_after_seconds,
+        )
+
+    async def create(self, *, user_id: uuid.UUID, topic: str, level: Level) -> Path:
+        path = Path(user_id=user_id, topic=topic, level=level)
+        self.session.add(path)
+        await self.session.flush()
+        return path
+
+    async def get(self, path_id: uuid.UUID) -> Path | None:
+        return await self.session.get(Path, path_id)
+
+    async def get_for_user(
+        self, *, path_id: uuid.UUID, user_id: uuid.UUID
+    ) -> Path | None:
+        """Fetch a path only if it belongs to ``user_id`` (ownership guard)."""
+        result = await self.session.execute(
+            select(Path).where(Path.id == path_id, Path.user_id == user_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def list_for_user(self, *, user_id: uuid.UUID) -> list[Path]:
+        result = await self.session.execute(
+            select(Path)
+            .where(Path.user_id == user_id)
+            .order_by(Path.created_at.desc(), Path.id)
+        )
+        return list(result.scalars())
+
+    async def effective_status(self, path_id: uuid.UUID) -> PathStatus | None:
+        """The path's **effective** status: a stale ``generating`` reads as failed.
+
+        The §6 poll target (``GET /paths/{id}``) reports status; a path whose
+        outline run crashed mid-flight (stale ``generating``) must read as
+        ``failed`` so the learner sees the retry affordance rather than a dead
+        spinner — the same stale rule readers apply to lessons (§5.4/§6), sharing
+        the one clock.
+        """
+        result = await self.session.execute(
+            select(self._effective_status_expr()).where(Path.id == path_id)
+        )
+        value = result.scalar_one_or_none()
+        return PathStatus(value) if value is not None else None
+
+    async def delete(self, path_id: uuid.UUID) -> bool:
+        """Hard-delete a path; ON DELETE CASCADE tears down its whole tree.
+
+        Returns whether a row was removed.
+        """
+        result = await self.session.execute(delete(Path).where(Path.id == path_id))
+        return affected_rows(result) > 0
+
+    async def claim_outline(self, path_id: uuid.UUID) -> datetime.datetime | None:
+        """Atomically claim a path's outline generation (auto path).
+
+        Wins iff the row is currently ``pending`` or a stale ``generating`` (a
+        crashed run). The ``UPDATE ... WHERE ... RETURNING`` is the whole
+        concurrency control: exactly one caller matches the predicate and flips
+        the row to ``generating`` under Postgres' row lock; every other caller
+        sees the already-claimed fresh row and matches nothing.
+
+        Returns the **fencing token** (the ``generation_started_at`` stamp this
+        claim wrote) on a win, or ``None`` if another caller already holds it —
+        pass it back to ``mark_*`` so a stalled worker cannot overwrite a fresh
+        re-claim.
+
+        **Commit immediately.** ``generation_started_at`` is ``func.now()`` = the
+        transaction start timestamp and the row lock is held until commit, so a
+        claim left open in a long transaction blocks competitors and freezes the
+        stale clock. A short claim-then-commit transaction is load-bearing
+        (TDD §5.4).
+        """
+        return await self._claim(path_id, _CLAIMABLE_STATUSES)
+
+    async def claim_outline_for_retry(
+        self, path_id: uuid.UUID
+    ) -> datetime.datetime | None:
+        """Atomically claim for an explicit learner retry (POST .../retry).
+
+        Same as :meth:`claim_outline` (including the fencing-token return and the
+        commit-immediately requirement) but additionally re-claims a ``failed``
+        row — the learner's retry is the only loop that re-runs a real failure.
+        """
+        return await self._claim(path_id, _RETRY_CLAIMABLE_STATUSES)
+
+    async def _claim(
+        self, path_id: uuid.UUID, statuses: tuple[PathStatus, ...]
+    ) -> datetime.datetime | None:
+        result = await self.session.execute(
+            update(Path)
+            .where(
+                Path.id == path_id,
+                claimable_predicate(
+                    state_col=Path.status,
+                    started_at_col=Path.generation_started_at,
+                    claimable_states=statuses,
+                    generating_state=PathStatus.GENERATING,
+                    stale_after_seconds=self._stale_after_seconds,
+                ),
+            )
+            # updated_at is bumped explicitly: a Core UPDATE bypasses the ORM
+            # ``onupdate`` hook (AL-010 landmine). ``refusal_message=None`` is
+            # defensive symmetry with the lesson claim's ``generation_error``
+            # clear: no claimable status currently carries a refusal_message
+            # (only terminal ``refused`` does), but clearing keeps the claim the
+            # single writer that resets stale generation fields.
+            .values(
+                status=PathStatus.GENERATING,
+                generation_started_at=func.now(),
+                refusal_message=None,
+                updated_at=func.now(),
+            )
+            .returning(Path.generation_started_at)
+        )
+        return result.scalar_one_or_none()
+
+    async def mark_ready(self, path_id: uuid.UUID, *, fence: datetime.datetime) -> bool:
+        """Mark the outline ready (terminal-ish; retryable only via ``failed``).
+
+        Guarded by the claim fence: writes only while the row is still
+        ``generating`` with ``generation_started_at == fence``. Returns whether
+        this caller still owned the claim (``False`` = lost, no-op).
+        """
+        return await self._guarded_set_status(path_id, PathStatus.READY, fence)
+
+    async def mark_failed(
+        self, path_id: uuid.UUID, *, fence: datetime.datetime
+    ) -> bool:
+        """Record an outline failure (retryable). Fenced like :meth:`mark_ready`."""
+        return await self._guarded_set_status(path_id, PathStatus.FAILED, fence)
+
+    async def mark_refused(
+        self, *, path_id: uuid.UUID, message: str, fence: datetime.datetime
+    ) -> bool:
+        """Record a refusal (terminal, W7). Fenced like :meth:`mark_ready`."""
+        result = await self.session.execute(
+            update(Path)
+            .where(
+                Path.id == path_id,
+                Path.status == PathStatus.GENERATING,
+                Path.generation_started_at == fence,
+            )
+            .values(
+                status=PathStatus.REFUSED,
+                refusal_message=message,
+                updated_at=func.now(),
+            )
+        )
+        return affected_rows(result) > 0
+
+    async def _guarded_set_status(
+        self, path_id: uuid.UUID, status: PathStatus, fence: datetime.datetime
+    ) -> bool:
+        result = await self.session.execute(
+            update(Path)
+            .where(
+                Path.id == path_id,
+                Path.status == PathStatus.GENERATING,
+                Path.generation_started_at == fence,
+            )
+            .values(status=status, updated_at=func.now())
+        )
+        return affected_rows(result) > 0
