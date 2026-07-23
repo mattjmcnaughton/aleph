@@ -3,8 +3,9 @@
 **Status:** Draft · **Owner:** solo builder · **Roadmap item:** [Phase 1](../roadmap.md#phase-1--the-generated-path-mvp)
 **References:** [`README.md`](../../README.md) · [`roadmap.md`](../roadmap.md) · [`CONTEXT.md`](../CONTEXT.md) (ubiquitous language) · mocks: [web](../mocks/aleph-mvp-web.html), [mobile](../mocks/aleph-mvp-mobile.html)
 
-> Companion doc: a separate **TDD** owns the technical design — model routing / multi-model
-> architecture, prompts, storage schema, and hosting. This PRD stops at the product boundary.
+> Companion doc: the [**Phase 1 TDD**](../tdds/phase-1-path-generation.md) owns the technical
+> design — model routing / multi-model architecture, prompts, storage schema, and hosting. This
+> PRD stops at the product boundary.
 
 ## 1. Summary
 
