@@ -78,6 +78,22 @@ OutlineResult = PathOutline | Refusal
 Level = Literal["beginner", "intermediate", "advanced"]
 
 
+def require_valid_level(level: Level) -> None:
+    """Reject an unknown ``level`` at a deps construction site (ponytail-3).
+
+    ``Level`` is a typing ``Literal`` — a static hint the runtime does not
+    enforce — so a bad value would otherwise construct happily and only explode
+    later as a bare ``KeyError`` deep inside a dynamic system prompt
+    (``_LEVEL_GUIDANCE[level]``). Both :class:`OutlineDeps` and ``LessonDeps``
+    call this from ``__post_init__`` so the failure is one explicit, actionable
+    ``ValueError`` at the construction site (the service's ``Settings`` mapping,
+    AL-040) rather than two copy-pasted checks.
+    """
+    valid = get_args(Level)
+    if level not in valid:
+        raise ValueError(f"Unknown level {level!r}; expected one of {list(valid)}.")
+
+
 @dataclass(frozen=True)
 class OutlineCaps:
     """The §14 sizing caps the agent aims for and its validators enforce.
@@ -133,18 +149,12 @@ class OutlineDeps:
     def __post_init__(self) -> None:
         """Reject an unknown ``level`` at construction (thermo-1).
 
-        ``Level`` is a typing ``Literal`` — a static hint the runtime does not
-        enforce — so ``OutlineDeps(level="wizard")`` would otherwise construct
-        happily and only explode later as a bare ``KeyError`` deep inside the
-        dynamic system prompt (``_LEVEL_GUIDANCE[level]``). Validate here so the
-        failure is an explicit, actionable ``ValueError`` at the construction
-        site (the service's ``Settings`` mapping, AL-040).
+        Delegates to :func:`require_valid_level` (shared with ``LessonDeps``,
+        ponytail-3) so the same actionable ``ValueError`` is raised at the
+        construction site (the service's ``Settings`` mapping, AL-040) rather
+        than exploding later as a bare ``KeyError`` in the dynamic system prompt.
         """
-        valid = get_args(Level)
-        if self.level not in valid:
-            raise ValueError(
-                f"Unknown level {self.level!r}; expected one of {list(valid)}."
-            )
+        require_valid_level(self.level)
 
 
 # --- system prompt (static role + boundary; level/caps appended dynamically) ---
