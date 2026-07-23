@@ -250,5 +250,14 @@ class Settings(BaseSettings):
             if domain.strip()
         )
 
+    # --- AL-042: per-account daily rate limits (TDD §10 / §14 D13) ------------
+    # Appended as a self-contained block. Cheap insurance on the §7 cost
+    # guardrail: caps how many paths a learner may create and how many lessons
+    # they may trigger generation for per calendar day, checked in the service
+    # layer against real row counts (see ``services.rate_limit``). Admins are
+    # exempt at the call site. A cap of 0 or negative disables that cap.
+    rate_limit_paths_per_day: int = 10
+    rate_limit_lesson_generations_per_day: int = 100
+
 
 settings = Settings()

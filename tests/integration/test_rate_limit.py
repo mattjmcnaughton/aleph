@@ -1,0 +1,204 @@
+"""Integration tests for the daily rate limiter against real Postgres (AL-042).
+
+The unit tests pin the cap/rollover/admin logic with a fake counter; these pin
+the *counting* — that ``UsageRepository`` counts the right real rows (learner
+filter, the UTC-day window on ``created_at`` / ``generation_started_at``) so the
+service seam enforces caps end-to-end against the database.
+
+Service-seam scope: POST /paths does not exist yet (AL-050 depends on this
+ticket), so enforcement is exercised at the ``DailyRateLimiter`` seam over rows
+inserted directly, not through an HTTP route. AL-050 carries the route wiring +
+its 429 endpoint contract test.
+"""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
+
+import pytest
+from fastapi import HTTPException
+from sqlalchemy import update
+
+from aleph import db
+from aleph.models import Lesson, LessonGenerationState, Level, Path, Unit
+from aleph.repositories import UsageRepository
+from aleph.services.rate_limit import DailyRateLimiter
+
+from .conftest import create_user
+
+if TYPE_CHECKING:
+    import uuid
+
+# A stable "now" so the UTC-day window is deterministic regardless of wall clock.
+NOW = datetime(2026, 7, 23, 15, 0, tzinfo=UTC)
+YESTERDAY = NOW - timedelta(days=1)
+
+
+def _limiter(session, *, paths: int = 10, lessons: int = 100) -> DailyRateLimiter:
+    return DailyRateLimiter(
+        UsageRepository(session),
+        paths_per_day=paths,
+        lesson_generations_per_day=lessons,
+        now=lambda: NOW,
+    )
+
+
+async def _make_path(
+    session, *, user_id: uuid.UUID, created_at: datetime | None = None
+) -> Path:
+    path = Path(user_id=user_id, topic="Rust ownership", level=Level.SOME_EXPERIENCE)
+    session.add(path)
+    await session.flush()
+    if created_at is not None:
+        # created_at has a server default, so backdate it explicitly to place the
+        # row outside today's window.
+        await session.execute(
+            update(Path).where(Path.id == path.id).values(created_at=created_at)
+        )
+    return path
+
+
+async def _make_lesson(
+    session,
+    *,
+    path: Path,
+    unit: Unit,
+    position: int,
+    generation_started_at: datetime | None,
+) -> Lesson:
+    lesson = Lesson(
+        unit=unit,
+        path=path,
+        position_in_path=position,
+        position_in_unit=position,
+        title=f"Lesson {position}",
+        generation_state=(
+            LessonGenerationState.GENERATING
+            if generation_started_at is not None
+            else LessonGenerationState.UNGENERATED
+        ),
+        generation_started_at=generation_started_at,
+    )
+    session.add(lesson)
+    await session.flush()
+    return lesson
+
+
+@pytest.mark.anyio
+async def test_path_cap_counts_real_rows_created_today() -> None:
+    async with db.async_session() as session:
+        user = await create_user(session, username="capped", subject="capped")
+        limiter = _limiter(session, paths=10)
+
+        # Creations 1..10 each pass, then the row lands (real INSERT).
+        for _ in range(10):
+            await limiter.check_path_creation(user_id=user.id, is_admin=False)
+            await _make_path(session, user_id=user.id)
+
+        # The 11th check counts 10 real rows today and denies.
+        with pytest.raises(HTTPException) as excinfo:
+            await limiter.check_path_creation(user_id=user.id, is_admin=False)
+        assert excinfo.value.status_code == 429
+
+
+@pytest.mark.anyio
+async def test_path_cap_only_counts_todays_rows() -> None:
+    async with db.async_session() as session:
+        user = await create_user(session, username="rollover", subject="rollover")
+        # Ten paths, but all backdated to yesterday: outside today's UTC window.
+        for _ in range(10):
+            await _make_path(session, user_id=user.id, created_at=YESTERDAY)
+
+        # Fresh allowance today despite ten rows existing.
+        await _limiter(session, paths=10).check_path_creation(
+            user_id=user.id, is_admin=False
+        )
+
+
+@pytest.mark.anyio
+async def test_path_cap_is_per_account() -> None:
+    async with db.async_session() as session:
+        capped = await create_user(session, username="a", subject="a")
+        other = await create_user(session, username="b", subject="b")
+        for _ in range(10):
+            await _make_path(session, user_id=capped.id)
+
+        limiter = _limiter(session, paths=10)
+        with pytest.raises(HTTPException):
+            await limiter.check_path_creation(user_id=capped.id, is_admin=False)
+        # The other account's rows are not counted against ``capped``.
+        await limiter.check_path_creation(user_id=other.id, is_admin=False)
+
+
+@pytest.mark.anyio
+async def test_admin_is_exempt_over_real_rows() -> None:
+    async with db.async_session() as session:
+        user = await create_user(session, username="admin", subject="admin")
+        for _ in range(10):
+            await _make_path(session, user_id=user.id)
+        # Over the cap, but admin: no raise.
+        await _limiter(session, paths=10).check_path_creation(
+            user_id=user.id, is_admin=True
+        )
+
+
+@pytest.mark.anyio
+async def test_lesson_generation_cap_counts_rows_started_today() -> None:
+    async with db.async_session() as session:
+        user = await create_user(session, username="lessons", subject="lessons")
+        path = await _make_path(session, user_id=user.id)
+        unit = Unit(path=path, position=1, title="Unit 1", summary="s")
+        session.add(unit)
+        await session.flush()
+
+        # Two lessons triggered today, one triggered yesterday, one never.
+        await _make_lesson(
+            session, path=path, unit=unit, position=1, generation_started_at=NOW
+        )
+        await _make_lesson(
+            session, path=path, unit=unit, position=2, generation_started_at=NOW
+        )
+        await _make_lesson(
+            session, path=path, unit=unit, position=3, generation_started_at=YESTERDAY
+        )
+        await _make_lesson(
+            session, path=path, unit=unit, position=4, generation_started_at=None
+        )
+
+        # Cap of 2 → the two started today put the learner at the cap; deny.
+        with pytest.raises(HTTPException) as excinfo:
+            await _limiter(session, lessons=2).check_lesson_generation(
+                user_id=user.id, is_admin=False
+            )
+        assert excinfo.value.status_code == 429
+
+        # Cap of 3 → only two count today (yesterday's + ungenerated excluded);
+        # under the cap, allowed.
+        await _limiter(session, lessons=3).check_lesson_generation(
+            user_id=user.id, is_admin=False
+        )
+
+
+@pytest.mark.anyio
+async def test_lesson_cap_is_per_account() -> None:
+    """The Path.user_id join is the only learner scoping — pin it."""
+    async with db.async_session() as session:
+        capped = await create_user(session, username="lc-a", subject="lc-a")
+        other = await create_user(session, username="lc-b", subject="lc-b")
+        path = await _make_path(session, user_id=capped.id)
+        unit = Unit(path=path, position=1, title="Unit 1", summary="s")
+        session.add(unit)
+        await session.flush()
+        await _make_lesson(
+            session, path=path, unit=unit, position=1, generation_started_at=NOW
+        )
+        await _make_lesson(
+            session, path=path, unit=unit, position=2, generation_started_at=NOW
+        )
+
+        limiter = _limiter(session, lessons=2)
+        with pytest.raises(HTTPException):
+            await limiter.check_lesson_generation(user_id=capped.id, is_admin=False)
+        # The other account's lessons are not counted against ``other``.
+        await limiter.check_lesson_generation(user_id=other.id, is_admin=False)

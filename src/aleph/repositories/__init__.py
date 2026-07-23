@@ -16,6 +16,7 @@ from aleph.repositories.lessons import LessonRepository, PathGenerationProgress
 from aleph.repositories.paths import PathRepository
 from aleph.repositories.quick_checks import QuickCheckRepository
 from aleph.repositories.units import UnitRepository
+from aleph.repositories.usage import UsageRepository
 from aleph.repositories.users import UserRepository
 
 __all__ = [
@@ -25,5 +26,6 @@ __all__ = [
     "PathRepository",
     "QuickCheckRepository",
     "UnitRepository",
+    "UsageRepository",
     "UserRepository",
 ]
