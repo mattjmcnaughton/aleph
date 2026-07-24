@@ -284,3 +284,117 @@ export function isRateLimited(error: unknown): boolean {
 export function isNotFound(error: unknown): boolean {
   return error instanceof ApiError && error.status === 404;
 }
+
+// --- Lessons API (AL-051 wire contract, docs/api.md) ------------------------
+//
+// Same trigger + poll model as paths (§5.4/D5): `POST /lessons/{id}/generate`
+// returns `202` and the client polls `GET /lessons/{id}` until `generation_state`
+// resolves. `attempt` and `complete` are synchronous state changes (not
+// generation triggers). Answer-hiding (W6, §6): the pre-Attempt payload carries
+// NO correct answer anywhere — `correct_index`/`explanation` live only inside
+// `attempt`, which is `null` until the learner records an Attempt.
+
+/** The result of an Attempt: correct or incorrect (CONTEXT — non-gating). */
+export type LessonOutcome = "correct" | "incorrect";
+
+/**
+ * The Quick check as served pre-Attempt: stem + options ONLY. The keyed answer
+ * (`correct_index`) and `explanation` are deliberately absent here (W6) — they
+ * arrive only inside `attempt` once an Attempt is recorded.
+ */
+export interface QuickCheck {
+  stem: string;
+  options: string[];
+}
+
+/**
+ * The reveal boundary (`AttemptResult`, docs/api.md): present on `GET` only once
+ * an Attempt exists (revealed-on-return), and returned by `POST .../attempt`.
+ * First-wins — a re-submit returns the first Attempt's stored outcome.
+ */
+export interface LessonAttempt {
+  selected_index: number;
+  outcome: LessonOutcome;
+  correct_index: number;
+  explanation: string;
+}
+
+/** `GET /api/v1/lessons/{id}` body — the poll target (docs/api.md). */
+export interface LessonDetail {
+  id: string;
+  path_id: string;
+  title: string;
+  position_in_path: number;
+  position_in_unit: number;
+  generation_state: LessonGenerationState;
+  unlock_state: LessonUnlockState;
+  /** Non-null only when `generation_state == generated`. */
+  read_passage: string | null;
+  /** Non-null only when `generation_state == generated` (stem + options only). */
+  quick_check: QuickCheck | null;
+  /** Non-null only once an Attempt is recorded — the answer-reveal (W6). */
+  attempt: LessonAttempt | null;
+  /** Non-null only when `generation_state == failed` (learner-safe message). */
+  generation_error: string | null;
+}
+
+/** `POST /api/v1/lessons/{id}/complete` body — `200 {id, unlock_state}`. */
+export interface LessonCompleted {
+  id: string;
+  unlock_state: LessonUnlockState;
+}
+
+/** Poll a lesson's detail (generation state + content once generated). */
+export function getLesson(id: string): Promise<LessonDetail> {
+  return apiFetch<LessonDetail>(apiV1Path(`/lessons/${id}`));
+}
+
+/** Ensure/retry this lesson's generation (§5.2/W8). Returns the lesson id. */
+export function generateLesson(id: string): Promise<{ id: string }> {
+  return apiFetch<{ id: string }>(apiV1Path(`/lessons/${id}/generate`), { method: "POST" });
+}
+
+/** Record the Attempt (first-wins) and get the graded reveal (the boundary). */
+export function attemptLesson(id: string, selectedIndex: number): Promise<LessonAttempt> {
+  return apiFetch<LessonAttempt>(apiV1Path(`/lessons/${id}/attempt`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ selected_index: selectedIndex }),
+  });
+}
+
+/** Mark the lesson complete (non-gating; idempotent on an already-complete one). */
+export function completeLesson(id: string): Promise<LessonCompleted> {
+  return apiFetch<LessonCompleted>(apiV1Path(`/lessons/${id}/complete`), { method: "POST" });
+}
+
+/** TanStack query key for a single lesson's detail poll. */
+export function lessonQueryKey(id: string): readonly ["lessons", string] {
+  return ["lessons", id] as const;
+}
+
+/**
+ * THE lesson-detail query — key + fetcher paired (mirrors `pathQueryOptions`).
+ * The lesson id always exists (the route param), so — unlike `pathQueryOptions`,
+ * which onboarding drives from a not-yet-created path — there is no `skipToken`
+ * idle branch here.
+ */
+export function lessonQueryOptions(id: string) {
+  return queryOptions({
+    queryKey: lessonQueryKey(id),
+    queryFn: () => getLesson(id),
+  });
+}
+
+/**
+ * When the lesson view can stop polling `GET /lessons/{id}` (§5.4). A locked
+ * lesson has no content to watch, so it is terminal immediately; otherwise the
+ * poll runs until generation resolves (`generated`/`failed`). A learner viewing
+ * an available-but-`ungenerated` lesson keeps polling — the GET itself is the
+ * trigger that spawns the resume, so content lands within a poll.
+ */
+export function isLessonViewTerminal(detail: LessonDetail | undefined): boolean {
+  if (detail === undefined) return false;
+  if (detail.unlock_state === "locked") return true;
+  return isLessonStateTerminal(detail.generation_state);
+}
