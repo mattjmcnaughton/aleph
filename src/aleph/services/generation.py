@@ -47,12 +47,14 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import time
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import structlog
 
+from aleph import events
 from aleph.agents.lesson import (
     LessonCaps,
     LessonDeps,
@@ -118,6 +120,34 @@ if TYPE_CHECKING:
 
 logger = structlog.get_logger(__name__)
 
+
+def _elapsed_ms(started: float) -> int:
+    """Milliseconds since a ``time.perf_counter()`` mark (generation latency)."""
+    return round((time.perf_counter() - started) * 1000)
+
+
+def _usage_tokens(run: Any) -> tuple[int, int, int]:
+    """``(prompt, completion, total)`` token counts off a pydantic-ai run result.
+
+    Best-effort and defensive (advisory: never let a usage-accounting change break
+    generation): a missing or shape-shifted usage surface yields zeros, so the
+    cost-per-path event field is always present but never load-bearing on the hot
+    path. Dollar cost proper lives on the model-call spans (TDD §10)."""
+    try:
+        usage = run.usage
+        return (
+            int(usage.input_tokens or 0),
+            int(usage.output_tokens or 0),
+            int(usage.total_tokens or 0),
+        )
+    except Exception:  # noqa: BLE001 - usage accounting must never fail generation
+        # Zeros here silently deflate the cost-per-path metric, so surface the
+        # drift: a shape change in pydantic-ai's usage surface is a real signal to
+        # investigate, not something to swallow into a silent 0.
+        logger.warning("generation_usage_unavailable", exc_info=True)
+        return 0, 0, 0
+
+
 # Learner-facing failure text (advisory 9): the ``generation_error`` column can
 # surface in the lesson-view error state, so it must never carry raw provider or
 # exception text (a leaked prompt, a stack detail). The specific cause is logged
@@ -166,6 +196,7 @@ class PathStatusSnapshot:
 class _LessonContext:
     """Everything one lesson generation needs, loaded from the DB in one read."""
 
+    account_id: uuid.UUID
     topic: str
     level: Level
     outline: PathOutline
@@ -177,6 +208,21 @@ class _LessonContext:
     # falls back to the configured ``MODEL_LESSON`` slot. On the context so it
     # travels with every DB-driven (re)generation, not just the request.
     model_lesson: str | None
+
+
+@dataclass(frozen=True)
+class _OutlineClaim:
+    """A won outline claim: the fence token plus everything the run needs.
+
+    ``account_id`` rides the claim so the fenced ``outline_generated`` emissions
+    carry it without a second DB read (precedent: :class:`_LessonContext`).
+    """
+
+    fence: datetime.datetime
+    topic: str
+    level: Level
+    model_outline: str | None
+    account_id: uuid.UUID
 
 
 class GenerationOrchestrator:
@@ -319,6 +365,12 @@ class GenerationOrchestrator:
             await session.commit()
             path_id = path.id
 
+        # The path exists and is committed (W1, PRD §5.7). The onboarding Level is
+        # stamped (as ``path_level``) for segmentation; the path-count-per-account
+        # this feeds is the breadth metric's numerator.
+        events.emit_path_created(
+            account_id=user_id, path_id=path_id, path_level=level.value
+        )
         self._spawn(self.run_outline_task(path_id))
         return path
 
@@ -349,11 +401,10 @@ class GenerationOrchestrator:
         # per-lesson chain never nests inside the outline's permit. Default slot is
         # a no-op; AL-041 binds the process-wide semaphore.
         async with self._model_slot():
-            claimed = await self._claim_outline(path_id, retry=retry)
-            if claimed is None:
+            claim = await self._claim_outline(path_id, retry=retry)
+            if claim is None:
                 # already ready/refused, freshly generating, or lost the race
                 return
-            fence, topic, level, model_outline = claimed
 
             # Top-level handler (§5.4 invariant): any escape from the claimed body
             # — a persist error, a DB blip in ``_persist_outline`` — records
@@ -363,25 +414,24 @@ class GenerationOrchestrator:
             # propagates for graceful shutdown; the state machine makes
             # cancellation safe (stale recovery).
             try:
-                ready = await self._run_claimed_outline(
-                    path_id, fence, topic, level, model_outline
-                )
+                ready = await self._run_claimed_outline(path_id, claim)
             except Exception:
+                # An infra escape (persist/DB blip) after the model ran: record
+                # ``failed`` best-effort but emit no product event — this is an
+                # operational error (captured by ``logger.exception`` + spans), not
+                # a generation-quality outcome. The product ``outline_generated``
+                # events come only from the fenced branches in
+                # ``_run_claimed_outline``.
                 logger.exception("outline_task_failed", path_id=str(path_id))
                 with contextlib.suppress(Exception):
-                    await self._mark_outline_failed(path_id, fence)
+                    await self._mark_outline_failed(path_id, claim.fence)
                 return
 
         if ready:
             await self.ensure_prefetch_window(path_id)
 
     async def _run_claimed_outline(
-        self,
-        path_id: uuid.UUID,
-        fence: datetime.datetime,
-        topic: str,
-        level: Level,
-        model_outline: str | None,
+        self, path_id: uuid.UUID, claim: _OutlineClaim
     ) -> bool:
         """Run the outline agent under the claim and persist; return whether the
         path is now ``ready`` (so the caller kicks the prefetch window).
@@ -391,40 +441,87 @@ class GenerationOrchestrator:
         a lost fence (a re-claim owns the units). Only a persisted ``PathOutline``
         returns ``True``.
 
-        ``model_outline`` is the path's admin picker override (§5.3), read from
-        the row at claim time; ``None`` falls back to the configured ``MODEL_OUTLINE``
-        slot. Reading it from the row (not the request) is what makes an
-        override survive resume/reconcile.
+        ``claim.model_outline`` is the path's admin picker override (§5.3), read
+        from the row at claim time; ``None`` falls back to the configured
+        ``MODEL_OUTLINE`` slot. Reading it from the row (not the request) is what
+        makes an override survive resume/reconcile.
         """
+        fence = claim.fence
+        account_id = claim.account_id
         agent = build_outline_agent()
-        deps = OutlineDeps(level=_AGENT_LEVEL[level], caps=self._outline_caps)
+        deps = OutlineDeps(level=_AGENT_LEVEL[claim.level], caps=self._outline_caps)
         model = self._resolve_model(
-            model_outline if model_outline is not None else self._config.model_outline
+            claim.model_outline
+            if claim.model_outline is not None
+            else self._config.model_outline
         )
+        started = time.perf_counter()
         try:
             # The concurrency permit is already held by ``run_outline_task``
             # (acquired before the claim, §5.4, so queue time never counts against
             # the per-call budget); here we only bound the model call itself.
             async with asyncio.timeout(self._outline_timeout):
-                run = await agent.run(topic, deps=deps, model=model)
+                run = await agent.run(claim.topic, deps=deps, model=model)
         except TimeoutError:
-            await self._mark_outline_failed(path_id, fence)
+            await self._emit_outline_failed(path_id, fence, account_id, started)
             return False
         except Exception:  # noqa: BLE001 - §5.5: any provider error maps to failed
             logger.exception("outline_generation_failed", path_id=str(path_id))
-            await self._mark_outline_failed(path_id, fence)
+            await self._emit_outline_failed(path_id, fence, account_id, started)
             return False
 
+        duration_ms = _elapsed_ms(started)
+        prompt_tokens, completion_tokens, total_tokens = _usage_tokens(run)
         output = run.output
         if isinstance(output, Refusal):
-            await self._mark_outline_refused(path_id, fence, output.message)
+            # A refusal still ran the model (it cost tokens/latency, W7).
+            if await self._mark_outline_refused(path_id, fence, output.message):
+                events.emit_outline_generated(
+                    account_id=account_id,
+                    path_id=path_id,
+                    outcome="refused",
+                    duration_ms=duration_ms,
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    total_tokens=total_tokens,
+                )
             return False
 
-        return await self._persist_outline(path_id, fence, output)
+        ready = await self._persist_outline(path_id, fence, output)
+        if ready:
+            events.emit_outline_generated(
+                account_id=account_id,
+                path_id=path_id,
+                outcome="ready",
+                duration_ms=duration_ms,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                total_tokens=total_tokens,
+            )
+        return ready
+
+    async def _emit_outline_failed(
+        self,
+        path_id: uuid.UUID,
+        fence: datetime.datetime,
+        account_id: uuid.UUID,
+        started: float,
+    ) -> None:
+        """Mark the outline failed and emit ``outline_generated`` on a fenced win.
+
+        A lost fence (a stale re-claim already owns the row) is a silent no-op and
+        emits nothing, so a real failure is counted exactly once (W8, §5.5)."""
+        if await self._mark_outline_failed(path_id, fence):
+            events.emit_outline_generated(
+                account_id=account_id,
+                path_id=path_id,
+                outcome="failed",
+                duration_ms=_elapsed_ms(started),
+            )
 
     async def _claim_outline(
         self, path_id: uuid.UUID, *, retry: bool
-    ) -> tuple[datetime.datetime, str, Level, str | None] | None:
+    ) -> _OutlineClaim | None:
         async with self._session_factory() as session:
             repo = self._paths(session)
             path = await repo.get(path_id)
@@ -433,10 +530,19 @@ class GenerationOrchestrator:
             claim = repo.claim_outline_for_retry if retry else repo.claim_outline
             fence = await claim(path_id)
             topic, level, model_outline = path.topic, path.level, path.model_outline
+            # ``user_id`` rides the claim so the fenced ``outline_generated``
+            # emissions carry ``account_id`` without a second read.
+            account_id = path.user_id
             await session.commit()
         if fence is None:
             return None
-        return fence, topic, level, model_outline
+        return _OutlineClaim(
+            fence=fence,
+            topic=topic,
+            level=level,
+            model_outline=model_outline,
+            account_id=account_id,
+        )
 
     @staticmethod
     async def _commit_or_rollback(session: AsyncSession, *, ok: bool) -> None:
@@ -454,19 +560,23 @@ class GenerationOrchestrator:
 
     async def _mark_outline_failed(
         self, path_id: uuid.UUID, fence: datetime.datetime
-    ) -> None:
+    ) -> bool:
+        """Record ``failed`` under the fence; return whether this call won it."""
         async with self._session_factory() as session:
             ok = await self._paths(session).mark_failed(path_id, fence=fence)
             await self._commit_or_rollback(session, ok=ok)
+        return ok
 
     async def _mark_outline_refused(
         self, path_id: uuid.UUID, fence: datetime.datetime, message: str
-    ) -> None:
+    ) -> bool:
+        """Record ``refused`` under the fence; return whether this call won it."""
         async with self._session_factory() as session:
             ok = await self._paths(session).mark_refused(
                 path_id=path_id, message=message, fence=fence
             )
             await self._commit_or_rollback(session, ok=ok)
+        return ok
 
     async def _persist_outline(
         self, path_id: uuid.UUID, fence: datetime.datetime, outline: PathOutline
@@ -631,7 +741,9 @@ class GenerationOrchestrator:
             context = await self._load_lesson_context(session, path_id, lesson_id)
         if context is None:
             # A vanished lesson/unit is referential breakage, not a transient
-            # error: record failed (generic message; detail logged).
+            # error: record failed (generic message; detail logged). No product
+            # event — with no context there is no ``account_id``/position to stamp,
+            # and this is an infra fault, not a generation-quality failure.
             logger.warning(
                 "lesson_context_unavailable",
                 lesson_id=str(lesson_id),
@@ -655,6 +767,7 @@ class GenerationOrchestrator:
             if context.model_lesson is not None
             else self._config.model_lesson
         )
+        started = time.perf_counter()
         try:
             # The concurrency permit is already held by ``_claim_and_generate``
             # (acquired before the claim, §5.4, and released once per lesson so the
@@ -664,18 +777,64 @@ class GenerationOrchestrator:
                     build_lesson_prompt(deps), deps=deps, model=model
                 )
         except TimeoutError:
-            await self._mark_lesson_failed(lesson_id, fence, _LESSON_TIMEOUT_MESSAGE)
+            await self._emit_lesson_failed(
+                path_id, lesson_id, fence, context, started, _LESSON_TIMEOUT_MESSAGE
+            )
             return False
         except Exception:  # noqa: BLE001 - §5.5: any error → failed + recorded
             # The stored message stays generic (advisory 9): raw provider text may
             # carry prompt/stack detail and reaches a learner-visible field. Log
             # the real cause with full context here.
             logger.exception("lesson_generation_failed", lesson_id=str(lesson_id))
-            await self._mark_lesson_failed(lesson_id, fence, _LESSON_FAILED_MESSAGE)
+            await self._emit_lesson_failed(
+                path_id, lesson_id, fence, context, started, _LESSON_FAILED_MESSAGE
+            )
             return False
 
+        duration_ms = _elapsed_ms(started)
+        prompt_tokens, completion_tokens, total_tokens = _usage_tokens(run)
         # Persist content + quick check in a fresh, fenced transaction.
-        return await self._persist_lesson(lesson_id, fence, run.output)
+        generated = await self._persist_lesson(lesson_id, fence, run.output)
+        if generated:
+            events.emit_lesson_generated(
+                account_id=context.account_id,
+                path_id=path_id,
+                lesson_id=lesson_id,
+                position_in_path=context.position_in_path,
+                outcome="generated",
+                duration_ms=duration_ms,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                total_tokens=total_tokens,
+            )
+        return generated
+
+    async def _emit_lesson_failed(
+        self,
+        path_id: uuid.UUID,
+        lesson_id: uuid.UUID,
+        fence: datetime.datetime,
+        context: _LessonContext,
+        started: float,
+        error: str,
+    ) -> None:
+        """Mark the lesson failed with ``error`` and emit ``lesson_generated`` on a
+        fenced win.
+
+        A lost fence is a silent no-op and emits nothing, so a real lesson failure
+        (model error / timeout) is counted once (W8, §5.5). ``error`` is the
+        branch-specific learner-facing message (timeout vs generic); the product
+        event only records the coarse ``failed`` outcome, the message stays in the
+        DB column and the logs."""
+        if await self._mark_lesson_failed(lesson_id, fence, error):
+            events.emit_lesson_generated(
+                account_id=context.account_id,
+                path_id=path_id,
+                lesson_id=lesson_id,
+                position_in_path=context.position_in_path,
+                outcome="failed",
+                duration_ms=_elapsed_ms(started),
+            )
 
     async def _persist_lesson(
         self, lesson_id: uuid.UUID, fence: datetime.datetime, content: LessonContent
@@ -700,12 +859,14 @@ class GenerationOrchestrator:
 
     async def _mark_lesson_failed(
         self, lesson_id: uuid.UUID, fence: datetime.datetime, error: str
-    ) -> None:
+    ) -> bool:
+        """Record ``failed`` under the fence; return whether this call won it."""
         async with self._session_factory() as session:
             ok = await self._lessons(session).mark_failed(
                 lesson_id=lesson_id, error=error, fence=fence
             )
             await self._commit_or_rollback(session, ok=ok)
+        return ok
 
     # -- continuity seam (D7) ---------------------------------------------- #
 
@@ -755,6 +916,7 @@ class GenerationOrchestrator:
             session, path_id, lesson.position_in_path
         )
         return _LessonContext(
+            account_id=path.user_id,
             topic=path.topic,
             level=path.level,
             outline=outline,

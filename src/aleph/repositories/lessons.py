@@ -287,6 +287,50 @@ class LessonRepository:
         )
         return affected_rows(result) > 0
 
+    async def mark_completed_and_finalize(
+        self, *, lesson_id: uuid.UUID, path_id: uuid.UUID
+    ) -> tuple[bool, bool, int]:
+        """Mark a lesson complete and, atomically, decide if it finished the path.
+
+        Returns ``(newly_completed, path_now_complete, lesson_count)``:
+
+        * ``newly_completed`` — whether *this* call performed the transition (as
+          :meth:`mark_completed`), so the caller fires the post-commit prefetch
+          advance / ``lesson_completed`` event only on the real transition.
+        * ``path_now_complete`` — ``True`` only for the single completion that
+          flipped the **last** incomplete lesson, so ``path_completed`` (W3, PRD
+          §5.4) is emitted exactly once.
+        * ``lesson_count`` — the path's total lesson count, via ``count()`` (no
+          list hydration), for the ``path_completed`` payload.
+
+        Atomicity: the path row is locked first (``SELECT ... FOR UPDATE``), so
+        concurrent completions on the same path serialize and the
+        "no lesson left incomplete" check cannot race — two completions can no
+        longer each observe the other's commit and both derive path completion (a
+        double ``path_completed``). The completeness read runs inside this same
+        transaction (after the mark), and the caller commits to release the lock.
+        """
+        # Serialize per-path: concurrent completes on this path queue on the lock.
+        await self.session.execute(
+            select(Path.id).where(Path.id == path_id).with_for_update()
+        )
+        result = await self.session.execute(
+            update(Lesson)
+            .where(Lesson.id == lesson_id, Lesson.completed_at.is_(None))
+            .values(completed_at=func.now(), updated_at=func.now())
+        )
+        newly_completed = affected_rows(result) > 0
+        remaining = await self.session.scalar(
+            select(func.count())
+            .select_from(Lesson)
+            .where(Lesson.path_id == path_id, Lesson.completed_at.is_(None))
+        )
+        lesson_count = await self.session.scalar(
+            select(func.count()).select_from(Lesson).where(Lesson.path_id == path_id)
+        )
+        path_now_complete = newly_completed and remaining == 0
+        return newly_completed, path_now_complete, int(lesson_count or 0)
+
     # -- stale-aware reads (§5.4/§6) --------------------------------------- #
 
     async def effective_state(
