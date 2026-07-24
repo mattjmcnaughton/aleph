@@ -53,6 +53,9 @@ select = ["E", "F", "I", "N", "W", "UP", "B", "A", "SIM", "TCH"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+junit_family = "legacy"
+addopts = "--strict-markers"
 markers = [
-    "external: tests that hit external services",
+    "external: tests that hit external services (opt-in via `just test-external`; never run in CI)",
+    "workflow(id): marks a test that proves a named PRD workflow (e.g. workflow(\"W1\")); shared vocabulary only, no enforcement machinery (TDD §12)",
 ]

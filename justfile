@@ -73,9 +73,28 @@ test-unit-fe:
 test-integration:
     uv run pytest -n auto tests/integration
 
-# Run e2e tests
+# Run e2e tests (Playwright browser suite, phone viewport — TDD §12)
 test-e2e:
-    uv run pytest tests/e2e
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mkdir -p .artifacts/test-results
+    # Local runs (no E2E_DATABASE_URL, not CI): create the ephemeral e2e database
+    # the Playwright webServer migrates + boots the stub backend against, and
+    # point Playwright at the machine's preinstalled chromium (the managed
+    # download may be a different build). CI sets E2E_DATABASE_URL to its
+    # Postgres service (already created) and installs its own matching browser.
+    if [ -z "${E2E_DATABASE_URL:-}" ] && [ -z "${CI:-}" ]; then
+        PGPASSWORD="${PGPASSWORD:-postgres}" psql -h localhost -U "${PGUSER:-postgres}" \
+            -c 'CREATE DATABASE aleph_e2e' 2>/dev/null || true
+        # Pin the e2e backend to its own database so a DATABASE_URL exported for
+        # the integration suite (e.g. during `just gate-expensive`) never leaks
+        # into the browser suite's backend.
+        export E2E_DATABASE_URL="postgresql+asyncpg://${PGUSER:-postgres}:${PGPASSWORD:-postgres}@localhost:5432/aleph_e2e"
+        if [ -z "${PW_CHROMIUM_PATH:-}" ] && [ -x /opt/pw-browsers/chromium ]; then
+            export PW_CHROMIUM_PATH=/opt/pw-browsers/chromium
+        fi
+    fi
+    cd {{fe_dir}} && pnpm exec playwright test
 
 # Run tests that hit external services
 test-external:

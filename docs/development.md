@@ -150,13 +150,19 @@ just gate-expensive
 
 ## Testing
 
-Tests are organized by type:
+Tests are organized by type (see [`ci.md`](ci.md) for the CI job that runs each):
 
-- `tests/unit/` — fast, isolated tests
-- `tests/integration/` — tests with real dependencies
-- `tests/e2e/` — end-to-end tests
+- `tests/unit/` — fast, isolated tests (backend `just test-unit-be`, frontend `just test-unit-fe`)
+- `tests/integration/` — tests against real Postgres + Keycloak (`just test-integration`)
+- `src/aleph/web/frontend/tests/e2e/` — the Playwright browser suite at the phone
+  viewport (`just test-e2e`); it boots the stub-model backend (`scripts/e2e_backend.py`)
+  plus the dev frontend. Locally it creates an `aleph_e2e` database and uses the
+  machine's preinstalled chromium via `PW_CHROMIUM_PATH`.
+- `tests/external/` — live-provider contract tests, opt-in via `just test-external`.
 
-Use `@pytest.mark.external` for tests that hit external services. These run via `just test-external`.
+Use `@pytest.mark.external` for tests that hit external services (they must skip cleanly
+without `OPENROUTER_API_KEY`); CI never runs them. Tag a test that proves a PRD workflow
+with `@pytest.mark.workflow("W1")` — shared vocabulary only, no enforcement machinery.
 
 ## Docker
 
