@@ -2,7 +2,7 @@
 // generating → ready/refused/failed transitions are testable without a router,
 // a network, or fake timers (§5.1, §5.6; W7 refusal, W8 failure+retry).
 
-import type { Level, PathStatus } from "./api";
+import type { CreatePathInput, Level, PathStatus } from "./api";
 
 /** The three self-assessed levels offered at onboarding, in display order. */
 export const LEVELS: ReadonlyArray<{ value: Level; label: string }> = [
@@ -58,4 +58,45 @@ export function deriveOnboardingPhase(input: {
 /** Whether the submit button should be enabled: a non-blank topic is required. */
 export function canSubmitTopic(topic: string): boolean {
   return topic.trim().length > 0;
+}
+
+/**
+ * The topic field's cap, mirroring `TopicStr` in `dtos/paths.py`
+ * (`max_length=500`). The input enforces it so an over-long topic is stopped at
+ * the keyboard rather than coming back as a `422` — which the client would
+ * otherwise have to tell apart from the *other* `422` on this endpoint (an
+ * off-allowlist model override). Keep the two numbers in step.
+ */
+export const TOPIC_MAX_LENGTH = 500;
+
+/**
+ * The admin model picker's "use the server default" value (AL-065, §5.3/D14).
+ * The empty string, because that is what an unselected `<option>` carries — the
+ * picker needs a real DOM value for "no override", and the payload builder below
+ * is the single place that turns it back into an absent key.
+ */
+export const MODEL_SLOT_DEFAULT = "";
+
+/**
+ * Build the `POST /api/v1/paths` body from the form's state (docs/api.md).
+ *
+ * The one rule worth a function: an unchosen model slot is **omitted**, not sent
+ * as null. A non-admin sending `model_outline` at all is `403 forbidden`, so
+ * "absent" and "explicitly nothing" are different payloads to this endpoint, and
+ * only absent is correct when the picker is unset or was never rendered.
+ */
+export function buildCreatePathInput(input: {
+  topic: string;
+  level: Level;
+  modelOutline?: string;
+  modelLesson?: string;
+}): CreatePathInput {
+  // A slot value is either `MODEL_SLOT_DEFAULT` (the empty string) or an id the
+  // picker took verbatim from the session — never free text — so a falsy check
+  // is the whole rule, and `undefined` (the picker never rendered) falls out of
+  // it for free.
+  const body: CreatePathInput = { topic: input.topic.trim(), level: input.level };
+  if (input.modelOutline) body.model_outline = input.modelOutline;
+  if (input.modelLesson) body.model_lesson = input.modelLesson;
+  return body;
 }

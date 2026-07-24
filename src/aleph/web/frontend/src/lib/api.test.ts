@@ -12,6 +12,7 @@ import {
   isNotFound,
   isPathListTerminal,
   isPathViewTerminal,
+  isValidationError,
   pathQueryKey,
 } from "./api";
 
@@ -189,5 +190,19 @@ describe("isNotFound", () => {
     expect(isNotFound(new ApiError("boom", 500, "internal_error"))).toBe(false);
     expect(isNotFound(new Error("plain"))).toBe(false);
     expect(isNotFound(undefined)).toBe(false);
+  });
+});
+
+describe("isValidationError", () => {
+  it("[AL-065] is true for the 422 validation_error envelope", () => {
+    expect(isValidationError(new ApiError("bad model", 422, "validation_error"))).toBe(true);
+  });
+
+  it("[AL-065] is false for the neighbouring create rejections and non-errors", () => {
+    // 403 (non-admin override) and 429 (daily cap) have their own surfaces.
+    expect(isValidationError(new ApiError("nope", 403, "forbidden"))).toBe(false);
+    expect(isValidationError(new ApiError("capped", 429, "rate_limited"))).toBe(false);
+    expect(isValidationError(new Error("plain"))).toBe(false);
+    expect(isValidationError(undefined)).toBe(false);
   });
 });
