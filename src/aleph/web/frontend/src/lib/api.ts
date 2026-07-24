@@ -225,6 +225,17 @@ export interface PathCreated {
 export interface CreatePathInput {
   topic: string;
   level: Level;
+  /**
+   * Admin model-picker overrides (AL-052/AL-065, §5.3/D14, docs/api.md): bare
+   * OpenRouter ids drawn from the session's `user.model_allowlist`, pinning the
+   * outline / lesson slot on this path. **Optional in the absent sense** — an
+   * unset slot must leave the key off the payload entirely, because sending an
+   * override at all is `403 forbidden` for a non-admin and an id outside the
+   * allowlist is `422 validation_error`. Omitted (the common case) uses the
+   * server's configured slot model.
+   */
+  model_outline?: string;
+  model_lesson?: string;
 }
 
 /** Create a path and trigger its outline (§5.1). Returns the new path id. */
@@ -360,6 +371,17 @@ export function isRateLimited(error: unknown): boolean {
  */
 export function isNotFound(error: unknown): boolean {
   return error instanceof ApiError && error.status === 404;
+}
+
+/**
+ * True once `apiFetch` raised a `422 validation_error`. On `POST /paths` the
+ * only reachable cause is an off-allowlist model override (docs/api.md) — topic
+ * length and the level enum are constrained by the form itself — so the model
+ * picker (AL-065) claims this error and shows it against the picker rather than
+ * letting the generic "something went wrong" copy swallow a fixable choice.
+ */
+export function isValidationError(error: unknown): boolean {
+  return error instanceof ApiError && (error.status === 422 || error.code === "validation_error");
 }
 
 // --- Lessons API (AL-051 wire contract, docs/api.md) ------------------------

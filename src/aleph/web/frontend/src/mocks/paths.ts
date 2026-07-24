@@ -22,6 +22,8 @@ import {
   type PathSummary,
   type PathUnit,
 } from "../lib/api";
+import { TOPIC_MAX_LENGTH } from "../lib/onboarding";
+import { ADMIN_MODEL_ALLOWLIST } from "./models";
 
 // --- Reusable path-view fixtures (AL-062) -----------------------------------
 //
@@ -204,6 +206,13 @@ interface PathsConfig {
    * real in-flight window — the only way to observe which row reads "Deleting…".
    */
   deleteDelayMs: number;
+  /**
+   * The server's `MODEL_ALLOWLIST` as `POST /paths` sees it (AL-065, §5.3/D14).
+   * A `model_outline`/`model_lesson` outside it is `422 validation_error`
+   * (docs/api.md) — set this to a narrower list (or `[]`) to fake the allowlist
+   * changing after the session that populated the picker was issued.
+   */
+  modelAllowlist: string[];
 }
 
 const defaultConfig: PathsConfig = {
@@ -213,12 +222,20 @@ const defaultConfig: PathsConfig = {
   retryFails: false,
   deleteFails: false,
   deleteDelayMs: 0,
+  modelAllowlist: [...ADMIN_MODEL_ALLOWLIST],
 };
 let config: PathsConfig = { ...defaultConfig };
 const store = new Map<string, StoredPath>();
 let idCounter = 0;
 /** Every id `DELETE /paths/{id}` accepted, in order (AL-064 assertions). */
 const deleted: string[] = [];
+/**
+ * Every body `POST /paths` received, in call order and exactly as it arrived on
+ * the wire (AL-065). Kept as raw JSON rather than a typed `CreatePathInput` so a
+ * test can assert a key is **absent** — "no model fields" and "model fields sent
+ * as null" are different payloads, and only the raw object can tell them apart.
+ */
+const createBodies: Array<Record<string, unknown>> = [];
 /** How many times `GET /paths` was served — lets a test see the poll stop. */
 let listRequests = 0;
 
@@ -228,7 +245,17 @@ export function resetPaths(): void {
   config = { ...defaultConfig };
   idCounter = 0;
   deleted.length = 0;
+  createBodies.length = 0;
   listRequests = 0;
+}
+
+/**
+ * The raw bodies `POST /paths` was called with, in order — including the ones
+ * the fake then rejected, so a test can assert what the picker *sent* even when
+ * the server refused it (the 422 off-allowlist case).
+ */
+export function createPathBodies(): Array<Record<string, unknown>> {
+  return createBodies.map((body) => ({ ...body }));
 }
 
 /** How many `GET /paths` the fake has served (the switcher's poll count). */
@@ -346,6 +373,39 @@ function rateLimitEnvelope() {
   );
 }
 
+/** `422 validation_error` — the off-allowlist model override (docs/api.md). */
+function offAllowlistEnvelope(model: string) {
+  return HttpResponse.json(
+    {
+      error: {
+        code: "validation_error",
+        message: `Model '${model}' is not in the allowlist.`,
+        request_id: "test-request-id",
+      },
+    },
+    { status: 422 },
+  );
+}
+
+/**
+ * `422 validation_error` for an over-long topic — the *other* rejection sharing
+ * this status code (`TopicStr`, `dtos/paths.py`). Same envelope, nothing to do
+ * with the model picker: the two are only tellable apart by what the client
+ * sent, which is what keeps the picker from claiming this one.
+ */
+function topicTooLongEnvelope() {
+  return HttpResponse.json(
+    {
+      error: {
+        code: "validation_error",
+        message: `Topic must be at most ${TOPIC_MAX_LENGTH} characters.`,
+        request_id: "test-request-id",
+      },
+    },
+    { status: 422 },
+  );
+}
+
 function serverErrorEnvelope() {
   return HttpResponse.json(
     {
@@ -361,10 +421,29 @@ function serverErrorEnvelope() {
 
 export const pathsHandlers = [
   http.post(`${API_V1_BASE}/paths`, async ({ request }) => {
+    const body = (await request.json()) as Record<string, unknown> & {
+      topic: string;
+      level: Level;
+    };
+    createBodies.push({ ...body });
+    // Request-body validation comes first, as Pydantic's does: an over-long
+    // topic is `422` before anything else is considered.
+    if (typeof body.topic === "string" && body.topic.trim().length > TOPIC_MAX_LENGTH) {
+      return topicTooLongEnvelope();
+    }
+    // Model overrides are validated **before** the rate limit and any billed
+    // work (docs/api.md): an id outside `MODEL_ALLOWLIST` is 422, whatever the
+    // cap says. (The non-admin 403 branch is server-side only — the picker is
+    // hidden for non-admins, so no test drives it through the fake.)
+    for (const slot of ["model_outline", "model_lesson"] as const) {
+      const chosen = body[slot];
+      if (typeof chosen === "string" && !config.modelAllowlist.includes(chosen)) {
+        return offAllowlistEnvelope(chosen);
+      }
+    }
     if (config.rateLimited) {
       return rateLimitEnvelope();
     }
-    const body = (await request.json()) as { topic: string; level: Level };
     idCounter += 1;
     const id = `00000000-0000-4000-8000-${String(idCounter).padStart(12, "0")}`;
     store.set(id, {
