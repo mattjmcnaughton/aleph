@@ -1,0 +1,72 @@
+# Agent eval harness (docs/evals.md, docs/ci.md). Opt-in and never a required
+# check: an eval run calls the live OpenRouter provider and costs real money, so
+# it happens only when a human dispatches this workflow. There is deliberately
+# no push/pull_request/schedule trigger — CI's gate/integration/e2e jobs must
+# stay free and offline.
+#
+# Requires the OPENROUTER_API_KEY repository secret (AL-080). Until it is
+# uploaded, a dispatched run fails immediately with the harness's exit-2
+# message rather than silently skipping.
+#
+# The job fails only on a Layer 1 hard floor (refusal-branch correctness,
+# outline caps, lesson bands) or a harness error — soft scores are reported
+# (job log + job summary + artifact), never gated on.
+name: Evals
+
+on:
+  workflow_dispatch:
+    inputs:
+      models:
+        description: >-
+          Comma-separated OpenRouter model ids to sweep; each is bound to both
+          the outline and lesson slots (empty = the configured MODEL_OUTLINE /
+          MODEL_LESSON)
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: evals-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  evals:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      # Minimal env: project deps + the evals group only (no dev toolchain, no
+      # Node, no Postgres, no Keycloak — the harness is database-free and never
+      # boots the app).
+      - name: Install dependencies
+        run: uv sync --frozen --no-dev --group evals
+
+      # `models` is dispatcher-supplied text: it goes through the environment,
+      # never interpolated into the script body, so it cannot close the quote
+      # and run as shell.
+      - name: Run seed-set evals
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          MODELS: ${{ inputs.models }}
+        run: |
+          mkdir -p .artifacts/evals
+          uv run --no-sync python -m evals \
+            --models "$MODELS" \
+            --report .artifacts/evals/report.json
+
+      - name: Upload eval report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-report
+          path: .artifacts/evals/
+          if-no-files-found: warn

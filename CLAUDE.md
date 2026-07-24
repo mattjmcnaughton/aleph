@@ -23,6 +23,7 @@ Python web application using FastAPI, uvicorn, OpenTelemetry, uv, ruff, ty, and 
 | `just test-e2e` | Run e2e tests |
 | `just test-all` | Run all tests |
 | `just test-external` | Run tests hitting external services |
+| `just evals` | Run the agent eval harness (needs `OPENROUTER_API_KEY`; `--smoke` = offline) |
 | `just gate` | Fast pre-push check (fmt + lint + typecheck + test-unit) |
 | `just gate-expensive` | Full check (gate + integration + e2e) |
 | `just gate-external` | Everything (gate-expensive + external) |
@@ -54,6 +55,8 @@ tests/
   unit/                     # Unit tests
   integration/              # Integration tests (real Postgres + Keycloak)
   external/                 # Live-provider contract tests (opt-in, @pytest.mark.external)
+evals/                      # Agent eval harness (dev-only, never packaged;
+                            # opt-in runs — see docs/evals.md)
 scripts/e2e_backend.py      # Stub-model app factory the Playwright harness boots
 src/aleph/web/frontend/tests/e2e/  # Playwright browser suite (E2E, phone viewport)
 ```
@@ -72,6 +75,9 @@ src/aleph/web/frontend/tests/e2e/  # Playwright browser suite (E2E, phone viewpo
   Mark tests that hit external services with `@pytest.mark.external` (opt-in, never in
   CI); tag workflow-proving tests with `@pytest.mark.workflow("W1")`. CI runs three jobs
   — gate / integration / e2e (see `docs/ci.md`).
+- **Agent evals** (`evals/`) are opt-in and cost money: `just evals` locally (or
+  `just evals --smoke` offline), or dispatch the `Evals` GitHub Actions workflow. Never
+  part of `just gate` or the CI gate. See `docs/evals.md`.
 - All Python tool config is in `pyproject.toml`.
 - Backend: `just dev-be`. Frontend: `just dev-fe`. Both: `just dev`.
 
@@ -101,3 +107,4 @@ front-loading. Start with:
 - [`docs/architecture.md`](docs/architecture.md) — read before adding modules or changing structure.
 - [`docs/development.md`](docs/development.md) — environment setup, debugging, common tasks.
 - [`docs/api.md`](docs/api.md) — API endpoint reference.
+- [`docs/evals.md`](docs/evals.md) — the agent eval harness (`evals/`) and evaluation strategy.

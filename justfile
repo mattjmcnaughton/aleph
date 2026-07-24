@@ -100,6 +100,10 @@ test-e2e:
 test-external:
     uv run pytest -m external
 
+# Run the agent eval harness (needs OPENROUTER_API_KEY; `--smoke` for offline). See docs/evals.md
+evals *ARGS:
+    uv run python -m evals {{ARGS}}
+
 # Fast pre-push check (backend + frontend)
 gate: gate-be gate-fe
 
