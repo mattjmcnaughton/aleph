@@ -1,8 +1,9 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import {
   type Level,
+  PATHS_LIST_QUERY_KEY,
   type PathDetail,
   createPath,
   isPathStatusTerminal,
@@ -33,6 +34,7 @@ const pathPollConfig = {
 // suggestion chips are deliberately out of scope for this ticket and land later.
 function NewPath() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
   const [topic, setTopic] = useState("");
   const [level, setLevel] = useState<Level>("new_to_it");
@@ -40,7 +42,16 @@ function NewPath() {
 
   const createMutation = useMutation({
     mutationFn: createPath,
-    onSuccess: (created) => setPathId(created.id),
+    onSuccess: async (created) => {
+      setPathId(created.id);
+      // The switcher's cached list no longer matches the server. Nothing else
+      // would correct it: the list is fresh for `staleTime` (30s) so a remount
+      // serves it straight from cache, and its poll only runs while a row is
+      // non-terminal — a list that predates this path has no such row. So a
+      // learner who backs out of onboarding would land on a home screen missing
+      // the path they just started.
+      await queryClient.invalidateQueries({ queryKey: PATHS_LIST_QUERY_KEY });
+    },
   });
 
   const pathQuery = useQuery({

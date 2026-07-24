@@ -6,15 +6,20 @@
 // Convention: the *topic string* selects the resolution via sentinels, so a
 // test only has to type a topic. Independently, `configurePaths({...})` tunes
 // how many polls a path sits in `generating` before it resolves, and can force
-// `POST /paths` to raise the 429 envelope.
+// `POST /paths` to raise the 429 envelope or `DELETE /paths/{id}` to fail.
+//
+// The same store also serves the switcher (AL-064): `GET /paths` lists it
+// newest-first as `PathSummaryDTO` rows, and `DELETE /paths/{id}` hard-deletes
+// exactly one entry (recorded in `deletedPathIds()` for assertions).
 
-import { HttpResponse, http } from "msw";
+import { HttpResponse, delay, http } from "msw";
 import {
   API_V1_BASE,
   type Level,
   type PathDetail,
   type PathProgress,
   type PathStatus,
+  type PathSummary,
   type PathUnit,
 } from "../lib/api";
 
@@ -192,6 +197,13 @@ interface PathsConfig {
   retryRateLimited: boolean;
   /** When true, `POST /paths/{id}/retry` raises a generic `500` (F1). */
   retryFails: boolean;
+  /** When true, `DELETE /paths/{id}` raises a generic `500` (AL-064/W5). */
+  deleteFails: boolean;
+  /**
+   * Milliseconds `DELETE /paths/{id}` waits before responding. Gives a test a
+   * real in-flight window — the only way to observe which row reads "Deleting…".
+   */
+  deleteDelayMs: number;
 }
 
 const defaultConfig: PathsConfig = {
@@ -199,16 +211,48 @@ const defaultConfig: PathsConfig = {
   rateLimited: false,
   retryRateLimited: false,
   retryFails: false,
+  deleteFails: false,
+  deleteDelayMs: 0,
 };
 let config: PathsConfig = { ...defaultConfig };
 const store = new Map<string, StoredPath>();
 let idCounter = 0;
+/** Every id `DELETE /paths/{id}` accepted, in order (AL-064 assertions). */
+const deleted: string[] = [];
+/** How many times `GET /paths` was served — lets a test see the poll stop. */
+let listRequests = 0;
 
 /** Reset store + config between tests (wired into tests/setup.ts). */
 export function resetPaths(): void {
   store.clear();
   config = { ...defaultConfig };
   idCounter = 0;
+  deleted.length = 0;
+  listRequests = 0;
+}
+
+/** How many `GET /paths` the fake has served (the switcher's poll count). */
+export function pathsListRequestCount(): number {
+  return listRequests;
+}
+
+/**
+ * The ids the fake actually hard-deleted, in call order. Lets a test assert
+ * "exactly one DELETE, for exactly this path" off the fake's own record rather
+ * than by spying on `fetch` (fakes over mocks).
+ */
+export function deletedPathIds(): string[] {
+  return [...deleted];
+}
+
+/**
+ * Drop a path from the store the way *another client* would: it vanishes
+ * server-side without this client's DELETE ever running, so the next request
+ * for it 404s. Deliberately not recorded in `deletedPathIds()` — nobody called
+ * `DELETE` — which is what lets a test tell the two apart.
+ */
+export function forgetPath(id: string): void {
+  store.delete(id);
 }
 
 /** Tune the fake's polling/rate-limit behaviour for a single test. */
@@ -273,6 +317,22 @@ function detailFor(path: StoredPath): PathDetail {
   };
 }
 
+/**
+ * The switcher row for a stored path (`PathSummaryDTO`, docs/api.md): the same
+ * effective status the detail poll reports, plus the progress roll-up over the
+ * same units — so list and detail can never disagree in a test.
+ */
+function summaryFor(path: StoredPath): PathSummary {
+  const detail = detailFor(path);
+  return {
+    id: detail.id,
+    topic: detail.topic,
+    level: detail.level,
+    status: detail.status,
+    progress: detail.progress,
+  };
+}
+
 function rateLimitEnvelope() {
   return HttpResponse.json(
     {
@@ -315,6 +375,41 @@ export const pathsHandlers = [
       pollsRemaining: config.pollsBeforeResolve,
     });
     return HttpResponse.json({ id }, { status: 202 });
+  }),
+
+  // Registered before `/paths/:id` for readability; MSW matches the exact path
+  // regardless, so the two never collide.
+  http.get(`${API_V1_BASE}/paths`, () => {
+    listRequests += 1;
+    // Newest first (docs/api.md). The store is insertion-ordered, so the most
+    // recently seeded/created path leads.
+    const paths = [...store.values()].reverse().map(summaryFor);
+    // Keep the generating clock moving under whichever poll is running, so a
+    // path seeded with `pollsRemaining` resolves on the switcher too.
+    for (const path of store.values()) {
+      if (path.pollsRemaining > 0) path.pollsRemaining -= 1;
+    }
+    return HttpResponse.json({ paths });
+  }),
+
+  http.delete(`${API_V1_BASE}/paths/:id`, async ({ params }) => {
+    if (config.deleteDelayMs > 0) {
+      await delay(config.deleteDelayMs);
+    }
+    if (config.deleteFails) {
+      return serverErrorEnvelope();
+    }
+    const id = params.id as string;
+    if (!store.has(id)) {
+      return HttpResponse.json(
+        { error: { code: "not_found", message: "Path not found." } },
+        { status: 404 },
+      );
+    }
+    // Hard delete, only this path — the learner's others are untouched (W5).
+    store.delete(id);
+    deleted.push(id);
+    return new HttpResponse(null, { status: 204 });
   }),
 
   http.get(`${API_V1_BASE}/paths/:id`, ({ params }) => {

@@ -193,6 +193,30 @@ export interface PathDetail {
   units: PathUnit[];
 }
 
+/**
+ * One row of `GET /api/v1/paths` — the "Your paths" switcher (docs/api.md,
+ * `PathSummaryDTO`). The outline itself is deliberately absent: the switcher
+ * shows topic, level, status and the progress roll-up; the units/lessons rail
+ * is the path view's payload.
+ */
+export interface PathSummary {
+  id: string;
+  topic: string;
+  level: Level;
+  /** Effective status — a stale `generating` reads as `failed` (docs/api.md). */
+  status: PathStatus;
+  progress: PathProgress;
+}
+
+/**
+ * `GET /api/v1/paths` body — the learner's paths, newest first. Wrapped in an
+ * object (never a bare top-level array) so the payload can grow fields without
+ * a breaking shape change (`PathListResponse`, docs/api.md).
+ */
+export interface PathList {
+  paths: PathSummary[];
+}
+
 /** `POST /api/v1/paths` / `POST /api/v1/paths/{id}/retry` body — `202 {id}`. */
 export interface PathCreated {
   id: string;
@@ -222,9 +246,62 @@ export function retryPath(id: string): Promise<PathCreated> {
   return apiFetch<PathCreated>(apiV1Path(`/paths/${id}/retry`), { method: "POST" });
 }
 
+/** The learner's paths, newest first — the switcher's payload (§5.5). */
+export function listPaths(): Promise<PathList> {
+  return apiFetch<PathList>(apiV1Path("/paths"));
+}
+
+/**
+ * Hard-delete one path and its progress (`204`, cascades to units/lessons/
+ * attempts). Destructive and not undoable in MVP — the caller MUST confirm
+ * first (§5.5/W5). Deletes only this path; the learner's others are untouched.
+ */
+export function deletePath(id: string): Promise<void> {
+  return apiFetch<void>(apiV1Path(`/paths/${id}`), { method: "DELETE" });
+}
+
 /** TanStack query key for a single path's detail poll. */
 export function pathQueryKey(id: string): readonly ["paths", string] {
   return ["paths", id] as const;
+}
+
+/**
+ * TanStack query key for the switcher's list. A constant, not a factory: the
+ * list takes no argument (the account comes from the session cookie), unlike
+ * `pathQueryKey(id)`. The `"list"` segment sits where a path id sits in
+ * `pathQueryKey`, which is unambiguous because ids are UUIDs — and it keeps the
+ * list under the `["paths", …]` prefix, so one
+ * `invalidateQueries({ queryKey: ["paths"] })` would reach list and details
+ * alike if a future caller needs that.
+ */
+export const PATHS_LIST_QUERY_KEY: readonly ["paths", "list"] = ["paths", "list"] as const;
+
+/**
+ * THE "Your paths" list query — key + fetcher paired in one place, the house
+ * rule from `sessionQueryOptions`/`pathQueryOptions`. Takes no argument (the
+ * account comes from the session cookie), so it is a value, not a factory.
+ *
+ * No `refetchOnWindowFocus` override: the app-wide default (`makeQueryClient`)
+ * leaves it off, so a path deleted in another tab lingers here until the next
+ * mount or invalidation. Deliberate for MVP — one setting for the whole app
+ * beats a per-query exception, and the row's own view 404s on open.
+ */
+export const pathsListQueryOptions = queryOptions({
+  queryKey: PATHS_LIST_QUERY_KEY,
+  queryFn: listPaths,
+});
+
+/**
+ * When the switcher can stop refetching `GET /paths`. The list is not a
+ * trigger+poll target of its own, but a freshly created path can still be
+ * `pending`/`generating` when the learner lands here (they navigated back off
+ * onboarding), and nothing else would move that row. So the list rides the same
+ * shared backoff (`./polling`) while any row is non-terminal and stops once
+ * every path has resolved.
+ */
+export function isPathListTerminal(list: PathList | undefined): boolean {
+  if (list === undefined) return false;
+  return list.paths.every((path) => isPathStatusTerminal(path.status));
 }
 
 /**

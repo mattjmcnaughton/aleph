@@ -1,14 +1,18 @@
 import { describe, expect, it } from "vitest";
 import {
   ApiError,
+  PATHS_LIST_QUERY_KEY,
   type LessonDetail,
   type LessonGenerationState,
   type LessonUnlockState,
   type PathDetail,
   type PathStatus,
+  type PathSummary,
   isLessonViewTerminal,
   isNotFound,
+  isPathListTerminal,
   isPathViewTerminal,
+  pathQueryKey,
 } from "./api";
 
 // Terminal-state predicates for the path-view poll (TDD §5.4/§14). These decide
@@ -135,6 +139,44 @@ describe("isLessonViewTerminal", () => {
   it("is terminal once generation is generated or failed", () => {
     expect(isLessonViewTerminal(lesson("available", "generated"))).toBe(true);
     expect(isLessonViewTerminal(lesson("available", "failed"))).toBe(true);
+  });
+});
+
+describe("isPathListTerminal", () => {
+  function summary(status: PathStatus): PathSummary {
+    return {
+      id: `p-${status}`,
+      topic: "TypeScript",
+      level: "new_to_it",
+      status,
+      progress: { total_lessons: 0, generated_lessons: 0, completed_lessons: 0 },
+    };
+  }
+
+  it("is non-terminal for undefined data (nothing fetched yet)", () => {
+    expect(isPathListTerminal(undefined)).toBe(false);
+  });
+
+  it("is terminal for an empty list (nothing left to resolve)", () => {
+    expect(isPathListTerminal({ paths: [] })).toBe(true);
+  });
+
+  it("keeps refetching while any row is still pending or generating", () => {
+    expect(isPathListTerminal({ paths: [summary("ready"), summary("generating")] })).toBe(false);
+    expect(isPathListTerminal({ paths: [summary("pending")] })).toBe(false);
+  });
+
+  it("is terminal once every row is ready, failed, or refused", () => {
+    expect(
+      isPathListTerminal({ paths: [summary("ready"), summary("failed"), summary("refused")] }),
+    ).toBe(true);
+  });
+});
+
+describe("PATHS_LIST_QUERY_KEY", () => {
+  it("never collides with a path-detail key (ids are UUIDs, not 'list')", () => {
+    expect(PATHS_LIST_QUERY_KEY).toEqual(["paths", "list"]);
+    expect(pathQueryKey("11111111-1111-4111-8111-111111111111")).not.toEqual(PATHS_LIST_QUERY_KEY);
   });
 });
 
