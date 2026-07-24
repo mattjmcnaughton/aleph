@@ -24,8 +24,13 @@ src/aleph/
   repositories/        # Data access layer
 tests/
   unit/                # Fast, isolated unit tests
-  integration/         # Tests with real dependencies
-  e2e/                 # End-to-end tests
+  integration/         # Tests with real dependencies (Postgres, Keycloak)
+  external/            # Live-provider contract tests (opt-in, @pytest.mark.external)
+scripts/
+  e2e_backend.py       # Stub-model app factory the Playwright harness boots
+src/aleph/web/frontend/
+  playwright.config.ts # E2E harness config (desktop + mobile-390x844 projects)
+  tests/e2e/           # Playwright browser suite (end-to-end user journeys)
 ```
 
 ## Layering

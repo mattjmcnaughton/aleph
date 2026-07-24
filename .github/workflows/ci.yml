@@ -6,25 +6,18 @@ on:
   pull_request:
     branches: [main]
 
+# Cancel superseded runs on the same ref so a rapid push sequence does not queue
+# redundant CI.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  gate-expensive:
+  # Fast correctness gate: formatting, linting, typecheck, and backend + frontend
+  # unit tests. No services — the unit suite touches no database and reaches no
+  # model provider (the stub model is deterministic and offline).
+  gate:
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_DB: aleph
-          POSTGRES_USER: aleph
-          POSTGRES_PASSWORD: aleph
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U aleph -d aleph"
-          --health-interval 2s
-          --health-timeout 5s
-          --health-retries 30
-    env:
-      DATABASE_URL: postgresql+asyncpg://aleph:aleph@localhost:5432/aleph
     steps:
       - uses: actions/checkout@v4
 
@@ -56,15 +49,144 @@ jobs:
       - name: Install just
         run: sudo apt-get update && sudo apt-get install -y just
 
-      # Keycloak is imported from the checked-in aleph realm, so it must start
-      # after checkout (it mounts the repo realm file). The auth integration
-      # tests (tests/integration/test_auth_keycloak.py) drive the real OIDC code
-      # flow against it. Reuse the same compose service + healthcheck developers
-      # run locally (``just compose-keycloak-up`` waits for the realm import) so
-      # CI and local dev cannot drift; ``just`` and compose v2 are already
-      # available on the runner by this point.
+      - name: Run gate
+        env:
+          PYTEST_ADDOPTS: --junitxml=.artifacts/test-results/unit.xml
+        run: mkdir -p .artifacts/test-results && just gate
+
+      - name: Upload unit test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-unit
+          path: .artifacts/test-results/unit.xml
+          if-no-files-found: error
+
+  # API against a real Postgres + real Keycloak. The per-test template-database
+  # conftest owns its own migrations, so no bootstrap step is needed. Keycloak is
+  # imported from the checked-in aleph realm and drives the real OIDC code flow
+  # in tests/integration/test_auth_keycloak.py; it reuses the same compose
+  # service developers run locally so CI and dev cannot drift.
+  integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: aleph
+          POSTGRES_USER: aleph
+          POSTGRES_PASSWORD: aleph
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U aleph -d aleph"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
+    env:
+      DATABASE_URL: postgresql+asyncpg://aleph:aleph@localhost:5432/aleph
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --dev --frozen
+
+      - name: Install just
+        run: sudo apt-get update && sudo apt-get install -y just
+
       - name: Start Keycloak
         run: just compose-keycloak-up
 
-      - name: Run gate-expensive
-        run: just gate-expensive
+      - name: Run integration tests
+        env:
+          PYTEST_ADDOPTS: --junitxml=.artifacts/test-results/integration.xml
+        run: mkdir -p .artifacts/test-results && just test-integration
+
+      - name: Upload integration test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-integration
+          path: .artifacts/test-results/integration.xml
+          if-no-files-found: error
+
+  # Playwright browser suite (phone viewport, TDD §12) against the stub backend
+  # (scripts/e2e_backend.py) + dev frontend, with real Postgres + Keycloak so the
+  # W1-W8 journeys AL-090 adds run against real auth. CI installs its own matching
+  # Playwright browser; E2E_DATABASE_URL points the harness at the Postgres
+  # service (already created), so the justfile's local db-create/browser-detect
+  # branch is skipped.
+  e2e:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: aleph
+          POSTGRES_USER: aleph
+          POSTGRES_PASSWORD: aleph
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U aleph -d aleph"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
+    env:
+      E2E_DATABASE_URL: postgresql+asyncpg://aleph:aleph@localhost:5432/aleph
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --dev --frozen
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: src/aleph/web/frontend/pnpm-lock.yaml
+
+      - name: Install frontend dependencies
+        working-directory: src/aleph/web/frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browsers
+        working-directory: src/aleph/web/frontend
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Install just
+        run: sudo apt-get update && sudo apt-get install -y just
+
+      - name: Start Keycloak
+        run: just compose-keycloak-up
+
+      - name: Run e2e suite
+        run: just test-e2e
+
+      - name: Upload e2e test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-e2e
+          path: |
+            .artifacts/test-results/playwright.json
+            src/aleph/web/frontend/test-results/
+          if-no-files-found: error

@@ -52,8 +52,10 @@ src/aleph/
   web/frontend/             # Frontend application (scaffolded separately)
 tests/
   unit/                     # Unit tests
-  integration/              # Integration tests
-  e2e/                      # End-to-end tests
+  integration/              # Integration tests (real Postgres + Keycloak)
+  external/                 # Live-provider contract tests (opt-in, @pytest.mark.external)
+scripts/e2e_backend.py      # Stub-model app factory the Playwright harness boots
+src/aleph/web/frontend/tests/e2e/  # Playwright browser suite (E2E, phone viewport)
 ```
 
 ## Key Conventions
@@ -65,8 +67,11 @@ tests/
   domain logic (grading, progression) lives in `domains/` and does no I/O.
 - **DTOs** are Pydantic models for API I/O, always separate from DB models.
 - **Frontend** is scaffolded separately into `src/aleph/web/frontend/` using the `frontend-react` template.
-- Tests are organized by type in `tests/unit/`, `tests/integration/`, `tests/e2e/`.
-  Mark tests that hit external services with `@pytest.mark.external`.
+- Tests are organized by type: `tests/unit/`, `tests/integration/`, `tests/external/`
+  (backend), and the Playwright browser suite in `src/aleph/web/frontend/tests/e2e/`.
+  Mark tests that hit external services with `@pytest.mark.external` (opt-in, never in
+  CI); tag workflow-proving tests with `@pytest.mark.workflow("W1")`. CI runs three jobs
+  — gate / integration / e2e (see `docs/ci.md`).
 - All Python tool config is in `pyproject.toml`.
 - Backend: `just dev-be`. Frontend: `just dev-fe`. Both: `just dev`.
 
