@@ -60,8 +60,29 @@ class PathRepository:
             stale_after_seconds=self._stale_after_seconds,
         )
 
-    async def create(self, *, user_id: uuid.UUID, topic: str, level: Level) -> Path:
-        path = Path(user_id=user_id, topic=topic, level=level)
+    async def create(
+        self,
+        *,
+        user_id: uuid.UUID,
+        topic: str,
+        level: Level,
+        model_outline: str | None = None,
+        model_lesson: str | None = None,
+    ) -> Path:
+        """Insert a ``pending`` path.
+
+        ``model_outline``/``model_lesson`` carry an admin's picker overrides
+        (AL-052, §5.3): already validated (admin-only, allowlist-bound) at the
+        route, stored so the DB-driven resume/reconcile routes the chosen model.
+        ``None`` means "use the configured slot".
+        """
+        path = Path(
+            user_id=user_id,
+            topic=topic,
+            level=level,
+            model_outline=model_outline,
+            model_lesson=model_lesson,
+        )
         self.session.add(path)
         await self.session.flush()
         return path

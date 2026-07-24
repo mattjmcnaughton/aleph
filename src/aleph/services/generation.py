@@ -173,6 +173,10 @@ class _LessonContext:
     unit_title: str
     lesson_title: str
     prior: tuple[PriorPassage, ...]
+    # The path's admin lesson-model override (§5.3), read from the row; ``None``
+    # falls back to the configured ``MODEL_LESSON`` slot. On the context so it
+    # travels with every DB-driven (re)generation, not just the request.
+    model_lesson: str | None
 
 
 class GenerationOrchestrator:
@@ -283,17 +287,34 @@ class GenerationOrchestrator:
     # -- path creation (POST /paths → 202) --------------------------------- #
 
     async def create_path(
-        self, *, user_id: uuid.UUID, topic: str, level: Level
+        self,
+        *,
+        user_id: uuid.UUID,
+        topic: str,
+        level: Level,
+        model_outline: str | None = None,
+        model_lesson: str | None = None,
     ) -> Path:
         """Insert the path (``pending``), spawn the outline task, return the row.
 
         The caller (AL-050) turns the returned row into a ``202 {id}`` and
         returns immediately while the outline generates in the background. The
         spawn goes through the injected seam (AL-041 wraps it).
+
+        ``model_outline``/``model_lesson`` are an admin's picker overrides
+        (AL-052, §5.3): already validated (admin-only, allowlist-bound) at the
+        route. They are **persisted on the row** — not carried in memory to the
+        spawned task — so the DB-driven resume/reconcile (§5.4/D6) re-generates
+        with the chosen model rather than the config default. ``None`` falls back
+        to the configured slot at model-resolution time.
         """
         async with self._session_factory() as session:
             path = await self._paths(session).create(
-                user_id=user_id, topic=topic, level=level
+                user_id=user_id,
+                topic=topic,
+                level=level,
+                model_outline=model_outline,
+                model_lesson=model_lesson,
             )
             await session.commit()
             path_id = path.id
@@ -332,7 +353,7 @@ class GenerationOrchestrator:
             if claimed is None:
                 # already ready/refused, freshly generating, or lost the race
                 return
-            fence, topic, level = claimed
+            fence, topic, level, model_outline = claimed
 
             # Top-level handler (§5.4 invariant): any escape from the claimed body
             # — a persist error, a DB blip in ``_persist_outline`` — records
@@ -342,7 +363,9 @@ class GenerationOrchestrator:
             # propagates for graceful shutdown; the state machine makes
             # cancellation safe (stale recovery).
             try:
-                ready = await self._run_claimed_outline(path_id, fence, topic, level)
+                ready = await self._run_claimed_outline(
+                    path_id, fence, topic, level, model_outline
+                )
             except Exception:
                 logger.exception("outline_task_failed", path_id=str(path_id))
                 with contextlib.suppress(Exception):
@@ -353,7 +376,12 @@ class GenerationOrchestrator:
             await self.ensure_prefetch_window(path_id)
 
     async def _run_claimed_outline(
-        self, path_id: uuid.UUID, fence: datetime.datetime, topic: str, level: Level
+        self,
+        path_id: uuid.UUID,
+        fence: datetime.datetime,
+        topic: str,
+        level: Level,
+        model_outline: str | None,
     ) -> bool:
         """Run the outline agent under the claim and persist; return whether the
         path is now ``ready`` (so the caller kicks the prefetch window).
@@ -362,10 +390,17 @@ class GenerationOrchestrator:
         (§5.5); returns ``False`` for both (nothing to prefetch), and ``False`` on
         a lost fence (a re-claim owns the units). Only a persisted ``PathOutline``
         returns ``True``.
+
+        ``model_outline`` is the path's admin picker override (§5.3), read from
+        the row at claim time; ``None`` falls back to the configured ``MODEL_OUTLINE``
+        slot. Reading it from the row (not the request) is what makes an
+        override survive resume/reconcile.
         """
         agent = build_outline_agent()
         deps = OutlineDeps(level=_AGENT_LEVEL[level], caps=self._outline_caps)
-        model = self._resolve_model(self._config.model_outline)
+        model = self._resolve_model(
+            model_outline if model_outline is not None else self._config.model_outline
+        )
         try:
             # The concurrency permit is already held by ``run_outline_task``
             # (acquired before the claim, §5.4, so queue time never counts against
@@ -389,7 +424,7 @@ class GenerationOrchestrator:
 
     async def _claim_outline(
         self, path_id: uuid.UUID, *, retry: bool
-    ) -> tuple[datetime.datetime, str, Level] | None:
+    ) -> tuple[datetime.datetime, str, Level, str | None] | None:
         async with self._session_factory() as session:
             repo = self._paths(session)
             path = await repo.get(path_id)
@@ -397,11 +432,11 @@ class GenerationOrchestrator:
                 return None
             claim = repo.claim_outline_for_retry if retry else repo.claim_outline
             fence = await claim(path_id)
-            topic, level = path.topic, path.level
+            topic, level, model_outline = path.topic, path.level, path.model_outline
             await session.commit()
         if fence is None:
             return None
-        return fence, topic, level
+        return fence, topic, level, model_outline
 
     @staticmethod
     async def _commit_or_rollback(session: AsyncSession, *, ok: bool) -> None:
@@ -615,7 +650,11 @@ class GenerationOrchestrator:
             prior_passages=context.prior,
             caps=self._lesson_caps,
         )
-        model = self._resolve_model(self._config.model_lesson)
+        model = self._resolve_model(
+            context.model_lesson
+            if context.model_lesson is not None
+            else self._config.model_lesson
+        )
         try:
             # The concurrency permit is already held by ``_claim_and_generate``
             # (acquired before the claim, §5.4, and released once per lesson so the
@@ -723,6 +762,7 @@ class GenerationOrchestrator:
             unit_title=unit.title,
             lesson_title=lesson.title,
             prior=prior,
+            model_lesson=path.model_lesson,
         )
 
     async def _load_outline(

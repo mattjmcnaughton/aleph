@@ -238,6 +238,28 @@ def stub_resolver() -> Callable[[str], Model]:
     return lambda _model_id: model
 
 
+def recording_resolver() -> tuple[Callable[[str], Model], list[str]]:
+    """A ``resolve_model_fn`` that records every model id it is asked to resolve.
+
+    Returns the resolver plus the shared list it appends to, so a test can assert
+    which OpenRouter ids the orchestrator actually routed to — the proof that an
+    admin picker override (§5.3) reaches the outline/lesson model calls (and that
+    it survives the DB-driven trigger/poll boundary, since the override travels on
+    the persisted path row, not the request). The underlying model is the
+    deterministic stub, so content stays schema-valid.
+    """
+    from aleph.services.stub_model import build_stub_model
+
+    model = build_stub_model()
+    calls: list[str] = []
+
+    def resolve(model_id: str) -> Model:
+        calls.append(model_id)
+        return model
+
+    return resolve, calls
+
+
 async def create_user(
     session: AsyncSession,
     *,
