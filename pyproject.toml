@@ -28,6 +28,7 @@ dependencies = [
     "pydantic-ai-slim[openai]>=2.5.0",
     "authlib>=1.7.2",
     "itsdangerous>=2.2.0",
+    "logfire[fastapi,httpx,sqlalchemy]>=4.37",
 ]
 
 [project.urls]
