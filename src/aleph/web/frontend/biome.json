@@ -16,6 +16,13 @@
     }
   },
   "files": {
-    "ignore": ["node_modules", "dist", "src/routeTree.gen.ts", "test-results", "playwright-report"]
+    "ignore": [
+      "node_modules",
+      "dist",
+      "src/routeTree.gen.ts",
+      "test-results",
+      "playwright-report",
+      "tests/e2e/.auth"
+    ]
   }
 }

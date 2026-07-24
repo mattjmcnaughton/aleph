@@ -89,8 +89,15 @@ Two pytest markers are registered in `pyproject.toml`:
 
 The Playwright config lives at
 [`src/aleph/web/frontend/playwright.config.ts`](../src/aleph/web/frontend/playwright.config.ts)
-with two projects — `desktop` and `mobile-390x844` (the §12 phone viewport, the
-primary target surface). Its `webServer` block boots two processes (unless
+with three projects:
+
+| Project | Runs | Why |
+| ------- | ---- | --- |
+| `setup` | `tests/e2e/auth.setup.ts` | Signs in through the real OIDC code flow twice — once as the `dev` learner, once as `admin-dev` — and saves each session as storage state the journeys replay. |
+| `desktop` | `@smoke` only (`testIgnore: journeys/**`) | Keeps the harness honest on a second viewport without paying for the journeys twice. |
+| `mobile-390x844` | everything | The §12 phone viewport — the primary target surface, and the only one that runs W1–W8. |
+
+Its `webServer` block boots two processes (unless
 `BASE_URL` points at a running deployment):
 
 1. **Stub backend** — [`scripts/e2e_backend.py`](../scripts/e2e_backend.py)
@@ -104,13 +111,61 @@ Sentinel topics force branches deterministically for the failure/refusal
 journeys: `[force-refusal]` (W7), `[force-outline-failure]` /
 `[force-lesson-failure:N]` (W8) — see `services/stub_model.py`.
 
-**Running locally:** `just test-e2e`. It creates an `aleph_e2e` database, pins
-the backend to it via `E2E_DATABASE_URL`, and points Playwright at the machine's
-preinstalled chromium through `PW_CHROMIUM_PATH` (the managed download may be a
-different build). In CI, `E2E_DATABASE_URL` targets the Postgres service and
-Playwright installs its own matching browser, so that local branch is skipped.
+**Running locally:** `just compose-keycloak-up`, then `just test-e2e`. The suite
+signs in for real, so the recipe refuses to start without a reachable realm and
+tells you so. It then creates an `aleph_e2e` database, pins the backend to it via
+`E2E_DATABASE_URL`, and points Playwright at the machine's preinstalled chromium
+through `PW_CHROMIUM_PATH` (the managed download may be a different build). In
+CI, `E2E_DATABASE_URL` targets the Postgres service and Playwright installs its
+own matching browser, so that local branch is skipped.
 
-**Adding the W1–W8 journeys (AL-090):** drop new specs beside
-`tests/e2e/smoke.spec.ts`, tagged `@w1`..`@w8`, driving the SPA against this same
-stub-model harness. The current `smoke.spec.ts` is the skeleton — it proves the
-harness boots end to end (session gate → sign-in surface renders) at 390x844.
+## The W1–W8 journeys (AL-090)
+
+`tests/e2e/journeys/` holds one spec per PRD §8 workflow, tagged `@w1`..`@w8`
+(Playwright tag annotations — `pnpm exec playwright test --grep @w3` runs one).
+They drive the SPA the way a learner does: real sign-in, real server, real
+Postgres, stub model.
+
+- **Auth is real, not injected.** `auth.setup.ts` drives `/auth/login` → the
+  realm's login form → `/auth/callback` and saves the resulting cookie as
+  storage state (`tests/e2e/.auth/`, gitignored); the journeys replay it with
+  `test.use({ storageState })`. The `@smoke` specs deliberately do not — they
+  assert the signed-out gate. W2 signs in from scratch again, form and all,
+  because "resume across sessions" is what it is about. The realm users are the
+  checked-in `dev` (learner) and `admin-dev` (admin — the model picker, §5.3).
+- **Isolation is by topic, not by database.** Every worker shares one `aleph_e2e`
+  database and one learner account, and the journeys exercise the real "Your
+  paths" list, so no spec may assume an empty account. Each test coins a unique
+  topic (`uniqueTopic`) and asserts through the resulting path's id
+  (`[data-path-id=…]`), which makes residue from other specs — and from previous
+  runs of the suite — invisible to it. The unique topic is also the stub model's
+  seed, so content cannot collide either.
+- **Assertions are structural.** "Real content renders" means a non-empty Read
+  passage, a 3–4 option Quick check, an Outcome with an explanation, progress
+  readouts that add up — never a literal string from the stub.
+- **Waits reload rather than stare.** A surface that has legitimately stopped
+  polling cannot be waited out at any timeout, so the generation waits reload
+  between attempts instead. Which waits do that, which deliberately do not (the
+  post-completion beats assert *in place*, so a stale surface fails rather than
+  being refreshed out from under the assertion), and why, is narrated once — in
+  the `waitWithReload` / `expectRailStateInPlace` docstrings in
+  `tests/e2e/fixtures/journey.ts`. Assertions never read a value once and
+  compare: every one of them retries.
+- **W6 uses two paths on one topic.** Proving the answer is hidden needs
+  something to look for, and the correct answer is exactly what the learner may
+  not see. Since the stub is deterministic in (topic, position), a second path on
+  the same topic is the same lesson: the first path's Attempt discloses the key
+  legitimately, and the second path is then a lesson whose answer the test knows
+  but whose DOM must not contain it — and knowing it is what lets the journey aim
+  at each Outcome branch deliberately.
+- **W8 does not assert "retry then succeeds."** The sentinel lives in the path's
+  topic and retry re-runs that same topic, so the stub fails it again by design.
+  The journey proves the retry is offered, that taking it is a real round trip
+  landing on a live surface rather than a dead spinner, and that the documented
+  recovery works. The half it cannot reach — a *transient* failure whose retry
+  succeeds and whose learner carries on down the same path — is proven where a
+  fail-once model can be injected at the model-resolution seam:
+  `test_retry_after_a_transient_failure_recovers_the_same_path` in
+  `tests/integration/test_paths_api.py` (alongside
+  `test_retry_reclaims_failed_outline`, which pins the re-claim itself through
+  the claim stamp). Between them the workflow is witnessed end to end.

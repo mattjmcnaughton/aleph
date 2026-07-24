@@ -83,6 +83,16 @@ test-e2e:
     # point Playwright at the machine's preinstalled chromium (the managed
     # download may be a different build). CI sets E2E_DATABASE_URL to its
     # Postgres service (already created) and installs its own matching browser.
+    # The W1-W8 journeys sign in through the real dev realm (TDD §12), so
+    # Keycloak has to be up before Playwright starts. Fail here with the fix
+    # rather than 30s later inside the browser.
+    issuer="${OIDC_ISSUER:-http://127.0.0.1:18080/realms/aleph}"
+    if command -v curl >/dev/null 2>&1; then
+        if ! curl -fsS -o /dev/null "${issuer}/.well-known/openid-configuration"; then
+            echo "e2e needs Keycloak at ${issuer} — run \`just compose-keycloak-up\`" >&2
+            exit 1
+        fi
+    fi
     if [ -z "${E2E_DATABASE_URL:-}" ] && [ -z "${CI:-}" ]; then
         PGPASSWORD="${PGPASSWORD:-postgres}" psql -h localhost -U "${PGUSER:-postgres}" \
             -c 'CREATE DATABASE aleph_e2e' 2>/dev/null || true

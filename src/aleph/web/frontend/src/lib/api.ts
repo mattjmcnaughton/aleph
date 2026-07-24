@@ -271,21 +271,34 @@ export function deletePath(id: string): Promise<void> {
   return apiFetch<void>(apiV1Path(`/paths/${id}`), { method: "DELETE" });
 }
 
+/**
+ * The prefix every paths query sits under: one
+ * `invalidateQueries({ queryKey: PATHS_QUERY_PREFIX })` reaches the switcher
+ * list *and* every cached path detail. Its caller is lesson completion, which
+ * moves state on both surfaces at once (AL-090/W1: the rail's unlock states and
+ * the two progress readouts).
+ *
+ * Declared first, and the two keys below are built from it, so that reach is
+ * structural: a key that did not extend this prefix could not be written without
+ * saying so.
+ */
+export const PATHS_QUERY_PREFIX: readonly ["paths"] = ["paths"] as const;
+
 /** TanStack query key for a single path's detail poll. */
 export function pathQueryKey(id: string): readonly ["paths", string] {
-  return ["paths", id] as const;
+  return [...PATHS_QUERY_PREFIX, id] as const;
 }
 
 /**
  * TanStack query key for the switcher's list. A constant, not a factory: the
  * list takes no argument (the account comes from the session cookie), unlike
  * `pathQueryKey(id)`. The `"list"` segment sits where a path id sits in
- * `pathQueryKey`, which is unambiguous because ids are UUIDs — and it keeps the
- * list under the `["paths", …]` prefix, so one
- * `invalidateQueries({ queryKey: ["paths"] })` would reach list and details
- * alike if a future caller needs that.
+ * `pathQueryKey`, which is unambiguous because ids are UUIDs.
  */
-export const PATHS_LIST_QUERY_KEY: readonly ["paths", "list"] = ["paths", "list"] as const;
+export const PATHS_LIST_QUERY_KEY: readonly ["paths", "list"] = [
+  ...PATHS_QUERY_PREFIX,
+  "list",
+] as const;
 
 /**
  * THE "Your paths" list query — key + fetcher paired in one place, the house
