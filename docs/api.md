@@ -40,3 +40,67 @@ server-side and does not trust the hidden picker: a non-admin override is `403`,
 an off-allowlist id is `422`. The chosen id lives on the path row so pollers and
 the reconciler route it too; the actual model used is on each Pydantic AI span
 (`gen_ai.request.model`), so Logfire cost data already groups by model.
+
+## Lessons (`/api/v1`, AL-051, TDD §6)
+
+Session-cookie protected (`401` via the shared envelope when anonymous). Address
+by UUID; a lesson on another learner's path reads/acts as `404` (existence not
+disclosed). Same **trigger + poll** model: `POST /lessons/{id}/generate` returns
+`202` and the client polls `GET /lessons/{id}` until `generation_state` resolves.
+`attempt` and `complete` are synchronous state changes (not generation triggers).
+
+| Method | Path | Body | Success | Notes |
+| ------ | ---- | ---- | ------- | ----- |
+| `GET` | `/api/v1/lessons/{id}` | — | `200` | Poll target. Body below. The poll is itself a trigger: it spawns the idempotent resume **and** refills the prefetch window, so *viewing* a lesson advances prefetch (§5.4). `generation_state` is effective (a stale `generating` reads as `failed`); `unlock_state` is derived (`locked`/`available`/`complete`). |
+| `POST` | `/api/v1/lessons/{id}/generate` | — | `202 {id}` | Ensure/retry this lesson's generation (also refills the prefetch window). Rate-limited by the daily lesson cap (`check_lesson_generation`, `RATE_LIMIT_LESSON_GENERATIONS_PER_DAY`, default 100; admins exempt) → `429 rate_limited` at the cap. Chain-head gated (§5.2/§5.5): it *ensures* a reached `ungenerated` lesson and *retries* a `failed` one only when all predecessors are `generated`; a trigger on a `generated` or non-chain-head lesson still returns `202` but only advances the window. |
+| `POST` | `/api/v1/lessons/{id}/attempt` | `{selected_index}` | `200` | Record the Attempt (first-wins) and grade it server-side. Gates on *not locked*, **not** available-only: **locked → `403`**, but a **complete** lesson stays attemptable (a learner may complete a lesson and still answer its Quick check — completion is orthogonal to the Attempt). An ungenerated lesson (no Quick check yet) → `409 conflict`. Returns `AttemptResult` (below) — the reveal boundary. A second submit never overwrites the first: the response is the first Attempt's Outcome, re-derived from its stored index (the `attempts.is_correct` column is a metrics cache, never trusted — AL-012). |
+| `POST` | `/api/v1/lessons/{id}/complete` | — | `200 {id, unlock_state}` | Mark complete (non-gating; orthogonal to the Quick-check Outcome). Only the **available** lesson may be completed (AL-012): **locked → `403`** (a later/not-yet-reached lesson cannot be skipped ahead to); already-**complete → idempotent `200`** no-op (no re-stamp). On success the prefetch window advances (`on_lesson_completed`, after commit) so the newly-unlocked next lesson begins prefetching. |
+
+**`GET /api/v1/lessons/{id}` body.**
+
+```json
+{
+  "id": "uuid", "path_id": "uuid", "title": "…",
+  "position_in_path": 1, "position_in_unit": 1,
+  "generation_state": "ungenerated|generating|generated|failed",
+  "unlock_state": "locked|available|complete",
+  "read_passage": "…str… | null",
+  "quick_check": { "stem": "…", "options": ["…", "…", "…"] } | null,
+  "attempt": { "selected_index": 0, "outcome": "correct|incorrect",
+               "correct_index": 2, "explanation": "…" } | null,
+  "generation_error": "generic message | null"
+}
+```
+
+- `read_passage` / `quick_check` are non-null **only** when `generation_state ==
+  generated`. `generation_error` is non-null **only** when `generation_state ==
+  failed` (a generic, learner-safe message — never raw provider text).
+- **Answer-hiding (W6, TDD §6).** `quick_check` carries **only** `stem` +
+  `options` — never the keyed answer. `correct_index` and `explanation` live
+  **only** inside `attempt`, which is `null` until the learner records an
+  Attempt. So a pre-Attempt payload contains no correct answer anywhere; grading
+  is server-side.
+
+**`POST /api/v1/lessons/{id}/attempt` response (`AttemptResult`).**
+
+```json
+{ "selected_index": 0, "outcome": "correct|incorrect",
+  "correct_index": 2, "explanation": "…" }
+```
+
+`selected_index` is the recorded (first-wins) Attempt's index; `outcome` is
+re-derived deterministically from it (`domains/grading`). An incorrect Attempt
+still reveals `correct_index` + `explanation` (formative, non-gating).
+
+**Known dead-end: completing past a failed head.** Completion gates on the
+**unlock** axis only (§6) and is orthogonal to generation, so an *available* but
+`failed` (or `ungenerated`) lesson **can** be completed (`200`). Doing so advances
+`first_incomplete` past a lesson whose generation never succeeded. Because the
+serial prefetch chain **stops at a real `failed` head** (§5.4) and retry only
+re-runs the current chain head, the skipped-over lesson and every successor then
+stay ungenerated — `POST .../generate` on a successor returns `202` but no-ops
+(it is not the chain head, and the head is a real failure the auto-walk will not
+burn). This is spec-conformant, not a bug: recovery is to retry the **failed head
+itself** (`POST /lessons/{failed-id}/generate`), which re-claims it and, on
+success, resumes the chain. A future ticket may make completion refuse (or warn
+on) an ungenerated head; today the gating is deliberately generation-agnostic.

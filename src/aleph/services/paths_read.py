@@ -36,8 +36,13 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True)
-class LessonDetailView:
-    """One lesson's slot in the composed outline (both axes resolved)."""
+class LessonSlotView:
+    """One lesson's slot in the composed path outline (both axes resolved).
+
+    Named ``LessonSlotView`` (not ``LessonDetailView``) to avoid colliding with
+    ``lessons_read.LessonDetailView`` — the *whole* lesson-detail view AL-051's
+    ``GET /lessons/{id}`` composes. This one is only a lesson's summary slot
+    inside a path's outline (TN-2)."""
 
     id: uuid.UUID
     title: str
@@ -55,7 +60,7 @@ class UnitDetailView:
     title: str
     summary: str
     position: int
-    lessons: list[LessonDetailView]
+    lessons: list[LessonSlotView]
 
 
 @dataclass(frozen=True)
@@ -108,12 +113,12 @@ async def load_path_detail(
             for lesson, _ in lessons
         ]
     )
-    lessons_by_unit: dict[uuid.UUID, list[LessonDetailView]] = defaultdict(list)
+    lessons_by_unit: dict[uuid.UUID, list[LessonSlotView]] = defaultdict(list)
     for (lesson, effective_state), unlock_state in zip(
         lessons, unlock_states, strict=True
     ):
         lessons_by_unit[lesson.unit_id].append(
-            LessonDetailView(
+            LessonSlotView(
                 id=lesson.id,
                 title=lesson.title,
                 position_in_path=lesson.position_in_path,

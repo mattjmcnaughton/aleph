@@ -816,6 +816,25 @@ class GenerationOrchestrator:
         """
         await self.run_outline_task(path_id, retry=True)
 
+    def trigger_lesson_generation(self, lesson_id: uuid.UUID) -> None:
+        """Fire-and-forget a lesson ensure/retry through the spawn seam (AL-051).
+
+        The public trigger ``POST /lessons/{id}/generate`` calls: it spawns
+        :meth:`retry_lesson` through the same registry-bound ``spawn`` seam create
+        uses (strong ref, concurrency bound, shutdown cancel), so the request
+        returns ``202`` immediately and the client polls ``GET /lessons/{id}`` for
+        the result — never blocking the HTTP worker on a model call (§5.4/D5).
+        Sibling to :meth:`trigger_outline_retry`; keeping the ``_spawn`` call here
+        (not in the router) keeps the private seam private.
+
+        :meth:`retry_lesson` is idempotent and both *ensures* (generates a
+        chain-head ``ungenerated`` lesson the learner has reached) and *retries*
+        (re-claims a chain-head ``failed`` one), then refills the prefetch window
+        — so this one trigger serves both the ensure and the retry cases of the
+        endpoint. The chain-head ordering guard lives in :meth:`retry_lesson`.
+        """
+        self._spawn(self.retry_lesson(lesson_id))
+
     async def retry_lesson(self, lesson_id: uuid.UUID) -> None:
         """Re-run a ``failed`` lesson, resume the chain (POST /lessons/{id}/generate).
 
