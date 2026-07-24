@@ -46,10 +46,12 @@ from aleph.config import Settings
 from aleph.services.generation import _lesson_caps_from, _outline_caps_from
 from evals.__main__ import _case_payload, _hard_floor_failures, main
 from evals.generation import (
+    FULL_PATH_LESSONS,
     HARD_FLOOR_EVALUATORS,
     LESSON_CAPS,
     OUTLINE_CAPS,
     PREFILTERS,
+    GeneratedLesson,
     GenerationSample,
     RefusalBranch,
     SeedInputs,
@@ -100,6 +102,34 @@ def _valid_lesson() -> LessonContent:
             explanation="Because the passage says so.",
         ),
     )
+
+
+def _sample(
+    outline: PathOutline | Refusal,
+    lesson: LessonContent | None = None,
+    *,
+    unit_title: str = "Unit 1",
+    lesson_title: str = "Lesson 1",
+) -> GenerationSample:
+    """A sample carrying zero or one generated lesson.
+
+    ``GenerationSample`` holds a *list* of lessons (a full-path case generates
+    several), so the single-lesson shape most of these probes want is built
+    here rather than repeated at every call site.
+    """
+    lessons = (
+        []
+        if lesson is None
+        else [
+            GeneratedLesson(
+                position_in_path=1,
+                unit_title=unit_title,
+                lesson_title=lesson_title,
+                content=lesson,
+            )
+        ]
+    )
+    return GenerationSample(outline=outline, lessons=lessons)
 
 
 async def _probe_report(
@@ -245,7 +275,7 @@ async def test_outline_prefilter_rejects_a_cap_violation() -> None:
     over_cap = _valid_outline(units=OUTLINE_CAPS.max_units + 1, lessons_per_unit=1)
     assertions = await _assess(
         SeedInputs(topic="anything", level="beginner", expected_branch="generate"),
-        GenerationSample(outline=over_cap, lesson=_valid_lesson()),
+        _sample(over_cap, _valid_lesson()),
     )
     passed, reason = assertions["OutlineInvariants"]
     assert not passed
@@ -260,7 +290,7 @@ async def test_outline_prefilter_rejects_a_cap_violation() -> None:
 async def test_outline_prefilter_accepts_an_outline_within_caps() -> None:
     assertions = await _assess(
         SeedInputs(topic="anything", level="beginner", expected_branch="generate"),
-        GenerationSample(outline=_valid_outline(), lesson=_valid_lesson()),
+        _sample(_valid_outline(), _valid_lesson()),
     )
     assert all(passed for passed, _ in assertions.values()), assertions
 
@@ -278,7 +308,7 @@ async def test_lesson_prefilter_rejects_a_band_violation() -> None:
     )
     assertions = await _assess(
         SeedInputs(topic="anything", level="beginner", expected_branch="generate"),
-        GenerationSample(outline=_valid_outline(), lesson=too_few_options),
+        _sample(_valid_outline(), too_few_options),
     )
     passed, reason = assertions["LessonInvariants"]
     assert not passed
@@ -293,7 +323,7 @@ async def test_lesson_prefilter_rejects_a_short_read_passage() -> None:
     )
     assertions = await _assess(
         SeedInputs(topic="anything", level="beginner", expected_branch="generate"),
-        GenerationSample(outline=_valid_outline(), lesson=short),
+        _sample(_valid_outline(), short),
     )
     passed, reason = assertions["LessonInvariants"]
     assert not passed
@@ -305,7 +335,7 @@ async def test_refusal_branch_prefilter_catches_under_refusal() -> None:
     """A boundary case that outlined instead of refusing: a safety failure."""
     assertions = await _assess(
         SeedInputs(topic="anything", level="beginner", expected_branch="refuse"),
-        GenerationSample(outline=_valid_outline(), lesson=_valid_lesson()),
+        _sample(_valid_outline(), _valid_lesson()),
     )
     passed, reason = assertions["RefusalBranch"]
     assert not passed
@@ -317,7 +347,7 @@ async def test_refusal_branch_prefilter_catches_over_refusal() -> None:
     """A legitimate case the agent declined: the other direction, also a block."""
     assertions = await _assess(
         SeedInputs(topic="anything", level="beginner", expected_branch="generate"),
-        GenerationSample(outline=Refusal(message="Sorry, I can't help with that.")),
+        _sample(Refusal(message="Sorry, I can't help with that.")),
     )
     passed, reason = assertions["RefusalBranch"]
     assert not passed
@@ -330,7 +360,7 @@ async def test_refusal_branch_prefilter_catches_over_refusal() -> None:
 async def test_refusal_branch_prefilter_accepts_an_expected_refusal() -> None:
     assertions = await _assess(
         SeedInputs(topic="anything", level="beginner", expected_branch="refuse"),
-        GenerationSample(outline=Refusal(message="Sorry, I can't help with that.")),
+        _sample(Refusal(message="Sorry, I can't help with that.")),
     )
     assert all(passed for passed, _ in assertions.values()), assertions
 
@@ -340,7 +370,7 @@ async def test_outline_prefilter_rejects_an_empty_refusal_message() -> None:
     """The refusal branch is validated too — a bare refusal is not graceful (W7)."""
     assertions = await _assess(
         SeedInputs(topic="anything", level="beginner", expected_branch="refuse"),
-        GenerationSample(outline=Refusal(message="   ")),
+        _sample(Refusal(message="   ")),
     )
     assert not assertions["OutlineInvariants"][0]
 
@@ -385,15 +415,101 @@ async def test_smoke_run_generates_a_probe_lesson_for_generate_cases() -> None:
     )
     sample = await task(generated.inputs)
     assert isinstance(sample.outline, PathOutline)
-    assert sample.lesson is not None
-    assert sample.lesson_slot is not None
+    assert sample.lessons, "a generate case must produce at least the probe lesson"
+    assert sample.lessons[0].position_in_path == 1
+    assert sample.lesson_slot == sample.lessons[0].slot
 
     refused = next(
         case for case in dataset.cases if case.inputs.expected_branch == "refuse"
     )
     refusal = await task(refused.inputs)
     assert isinstance(refusal.outline, Refusal)
-    assert refusal.lesson is None
+    assert refusal.lesson_slot is None
+    assert refusal.lessons == []
+
+
+# --- full-path (sequential) cases ----------------------------------------------
+
+
+def test_seed_set_marks_exactly_the_documented_full_path_cases() -> None:
+    """docs/evals.md and the seed set's own header name three; pin them.
+
+    Full-path cases are the expensive ones (three lesson calls plus three judge
+    calls each instead of one), so quietly flipping a fourth case on — or
+    dropping one and leaving the continuity item without evidence — should not
+    be possible while the docs claim this shape.
+    """
+    dataset = load_seed_set()
+    full_path = {case.name for case in dataset.cases if case.inputs.full_path}
+    assert full_path == {
+        "typescript-for-javascript-devs",
+        "fall-of-the-roman-republic",
+        "home-network-security",
+    }
+    # One per non-boundary bucket, and never a refusal case (which has no path).
+    for case in dataset.cases:
+        if case.inputs.full_path:
+            assert case.inputs.expected_branch == "generate", case.name
+
+
+@pytest.mark.anyio
+async def test_full_path_case_generates_lessons_sequentially_with_priors() -> None:
+    """Lesson N carries the real Read passages of lessons 1..N-1 (TDD §5.2/§11).
+
+    This is what makes the rubric's continuity item falsifiable: the generator
+    is given what it must build on, and the judge is given the same text to
+    check it against. A probe-lesson-only harness can assert neither.
+    """
+    dataset = load_seed_set()
+    stub = smoke_model()
+    task = build_generation_task(stub, stub, force_expected_branch=True)
+
+    case = next(case for case in dataset.cases if case.inputs.full_path)
+    sample = await task(case.inputs)
+    assert isinstance(sample.outline, PathOutline)
+    assert len(sample.lessons) == FULL_PATH_LESSONS
+
+    # Path order, 1-based and contiguous — the same total-order numbering the
+    # orchestrator assigns (TDD §4).
+    assert [lesson.position_in_path for lesson in sample.lessons] == list(
+        range(1, FULL_PATH_LESSONS + 1)
+    )
+    ordered_titles = [
+        lesson.title for unit in sample.outline.units for lesson in unit.lessons
+    ]
+    assert [lesson.lesson_title for lesson in sample.lessons] == ordered_titles[
+        :FULL_PATH_LESSONS
+    ]
+
+    # Lesson 1 has no priors; lesson 2 has lesson 1; lesson 3 has both, in order.
+    assert sample.priors_for(0) == ()
+    priors_for_second = sample.priors_for(1)
+    assert len(priors_for_second) == 1
+    assert priors_for_second[0].read_passage == sample.lessons[0].content.read_passage
+    assert priors_for_second[0].lesson_title == sample.lessons[0].lesson_title
+    assert len(sample.priors_for(2)) == 2
+
+
+@pytest.mark.anyio
+async def test_full_path_depth_is_configurable_and_ordinary_cases_are_unaffected() -> (
+    None
+):
+    """``--full-path-lessons`` is the cost knob; it moves only full-path cases."""
+    dataset = load_seed_set()
+    stub = smoke_model()
+    task = build_generation_task(
+        stub, stub, force_expected_branch=True, full_path_lessons=2
+    )
+
+    full_path = next(case for case in dataset.cases if case.inputs.full_path)
+    assert len((await task(full_path.inputs)).lessons) == 2
+
+    ordinary = next(
+        case
+        for case in dataset.cases
+        if case.inputs.expected_branch == "generate" and not case.inputs.full_path
+    )
+    assert len((await task(ordinary.inputs)).lessons) == 1
 
 
 # --- exit-code classification (evals/__main__.py) ------------------------------
@@ -426,11 +542,7 @@ async def _report_with_a_crashed_branch_check() -> EvaluationReport[
     """
     return await _probe_report(
         SeedInputs(topic="anything", level="beginner", expected_branch="refuse"),
-        GenerationSample(
-            outline=_valid_outline(),
-            lesson=_valid_lesson(),
-            lesson_slot="Unit 1 / Lesson 1",
-        ),
+        _sample(_valid_outline(), _valid_lesson()),
         evaluators=[
             _CrashingBranchCheck(),
             *(
@@ -470,7 +582,7 @@ async def test_a_dropped_hard_floor_evaluator_fails_the_hard_floor() -> None:
     """An unregistered pre-filter is a harness bug, not an implicit pass."""
     report = await _probe_report(
         SeedInputs(topic="anything", level="beginner", expected_branch="refuse"),
-        GenerationSample(outline=_valid_outline(), lesson=_valid_lesson()),
+        _sample(_valid_outline(), _valid_lesson()),
         evaluators=[
             prefilter()
             for prefilter in PREFILTERS

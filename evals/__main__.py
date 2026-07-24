@@ -1,21 +1,35 @@
 """Eval harness CLI: ``uv run python -m evals`` (or ``just evals``).
 
-Runs the seed set (``evals/seed_set.yaml``) through the outline and lesson
-agents against one or more model bindings and prints a pydantic-evals report
-table per binding. See docs/evals.md for the strategy and docs/ci.md for the
-GitHub Actions wiring.
+Two modes:
+
+- **seed set** (default) — runs ``evals/seed_set.yaml`` through the outline and
+  lesson agents against one or more model bindings, scores each case with the
+  Layer 1 deterministic pre-filters and (unless disabled) the Layer 2 binary
+  judge, and prints a pydantic-evals report table plus a gate summary per
+  binding.
+- **calibration** (``--agreement``) — runs the judge over
+  ``evals/human_labels.yaml`` and reports judge↔human agreement. No generation
+  happens; this mode measures the measuring instrument.
+
+See docs/evals.md for the strategy and docs/ci.md for the GitHub Actions wiring.
 
 Exit codes:
-    0  ran; every Layer 1 hard-floor assertion passed (soft scores never gate)
-    1  a case failed a hard floor (branch / outline caps / lesson bands) or
-       errored outright
+    0  ran; every hard floor held and the ≥ 90% pass-rate gate was met
+    1  a case failed a hard floor (branch / outline caps / lesson bands / the
+       safety rubric item), the judged pass rate fell below the gate, judge↔human
+       agreement fell below the trust threshold, or a case errored outright
     2  misconfiguration (no OPENROUTER_API_KEY and not --smoke; --models
-       combined with --smoke; bad arguments)
+       combined with --smoke or --agreement; --agreement with --no-judge; bad
+       arguments; a ``seed_set.yaml`` / ``human_labels.yaml`` that does not
+       parse or validate — a broken data file says nothing about the models
+       under evaluation, so it must not be reported as a failed gate)
 
-Reads ``OPENROUTER_API_KEY`` and the ``MODEL_OUTLINE`` / ``MODEL_LESSON`` slots
-via ``aleph.config.settings`` (environment or ``.env``) — imported lazily, so
-``--smoke`` needs no configuration at all. When ``$GITHUB_STEP_SUMMARY`` is set
-(GitHub Actions), the same report tables are appended there as the job summary.
+Reads ``OPENROUTER_API_KEY`` and the ``MODEL_OUTLINE`` / ``MODEL_LESSON`` /
+``MODEL_JUDGE`` slots via ``aleph.config.settings`` (environment or ``.env``) —
+imported lazily, so ``--smoke`` needs no configuration at all. ``MODEL_JUDGE`` is
+read *here and nowhere else in the repo*: the judge is eval-only and never
+touches the request path. When ``$GITHUB_STEP_SUMMARY`` is set (GitHub Actions),
+the same tables are appended there as the job summary.
 """
 
 from __future__ import annotations
@@ -27,25 +41,47 @@ import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
+import yaml
+
+from evals.agreement import (
+    AGREEMENT_TRUST_THRESHOLD,
+    HUMAN_LABELS_PATH,
+    load_human_labels,
+    render_agreement,
+    run_agreement,
+)
 from evals.generation import (
+    EVALUATOR_ASSERTIONS,
+    FULL_PATH_LESSONS,
     HARD_FLOOR_EVALUATORS,
+    JUDGE_ASSERTIONS,
+    JUDGE_HARD_FLOOR,
+    JUDGE_SAFETY,
+    SEED_SET_PASS_RATE_GATE,
+    SEED_SET_PATH,
+    RubricJudge,
     build_generation_task,
     load_seed_set,
     smoke_model,
 )
+from evals.judge import Judge, build_stub_judge
 
 if TYPE_CHECKING:
-    from pydantic_ai.models import Model
-    from pydantic_evals.reporting import EvaluationReport
+    from collections.abc import Collection
 
+    from pydantic_ai.models import Model
+    from pydantic_evals.reporting import EvaluationReport, ReportCase
+
+    from evals.agreement import AgreementSummary
     from evals.generation import GenerationSample, SeedInputs, SeedMeta
 
     # The concrete report a seed-set run produces. Spelled out rather than left
     # as ``Any`` so the payload builder is type-checked against the sample
     # (``case.output.lesson_slot``) instead of guessing at run time.
     SeedReport = EvaluationReport[SeedInputs, GenerationSample, SeedMeta]
+    SeedCase = ReportCase[SeedInputs, GenerationSample, SeedMeta]
 
 # Wide enough that the report table never wraps mid-cell in CI logs.
 _REPORT_WIDTH = 140
@@ -53,43 +89,84 @@ _REPORT_WIDTH = 140
 
 @dataclass(frozen=True)
 class ModelBinding:
-    """One evaluated configuration: a model in each of the two agent slots.
+    """One evaluated configuration: a model in each agent slot, plus the judge.
 
-    The slots are separate in production (TDD §5.3: ``MODEL_OUTLINE`` is the
-    once-per-path, unrecoverable call; ``MODEL_LESSON`` is the high-volume one
-    that may step *down*), so the harness keeps them separate too rather than
-    pretending a run exercises a single model.
+    The generation slots are separate in production (TDD §5.3: ``MODEL_OUTLINE``
+    is the once-per-path, unrecoverable call; ``MODEL_LESSON`` is the
+    high-volume one that may step *down*), so the harness keeps them separate
+    too rather than pretending a run exercises a single model.
+
+    ``judge`` is ``None`` for a Layer-1-only run. It deliberately does **not**
+    vary across a ``--models`` sweep: the judge is the measuring instrument, so
+    holding it fixed at ``MODEL_JUDGE`` is what makes two swept models
+    comparable at all.
     """
 
     label: str
     outline: Model
     lesson: Model
+    judge: Judge | None = None
     # Smoke only: force the expected branch via the stub's sentinel.
     force_expected_branch: bool = False
 
 
+def _judging_enabled(args: argparse.Namespace) -> bool:
+    """Whether Layer 2 runs, given the flags.
+
+    Default **on** for a live run — the judge is the point of the harness, and a
+    silently Layer-1-only run would report a green gate that never looked at
+    quality — and **off** under ``--smoke``, which is a plumbing check that
+    should stay fast and has no real content for a judge to have an opinion
+    about. ``--judge`` / ``--no-judge`` override either way; ``--smoke --judge``
+    attaches the deterministic stub judge, which is how the whole Layer 2 path
+    stays exercisable with no key.
+    """
+    if args.judge is not None:
+        return bool(args.judge)
+    return not args.smoke
+
+
+def _live_judge(model_id: str) -> Judge:
+    """A judge bound to ``model_id`` through the app's own resolution seam."""
+    from aleph.services.openrouter import resolve_model
+
+    return Judge(model=resolve_model(model_id), label=model_id)
+
+
+def _missing_key_message() -> None:
+    print(
+        "OPENROUTER_API_KEY is not set. Eval runs call the live provider; "
+        "set the key (env or .env), or use --smoke for an offline "
+        "plumbing check.",
+        file=sys.stderr,
+    )
+
+
 def _resolve_bindings(args: argparse.Namespace) -> list[ModelBinding] | None:
     """The model bindings to evaluate, or None on misconfiguration."""
+    judging = _judging_enabled(args)
+
     if args.smoke:
         stub = smoke_model()
         return [
             ModelBinding(
-                label="smoke", outline=stub, lesson=stub, force_expected_branch=True
+                label="smoke",
+                outline=stub,
+                lesson=stub,
+                judge=build_stub_judge() if judging else None,
+                force_expected_branch=True,
             )
         ]
 
     from aleph.config import settings
 
     if not settings.openrouter_api_key:
-        print(
-            "OPENROUTER_API_KEY is not set. Eval runs call the live provider; "
-            "set the key (env or .env), or use --smoke for an offline "
-            "plumbing check.",
-            file=sys.stderr,
-        )
+        _missing_key_message()
         return None
 
     from aleph.services.openrouter import resolve_model
+
+    judge = _live_judge(settings.model_judge) if judging else None
 
     sweep = [
         model_id.strip()
@@ -109,6 +186,7 @@ def _resolve_bindings(args: argparse.Namespace) -> list[ModelBinding] | None:
                 label=label,
                 outline=resolve_model(outline_id),
                 lesson=resolve_model(lesson_id),
+                judge=judge,
             )
         ]
     # A sweep entry binds the same id to both slots: the comparison that matters
@@ -118,6 +196,7 @@ def _resolve_bindings(args: argparse.Namespace) -> list[ModelBinding] | None:
             label=model_id,
             outline=resolve_model(model_id),
             lesson=resolve_model(model_id),
+            judge=judge,
         )
         for model_id in sweep
     ]
@@ -133,6 +212,9 @@ def _case_payload(report: SeedReport) -> dict[str, Any]:
                 # report can be read against the outline it came from; None for
                 # a refusal case, which has no probe lesson.
                 "lesson_slot": case.output.lesson_slot,
+                # Every lesson the case generated, in path order: one for an
+                # ordinary case, several for a full-path one.
+                "lessons": [lesson.slot for lesson in case.output.lessons],
                 "assertions": {
                     name: {"value": result.value, "reason": result.reason}
                     for name, result in case.assertions.items()
@@ -152,45 +234,268 @@ def _case_payload(report: SeedReport) -> dict[str, Any]:
     }
 
 
-def _hard_floor_failures(report: SeedReport) -> list[str]:
-    """``case: reason`` strings for every hard-floor violation or error.
+#: What happened to one gating check on one case. ``missing`` and ``errored``
+#: exist separately from ``fail`` because they are *harness* problems rather
+#: than quality ones, and they read very differently in a report — but all three
+#: are non-passes: an unscored case is never a pass.
+CheckState = Literal["pass", "fail", "missing", "errored"]
 
-    Three distinct ways a run can fail to clear the floor, all of which must
-    exit 1 — an unscored case is never a pass:
 
-    1. the *task* errored (``report.failures``), so there is no generation;
-    2. an *evaluator* errored (``case.evaluator_failures``) — pydantic-evals
-       keeps the case in ``report.cases`` and simply omits that evaluator's
-       assertion, so a crashing ``RefusalBranch`` would otherwise leave the
-       safety check silently unrun and the run green;
-    3. a hard-floor assertion is missing for any other reason (an evaluator
-       dropped from the dataset, a rename that broke the registration) — the
-       CLI keys its exit code on these names, so an absent name is a harness
+@dataclass(frozen=True)
+class CheckOutcome:
+    """One named check on one case: what happened, and why."""
+
+    name: str
+    state: CheckState
+    detail: str
+
+    @property
+    def ok(self) -> bool:
+        return self.state == "pass"
+
+    def label(self) -> str:
+        """How the gate table names it: bare for a fail, tagged otherwise."""
+        if self.state == "fail":
+            return self.name
+        if self.state == "errored":
+            return f"{self.name} (evaluator errored)"
+        return f"{self.name} ({self.state})"
+
+
+def _case_checks(case: SeedCase, gating: Collection[str]) -> tuple[CheckOutcome, ...]:
+    """Resolve every ``gating`` assertion on one case to a single outcome.
+
+    The one walk both report views are derived from (:func:`_hard_floor_failures`
+    and :func:`_gate_summary`), because the two used to answer the same question
+    twice and could disagree about it.
+
+    Three ways a check can be a non-pass, all of which must exit 1:
+
+    1. the assertion is present and false — an ordinary **fail**;
+    2. the evaluator that owns the assertion raised, so pydantic-evals kept the
+       case in ``report.cases`` and simply omitted the assertion — **errored**.
+       A crashing ``RefusalBranch`` would otherwise leave the safety check
+       silently unrun and the run green;
+    3. the assertion is absent with no crash to explain it — **missing** (an
+       evaluator dropped from the dataset, a rename that broke registration).
+       The CLI keys its exit code on these names, so an absent name is a harness
        bug, not an implicit pass.
+
+    Which assertions a crashed evaluator owns comes from
+    :data:`~evals.generation.EVALUATOR_ASSERTIONS`, **explicitly**, not from the
+    coincidence that a Layer 1 evaluator's class name equals its assertion name:
+    ``RubricJudge`` emits three assertions under none of its own name, so
+    matching on names alone reported a crashed judge as three assertions
+    "missing from the report (evaluator not registered?)" — a false and
+    misleading diagnosis of a registered evaluator that blew up.
+
+    ``gating`` is a set of *assertion* names for the same reason. A crashed
+    evaluator that owns no gating assertion (a soft check such as
+    ``MaxDuration``) is still reported, under its own name: a check that did not
+    run is never evidence that it would have passed.
     """
-    failed = [f"{failure.name}: errored" for failure in report.failures]
-    for case in report.cases:
-        crashed = {failure.name for failure in case.evaluator_failures}
-        for failure in case.evaluator_failures:
-            failed.append(
-                f"{case.name}/{failure.name}: evaluator errored "
-                f"({failure.error_message})"
+    crashed: dict[str, str] = {}
+    unowned: list[CheckOutcome] = []
+    for failure in case.evaluator_failures:
+        owned = EVALUATOR_ASSERTIONS.get(failure.name, frozenset({failure.name}))
+        crashed.update(dict.fromkeys(owned, failure.error_message))
+        if not owned & set(gating):
+            unowned.append(
+                CheckOutcome(
+                    name=failure.name,
+                    state="errored",
+                    detail=f"evaluator errored ({failure.error_message})",
+                )
             )
-        for name in sorted(HARD_FLOOR_EVALUATORS):
-            result = case.assertions.get(name)
-            if result is None:
-                if name not in crashed:
-                    failed.append(
-                        f"{case.name}/{name}: hard-floor assertion missing from "
-                        "the report (evaluator not registered?)"
-                    )
-            elif not result.value:
-                failed.append(f"{case.name}/{name}: {result.reason}")
-    return failed
+
+    checks: list[CheckOutcome] = []
+    for name in sorted(gating):
+        result = case.assertions.get(name)
+        state: CheckState
+        if result is not None:
+            state = "pass" if result.value else "fail"
+            detail = result.reason or "assertion is false"
+        elif name in crashed:
+            state = "errored"
+            detail = f"evaluator errored ({crashed[name]})"
+        else:
+            state = "missing"
+            detail = "assertion missing from the report (evaluator not registered?)"
+        checks.append(CheckOutcome(name=name, state=state, detail=detail))
+    return tuple(checks + unowned)
 
 
-def _append_step_summary(label: str, report: SeedReport) -> None:
-    """Mirror the report table into the GitHub Actions job summary."""
+def _hard_floor_failures(
+    report: SeedReport, hard_floor: Collection[str] = HARD_FLOOR_EVALUATORS
+) -> list[str]:
+    """``case/check: reason`` strings for every hard-floor violation or error.
+
+    The task erroring outright (``report.failures``) is a fourth way to fail the
+    floor on top of the three :func:`_case_checks` classifies: there is no
+    generation at all, so there is nothing to score.
+
+    ``hard_floor`` is a set of assertion names because Layer 2 emits three named
+    assertions from a single evaluator. Callers union
+    :data:`~evals.generation.JUDGE_HARD_FLOOR` in when judging, so a missing or
+    crashed ``JudgeSafety`` verdict fails exactly as a missing ``RefusalBranch``
+    does. Layer 2's other two assertions are deliberately *not* hard floors —
+    they feed the ≥ 90% rate gate instead (:func:`_gate_summary`).
+    """
+    return [f"{failure.name}: errored" for failure in report.failures] + [
+        f"{case.name}/{check.name}: {check.detail}"
+        for case in report.cases
+        for check in _case_checks(case, hard_floor)
+        if not check.ok
+    ]
+
+
+# --- PRD §9's ship gate --------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class CaseGateRow:
+    """One row of the printed gate table."""
+
+    name: str
+    passed: bool
+    failed_checks: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class GateSummary:
+    """PRD §9's ship gate, computed over one binding's report.
+
+    A case counts as a **pass** when every *gating* assertion it carries is true
+    and nothing about it went unscored. Gating assertions are the Layer 1 hard
+    floors plus, when Layer 2 ran, the three judge assertions. Soft checks
+    (``MaxDuration``) are excluded on purpose: a slow case on a noisy shared CI
+    runner is not a quality failure, and letting it move the pass rate would
+    quietly turn the ship gate into a latency measurement.
+    """
+
+    rows: tuple[CaseGateRow, ...]
+    judged: bool
+    safety_failures: tuple[str, ...]
+
+    @property
+    def total(self) -> int:
+        return len(self.rows)
+
+    @property
+    def passed(self) -> int:
+        return sum(1 for row in self.rows if row.passed)
+
+    @property
+    def pass_rate(self) -> float:
+        return self.passed / self.total if self.total else 0.0
+
+    @property
+    def meets_gate(self) -> bool:
+        """The ≥ 90% pass rate **and** no safety failure (PRD §9).
+
+        The two are separate conditions, not one: 19 of 20 cases passing is a
+        95% rate, and if the one failure is a safety-item failure the run still
+        must not ship. "Any safety failure is a hard block regardless of the
+        aggregate rate" is exactly what the ``and not self.safety_failures``
+        clause encodes.
+        """
+        return (
+            self.total > 0
+            and self.pass_rate >= SEED_SET_PASS_RATE_GATE
+            and not self.safety_failures
+        )
+
+
+def _gate_summary(report: SeedReport, *, judged: bool) -> GateSummary:
+    """Compute the gate figures for one binding's report."""
+    gating: set[str] = set(HARD_FLOOR_EVALUATORS)
+    if judged:
+        gating |= JUDGE_ASSERTIONS
+
+    rows: list[CaseGateRow] = []
+    safety_failures: list[str] = []
+
+    # A task that errored produces no case at all; it is a failure, and leaving
+    # it out of the denominator would inflate the rate of a run that half died.
+    for failure in report.failures:
+        rows.append(
+            CaseGateRow(name=failure.name, passed=False, failed_checks=("errored",))
+        )
+
+    for case in report.cases:
+        checks = _case_checks(case, gating)
+        failed_checks = [check.label() for check in checks if not check.ok]
+        # Only a real verdict of "unsafe" is a safety *failure*; a safety check
+        # that never ran fails the case (above) and the hard floor, but claiming
+        # the judge found something unsafe would be a different, false, report.
+        safety_failures.extend(
+            f"{case.name}: {check.detail}"
+            for check in checks
+            if check.name == JUDGE_SAFETY and check.state == "fail"
+        )
+        rows.append(
+            CaseGateRow(
+                name=case.name,
+                passed=not failed_checks,
+                failed_checks=tuple(failed_checks),
+            )
+        )
+
+    return GateSummary(
+        rows=tuple(rows), judged=judged, safety_failures=tuple(safety_failures)
+    )
+
+
+def _render_gate_summary(label: str, summary: GateSummary) -> str:
+    """The printed gate block: per-case table, pass rate, safety failures."""
+    layer = "Layer 1 + Layer 2 (judge)" if summary.judged else "Layer 1 only (no judge)"
+    lines = [
+        f"Gate summary — {label} [{layer}]",
+        "",
+        f"{'case':<44} {'result':<7} failed checks",
+        "-" * 100,
+    ]
+    for row in summary.rows:
+        lines.append(
+            f"{row.name:<44} {'PASS' if row.passed else 'FAIL':<7} "
+            f"{', '.join(row.failed_checks)}"
+        )
+    lines.append("-" * 100)
+    lines.append(
+        f"pass rate: {summary.passed}/{summary.total} ({summary.pass_rate:.1%}); "
+        f"gate {SEED_SET_PASS_RATE_GATE:.0%}"
+    )
+    if summary.safety_failures:
+        lines.append(f"SAFETY FAILURES (hard block, {len(summary.safety_failures)}):")
+        lines.extend(f"  - {failure}" for failure in summary.safety_failures)
+    else:
+        lines.append("safety failures: none")
+    if not summary.judged:
+        lines.append(
+            "NOTE: the judge did not run, so this rate reflects the Layer 1 "
+            "structural floor only — it is not the PRD §9 quality gate."
+        )
+    return "\n".join(lines)
+
+
+def _gate_payload(summary: GateSummary) -> dict[str, Any]:
+    """JSON-friendly gate figures for the --report artifact."""
+    return {
+        "judged": summary.judged,
+        "total": summary.total,
+        "passed": summary.passed,
+        "pass_rate": summary.pass_rate,
+        "gate": SEED_SET_PASS_RATE_GATE,
+        "meets_gate": summary.meets_gate,
+        "safety_failures": list(summary.safety_failures),
+        "failed_cases": {
+            row.name: list(row.failed_checks) for row in summary.rows if not row.passed
+        },
+    }
+
+
+def _append_step_summary(label: str, report: SeedReport, gate: GateSummary) -> None:
+    """Mirror the report table and the gate block into the Actions job summary."""
     summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
     if not summary_path:
         return
@@ -198,7 +503,248 @@ def _append_step_summary(label: str, report: SeedReport) -> None:
         summary.write(
             f"## Seed-set evals — {label}\n\n"
             f"```\n{report.render(width=_REPORT_WIDTH, include_reasons=True)}```\n\n"
+            f"```\n{_render_gate_summary(label, gate)}\n```\n\n"
         )
+
+
+def _append_agreement_step_summary(text: str) -> None:
+    """Mirror the calibration report into the Actions job summary."""
+    summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not summary_path:
+        return
+    with Path(summary_path).open("a", encoding="utf-8") as summary:
+        summary.write(f"## Judge↔human agreement\n\n```\n{text}\n```\n\n")
+
+
+def _write_report(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    print(f"wrote {path}")
+
+
+# --- modes ---------------------------------------------------------------------
+
+
+def _agreement_payload(
+    judge_label: str, summary: AgreementSummary, *, smoke: bool, all_samples: bool
+) -> dict[str, Any]:
+    """JSON-friendly calibration figures for the --report artifact.
+
+    ``total``/``agreed``/``rate`` cover **every** label; ``gated`` covers the
+    builder-recorded ones and is the only block a threshold is applied to (see
+    :attr:`~evals.agreement.AgreementSummary.real`). Both are reported so a
+    consumer of the artifact cannot mistake the mixture for the measurement.
+    """
+    gated = summary.real
+    return {
+        "agreement": {
+            "judge": judge_label,
+            "smoke": smoke,
+            "all_samples": all_samples,
+            "total": summary.total,
+            "agreed": summary.agreed,
+            "rate": summary.rate,
+            "threshold": AGREEMENT_TRUST_THRESHOLD,
+            "gated": {
+                "total": gated.total,
+                "agreed": gated.agreed,
+                "rate": gated.rate,
+                "meets_threshold": gated.meets_threshold,
+                "item_rate": gated.item_rate,
+            },
+            "samples": summary.samples.total,
+            "item_rate": summary.item_rate,
+            "comparisons": [
+                {
+                    "label_id": comparison.label_id,
+                    "sample": comparison.sample,
+                    "artifact": comparison.artifact,
+                    "human": comparison.human,
+                    "judge": comparison.judge,
+                    "direction": comparison.direction,
+                    "judge_failed_items": list(comparison.judge_failed_items),
+                    "item_disagreements": [
+                        {"item": item, "human": human, "judge": judged}
+                        for item, human, judged in comparison.item_disagreements
+                    ],
+                }
+                for comparison in summary.comparisons
+            ],
+        }
+    }
+
+
+#: What a data file raises when it does not parse or does not validate.
+#:
+#: ``ValueError`` rather than ``ValidationError`` because it covers all three
+#: shapes: pydantic's ``ValidationError`` *is* a ``ValueError``, and
+#: ``Dataset.from_file`` re-raises one as a plain ``ValueError`` with the path
+#: attached. ``yaml.YAMLError`` is the syntax half, and is not a ``ValueError``.
+_DATA_FILE_ERRORS = (ValueError, yaml.YAMLError)
+
+
+def _unreadable_data_file(path: Path, error: Exception) -> None:
+    """Report a data file the harness cannot parse or validate (exit 2).
+
+    Misconfiguration, not a failed gate: an unparseable ``seed_set.yaml`` or
+    ``human_labels.yaml`` says nothing about the models under evaluation, and
+    letting the traceback escape would surface it as exit 1 — the code that
+    means "a case failed a hard floor". One line, because the fix is always in
+    the file the line names.
+    """
+    print(
+        f"{path}: cannot be loaded — {type(error).__name__}: {error}", file=sys.stderr
+    )
+
+
+def _run_agreement_mode(args: argparse.Namespace) -> int:
+    """``--agreement``: judge the human-labeled set and report agreement."""
+    try:
+        labels = load_human_labels()
+    except _DATA_FILE_ERRORS as error:
+        _unreadable_data_file(HUMAN_LABELS_PATH, error)
+        return 2
+
+    if args.smoke:
+        judge = build_stub_judge()
+    else:
+        from aleph.config import settings
+
+        if not settings.openrouter_api_key:
+            _missing_key_message()
+            return 2
+        judge = _live_judge(settings.model_judge)
+
+    summary = asyncio.run(
+        run_agreement(judge, labels.labels, apply_smoke_script=args.smoke)
+    )
+    rendered = render_agreement(summary, judge_label_text=judge.label)
+    print(rendered)
+    _append_agreement_step_summary(rendered)
+
+    if args.report is not None:
+        _write_report(
+            args.report,
+            _agreement_payload(
+                judge.label, summary, smoke=args.smoke, all_samples=labels.all_samples
+            ),
+        )
+
+    # Neither of the next two situations is a calibration measurement, so
+    # neither may pass or fail a build on the strength of its number.
+    if args.smoke:
+        print(
+            "\n--smoke: the stub judge's verdicts are scripted per label "
+            "(`smoke.judge_fails`), so this exercises the agreement machinery "
+            "end to end and measures nothing about a real judge. Run without "
+            "--smoke, against MODEL_JUDGE, for the real figure."
+        )
+        return 0
+    if labels.all_samples:
+        print(
+            "\nWARNING: every label in evals/human_labels.yaml is marked "
+            "`sample: true`. Those are illustrative, not builder-recorded, so "
+            "the rate above is not a calibration measurement and is not gated "
+            "on. Record real labels (PRD §9 asks for ~30-50) and clear the "
+            "`sample` flag to turn the threshold on.",
+            file=sys.stderr,
+        )
+        return 0
+
+    # The gate is the builder-recorded labels alone. While the file is mixed —
+    # its expected state as real labels land one at a time — averaging the
+    # samples in would let them dilute the very figure they are excluded from
+    # being evidence for.
+    gated = summary.real
+    if not gated.meets_threshold:
+        print(
+            f"\nJUDGE↔HUMAN AGREEMENT BELOW THRESHOLD: {gated.rate:.1%} < "
+            f"{AGREEMENT_TRUST_THRESHOLD:.0%} over {gated.total} "
+            f"builder-recorded label(s) ({summary.samples.total} sample(s) "
+            "excluded). The judge is not a trusted gate at this level — fix the "
+            "judge prompt or the judge model and re-measure before believing a "
+            "seed-set result.",
+            file=sys.stderr,
+        )
+        return 1
+    return 0
+
+
+def _run_seed_set_mode(args: argparse.Namespace) -> int:
+    """The default mode: generate the seed set and gate on the results."""
+    bindings = _resolve_bindings(args)
+    if bindings is None:
+        return 2
+
+    results: dict[str, Any] = {}
+    hard_failures: dict[str, list[str]] = {}
+    gate_failures: list[str] = []
+
+    for binding in bindings:
+        # Loaded per binding: `add_evaluator` mutates the dataset, and a shared
+        # one would accumulate a judge per swept model.
+        try:
+            dataset = load_seed_set()
+        except _DATA_FILE_ERRORS as error:
+            _unreadable_data_file(SEED_SET_PATH, error)
+            return 2
+        judged = binding.judge is not None
+        if binding.judge is not None:
+            dataset.add_evaluator(RubricJudge(judge=binding.judge))
+
+        report = asyncio.run(
+            dataset.evaluate(
+                build_generation_task(
+                    binding.outline,
+                    binding.lesson,
+                    force_expected_branch=binding.force_expected_branch,
+                    full_path_lessons=args.full_path_lessons,
+                ),
+                name=f"seed-set ({binding.label})",
+                max_concurrency=args.max_concurrency,
+            )
+        )
+        report.print(width=_REPORT_WIDTH, include_reasons=True)
+
+        gate = _gate_summary(report, judged=judged)
+        print()
+        print(_render_gate_summary(binding.label, gate))
+        _append_step_summary(binding.label, report, gate)
+
+        payload = _case_payload(report)
+        payload["gate"] = _gate_payload(gate)
+        payload["judge"] = binding.judge.label if binding.judge else None
+        results[binding.label] = payload
+
+        hard_floor = set(HARD_FLOOR_EVALUATORS)
+        if judged:
+            hard_floor |= JUDGE_HARD_FLOOR
+        failed_cases = _hard_floor_failures(report, hard_floor)
+        if failed_cases:
+            hard_failures[binding.label] = failed_cases
+        # The rate gate is a *quality* gate and only means anything once the
+        # judge has run: Layer 1 alone is already pass/fail at 100%, so applying
+        # a 90% threshold to it would license one broken case per ten.
+        if judged and not gate.meets_gate:
+            gate_failures.append(
+                f"{binding.label}: pass rate {gate.pass_rate:.1%} "
+                f"(gate {SEED_SET_PASS_RATE_GATE:.0%}), "
+                f"{len(gate.safety_failures)} safety failure(s)"
+            )
+
+    if args.report is not None:
+        _write_report(args.report, {"seed_set": results})
+
+    if hard_failures:
+        for label, failures in hard_failures.items():
+            print(f"HARD FLOOR FAILED [{label}]:", file=sys.stderr)
+            for failure in failures:
+                print(f"  - {failure}", file=sys.stderr)
+    if gate_failures:
+        print("SHIP GATE FAILED:", file=sys.stderr)
+        for failure in gate_failures:
+            print(f"  - {failure}", file=sys.stderr)
+    return 1 if (hard_failures or gate_failures) else 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -210,13 +756,34 @@ def main(argv: list[str] | None = None) -> int:
         default="",
         help="comma-separated OpenRouter model ids to sweep; each is bound to "
         "both the outline and lesson slots (default: the configured "
-        "MODEL_OUTLINE / MODEL_LESSON)",
+        "MODEL_OUTLINE / MODEL_LESSON). The judge always stays on MODEL_JUDGE.",
     )
     parser.add_argument(
         "--smoke",
         action="store_true",
         help="offline plumbing check with the deterministic stub model "
         "(no key, no network)",
+    )
+    parser.add_argument(
+        "--judge",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="run the Layer 2 binary judge (MODEL_JUDGE). Default: on for a "
+        "live run, off under --smoke, where --judge attaches the deterministic "
+        "stub judge instead.",
+    )
+    parser.add_argument(
+        "--agreement",
+        action="store_true",
+        help="calibration mode: judge evals/human_labels.yaml and report "
+        "judge↔human agreement instead of running the seed set",
+    )
+    parser.add_argument(
+        "--full-path-lessons",
+        type=int,
+        default=FULL_PATH_LESSONS,
+        help="lessons generated sequentially for a full_path seed case "
+        f"(default: {FULL_PATH_LESSONS})",
     )
     parser.add_argument(
         "--report",
@@ -239,47 +806,23 @@ def main(argv: list[str] | None = None) -> int:
             "--models cannot be combined with --smoke: a smoke run always uses "
             "the deterministic stub model. Drop --smoke to sweep real models."
         )
-
-    bindings = _resolve_bindings(args)
-    if bindings is None:
-        return 2
-
-    dataset = load_seed_set()
-    results: dict[str, Any] = {}
-    hard_failures: dict[str, list[str]] = {}
-    for binding in bindings:
-        report = asyncio.run(
-            dataset.evaluate(
-                build_generation_task(
-                    binding.outline,
-                    binding.lesson,
-                    force_expected_branch=binding.force_expected_branch,
-                ),
-                name=f"seed-set ({binding.label})",
-                max_concurrency=args.max_concurrency,
-            )
+    if args.agreement and args.models:
+        parser.error(
+            "--models cannot be combined with --agreement: calibration judges a "
+            "fixed set of already-generated artifacts, so there is no "
+            "generation model to sweep."
         )
-        report.print(width=_REPORT_WIDTH, include_reasons=True)
-        _append_step_summary(binding.label, report)
-        results[binding.label] = _case_payload(report)
-        failed_cases = _hard_floor_failures(report)
-        if failed_cases:
-            hard_failures[binding.label] = failed_cases
-
-    if args.report is not None:
-        args.report.parent.mkdir(parents=True, exist_ok=True)
-        args.report.write_text(
-            json.dumps({"seed_set": results}, indent=2) + "\n", encoding="utf-8"
+    if args.agreement and args.judge is False:
+        parser.error(
+            "--no-judge cannot be combined with --agreement: agreement mode "
+            "exists to measure the judge."
         )
-        print(f"wrote {args.report}")
+    if args.full_path_lessons < 1:
+        parser.error("--full-path-lessons must be at least 1.")
 
-    if hard_failures:
-        for label, failures in hard_failures.items():
-            print(f"HARD FLOOR FAILED [{label}]:", file=sys.stderr)
-            for failure in failures:
-                print(f"  - {failure}", file=sys.stderr)
-        return 1
-    return 0
+    if args.agreement:
+        return _run_agreement_mode(args)
+    return _run_seed_set_mode(args)
 
 
 if __name__ == "__main__":

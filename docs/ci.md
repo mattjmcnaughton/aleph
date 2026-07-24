@@ -28,23 +28,33 @@ provider.
 - **`workflow_dispatch` only.** No `push`, no `pull_request`, no `schedule`
   trigger — an eval run costs real money, so it happens only when a human
   dispatches it (Actions tab → Evals → Run workflow). It is never a required
-  check and nothing in the CI gate depends on it. The `models` input takes
-  comma-separated OpenRouter ids to sweep; empty uses the configured
-  `MODEL_OUTLINE` / `MODEL_LESSON`.
+  check and nothing in the CI gate depends on it. Three inputs:
+  - `mode` — `seed-set` (generate the seed set and gate on it) or `agreement`
+    (calibration only: judge `evals/human_labels.yaml` and report judge↔human
+    agreement — no generation, much cheaper, and the run to dispatch after any
+    change to the judge prompt or its calibration examples).
+  - `models` — comma-separated OpenRouter ids to sweep in `seed-set` mode; empty
+    uses the configured `MODEL_OUTLINE` / `MODEL_LESSON`. The judge always stays
+    on `MODEL_JUDGE`.
+  - `judge` — run Layer 2 (default on). Uncheck for a cheap Layer-1-only
+    structural pass; one judge call per artifact is the bulk of a run's cost.
 - **Secret:** `OPENROUTER_API_KEY`, a repository secret (**AL-080 — not
   uploaded yet**). Until it lands, a dispatched run fails immediately with the
   harness's exit-2 message.
 - **Environment:** `uv sync --frozen --no-dev --group evals` — project deps plus
   the `evals` dependency group only. No Node, no Postgres, no Keycloak: the
   harness is database-free and never boots the app.
-- **Results:** the per-case report table lands in the job log and the job summary
-  (`$GITHUB_STEP_SUMMARY`), and the JSON is uploaded as the `eval-report`
-  artifact. The job fails only on a harness error or a Layer 1 hard floor
-  (refusal-branch correctness, outline caps, lesson bands).
+- **Results:** the per-case report table and the gate summary land in the job log
+  and the job summary (`$GITHUB_STEP_SUMMARY`), and the JSON is uploaded as the
+  `eval-report` artifact. The job fails on a harness error, a hard floor
+  (Layer 1's refusal-branch correctness / outline caps / lesson bands, or
+  Layer 2's `safe` rubric item), or a seed-set pass rate below the ≥ 90% gate.
 
 The harness's *own* plumbing is covered for free in the gate:
 `tests/unit/test_evals_harness.py` runs the offline smoke path (real agents,
-stub model), and `tests/unit/test_packaging.py` proves `evals/` never ships in
+stub model), `tests/unit/test_evals_judge.py` runs the whole Layer 2 path
+against the deterministic stub judge (rubric, prompts, gate arithmetic,
+agreement), and `tests/unit/test_packaging.py` proves `evals/` never ships in
 the wheel.
 
 ## Test layers and markers (TDD §12)
