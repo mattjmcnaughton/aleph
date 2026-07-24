@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import {
   type PathDetail,
@@ -6,12 +6,21 @@ import {
   type PathUnit,
   isNotFound,
   isPathViewTerminal,
-  isRateLimited,
   pathQueryKey,
   pathQueryOptions,
   retryPath,
 } from "../lib/api";
+import {
+  CheckIcon,
+  LockIcon,
+  PRIMARY_CTA,
+  PlayIcon,
+  RetryNotices,
+  Spinner,
+  StateCard,
+} from "../components/state-card";
 import { makePollingRefetchInterval } from "../lib/polling";
+import { useRetryGeneration } from "../lib/use-retry-generation";
 
 export const Route = createFileRoute("/paths/$pathId")({
   component: PathView,
@@ -38,26 +47,15 @@ const pathViewPollConfig = {
 function PathView() {
   const { pathId } = Route.useParams();
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
 
   const pathQuery = useQuery({
     ...pathQueryOptions(pathId),
     refetchInterval: makePollingRefetchInterval(pathViewPollConfig),
   });
 
-  const retryMutation = useMutation({
-    mutationFn: (id: string) => retryPath(id),
-    // Reset (not invalidate) so the poll restarts at the 2s cadence rather than
-    // resuming at the 5s ceiling (mirrors onboarding's retry, see lib/polling).
-    onSuccess: (_created, id) => queryClient.resetQueries({ queryKey: pathQueryKey(id) }),
-  });
+  const retry = useRetryGeneration({ mutationFn: retryPath, queryKey: pathQueryKey });
 
   const detail = pathQuery.data;
-
-  // Surface a retry that didn't land (mirrors onboarding's FailedState): a
-  // rate-limited retry gets the daily-cap notice, any other error a generic one.
-  const retryRateLimited = retryMutation.isError && isRateLimited(retryMutation.error);
-  const retryErrored = retryMutation.isError && !retryRateLimited;
 
   function openLesson(lessonId: string) {
     navigate({ to: "/lessons/$lessonId", params: { lessonId } });
@@ -75,10 +73,10 @@ function PathView() {
         <RefusedState message={detail.refusal_message ?? undefined} />
       ) : detail.status === "failed" ? (
         <FailedState
-          onRetry={() => retryMutation.mutate(detail.id)}
-          retrying={retryMutation.isPending}
-          retryRateLimited={retryRateLimited}
-          retryErrored={retryErrored}
+          onRetry={() => retry.retry(detail.id)}
+          retrying={retry.retrying}
+          retryRateLimited={retry.rateLimited}
+          retryErrored={retry.errored}
         />
       ) : detail.status !== "ready" ? (
         <GeneratingState />
@@ -286,37 +284,26 @@ function LoadingState() {
 
 function GeneratingState() {
   return (
-    <section
-      data-testid="path-generating"
-      aria-live="polite"
-      className="mt-4 rounded-lg border border-divider bg-surface p-6 text-center shadow-sm"
-    >
-      <div
-        className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-divider border-t-teal"
-        aria-hidden="true"
-      />
+    <StateCard testid="path-generating" ariaLive="polite">
+      <Spinner />
       <h1 className="mt-4 text-lg font-semibold">Drafting your path…</h1>
       <p className="mx-auto mt-2 max-w-[22rem] text-sm leading-6 text-mist">
         Aleph is generating an outline of units and lessons. This page updates itself when it's
         ready.
       </p>
-    </section>
+    </StateCard>
   );
 }
 
 function RefusedState({ message }: { message?: string }) {
   return (
-    <section
-      data-testid="path-refused"
-      data-variant="refusal"
-      className="mt-4 rounded-lg border border-iris-700 bg-iris-900 p-6 text-center shadow-sm"
-    >
+    <StateCard testid="path-refused" variant="refusal" dataVariant="refusal">
       <h1 className="text-lg font-semibold text-iris-300">This topic is out of scope.</h1>
       <p className="mx-auto mt-2 max-w-[24rem] text-sm leading-6 text-porcelain">
         {message ??
           "Aleph can't build a path on this topic. Try a different topic and we'll draft one."}
       </p>
-    </section>
+    </StateCard>
   );
 }
 
@@ -332,87 +319,31 @@ function FailedState({
   retryErrored: boolean;
 }) {
   return (
-    <section
-      data-testid="path-failed"
-      data-variant="error"
-      aria-live="assertive"
-      className="mt-4 rounded-lg border border-danger-border/60 bg-danger-bg p-6 text-center shadow-sm"
-    >
+    <StateCard testid="path-failed" variant="error" dataVariant="error" ariaLive="assertive">
       <h1 className="text-lg font-semibold text-danger">Generation didn't finish.</h1>
       <p className="mx-auto mt-2 max-w-[24rem] text-sm leading-6 text-porcelain">
         We couldn't draft this path. Retry when you're ready.
       </p>
-      {retryRateLimited ? (
-        <p
-          data-testid="path-retry-ratelimit"
-          className="mx-auto mt-4 max-w-[24rem] text-sm leading-6 text-danger"
-        >
-          You've reached today's limit for new paths. Try again tomorrow.
-        </p>
-      ) : null}
-      {retryErrored ? (
-        <p
-          data-testid="path-retry-error"
-          className="mx-auto mt-4 max-w-[24rem] text-sm leading-6 text-danger"
-        >
-          That retry didn't go through. Check your connection and try again.
-        </p>
-      ) : null}
-      <button
-        type="button"
-        onClick={onRetry}
-        disabled={retrying}
-        className="mt-6 inline-flex w-full items-center justify-center rounded-md bg-teal px-4 py-3 text-sm font-semibold text-night transition-colors hover:bg-teal-bright disabled:cursor-not-allowed disabled:opacity-50"
-      >
+      <RetryNotices
+        testidPrefix="path"
+        rateLimited={retryRateLimited}
+        errored={retryErrored}
+        rateLimitMessage="You've reached today's limit for new paths. Try again tomorrow."
+      />
+      <button type="button" onClick={onRetry} disabled={retrying} className={`mt-6 ${PRIMARY_CTA}`}>
         {retrying ? "Retrying…" : "Try again"}
       </button>
-    </section>
+    </StateCard>
   );
 }
 
 function UnavailableState() {
   return (
-    <section
-      data-testid="path-unavailable"
-      className="mt-4 rounded-lg border border-divider bg-surface p-6 text-center shadow-sm"
-    >
+    <StateCard testid="path-unavailable">
       <h1 className="text-lg font-semibold">We couldn't load this path.</h1>
       <p className="mx-auto mt-2 max-w-[24rem] text-sm leading-6 text-mist">
         It may have been deleted, or something went wrong. Head back to your paths and try again.
       </p>
-    </section>
-  );
-}
-
-// --- Icons (inline; no icon dependency) -------------------------------------
-
-function CheckIcon() {
-  return (
-    <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" aria-hidden="true">
-      <path
-        d="M3.5 8.5l3 3 6-6.5"
-        stroke="currentColor"
-        strokeWidth="1.75"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function LockIcon() {
-  return (
-    <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" aria-hidden="true">
-      <rect x="3.5" y="7" width="9" height="6" rx="1.2" stroke="currentColor" strokeWidth="1.4" />
-      <path d="M5.5 7V5.5a2.5 2.5 0 0 1 5 0V7" stroke="currentColor" strokeWidth="1.4" />
-    </svg>
-  );
-}
-
-function PlayIcon() {
-  return (
-    <svg viewBox="0 0 16 16" className="h-3 w-3" fill="currentColor" aria-hidden="true">
-      <path d="M5 3.5v9l7-4.5-7-4.5z" />
-    </svg>
+    </StateCard>
   );
 }

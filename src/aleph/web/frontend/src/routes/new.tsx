@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -11,8 +11,10 @@ import {
   pathQueryOptions,
   retryPath,
 } from "../lib/api";
+import { PRIMARY_CTA, RetryNotices, Spinner, StateCard } from "../components/state-card";
 import { LEVELS, canSubmitTopic, deriveOnboardingPhase } from "../lib/onboarding";
 import { makePollingRefetchInterval } from "../lib/polling";
+import { useRetryGeneration } from "../lib/use-retry-generation";
 
 export const Route = createFileRoute("/new")({
   component: NewPath,
@@ -31,7 +33,6 @@ const pathPollConfig = {
 // suggestion chips are deliberately out of scope for this ticket and land later.
 function NewPath() {
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
 
   const [topic, setTopic] = useState("");
   const [level, setLevel] = useState<Level>("new_to_it");
@@ -47,12 +48,7 @@ function NewPath() {
     refetchInterval: makePollingRefetchInterval(pathPollConfig),
   });
 
-  const retryMutation = useMutation({
-    mutationFn: (id: string) => retryPath(id),
-    // Reset (not just invalidate) so the poll restarts its 2s cadence rather
-    // than resuming at the 5s ceiling (dataUpdateCount is cleared).
-    onSuccess: (_created, id) => queryClient.resetQueries({ queryKey: pathQueryKey(id) }),
-  });
+  const retry = useRetryGeneration({ mutationFn: retryPath, queryKey: pathQueryKey });
 
   const status = pathQuery.data?.status;
 
@@ -73,7 +69,7 @@ function NewPath() {
     setPathId(null);
     navigatedRef.current = false;
     createMutation.reset();
-    retryMutation.reset();
+    retry.reset();
   }
 
   function onSubmit(event: React.FormEvent) {
@@ -84,11 +80,6 @@ function NewPath() {
 
   const rateLimited = createMutation.isError && isRateLimited(createMutation.error);
   const createFailed = createMutation.isError && !rateLimited;
-
-  // A retry that itself fails must not silently flip the button back (F1): the
-  // 429 daily cap (§5.6) gets distinct copy from a generic failure.
-  const retryRateLimited = retryMutation.isError && isRateLimited(retryMutation.error);
-  const retryFailed = retryMutation.isError && !retryRateLimited;
 
   return (
     <main className="mx-auto w-full max-w-[480px] px-4 py-8">
@@ -124,10 +115,10 @@ function NewPath() {
 
       {phase === "failed" ? (
         <FailedState
-          onRetry={() => pathId && retryMutation.mutate(pathId)}
-          retrying={retryMutation.isPending}
-          retryRateLimited={retryRateLimited}
-          retryErrored={retryFailed}
+          onRetry={() => pathId && retry.retry(pathId)}
+          retrying={retry.retrying}
+          retryRateLimited={retry.rateLimited}
+          retryErrored={retry.errored}
           onEdit={backToEditing}
         />
       ) : null}
@@ -231,20 +222,13 @@ function OnboardingForm({
 
 function GeneratingState() {
   return (
-    <section
-      data-testid="onboarding-generating"
-      aria-live="polite"
-      className="mt-8 rounded-lg border border-divider bg-surface p-6 text-center shadow-sm"
-    >
-      <div
-        className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-divider border-t-teal"
-        aria-hidden="true"
-      />
+    <StateCard testid="onboarding-generating" ariaLive="polite" spacing="mt-8">
+      <Spinner />
       <h2 className="mt-4 text-lg font-semibold">Drafting your path…</h2>
       <p className="mx-auto mt-2 max-w-[22rem] text-sm leading-6 text-mist">
         Aleph is generating an outline of units and lessons. This takes a moment.
       </p>
-    </section>
+    </StateCard>
   );
 }
 
@@ -253,11 +237,12 @@ function RefusedState({
   onTryDifferent,
 }: { message?: string; onTryDifferent: () => void }) {
   return (
-    <section
-      data-testid="onboarding-refused"
-      data-variant="refusal"
-      aria-live="polite"
-      className="mt-8 rounded-lg border border-iris-700 bg-iris-900 p-6 text-center shadow-sm"
+    <StateCard
+      testid="onboarding-refused"
+      variant="refusal"
+      dataVariant="refusal"
+      ariaLive="polite"
+      spacing="mt-8"
     >
       <h2 className="text-lg font-semibold text-iris-300">This topic is out of scope.</h2>
       <p className="mx-auto mt-2 max-w-[24rem] text-sm leading-6 text-porcelain">
@@ -271,7 +256,7 @@ function RefusedState({
       >
         Try a different topic
       </button>
-    </section>
+    </StateCard>
   );
 }
 
@@ -289,39 +274,25 @@ function FailedState({
   onEdit: () => void;
 }) {
   return (
-    <section
-      data-testid="onboarding-failed"
-      data-variant="error"
-      aria-live="assertive"
-      className="mt-8 rounded-lg border border-danger-border/60 bg-danger-bg p-6 text-center shadow-sm"
+    <StateCard
+      testid="onboarding-failed"
+      variant="error"
+      dataVariant="error"
+      ariaLive="assertive"
+      spacing="mt-8"
     >
       <h2 className="text-lg font-semibold text-danger">Generation didn't finish.</h2>
       <p className="mx-auto mt-2 max-w-[24rem] text-sm leading-6 text-porcelain">
         We couldn't draft your path this time. Your topic and level are saved — retry when you're
         ready.
       </p>
-      {retryRateLimited ? (
-        <p
-          data-testid="onboarding-retry-ratelimit"
-          className="mx-auto mt-4 max-w-[24rem] text-sm leading-6 text-danger"
-        >
-          You've reached today's limit for new paths. Your topic is saved — try again tomorrow.
-        </p>
-      ) : null}
-      {retryErrored ? (
-        <p
-          data-testid="onboarding-retry-error"
-          className="mx-auto mt-4 max-w-[24rem] text-sm leading-6 text-danger"
-        >
-          That retry didn't go through. Check your connection and try again.
-        </p>
-      ) : null}
-      <button
-        type="button"
-        onClick={onRetry}
-        disabled={retrying}
-        className="mt-6 inline-flex w-full items-center justify-center rounded-md bg-teal px-4 py-3 text-sm font-semibold text-night transition-colors hover:bg-teal-bright disabled:cursor-not-allowed disabled:opacity-50"
-      >
+      <RetryNotices
+        testidPrefix="onboarding"
+        rateLimited={retryRateLimited}
+        errored={retryErrored}
+        rateLimitMessage="You've reached today's limit for new paths. Your topic is saved — try again tomorrow."
+      />
+      <button type="button" onClick={onRetry} disabled={retrying} className={`mt-6 ${PRIMARY_CTA}`}>
         {retrying ? "Retrying…" : "Try again"}
       </button>
       <button
@@ -331,6 +302,6 @@ function FailedState({
       >
         Edit topic
       </button>
-    </section>
+    </StateCard>
   );
 }

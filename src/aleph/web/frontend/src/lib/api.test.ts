@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   ApiError,
+  type LessonDetail,
   type LessonGenerationState,
   type LessonUnlockState,
   type PathDetail,
   type PathStatus,
+  isLessonViewTerminal,
   isNotFound,
   isPathViewTerminal,
 } from "./api";
@@ -93,6 +95,46 @@ describe("isPathViewTerminal", () => {
         detail("ready", [{ unlock_state: "available", generation_state: "failed" }]),
       ),
     ).toBe(true);
+  });
+});
+
+describe("isLessonViewTerminal", () => {
+  function lesson(
+    unlock_state: LessonUnlockState,
+    generation_state: LessonGenerationState,
+  ): LessonDetail {
+    return {
+      id: "l1",
+      path_id: "p1",
+      title: "Lesson",
+      position_in_path: 0,
+      position_in_unit: 0,
+      generation_state,
+      unlock_state,
+      read_passage: null,
+      quick_check: null,
+      attempt: null,
+      generation_error: null,
+    };
+  }
+
+  it("is non-terminal for undefined data (nothing fetched yet)", () => {
+    expect(isLessonViewTerminal(undefined)).toBe(false);
+  });
+
+  it("is terminal for a locked lesson (no content to watch, regardless of state)", () => {
+    expect(isLessonViewTerminal(lesson("locked", "generating"))).toBe(true);
+    expect(isLessonViewTerminal(lesson("locked", "ungenerated"))).toBe(true);
+  });
+
+  it("keeps polling an available lesson until its generation resolves", () => {
+    expect(isLessonViewTerminal(lesson("available", "ungenerated"))).toBe(false);
+    expect(isLessonViewTerminal(lesson("available", "generating"))).toBe(false);
+  });
+
+  it("is terminal once generation is generated or failed", () => {
+    expect(isLessonViewTerminal(lesson("available", "generated"))).toBe(true);
+    expect(isLessonViewTerminal(lesson("available", "failed"))).toBe(true);
   });
 });
 
