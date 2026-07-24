@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { PathStatus } from "./api";
-import { LEVELS, canSubmitTopic, deriveOnboardingPhase } from "./onboarding";
+import { LEVELS, canSubmitTopic, deriveOnboardingPhase, levelLabel } from "./onboarding";
 
 describe("deriveOnboardingPhase", () => {
   it("[AL-061] shows the form before any path exists", () => {
@@ -44,5 +44,13 @@ describe("LEVELS", () => {
   it("[AL-061] offers the three CONTEXT levels in order", () => {
     expect(LEVELS.map((l) => l.value)).toEqual(["new_to_it", "some_experience", "work_in_it"]);
     expect(LEVELS.map((l) => l.label)).toEqual(["New to it", "Some experience", "I work in it"]);
+  });
+});
+
+describe("levelLabel", () => {
+  it("[AL-064] renders each level with its CONTEXT display label", () => {
+    expect(levelLabel("new_to_it")).toBe("New to it");
+    expect(levelLabel("some_experience")).toBe("Some experience");
+    expect(levelLabel("work_in_it")).toBe("I work in it");
   });
 });

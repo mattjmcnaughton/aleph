@@ -11,6 +11,11 @@ export const LEVELS: ReadonlyArray<{ value: Level; label: string }> = [
   { value: "work_in_it", label: "I work in it" },
 ] as const;
 
+/** The display label for a level, e.g. on a "Your paths" row (§5.5). */
+export function levelLabel(level: Level): string {
+  return LEVELS.find((option) => option.value === level)?.label ?? level;
+}
+
 /**
  * What the onboarding surface is showing right now:
  * - `editing`     — the topic + level form (initial, and where a refusal or a
