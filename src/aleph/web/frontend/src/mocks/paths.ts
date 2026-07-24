@@ -13,9 +13,147 @@ import {
   API_V1_BASE,
   type Level,
   type PathDetail,
+  type PathProgress,
   type PathStatus,
   type PathUnit,
 } from "../lib/api";
+
+// --- Reusable path-view fixtures (AL-062) -----------------------------------
+//
+// Single-payload rail fixtures for the three shapes the path view must render:
+// a fresh path (nothing started), a mid path (some complete, one available), and
+// a complete path (every lesson done). Ids are stable so tests can target a
+// specific lesson. The path view derives its `n of m complete` readout straight
+// from each payload's `unlock_state`s, so the fixtures stay the single source of
+// truth and the `progress` roll-up is computed from the same units.
+
+/** Fresh path: first lesson available (generated), the rest locked. */
+export const FRESH_PATH_UNITS: PathUnit[] = [
+  {
+    id: "u1000000-0000-4000-8000-000000000001",
+    title: "Foundations & types",
+    lessons: [
+      {
+        id: "l1000000-0000-4000-8000-000000000001",
+        title: "What TypeScript adds",
+        position_in_path: 0,
+        generation_state: "generated",
+        unlock_state: "available",
+      },
+      {
+        id: "l1000000-0000-4000-8000-000000000002",
+        title: "Primitive types",
+        position_in_path: 1,
+        generation_state: "ungenerated",
+        unlock_state: "locked",
+      },
+      {
+        id: "l1000000-0000-4000-8000-000000000003",
+        title: "Type inference",
+        position_in_path: 2,
+        generation_state: "ungenerated",
+        unlock_state: "locked",
+      },
+    ],
+  },
+];
+
+/** Mid path: two lessons complete, the third available, the fourth locked. */
+export const MID_PATH_UNITS: PathUnit[] = [
+  {
+    id: "u2000000-0000-4000-8000-000000000001",
+    title: "Foundations & types",
+    lessons: [
+      {
+        id: "l2000000-0000-4000-8000-000000000001",
+        title: "What TypeScript adds",
+        position_in_path: 0,
+        generation_state: "generated",
+        unlock_state: "complete",
+      },
+      {
+        id: "l2000000-0000-4000-8000-000000000002",
+        title: "Primitive types",
+        position_in_path: 1,
+        generation_state: "generated",
+        unlock_state: "complete",
+      },
+    ],
+  },
+  {
+    id: "u2000000-0000-4000-8000-000000000002",
+    title: "Functions & narrowing",
+    lessons: [
+      {
+        id: "l2000000-0000-4000-8000-000000000003",
+        title: "Function types",
+        position_in_path: 2,
+        generation_state: "generated",
+        unlock_state: "available",
+      },
+      {
+        id: "l2000000-0000-4000-8000-000000000004",
+        title: "Narrowing",
+        position_in_path: 3,
+        generation_state: "ungenerated",
+        unlock_state: "locked",
+      },
+    ],
+  },
+];
+
+/** Complete path: every lesson complete (path-complete treatment, revisitable). */
+export const COMPLETE_PATH_UNITS: PathUnit[] = [
+  {
+    id: "u3000000-0000-4000-8000-000000000001",
+    title: "Foundations & types",
+    lessons: [
+      {
+        id: "l3000000-0000-4000-8000-000000000001",
+        title: "What TypeScript adds",
+        position_in_path: 0,
+        generation_state: "generated",
+        unlock_state: "complete",
+      },
+      {
+        id: "l3000000-0000-4000-8000-000000000002",
+        title: "Primitive types",
+        position_in_path: 1,
+        generation_state: "generated",
+        unlock_state: "complete",
+      },
+      {
+        id: "l3000000-0000-4000-8000-000000000003",
+        title: "Type inference",
+        position_in_path: 2,
+        generation_state: "generated",
+        unlock_state: "complete",
+      },
+    ],
+  },
+];
+
+/**
+ * The `PathProgressDTO` roll-up for a payload's units (docs/api.md): counts over
+ * the effective lesson states. Kept in lockstep with `units` so the contract the
+ * switcher (AL-064) will read stays honest even though the path view derives its
+ * own header count from `unlock_state`.
+ */
+function progressFor(units: PathUnit[]): PathProgress {
+  const lessons = units.flatMap((unit) => unit.lessons);
+  return {
+    total_lessons: lessons.length,
+    generated_lessons: lessons.filter((l) => l.generation_state === "generated").length,
+    completed_lessons: lessons.filter((l) => l.unlock_state === "complete").length,
+  };
+}
+
+/** Zeroed roll-up for a path with no visible outline (non-ready statuses). */
+const EMPTY_PROGRESS: PathProgress = {
+  total_lessons: 0,
+  generated_lessons: 0,
+  completed_lessons: 0,
+};
 
 /** Topic contains this (case-insensitive) → the outline refuses (W7). */
 export const REFUSED_TOPIC_SENTINEL = "refuse-me";
@@ -41,6 +179,8 @@ interface StoredPath {
   resolution: PathStatus;
   /** While > 0, `GET` reports `generating`; each poll decrements it. */
   pollsRemaining: number;
+  /** Outline once `ready` (AL-062 rail fixtures). Defaults to READY_UNITS. */
+  units?: PathUnit[];
 }
 
 interface PathsConfig {
@@ -83,6 +223,8 @@ export function seedPath(path: {
   level: Level;
   resolution?: PathStatus;
   pollsRemaining?: number;
+  /** Custom outline for a `ready` path (the rail fixtures above). */
+  units?: PathUnit[];
 }): void {
   store.set(path.id, {
     id: path.id,
@@ -90,6 +232,7 @@ export function seedPath(path: {
     level: path.level,
     resolution: path.resolution ?? "ready",
     pollsRemaining: path.pollsRemaining ?? 0,
+    units: path.units,
   });
 }
 
@@ -103,7 +246,11 @@ const READY_UNITS: PathUnit[] = [
         id: "22222222-2222-4222-8222-222222222222",
         title: "Getting started",
         position_in_path: 0,
-        generation_state: "ungenerated",
+        // `generated` (not `ungenerated`): a `ready` outline whose available
+        // lesson still has no content is a *non-terminal* path-view state
+        // (`isPathViewTerminal`), so the poll would never stop with the old
+        // default. The steady ready state has the available lesson generated.
+        generation_state: "generated",
         unlock_state: "available",
       },
     ],
@@ -113,14 +260,16 @@ const READY_UNITS: PathUnit[] = [
 function detailFor(path: StoredPath): PathDetail {
   const generating = path.pollsRemaining > 0;
   const status: PathStatus = generating ? "generating" : path.resolution;
+  const units = status === "ready" ? (path.units ?? READY_UNITS) : [];
   return {
     id: path.id,
     topic: path.topic,
     level: path.level,
     status,
     refusal_message: status === "refused" ? REFUSAL_MESSAGE : null,
-    progress: 0,
-    units: status === "ready" ? READY_UNITS : [],
+    // Roll-up derived from the same units the rail renders (docs/api.md).
+    progress: status === "ready" ? progressFor(units) : EMPTY_PROGRESS,
+    units,
   };
 }
 
