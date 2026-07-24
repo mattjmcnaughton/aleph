@@ -21,6 +21,22 @@ frees quota (counts derive from live rows, and cascade deletes also erase
 lesson stamps); and only each lesson's *latest* claim stamp is counted, so
 same-day retries of one lesson consume a single quota unit.
 
+**Outline retries (``check_outline_generation``, AL-050).** ``POST
+/paths/{id}/retry`` is a billed trigger that inserts no row, so
+``check_path_creation`` cannot bound it (its created-rows count never moves on a
+retry). The retry cap instead counts *paths with an outline attempt today*
+(``UsageRepository.count_path_outline_generations_since``, keyed on the
+re-stamped ``generation_started_at``), reusing ``RATE_LIMIT_PATHS_PER_DAY`` — an
+outline attempt is the same billed unit as path creation and §14 defines no
+separate retry cap, so one daily outline-attempt budget covers both create and
+retry symmetrically. This bounds *cross-path* retry storms at distinct paths per
+day. It deliberately does **not** bound a *same-path* retry loop: repeated
+retries of one path overwrite its single stamp, so the row counts once. That
+loop is accepted for MVP — it is bounded only by claim serialization and client
+patience (one outline call runs at a time under the concurrency permit, and the
+reconciler never auto-retries a real ``failed`` outline, so nothing re-drives it
+without a fresh learner-initiated request).
+
 The check is called *before* the billed work, and admins are exempt via an
 injected ``is_admin`` flag (decoupled from ``authz`` on purpose — AL-050 wires
 the two together). On refusal it raises ``HTTPException(429, ...)`` with a
@@ -53,6 +69,10 @@ class UsageCounter(Protocol):
     """
 
     async def count_paths_created_since(
+        self, *, user_id: uuid.UUID, since: datetime
+    ) -> int: ...
+
+    async def count_path_outline_generations_since(
         self, *, user_id: uuid.UUID, since: datetime
     ) -> int: ...
 
@@ -105,6 +125,28 @@ class DailyRateLimiter:
             message=(
                 f"You've reached today's limit of {self._paths_per_day} new "
                 "paths. Please try again tomorrow."
+            ),
+        )
+
+    async def check_outline_generation(
+        self, *, user_id: uuid.UUID, is_admin: bool
+    ) -> None:
+        """Raise ``HTTPException(429)`` if ``user_id`` is at the daily outline cap.
+
+        Call before triggering an outline retry (``POST /paths/{id}/retry``).
+        Reuses the daily path cap (``paths_per_day``): an outline attempt is the
+        same billed unit as a path creation, and it counts *paths with an outline
+        attempt today* — see this module's docstring for what that bounds (and
+        does not).
+        """
+        await self._check(
+            self._usage.count_path_outline_generations_since,
+            cap=self._paths_per_day,
+            user_id=user_id,
+            is_admin=is_admin,
+            message=(
+                f"You've reached today's limit of {self._paths_per_day} path "
+                "generations. Please try again tomorrow."
             ),
         )
 

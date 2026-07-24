@@ -35,10 +35,14 @@ class _FakeUsage:
 
     def __init__(self) -> None:
         self.paths: dict[uuid.UUID, list[datetime]] = {}
+        self.outlines: dict[uuid.UUID, list[datetime]] = {}
         self.lessons: dict[uuid.UUID, list[datetime]] = {}
 
     def add_path(self, user_id: uuid.UUID, when: datetime) -> None:
         self.paths.setdefault(user_id, []).append(when)
+
+    def add_outline(self, user_id: uuid.UUID, when: datetime) -> None:
+        self.outlines.setdefault(user_id, []).append(when)
 
     def add_lesson(self, user_id: uuid.UUID, when: datetime) -> None:
         self.lessons.setdefault(user_id, []).append(when)
@@ -47,6 +51,11 @@ class _FakeUsage:
         self, *, user_id: uuid.UUID, since: datetime
     ) -> int:
         return sum(1 for t in self.paths.get(user_id, []) if t >= since)
+
+    async def count_path_outline_generations_since(
+        self, *, user_id: uuid.UUID, since: datetime
+    ) -> int:
+        return sum(1 for t in self.outlines.get(user_id, []) if t >= since)
 
     async def count_lesson_generations_since(
         self, *, user_id: uuid.UUID, since: datetime
@@ -83,6 +92,26 @@ async def test_path_creation_allows_up_to_cap_then_denies() -> None:
     with pytest.raises(HTTPException) as excinfo:
         await limiter.check_path_creation(user_id=USER, is_admin=False)
     assert excinfo.value.status_code == status.HTTP_429_TOO_MANY_REQUESTS
+
+
+@pytest.mark.anyio
+async def test_outline_generation_reuses_the_paths_cap() -> None:
+    # The retry cap counts paths-with-an-outline-attempt-today and reuses the
+    # daily paths cap: cap of 3, three attempts today → the next is denied.
+    usage = _FakeUsage()
+    limiter = _limiter(usage, paths=3)
+    for _ in range(3):
+        usage.add_outline(USER, DAY_ONE)
+
+    with pytest.raises(HTTPException) as excinfo:
+        await limiter.check_outline_generation(user_id=USER, is_admin=False)
+    assert excinfo.value.status_code == status.HTTP_429_TOO_MANY_REQUESTS
+
+    # Admin exempt, and a fresh UTC day resets the window.
+    await limiter.check_outline_generation(user_id=USER, is_admin=True)
+    await _limiter(usage, paths=3, now=DAY_TWO).check_outline_generation(
+        user_id=USER, is_admin=False
+    )
 
 
 @pytest.mark.anyio

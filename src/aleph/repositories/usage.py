@@ -53,6 +53,34 @@ class UsageRepository:
         )
         return result.scalar_one()
 
+    async def count_path_outline_generations_since(
+        self, *, user_id: uuid.UUID, since: datetime.datetime
+    ) -> int:
+        """Count ``user_id``'s paths whose outline was (re)claimed since ``since``.
+
+        Unlike :meth:`count_paths_created_since` (keyed on ``created_at``, so a
+        row is counted once by its creation day), this counts the ``paths`` rows
+        whose ``generation_started_at`` — the stamp an outline claim writes — is
+        at/after ``since``. Because a retry re-claims and **re-stamps** the same
+        row, this counts each path's *latest* outline attempt, so it bounds
+        outline generations at *distinct paths with an attempt today*: it backs
+        the retry cap (``check_outline_generation``), which path creation cannot
+        (a retry inserts no row, so a created-rows count never moves on retry).
+
+        Same-path retry loops still slip through — repeated retries of one path
+        overwrite the one stamp, so the row counts once — an accepted MVP
+        limitation documented in ``services.rate_limit``.
+        """
+        result = await self.session.execute(
+            select(func.count())
+            .select_from(Path)
+            .where(
+                Path.user_id == user_id,
+                Path.generation_started_at >= since,
+            )
+        )
+        return result.scalar_one()
+
     async def count_lesson_generations_since(
         self, *, user_id: uuid.UUID, since: datetime.datetime
     ) -> int:
