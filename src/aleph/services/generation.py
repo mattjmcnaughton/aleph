@@ -98,6 +98,23 @@ if TYPE_CHECKING:
     SessionFactory = Callable[[], AbstractAsyncContextManager[AsyncSession]]
     Spawn = Callable[[Coroutine[Any, Any, Any]], Any]
     ResolveModel = Callable[[str], Model]
+    # The seam AL-041 wraps around generation to enforce the process-wide
+    # concurrency bound. ``model_slot()`` returns an async context manager entered
+    # for the span of one claim + context load + model call — production passes
+    # ``lambda: semaphore`` (an ``asyncio.Semaphore`` is itself an async CM, so
+    # entering it acquires/releases one permit), tests pass one that instruments
+    # concurrency, and the default is ``nullcontext`` (no bound). The permit is
+    # acquired **before** the claim (§5.4): a claim implies a held permit, so a row
+    # never commits ``generating`` and then queues unbounded on the semaphore
+    # (which, under a spike, would let a healthy queued row's wait exceed
+    # ``GENERATION_STALE_AFTER``, go stale mid-queue, and be re-claimed and
+    # double-run). Permit acquisition is deliberately **outside** the per-call
+    # ``asyncio.timeout`` (queue time is not model time). It spans one generation
+    # and **not** the whole task: the serial per-path prefetch chain awaits its
+    # sub-generations inline, acquiring and releasing one permit per lesson — a
+    # whole-task bound would let a path holding a permit block on sub-work that
+    # also needs one, a deadlock.
+    ModelSlot = Callable[[], AbstractAsyncContextManager[Any]]
 
 logger = structlog.get_logger(__name__)
 
@@ -182,11 +199,21 @@ class GenerationOrchestrator:
         stale_after_seconds: float | None = None,
         outline_caps: OutlineCaps | None = None,
         lesson_caps: LessonCaps | None = None,
+        model_slot: ModelSlot = contextlib.nullcontext,
     ) -> None:
         self._session_factory = session_factory
         self._spawn = spawn
         self._resolve_model = resolve_model_fn
         self._config = config
+        # The runtime seams AL-041 rebinds in the app lifespan (see
+        # :meth:`bind_runtime`): the spawn (→ a registry wrapper) and the model
+        # slot (→ the process-wide semaphore). Defaults are unbound production
+        # values so the orchestrator is fully usable — and testable — with no
+        # lifecycle at all. The constructed values are remembered so
+        # :meth:`reset_runtime` can restore them on shutdown.
+        self._model_slot = model_slot
+        self._base_spawn = spawn
+        self._base_model_slot = model_slot
         self._prefetch_n = prefetch_n if prefetch_n is not None else config.prefetch_n
         self._timeout = (
             generation_timeout_seconds
@@ -209,6 +236,40 @@ class GenerationOrchestrator:
         )
         self._outline_caps = outline_caps or _outline_caps_from(config)
         self._lesson_caps = lesson_caps or _lesson_caps_from(config)
+
+    # -- runtime wiring (AL-041 lifespan) ---------------------------------- #
+
+    def bind_runtime(self, *, spawn: Spawn, model_slot: ModelSlot) -> None:
+        """Rebind the spawn and model-slot seams for the app's lifetime (§5.4).
+
+        The FastAPI lifespan (``services/lifecycle.py``) calls this at startup on
+        the module-level :data:`generation_orchestrator` — the same instance
+        AL-050/051 import — so every route and background trigger routes through
+        the task registry (strong refs, shutdown cancel) and the process-wide
+        concurrency semaphore. Mutating the shared instance in place (rather than
+        reconstructing and rebinding the module attribute) is deliberate: a
+        rebind would not reach references AL-050 already imported.
+
+        **AL-050, revisit this choice.** Singleton mutation-in-place is the seam
+        precisely because AL-050 imports the module-level
+        :data:`generation_orchestrator` directly. If AL-050 instead resolves the
+        orchestrator from FastAPI app state (a DI provider) rather than importing
+        the singleton, prefer constructing a fresh, already-bound orchestrator in
+        the lifespan and storing *that* on ``app.state`` — no in-place mutation, no
+        shared global. The executor keeps ``bind_runtime`` for now because the
+        import-the-singleton access pattern is what exists today.
+        """
+        self._spawn = spawn
+        self._model_slot = model_slot
+
+    def reset_runtime(self) -> None:
+        """Restore the unbound construction-time seams (lifespan shutdown).
+
+        Symmetric with :meth:`bind_runtime`; keeps the module-level singleton
+        clean between an app's shutdown and any later start (and between tests).
+        """
+        self._spawn = self._base_spawn
+        self._model_slot = self._base_model_slot
 
     # -- repository construction ------------------------------------------- #
 
@@ -256,24 +317,36 @@ class GenerationOrchestrator:
         * ``PathOutline`` output → units/lessons inserted (``ungenerated``),
           ``paths.status = ready``, prefetch kicked
         """
-        claimed = await self._claim_outline(path_id, retry=retry)
-        if claimed is None:
-            return  # already ready/refused, freshly generating, or lost the race
-        fence, topic, level = claimed
+        # Acquire the concurrency permit BEFORE the claim (§5.4): the permit spans
+        # the claim + model call, so an outline never commits ``generating`` and
+        # then waits unbounded on the semaphore — which, under a spike, would let a
+        # healthy queued row's wait exceed ``GENERATION_STALE_AFTER``, go stale
+        # mid-queue, and be re-claimed and double-run. Claims happen only once a
+        # permit is held, so queued paths stay ``pending`` (unclaimed). The permit
+        # is released before the prefetch window is kicked (below), so the serial
+        # per-lesson chain never nests inside the outline's permit. Default slot is
+        # a no-op; AL-041 binds the process-wide semaphore.
+        async with self._model_slot():
+            claimed = await self._claim_outline(path_id, retry=retry)
+            if claimed is None:
+                # already ready/refused, freshly generating, or lost the race
+                return
+            fence, topic, level = claimed
 
-        # Top-level handler (§5.4 invariant): any escape from the claimed body —
-        # a persist error, a DB blip in ``_persist_outline`` — records ``failed``
-        # best-effort rather than leaving the row wedged in ``generating`` until
-        # the stale window, and never leaks an unretrieved exception out of the
-        # spawned task. ``CancelledError`` (BaseException) propagates for graceful
-        # shutdown; the state machine makes cancellation safe (stale recovery).
-        try:
-            ready = await self._run_claimed_outline(path_id, fence, topic, level)
-        except Exception:
-            logger.exception("outline_task_failed", path_id=str(path_id))
-            with contextlib.suppress(Exception):
-                await self._mark_outline_failed(path_id, fence)
-            return
+            # Top-level handler (§5.4 invariant): any escape from the claimed body
+            # — a persist error, a DB blip in ``_persist_outline`` — records
+            # ``failed`` best-effort rather than leaving the row wedged in
+            # ``generating`` until the stale window, and never leaks an unretrieved
+            # exception out of the spawned task. ``CancelledError`` (BaseException)
+            # propagates for graceful shutdown; the state machine makes
+            # cancellation safe (stale recovery).
+            try:
+                ready = await self._run_claimed_outline(path_id, fence, topic, level)
+            except Exception:
+                logger.exception("outline_task_failed", path_id=str(path_id))
+                with contextlib.suppress(Exception):
+                    await self._mark_outline_failed(path_id, fence)
+                return
 
         if ready:
             await self.ensure_prefetch_window(path_id)
@@ -293,6 +366,9 @@ class GenerationOrchestrator:
         deps = OutlineDeps(level=_AGENT_LEVEL[level], caps=self._outline_caps)
         model = self._resolve_model(self._config.model_outline)
         try:
+            # The concurrency permit is already held by ``run_outline_task``
+            # (acquired before the claim, §5.4, so queue time never counts against
+            # the per-call budget); here we only bound the model call itself.
             async with asyncio.timeout(self._outline_timeout):
                 run = await agent.run(topic, deps=deps, model=model)
         except TimeoutError:
@@ -468,29 +544,47 @@ class GenerationOrchestrator:
         self, path_id: uuid.UUID, lesson_id: uuid.UUID, *, retry: bool
     ) -> bool:
         """Claim one lesson, generate it, and mark the result. Returns whether it
-        is now ``generated`` by *this* call so the chain may advance."""
-        # 1. Claim (own short transaction, commit immediately).
-        async with self._session_factory() as session:
-            repo = self._lessons(session)
-            claim = repo.claim_for_retry if retry else repo.claim_for_generation
-            fence = await claim(lesson_id)
-            await session.commit()
-        if fence is None:
-            return False  # someone else holds it, or it is terminal
+        is now ``generated`` by *this* call so the chain may advance.
 
-        # 2. Everything after the claim runs under a top-level handler (§5.4
-        # invariant): any escape — a context-load error, a persist blip — records
-        # ``failed`` under the fence best-effort, so the row never wedges in
-        # ``generating`` until the stale window and the spawned task never leaks an
-        # unretrieved exception. ``CancelledError`` (BaseException) propagates for
-        # graceful shutdown; the state machine makes cancellation safe.
-        try:
-            return await self._run_claimed_lesson(path_id, lesson_id, fence)
-        except Exception:
-            logger.exception("lesson_task_failed", lesson_id=str(lesson_id))
-            with contextlib.suppress(Exception):
-                await self._mark_lesson_failed(lesson_id, fence, _LESSON_FAILED_MESSAGE)
-            return False
+        The concurrency permit is acquired **before** the claim (§5.4): the permit
+        spans the claim + context load + model call, so a lesson never commits
+        ``generating`` and then waits unbounded on the semaphore. Were the claim to
+        run first, under a spike (e.g. 50 paths, 8 permits) a healthy queued row's
+        wait for a permit could exceed ``GENERATION_STALE_AFTER``, going stale
+        mid-queue, getting re-claimed, and running the model twice per row.
+        Acquiring the permit first means claims happen only once a permit is held —
+        the queued rows stay ``ungenerated`` (unclaimed), not ``generating``. The
+        permit is released per-lesson before the chain advances, so the serial
+        per-path walk never holds two permits (no self-deadlock). Default slot is a
+        no-op; AL-041 binds the process-wide semaphore.
+        """
+        async with self._model_slot():
+            # 1. Claim (own short transaction, commit immediately) — under the
+            # permit, so a committed claim implies a held permit.
+            async with self._session_factory() as session:
+                repo = self._lessons(session)
+                claim = repo.claim_for_retry if retry else repo.claim_for_generation
+                fence = await claim(lesson_id)
+                await session.commit()
+            if fence is None:
+                return False  # someone else holds it, or it is terminal
+
+            # 2. Everything after the claim runs under a top-level handler (§5.4
+            # invariant): any escape — a context-load error, a persist blip —
+            # records ``failed`` under the fence best-effort, so the row never
+            # wedges in ``generating`` until the stale window and the spawned task
+            # never leaks an unretrieved exception. ``CancelledError``
+            # (BaseException) propagates for graceful shutdown; the state machine
+            # makes cancellation safe.
+            try:
+                return await self._run_claimed_lesson(path_id, lesson_id, fence)
+            except Exception:
+                logger.exception("lesson_task_failed", lesson_id=str(lesson_id))
+                with contextlib.suppress(Exception):
+                    await self._mark_lesson_failed(
+                        lesson_id, fence, _LESSON_FAILED_MESSAGE
+                    )
+                return False
 
     async def _run_claimed_lesson(
         self, path_id: uuid.UUID, lesson_id: uuid.UUID, fence: datetime.datetime
@@ -522,6 +616,9 @@ class GenerationOrchestrator:
         )
         model = self._resolve_model(self._config.model_lesson)
         try:
+            # The concurrency permit is already held by ``_claim_and_generate``
+            # (acquired before the claim, §5.4, and released once per lesson so the
+            # serial chain never holds two); here we only bound the model call.
             async with asyncio.timeout(self._timeout):
                 run = await build_lesson_agent().run(
                     build_lesson_prompt(deps), deps=deps, model=model
