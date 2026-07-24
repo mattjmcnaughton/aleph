@@ -157,7 +157,9 @@ Tests are organized by type (see [`ci.md`](ci.md) for the CI job that runs each)
 - `src/aleph/web/frontend/tests/e2e/` — the Playwright browser suite at the phone
   viewport (`just test-e2e`); it boots the stub-model backend (`scripts/e2e_backend.py`)
   plus the dev frontend. Locally it creates an `aleph_e2e` database and uses the
-  machine's preinstalled chromium via `PW_CHROMIUM_PATH`.
+  machine's preinstalled chromium via `PW_CHROMIUM_PATH`. **Needs compose
+  Keycloak** (`just compose-keycloak-up`): `tests/e2e/journeys/` are the PRD §8
+  workflows (`@w1`..`@w8`) and they sign in for real. See [`ci.md`](ci.md).
 - `tests/external/` — live-provider contract tests, opt-in via `just test-external`.
 
 Use `@pytest.mark.external` for tests that hit external services (they must skip cleanly

@@ -50,3 +50,5 @@ node_modules/
 src/aleph/web/frontend/src/routeTree.gen.ts
 src/aleph/web/frontend/test-results/
 src/aleph/web/frontend/playwright-report/
+# Signed-in browser state the e2e `setup` project mints per run (real cookies).
+src/aleph/web/frontend/tests/e2e/.auth/

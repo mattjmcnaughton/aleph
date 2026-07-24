@@ -25,6 +25,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from pydantic_ai.messages import ModelResponse
+from pydantic_ai.models.function import FunctionModel
 from sqlalchemy import func, select
 
 from aleph import db
@@ -33,11 +35,17 @@ from aleph.auth import AuthIdentity
 from aleph.config import settings
 from aleph.models import Lesson, Path, PathStatus, QuickCheck, Unit
 from aleph.services import generation as gen_module
+from aleph.services.stub_model import StubModelForcedError, build_stub_model
 
 from .conftest import CollectingSpawn, recording_resolver, stub_resolver
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from fastapi import FastAPI
+    from pydantic_ai.messages import ModelMessage
+    from pydantic_ai.models import Model
+    from pydantic_ai.models.function import AgentInfo
 
 # Two distinct learners for ownership assertions. Neither email is in an admin
 # domain (``mattjmcnaughton.com``), so both are subject to the daily cap.
@@ -286,6 +294,93 @@ async def test_retry_reclaims_failed_outline(
         assert before_started is not None
         assert after.generation_started_at is not None
         assert after.generation_started_at > before_started
+
+
+def _fail_first_outline_resolver() -> Callable[[str], Model]:
+    """A ``resolve_model_fn`` whose FIRST outline call fails, transiently.
+
+    The deterministic stub with everything else intact: outline call #1 raises
+    the way a provider error does (propagating out of ``agent.run``, so the
+    orchestrator's real failure handling runs), and every call after it —
+    outline or lesson — delegates to the stub unchanged.
+
+    This is the one seam at which "retry, and this time it works" (PRD §8/W8)
+    can be witnessed. The browser suite cannot reach it: its failures come from a
+    sentinel in the path's *topic*, retry re-runs that same stored topic, and the
+    stub is deterministic, so a retried failure fails identically for ever
+    (``test_retry_reclaims_failed_outline`` pins exactly that shape, through the
+    claim stamp). A transient failure — which is what §5.6 recovery is actually
+    about — needs a model that stops failing, and it needs to fail *by call*, not
+    by topic, so the path being recovered is the same row the learner started.
+    """
+    stub_respond = build_stub_model().function
+    assert stub_respond is not None, "the stub model is built from a callback"
+    outline_calls = 0
+
+    def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        nonlocal outline_calls
+        # The outline agent's union registers a tool carrying ``units``; the
+        # lesson agent's does not (the stub dispatches on the same property).
+        is_outline = any(
+            "units" in tool.parameters_json_schema.get("properties", {})
+            for tool in info.output_tools
+        )
+        if is_outline:
+            outline_calls += 1
+            if outline_calls == 1:
+                raise StubModelForcedError("transient outline failure (first call)")
+        response = stub_respond(messages, info)
+        assert isinstance(response, ModelResponse)
+        return response
+
+    model = FunctionModel(respond)
+    return lambda _model_id: model
+
+
+@pytest.mark.anyio
+@pytest.mark.workflow("W8")
+async def test_retry_after_a_transient_failure_recovers_the_same_path(
+    app: FastAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The other half of W8: the retry *succeeds* and the journey continues on the
+    # same path — a failed outline is recoverable, not a dead end (PRD §8, §5.6).
+    collector = CollectingSpawn()
+    monkeypatch.setattr(
+        gen_module.generation_orchestrator,
+        "_resolve_model",
+        _fail_first_outline_resolver(),
+    )
+    monkeypatch.setattr(gen_module.generation_orchestrator, "_spawn", collector)
+
+    async with _client(app) as client:
+        await _sign_in(client, monkeypatch, OWNER)
+
+        # No sentinel in the topic: the failure belongs to the call, not the
+        # topic, so retrying the *same* path is what makes the difference.
+        path_id = await _create(
+            client, collector, "Transient provider trouble", "new_to_it"
+        )
+        assert (await _poll(client, collector, path_id))["status"] == "failed"
+
+        resp = await client.post(f"/api/v1/paths/{path_id}/retry")
+        assert resp.status_code == 202
+        assert resp.json()["id"] == path_id
+        await collector.drain()
+
+        body = await _poll(client, collector, path_id)
+        assert body["id"] == path_id, "recovery happened on the learner's path"
+        assert body["status"] == "ready"
+        assert body["refusal_message"] is None
+        assert body["units"], "the recovered outline carries its units"
+
+        # ...and the learner picks up exactly where a first-time success would
+        # have left them: lesson 1 open, with content already written.
+        first_lesson = body["units"][0]["lessons"][0]
+        assert first_lesson["unlock_state"] == "available"
+        assert first_lesson["generation_state"] == "generated"
+        assert body["progress"]["total_lessons"] > 0
+        assert body["progress"]["generated_lessons"] >= 1
+        assert body["progress"]["completed_lessons"] == 0
 
 
 @pytest.mark.anyio

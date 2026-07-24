@@ -1,12 +1,14 @@
 import { defineConfig, devices } from "@playwright/test";
+import { BACKEND_PORT, BACKEND_URL, FRONTEND_PORT, FRONTEND_URL } from "./tests/e2e/servers";
 
-// Ports the harness boots the ephemeral backend + frontend on. Fixed: the vite
-// dev proxy targets http://localhost:8000, so the backend cannot move without
-// moving the proxy target with it.
-const backendPort = 8000;
-const frontendPort = 5300;
-const frontendURL = `http://127.0.0.1:${frontendPort}`;
-const backendURL = `http://127.0.0.1:${backendPort}`;
+// Ports the harness boots the ephemeral backend + frontend on (tests/e2e/servers.ts
+// — the specs drive the backend origin directly for the OIDC flow). Fixed: the
+// vite dev proxy targets http://localhost:8000, so the backend cannot move
+// without moving the proxy target with it.
+const backendPort = BACKEND_PORT;
+const frontendPort = FRONTEND_PORT;
+const frontendURL = FRONTEND_URL;
+const backendURL = BACKEND_URL;
 // BASE_URL points the suite at an already-running deployment (prod smoke);
 // unset, the harness boots its own stub backend + dev frontend below.
 const baseURL = process.env.BASE_URL ?? frontendURL;
@@ -33,10 +35,26 @@ const backendCommand = [
     ` --factory --host 127.0.0.1 --port ${backendPort}`,
 ].join(" && ");
 
+// The W1-W8 user journeys (tests/e2e/journeys/, tagged @w1..@w8). They need the
+// harness's own stub backend — the sentinel topics that force the refusal (W7)
+// and failure (W8) branches only mean something to the stub model — and §12 puts
+// them on the phone viewport, so they run in the mobile project alone and not at
+// all against a BASE_URL deployment (where only the @smoke specs make sense).
+const journeys = "journeys/**";
+const bootsOwnServers = !process.env.BASE_URL;
+
 export default defineConfig({
   testDir: "./tests/e2e",
   fullyParallel: false,
   workers: 1,
+  // Generous budgets: a journey walks several generate/poll cycles and the app
+  // polls on the §14 2s->5s backoff, so wall time is dominated by waits the stub
+  // model itself does not cause — and every one of those cycles stretches on a
+  // CI runner or a developer machine that is busy with something else. The
+  // journeys are deterministic, so a wait that is too tight buys nothing but
+  // flakes; only a real hang should ever reach these.
+  timeout: 180_000,
+  expect: { timeout: 15_000 },
   reporter: [
     ["list"],
     ["json", { outputFile: "../../../../.artifacts/test-results/playwright.json" }],
@@ -62,16 +80,32 @@ export default defineConfig({
         },
       ],
   projects: [
+    // Signs in through the real OIDC code flow once and saves the session as
+    // storage state the journeys replay (tests/e2e/auth.setup.ts). Not a project
+    // the @smoke specs may depend on — those assert the signed-out gate.
+    ...(bootsOwnServers
+      ? [
+          {
+            name: "setup",
+            testMatch: /auth\.setup\.ts/,
+            use: { ...devices["Desktop Chrome"], ...chromiumLaunch },
+          },
+        ]
+      : []),
     {
       name: "desktop",
+      testIgnore: journeys,
       use: {
         ...devices["Desktop Chrome"],
         ...chromiumLaunch,
       },
     },
     {
-      // The phone viewport §12 mandates (390x844) — the primary target surface.
+      // The phone viewport §12 mandates (390x844) — the primary target surface,
+      // and the only one that runs the W1-W8 journeys.
       name: "mobile-390x844",
+      testIgnore: bootsOwnServers ? undefined : journeys,
+      dependencies: bootsOwnServers ? ["setup"] : [],
       use: {
         ...devices["Pixel 5"],
         viewport: { width: 390, height: 844 },

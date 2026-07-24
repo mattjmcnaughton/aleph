@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import {
   type LessonAttempt,
   type LessonDetail,
+  PATHS_QUERY_PREFIX,
   type QuickCheck,
   attemptLesson,
   completeLesson,
@@ -97,6 +98,17 @@ function LessonView() {
       queryClient.setQueryData<LessonDetail>(lessonQueryKey(id), (old) =>
         old ? { ...old, unlock_state: result.unlock_state } : old,
       );
+      // Completion also moves state the *path* surfaces own: the rail's unlock
+      // states (this lesson complete, the next one unlocked) and both progress
+      // readouts. Nothing else would correct them — the path poll stops once
+      // everything visible is terminal, and its cached payload stays fresh for
+      // `staleTime` (30s), so a learner tapping "Back to your path" would find
+      // the lesson un-ticked and the next one still locked (W1's closing beat,
+      // caught by the AL-090 journeys). Invalidating the shared `["paths", …]`
+      // prefix covers the detail and the switcher list in one; it is not
+      // awaited because marking those queries stale is synchronous and no
+      // refetch needs to land before the completed state renders.
+      void queryClient.invalidateQueries({ queryKey: PATHS_QUERY_PREFIX });
     },
   });
 

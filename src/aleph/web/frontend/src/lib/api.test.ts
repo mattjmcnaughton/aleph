@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   ApiError,
   PATHS_LIST_QUERY_KEY,
+  PATHS_QUERY_PREFIX,
   type LessonDetail,
   type LessonGenerationState,
   type LessonUnlockState,
@@ -174,10 +175,21 @@ describe("isPathListTerminal", () => {
   });
 });
 
-describe("PATHS_LIST_QUERY_KEY", () => {
-  it("never collides with a path-detail key (ids are UUIDs, not 'list')", () => {
+describe("the paths query keys", () => {
+  const pathId = "11111111-1111-4111-8111-111111111111";
+
+  it("never collide with each other (ids are UUIDs, not 'list')", () => {
     expect(PATHS_LIST_QUERY_KEY).toEqual(["paths", "list"]);
-    expect(pathQueryKey("11111111-1111-4111-8111-111111111111")).not.toEqual(PATHS_LIST_QUERY_KEY);
+    expect(pathQueryKey(pathId)).not.toEqual(PATHS_LIST_QUERY_KEY);
+  });
+
+  it("[AL-090] both sit under the prefix a completion invalidates", () => {
+    // `invalidateQueries({ queryKey: PATHS_QUERY_PREFIX })` matches by prefix,
+    // so completion reaches the switcher list and every cached path detail only
+    // as long as both keys start with it (routes/lessons.$lessonId.tsx, W1).
+    const depth = PATHS_QUERY_PREFIX.length;
+    expect(PATHS_LIST_QUERY_KEY.slice(0, depth)).toEqual([...PATHS_QUERY_PREFIX]);
+    expect(pathQueryKey(pathId).slice(0, depth)).toEqual([...PATHS_QUERY_PREFIX]);
   });
 });
 
