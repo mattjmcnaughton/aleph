@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from sqlalchemy import ColumnElement, delete, func, select, update
+from sqlalchemy import ColumnElement, delete, exists, func, or_, select, update
 
 from aleph.config import settings
-from aleph.models import Path, PathStatus
+from aleph.models import Lesson, LessonGenerationState, Path, PathStatus
 from aleph.repositories._generation import (
     affected_rows,
     claimable_predicate,
@@ -100,6 +100,54 @@ class PathRepository:
         )
         value = result.scalar_one_or_none()
         return PathStatus(value) if value is not None else None
+
+    async def ids_needing_reconciliation(self) -> list[uuid.UUID]:
+        """Path ids the reconciler should re-drive this tick (TDD §5.4 D6).
+
+        A single scan for **claimable work**, the over-approximation the
+        idempotent driver then makes precise:
+
+        * **outline-level** — a ``pending`` path (its spawn may have been lost to
+          a crash/deploy and no live task holds it) or a **stale** ``generating``
+          one (a crashed outline run), via the shared claim predicate.
+        * **lesson-level** — a ``ready`` path that still has an ``ungenerated``
+          lesson (an unfilled prefetch window) or a **stale** ``generating`` one
+          (a crashed lesson run).
+
+        This is a deliberate over-approximation: it may select a ready path whose
+        window is already filled (ungenerated lessons all sit *beyond* the
+        window) or one blocked by a real ``failed`` lesson. ``resume_path`` /
+        ``ensure_prefetch_window`` handle both precisely and cheaply — the window
+        computation stops at the window edge, and the serial walk stops at a real
+        ``failed`` (never retry-burning it, §5.4). A row in a **real** ``failed``
+        state is never selected on its own (``failed`` is absent from the auto
+        claim predicate), so a systematically failing generation is not
+        retry-burned by the reconciler — only the learner's explicit retry loops.
+        """
+        stale = self._stale_after_seconds
+        outline_claimable = claimable_predicate(
+            state_col=Path.status,
+            started_at_col=Path.generation_started_at,
+            claimable_states=_CLAIMABLE_STATUSES,
+            generating_state=PathStatus.GENERATING,
+            stale_after_seconds=stale,
+        )
+        lesson_work = claimable_predicate(
+            state_col=Lesson.generation_state,
+            started_at_col=Lesson.generation_started_at,
+            claimable_states=(LessonGenerationState.UNGENERATED,),
+            generating_state=LessonGenerationState.GENERATING,
+            stale_after_seconds=stale,
+        )
+        ready_with_work = (Path.status == PathStatus.READY) & exists().where(
+            Lesson.path_id == Path.id, lesson_work
+        )
+        result = await self.session.execute(
+            select(Path.id)
+            .where(or_(outline_claimable, ready_with_work))
+            .order_by(Path.created_at, Path.id)
+        )
+        return list(result.scalars())
 
     async def delete(self, path_id: uuid.UUID) -> bool:
         """Hard-delete a path; ON DELETE CASCADE tears down its whole tree.

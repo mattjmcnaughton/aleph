@@ -13,6 +13,8 @@ from aleph.config import settings
 from aleph.errors import error_response
 from aleph.logging import configure_logging
 from aleph.routers import auth, health
+from aleph.services.generation import generation_orchestrator
+from aleph.services.lifecycle import GenerationLifecycle
 from aleph.telemetry import setup_telemetry
 from aleph.web.serve import mount_frontend
 
@@ -21,9 +23,22 @@ DESCRIPTION = "Mobile-friendly AI tutor: name a topic, get a generated learning 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifespan handler."""
+    """Application lifespan handler.
+
+    Starts the generation lifecycle (AL-041, §5.4): it binds the module-level
+    orchestrator's runtime seams (the task registry + the concurrency semaphore)
+    and launches the in-process reconciler loop, then tears them down on
+    shutdown — cancelling in-flight generation so its rows revert via stale
+    recovery and stay re-claimable.
+    """
     configure_logging()
-    yield
+    lifecycle = GenerationLifecycle(generation_orchestrator, config=settings)
+    await lifecycle.start()
+    app.state.generation_lifecycle = lifecycle
+    try:
+        yield
+    finally:
+        await lifecycle.stop()
 
 
 def create_app() -> FastAPI:

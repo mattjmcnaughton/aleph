@@ -3,7 +3,7 @@
 import datetime
 from typing import Literal, Self
 
-from pydantic import model_validator
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings
 
 # The config-selectable id (TDD §12/D9) that resolves to the deterministic stub
@@ -258,6 +258,29 @@ class Settings(BaseSettings):
     # exempt at the call site. A cap of 0 or negative disables that cap.
     rate_limit_paths_per_day: int = 10
     rate_limit_lesson_generations_per_day: int = 100
+
+    # --- AL-041: reconciler & global concurrency bound (TDD §5.4, §14) --------
+    # Appended as a self-contained block at the END of Settings (other AL-0xx
+    # branches append their own config blocks; keep them separate to avoid merge
+    # conflicts). These wire the in-process reconciler loop and the process-wide
+    # semaphore that caps concurrent model calls (``services/lifecycle.py``).
+
+    # How often the reconciler scans for claimable work — stale ``generating``
+    # rows and paths with unfilled prefetch windows (``RECONCILER_INTERVAL``,
+    # §14). A crashed generation chain resumes within one tick of the stale
+    # timeout instead of waiting for a learner's poll. Must be positive
+    # (``gt=0``): a non-positive interval would busy-spin the loop.
+    reconciler_interval_seconds: float = Field(default=30.0, gt=0)
+
+    # Process-wide ceiling on concurrent model calls (``MAX_CONCURRENT_GENERATIONS``,
+    # §14). Per-path work is already serialized by the ordering invariant; this
+    # bounds *aggregate* load across all paths so spend/latency spikes queue
+    # instead of fanning out (e.g. 50 simultaneous path creations do not become
+    # 50 concurrent model calls). Enforced by a semaphore wrapping each
+    # generation (NOT the whole task — a whole-task bound would deadlock the
+    # serial per-path chain that awaits its sub-generations inline). Must admit at
+    # least one permit (``ge=1``): zero would deadlock every generation.
+    max_concurrent_generations: int = Field(default=8, ge=1)
 
 
 settings = Settings()
