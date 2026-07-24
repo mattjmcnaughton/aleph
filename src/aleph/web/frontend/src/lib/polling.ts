@@ -60,11 +60,11 @@ export interface PollableQuery<T> {
  *
  * `dataUpdateCount` is already 1 at the first interval decision (the initial
  * fetch counts), so we subtract it to make the *first poll* fire at 2s rather
- * than 3s. Advisory: `dataUpdateCount` never resets across a query's lifetime,
- * so a retry after a failed/refused terminal state would resume at the 5s
- * ceiling instead of 2s. That is fine for Phase 1 (terminal states stop the
- * loop and surfaces remount a fresh query on retry); revisit if an in-place
- * "resume polling" path is ever added.
+ * than 3s. Note: `dataUpdateCount` never resets across a query's lifetime, so a
+ * retry that reused the same cached query would resume at the 5s ceiling. The
+ * onboarding retry therefore `resetQueries` (not `invalidateQueries`) to clear
+ * the count and restore the 2s cadence; any future in-place "resume polling"
+ * path must do the same.
  */
 export function makePollingRefetchInterval<T>(config: PollingConfig<T>) {
   return (query: PollableQuery<T>): number | false =>

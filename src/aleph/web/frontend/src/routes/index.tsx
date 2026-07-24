@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { AlephGlyph } from "../components/aleph-logo";
 import { sessionQueryOptions } from "../lib/auth";
 
@@ -12,6 +12,7 @@ export const Route = createFileRoute("/")({
 // the Nocturne system and holds the seam those surfaces plug into.
 function Home() {
   const session = useQuery(sessionQueryOptions);
+  const navigate = useNavigate();
   const firstName = session.data?.authenticated
     ? session.data.user.display_name.split(" ")[0]
     : "learner";
@@ -37,6 +38,7 @@ function Home() {
         </p>
         <button
           type="button"
+          onClick={() => navigate({ to: "/new" })}
           className="mt-5 inline-flex w-full items-center justify-center rounded-md bg-teal px-4 py-3 text-sm font-semibold text-night transition-colors hover:bg-teal-bright"
         >
           New path

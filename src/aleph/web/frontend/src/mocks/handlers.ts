@@ -1,5 +1,6 @@
 import { HttpResponse, http } from "msw";
 import { API_V1_BASE, AUTH_LOGOUT_PATH, type AuthSession } from "../lib/api";
+import { pathsHandlers } from "./paths";
 
 // Contract-shaped fakes for the session endpoint AL-020/AL-021 will serve live.
 // The default is an authenticated, non-admin learner; tests override per-case
@@ -27,4 +28,5 @@ export const signedOutSession: AuthSession = {
 export const handlers = [
   http.get(`${API_V1_BASE}/auth/session`, () => HttpResponse.json(authenticatedSession)),
   http.post(AUTH_LOGOUT_PATH, () => new HttpResponse(null, { status: 204 })),
+  ...pathsHandlers,
 ];

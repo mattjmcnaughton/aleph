@@ -3,6 +3,8 @@
 // component builds a URL or calls `fetch` directly. Resource routes live under
 // `/api/v1` (TDD §6); the OIDC flow lives at unversioned `/auth/*`.
 
+import { queryOptions, skipToken } from "@tanstack/react-query";
+
 const API_BASE = import.meta.env?.VITE_API_URL ?? "";
 
 /** Base path for versioned, session-cookie-protected resources (TDD §6). */
@@ -138,4 +140,96 @@ export function isPathStatusTerminal(status: PathStatus | undefined): boolean {
 /** A lesson poll can stop once content is generated or generation failed. */
 export function isLessonStateTerminal(state: LessonGenerationState | undefined): boolean {
   return state === "generated" || state === "failed";
+}
+
+// --- Paths API (AL-050 wire contract, docs/api.md) --------------------------
+//
+// Trigger + poll (§5.4/D5): `POST /paths` returns `202 {id}` and the client
+// polls `GET /paths/{id}` until `status` resolves. `POST /paths/{id}/retry`
+// re-claims a `failed` outline (§5.6/W8). All three go through `apiFetch`.
+
+/** The learner's self-assessed starting point, chosen at onboarding (CONTEXT). */
+export type Level = "new_to_it" | "some_experience" | "work_in_it";
+
+/** Per-lesson axes carried in the path detail (the two orthogonal states). */
+export type LessonUnlockState = "locked" | "available" | "complete";
+
+export interface PathLesson {
+  id: string;
+  title: string;
+  position_in_path: number;
+  generation_state: LessonGenerationState;
+  unlock_state: LessonUnlockState;
+}
+
+export interface PathUnit {
+  id: string;
+  title: string;
+  lessons: PathLesson[];
+}
+
+/** `GET /api/v1/paths/{id}` body — the poll target (docs/api.md). */
+export interface PathDetail {
+  id: string;
+  topic: string;
+  level: Level;
+  status: PathStatus;
+  /** Non-null **only** when `status == "refused"` (docs/api.md). */
+  refusal_message: string | null;
+  progress: number;
+  units: PathUnit[];
+}
+
+/** `POST /api/v1/paths` / `POST /api/v1/paths/{id}/retry` body — `202 {id}`. */
+export interface PathCreated {
+  id: string;
+}
+
+export interface CreatePathInput {
+  topic: string;
+  level: Level;
+}
+
+/** Create a path and trigger its outline (§5.1). Returns the new path id. */
+export function createPath(input: CreatePathInput): Promise<PathCreated> {
+  return apiFetch<PathCreated>(apiV1Path("/paths"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+}
+
+/** Poll a path's detail (outline status + units) — the trigger+poll GET. */
+export function getPath(id: string): Promise<PathDetail> {
+  return apiFetch<PathDetail>(apiV1Path(`/paths/${id}`));
+}
+
+/** Re-claim a `failed` outline (§5.6/W8). Terminal paths are a silent no-op. */
+export function retryPath(id: string): Promise<PathCreated> {
+  return apiFetch<PathCreated>(apiV1Path(`/paths/${id}/retry`), { method: "POST" });
+}
+
+/** TanStack query key for a single path's detail poll. */
+export function pathQueryKey(id: string): readonly ["paths", string] {
+  return ["paths", id] as const;
+}
+
+/**
+ * THE path-detail query — key + fetcher paired in one place (the
+ * `sessionQueryOptions` house rule in `lib/auth.ts`). Callers spread it into
+ * `useQuery` and layer on their own options (e.g. onboarding adds
+ * `refetchInterval`). Pass `null` before a path exists: the query idles on
+ * `skipToken` instead of firing, so no caller hand-spells the key/fetcher pair
+ * or casts a nullable id (TanStack v5 idiom, replaces `enabled` + `as string`).
+ */
+export function pathQueryOptions(id: string | null) {
+  return queryOptions({
+    queryKey: pathQueryKey(id ?? "idle"),
+    queryFn: id === null ? skipToken : () => getPath(id),
+  });
+}
+
+/** True once `apiFetch` raised the daily-cap envelope (`429 rate_limited`). */
+export function isRateLimited(error: unknown): boolean {
+  return error instanceof ApiError && (error.status === 429 || error.code === "rate_limited");
 }
