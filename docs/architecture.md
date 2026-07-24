@@ -26,6 +26,8 @@ tests/
   unit/                # Fast, isolated unit tests
   integration/         # Tests with real dependencies (Postgres, Keycloak)
   external/            # Live-provider contract tests (opt-in, @pytest.mark.external)
+evals/                 # Agent eval harness — a peer of tests/, dev-only and
+                       # never packaged; opt-in runs (docs/evals.md)
 scripts/
   e2e_backend.py       # Stub-model app factory the Playwright harness boots
 src/aleph/web/frontend/
@@ -44,6 +46,8 @@ routers (HTTP endpoints, parse requests into DTOs)
 ```
 
 DTOs (Pydantic models) are used at the router and service level for API I/O. They are always separate from database models.
+
+`evals/` sits outside this stack entirely: it is development tooling that imports the `agents/` factories (which is what their no-model, no-config purity is *for*) and is excluded from the wheel — see [`docs/evals.md`](evals.md). It reaches into `services/` and `config` only to bind a model — `services/openrouter.resolve_model` plus `config.settings` for the key and slot ids (lazily, so `--smoke` needs no configuration), and `services/stub_model` for the offline stub. The direction is one-way: nothing under `src/aleph/` imports `evals/`.
 
 ## Frontend
 

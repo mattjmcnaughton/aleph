@@ -34,6 +34,14 @@ dependencies = [
 [project.urls]
 Repository = "https://github.com/mattjmcnaughton/aleph"
 
+# The wheel ships exactly one thing: the application package. Stated explicitly
+# (rather than left to hatchling's src-layout auto-detection) because it is the
+# load-bearing half of the "evals/ never ships" guarantee — `evals/`, `tests/`,
+# `scripts/` and `docs/` are peers of `src/`, so none of them can be swept in.
+# `tests/unit/test_packaging.py` asserts this contract.
+[tool.hatch.build.targets.wheel]
+packages = ["src/aleph"]
+
 [tool.uv]
 exclude-newer = "2026-07-23T00:00:00Z"
 
@@ -43,6 +51,18 @@ dev = [
     "pytest-xdist>=3.6",
     "ruff>=0.8",
     "ty>=0.0.54",
+    # Dev environments include the eval-harness deps so `just gate` (ruff, ty,
+    # unit tests) can see `evals/` without a separate sync. Eval *runs* stay
+    # opt-in (`just evals`); only the deps ride along here.
+    { include-group = "evals" },
+]
+# Agent eval harness (evals/, docs/evals.md). A separate group so the Evals CI
+# job installs a minimal env (`uv sync --no-dev --group evals`); the exact
+# version is pinned by uv.lock. The floor stays at 2.9.0 rather than the locked
+# version: [tool.uv] exclude-newer caps fresh resolutions, and an implicit
+# `uv run` re-resolve must stay satisfiable under that window.
+evals = [
+    "pydantic-evals>=2.9.0",
 ]
 
 [tool.ruff]

@@ -11,12 +11,41 @@ layout mirrors the sanctioned habagou shape (gate / integration / e2e).
 | **e2e** | `just test-e2e` | Postgres 16 + Keycloak | Playwright browser suite (phone viewport) against the stub-model backend + dev frontend. |
 
 No job calls an LLM provider: the stub model (`services/stub_model.py`) is
-deterministic and offline, and the live-provider contract tests
-(`tests/external/`) are reachable only via `just test-external`, which CI never
-invokes.
+deterministic and offline, the live-provider contract tests (`tests/external/`)
+are reachable only via `just test-external`, which CI never invokes, and the
+eval harness has its own dispatch-only workflow (below) that no required check
+depends on.
 
 Runs on the same ref cancel their predecessors (`concurrency`), and each job
 uploads its JUnit / Playwright report as an artifact.
+
+## The Evals workflow (opt-in, never required)
+
+[`.github/workflows/evals.yml`](../.github/workflows/evals.yml) runs the agent
+eval harness (`evals/`, [docs/evals.md](evals.md)) against the live OpenRouter
+provider.
+
+- **`workflow_dispatch` only.** No `push`, no `pull_request`, no `schedule`
+  trigger — an eval run costs real money, so it happens only when a human
+  dispatches it (Actions tab → Evals → Run workflow). It is never a required
+  check and nothing in the CI gate depends on it. The `models` input takes
+  comma-separated OpenRouter ids to sweep; empty uses the configured
+  `MODEL_OUTLINE` / `MODEL_LESSON`.
+- **Secret:** `OPENROUTER_API_KEY`, a repository secret (**AL-080 — not
+  uploaded yet**). Until it lands, a dispatched run fails immediately with the
+  harness's exit-2 message.
+- **Environment:** `uv sync --frozen --no-dev --group evals` — project deps plus
+  the `evals` dependency group only. No Node, no Postgres, no Keycloak: the
+  harness is database-free and never boots the app.
+- **Results:** the per-case report table lands in the job log and the job summary
+  (`$GITHUB_STEP_SUMMARY`), and the JSON is uploaded as the `eval-report`
+  artifact. The job fails only on a harness error or a Layer 1 hard floor
+  (refusal-branch correctness, outline caps, lesson bands).
+
+The harness's *own* plumbing is covered for free in the gate:
+`tests/unit/test_evals_harness.py` runs the offline smoke path (real agents,
+stub model), and `tests/unit/test_packaging.py` proves `evals/` never ships in
+the wheel.
 
 ## Test layers and markers (TDD §12)
 
@@ -29,6 +58,9 @@ uploads its JUnit / Playwright report as an artifact.
 - **External** (`tests/external/`) — one live outline + one live lesson round
   trip against real OpenRouter models: a drift canary, not a quality measure
   (quality is the §11 eval harness's job).
+- **Evals** (`evals/`) — not a pytest layer at all: a separate harness with its
+  own runner (`just evals`) and its own dispatch-only workflow. See
+  [docs/evals.md](evals.md).
 
 Two pytest markers are registered in `pyproject.toml`:
 
