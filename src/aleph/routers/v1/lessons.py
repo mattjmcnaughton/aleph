@@ -34,6 +34,7 @@ from sqlalchemy.ext.asyncio import (  # noqa: TC002 - FastAPI resolves annotatio
     AsyncSession,
 )
 
+from aleph import events
 from aleph.authz import is_admin
 from aleph.config import settings
 from aleph.db import get_session
@@ -184,6 +185,15 @@ async def get_lesson(
     )
     if view is None:
         raise _lesson_not_found()
+    # The lesson was served to its owner (PRD §5.7 "lesson viewed"). Polling emits
+    # one event per view; the metrics (path-start = view lesson 1, continuation =
+    # view lesson N+1) count distinct positions, so repeated polls are harmless.
+    events.emit_lesson_viewed(
+        account_id=user.id,
+        path_id=lesson.path_id,
+        lesson_id=lesson.id,
+        position_in_path=lesson.position_in_path,
+    )
     return _detail_response(view)
 
 
@@ -274,6 +284,21 @@ async def attempt_lesson(
     of_record, outcome = outcome_of_record(
         prior=prior, submitted=submitted, correct_index=quick_check.correct_index
     )
+    # The Attempt with its Outcome of record (W6, PRD §5.7). This event is the
+    # activation gate: a completed lesson counts toward "activated" only if its
+    # Quick check was also attempted (§7). Emitted **only on the first-wins
+    # Attempt** (``created``): a repeat submit is not an Attempt (CONTEXT.md /
+    # AL-012), so it must not re-emit — a second event would double-count the
+    # correctness guardrail's denominator and the activation gate. ``outcome`` is
+    # the recorded (first) Outcome regardless, so the single event is truthful.
+    if created:
+        events.emit_quick_check_attempted(
+            account_id=user.id,
+            path_id=lesson.path_id,
+            lesson_id=lesson.id,
+            position_in_path=lesson.position_in_path,
+            outcome=outcome.value,
+        )
     return AttemptResultDTO(
         selected_index=of_record.selected_index,
         outcome=outcome,
@@ -284,7 +309,7 @@ async def attempt_lesson(
 
 @router.post("/lessons/{lesson_id}/complete")
 async def complete_lesson(
-    lesson: OwnedLesson, session: Session
+    lesson: OwnedLesson, user: CurrentUser, session: Session
 ) -> CompleteLessonResponse:
     """Mark the available lesson complete (non-gating) → ``200`` (§4/§6).
 
@@ -303,9 +328,12 @@ async def complete_lesson(
       lesson begins prefetching.
 
     The window advance is fired **only** when this request performed the
-    transition (``mark_completed`` returns ``True``). A concurrent second complete
-    that raced past the ``COMPLETE`` early-return re-stamps nothing (the repo's
-    ``completed_at IS NULL`` guard, TN-4) and must not re-fire the advance either.
+    transition (``mark_completed_and_finalize`` returns ``newly_completed``). A
+    concurrent second complete that raced past the ``COMPLETE`` early-return
+    re-stamps nothing (the repo's ``completed_at IS NULL`` guard, TN-4) and must
+    not re-fire the advance either. Path completion is derived **atomically** in
+    the repository (under the path lock), so ``path_completed`` fires exactly once
+    — never a double-emit if two lessons on a path resolve concurrently.
     """
     unlock_state = await lesson_unlock_state(
         session, path_id=lesson.path_id, lesson_id=lesson.id
@@ -317,11 +345,40 @@ async def complete_lesson(
     if unlock_state is UnlockState.COMPLETE:
         return CompleteLessonResponse(id=lesson.id, unlock_state=UnlockState.COMPLETE)
 
-    newly_completed = await LessonRepository(session).mark_completed(lesson.id)
+    lessons_repo = LessonRepository(session)
+    # Mark complete and derive path completion in one fenced, path-locked step:
+    # ``path_now_complete`` is True only for the completion that flipped the last
+    # incomplete lesson, and ``lesson_count`` is a ``count()`` (no list hydration).
+    (
+        newly_completed,
+        path_now_complete,
+        lesson_count,
+    ) = await lessons_repo.mark_completed_and_finalize(
+        lesson_id=lesson.id, path_id=lesson.path_id
+    )
     await session.commit()
     if newly_completed:
-        # After the commit so ``first_incomplete`` already reflects it (AL-040
-        # note); only on the real transition, so a raced double-complete never
-        # re-advances the window on a no-op write.
+        # Emit the (now durable) transition events BEFORE the prefetch advance:
+        # ``on_lesson_completed`` can raise, and a committed completion must never
+        # lose its product event to that. Only on the real transition, so counts
+        # are not inflated by an idempotent re-complete (W1, PRD §5.7).
+        events.emit_lesson_completed(
+            account_id=user.id,
+            path_id=lesson.path_id,
+            lesson_id=lesson.id,
+            position_in_path=lesson.position_in_path,
+        )
+        # Path completion derives from lesson state (PRD §5.4): decided atomically
+        # above (last incomplete lesson just flipped), so this fires exactly once
+        # for the path (W3), never a double-emit race.
+        if path_now_complete:
+            events.emit_path_completed(
+                account_id=user.id,
+                path_id=lesson.path_id,
+                lesson_count=lesson_count,
+            )
+        # Advance the prefetch window last (after the commit so ``first_incomplete``
+        # already reflects it, AL-040 note); only on the real transition, so a
+        # raced double-complete never re-advances the window on a no-op write.
         await generation_orchestrator.on_lesson_completed(lesson.id)
     return CompleteLessonResponse(id=lesson.id, unlock_state=UnlockState.COMPLETE)

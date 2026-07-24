@@ -34,6 +34,7 @@ from sqlalchemy.ext.asyncio import (  # noqa: TC002 - FastAPI resolves annotatio
     AsyncSession,
 )
 
+from aleph import events
 from aleph.authz import is_admin
 from aleph.config import settings
 from aleph.db import get_session
@@ -332,4 +333,7 @@ async def delete_path(path: OwnedPath, session: Session) -> Response:
     """
     await PathRepository(session).delete(path.id)
     await session.commit()
+    # After the delete commits (W5, PRD §5.7). ``account_id`` comes off the owned
+    # row rather than a separate ``CurrentUser`` dep — ownership is already proven.
+    events.emit_path_deleted(account_id=path.user_id, path_id=path.id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

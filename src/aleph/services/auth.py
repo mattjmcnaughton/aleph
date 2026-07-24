@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy.exc import IntegrityError
 
+from aleph import events
 from aleph.repositories import UserRepository
 
 if TYPE_CHECKING:
@@ -71,9 +72,15 @@ class AuthService:
                     identity.issuer, identity.subject
                 )
                 if existing is not None:
+                    # A concurrent first-login for the *same* identity won and
+                    # already emitted ``account_created``; reusing its row must
+                    # not double-count the new account.
                     return existing
                 continue
             else:
+                # A genuinely new account (PRD §5.7): the record timestamp is the
+                # signup time anchoring the activation cohort + 7-day window.
+                events.emit_account_created(account_id=user.id)
                 return user
 
         raise RuntimeError(
