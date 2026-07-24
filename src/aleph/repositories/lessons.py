@@ -267,17 +267,25 @@ class LessonRepository:
         )
         return affected_rows(result) > 0
 
-    async def mark_completed(self, lesson_id: uuid.UUID) -> None:
+    async def mark_completed(self, lesson_id: uuid.UUID) -> bool:
         """Mark a lesson complete (non-gating; drives derived unlock state).
 
         Not a generation transition — completion is orthogonal to
-        ``generation_state`` — so it carries no state guard or fence.
+        ``generation_state`` — so it carries no state guard or fence. It **is**
+        guarded on ``completed_at IS NULL`` so completion is durably idempotent:
+        the ``UPDATE`` stamps ``completed_at`` only on the first call, and returns
+        whether *this* call performed the transition. Two concurrent completes
+        serialize on the row lock — exactly one sees ``completed_at IS NULL`` and
+        wins; the other matches no row (TN-4), so ``completed_at`` is stamped once
+        and never re-stamped. The caller uses the return to fire the post-commit
+        prefetch advance only on the real transition.
         """
-        await self.session.execute(
+        result = await self.session.execute(
             update(Lesson)
-            .where(Lesson.id == lesson_id)
+            .where(Lesson.id == lesson_id, Lesson.completed_at.is_(None))
             .values(completed_at=func.now(), updated_at=func.now())
         )
+        return affected_rows(result) > 0
 
     # -- stale-aware reads (§5.4/§6) --------------------------------------- #
 

@@ -320,6 +320,48 @@ async def test_concurrent_attempt_double_submit_records_exactly_one() -> None:
         assert len([*rows]) == 1  # exactly one Attempt of record
 
 
+@pytest.mark.anyio
+async def test_concurrent_complete_stamps_completed_at_exactly_once() -> None:
+    """Two concurrent completes on the same available lesson: exactly one
+    transitions it (``UPDATE ... WHERE completed_at IS NULL`` under the row lock),
+    the other reports ``False`` and stamps nothing — so ``completed_at`` is set
+    once and never re-stamped (documented idempotency, TN-4). Before the guard
+    both writes re-stamped ``completed_at`` and both callers re-fired the window
+    advance."""
+    async with db.async_session() as session:
+        user = await create_user(session)
+        path = await _make_path(session, user_id=user.id, status=PathStatus.READY)
+        unit = await _make_unit(session, path=path)
+        lesson = await _make_lesson(session, path=path, unit=unit, position=1)
+        await session.commit()
+        lesson_id = lesson.id
+
+    async def complete() -> bool:
+        async with db.async_session() as session:
+            newly = await LessonRepository(session).mark_completed(lesson_id)
+            await session.commit()
+            return newly
+
+    results = await asyncio.gather(complete(), complete())
+    assert results.count(True) == 1, results  # exactly one transition
+    assert results.count(False) == 1, results
+
+    async with db.async_session() as session:
+        lesson = await LessonRepository(session).get(lesson_id)
+        assert lesson is not None
+        stamped = lesson.completed_at
+        assert stamped is not None
+
+    # A later repeat is a no-op: returns False and does not re-stamp completed_at.
+    async with db.async_session() as session:
+        assert await LessonRepository(session).mark_completed(lesson_id) is False
+        await session.commit()
+    async with db.async_session() as session:
+        lesson = await LessonRepository(session).get(lesson_id)
+        assert lesson is not None
+        assert lesson.completed_at == stamped  # unchanged after the second
+
+
 # --------------------------------------------------------------------------- #
 # Atomic claim — exactly one winner
 # --------------------------------------------------------------------------- #
