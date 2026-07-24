@@ -34,7 +34,7 @@ from aleph.config import settings
 from aleph.models import Lesson, Path, PathStatus, QuickCheck, Unit
 from aleph.services import generation as gen_module
 
-from .conftest import CollectingSpawn, stub_resolver
+from .conftest import CollectingSpawn, recording_resolver, stub_resolver
 
 if TYPE_CHECKING:
     from fastapi import FastAPI
@@ -440,6 +440,143 @@ async def test_path_creation_rate_limited_returns_429_envelope(
 
 
 # --------------------------------------------------------------------------- #
+# AL-052: admin model-picker enforcement + routing (TDD §5.3/D14)
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.anyio
+async def test_non_admin_model_override_is_403(
+    app: FastAPI, spawn: CollectingSpawn, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The picker is admin-only (§5.3): a non-admin sending an override is a 403
+    # through the shared ``forbidden`` envelope — the capability gate, not the
+    # cosmetic hidden picker. The billed work never runs: no path row is created.
+    async with _client(app) as client:
+        await _sign_in(client, monkeypatch, OWNER)
+        resp = await client.post(
+            "/api/v1/paths",
+            json={
+                "topic": "Rust ownership",
+                "level": "new_to_it",
+                "model_lesson": "anthropic/claude-haiku-4-5",
+            },
+        )
+        assert resp.status_code == 403, resp.text
+        body = resp.json()
+        assert body["error"]["code"] == "forbidden"
+        assert body["error"]["message"]
+        assert await _count_paths() == 0
+
+
+@pytest.mark.anyio
+async def test_admin_off_allowlist_model_override_is_422(
+    app: FastAPI, spawn: CollectingSpawn, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Allowlist enforcement is server-side (§5.3): even an admin cannot select a
+    # model outside ``MODEL_ALLOWLIST`` — an off-allowlist id is a 422 through the
+    # shared ``validation_error`` envelope, and no path is created.
+    async with _client(app) as client:
+        await _sign_in(client, monkeypatch, ADMIN)
+        resp = await client.post(
+            "/api/v1/paths",
+            json={
+                "topic": "Rust ownership",
+                "level": "new_to_it",
+                "model_outline": "anthropic/claude-not-a-real-model",
+            },
+        )
+        assert resp.status_code == 422, resp.text
+        body = resp.json()
+        assert body["error"]["code"] == "validation_error"
+        assert body["error"]["message"]
+        assert await _count_paths() == 0
+
+
+@pytest.mark.anyio
+async def test_admin_model_override_routes_chosen_model(
+    app: FastAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The real acceptance: an admin override actually ROUTES the chosen model.
+    # A recording resolver captures every id the orchestrator resolves; the
+    # outline override must drive the outline call and the lesson override the
+    # lesson calls — and the default Sonnet is never resolved for this path. The
+    # override reaches the background tasks only because it is persisted on the
+    # path row (survives the trigger/poll/reconcile boundary, §5.4).
+    resolver, calls = recording_resolver()
+    collector = CollectingSpawn()
+    monkeypatch.setattr(gen_module.generation_orchestrator, "_resolve_model", resolver)
+    monkeypatch.setattr(gen_module.generation_orchestrator, "_spawn", collector)
+
+    async with _client(app) as client:
+        await _sign_in(client, monkeypatch, ADMIN)
+        resp = await client.post(
+            "/api/v1/paths",
+            json={
+                "topic": "Rust ownership",
+                "level": "some_experience",
+                "model_outline": "anthropic/claude-opus-4-8",
+                "model_lesson": "anthropic/claude-haiku-4-5",
+            },
+        )
+        assert resp.status_code == 202, resp.text
+        path_id = resp.json()["id"]
+        await collector.drain()
+        # Poll drives the idempotent resume + prefetch too (poll-as-trigger); the
+        # override still routes because it lives on the persisted row, not the
+        # request.
+        await client.get(f"/api/v1/paths/{path_id}")
+        await collector.drain()
+
+    assert "anthropic/claude-opus-4-8" in calls, "outline override was not routed"
+    assert "anthropic/claude-haiku-4-5" in calls, "lesson override was not routed"
+    # The configured default was never resolved for this path — the override, not
+    # config, chose the models.
+    assert settings.model_outline not in calls  # the config default was never resolved
+
+
+@pytest.mark.anyio
+async def test_admin_override_persists_on_path_row(
+    app: FastAPI, spawn: CollectingSpawn, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Resume-correctness (§5.4): the override is stored on the path so a poller or
+    # the reconciler re-drives generation with the admin's chosen models, not the
+    # config default. Assert the persisted columns directly.
+    async with _client(app) as client:
+        await _sign_in(client, monkeypatch, ADMIN)
+        resp = await client.post(
+            "/api/v1/paths",
+            json={
+                "topic": "Rust ownership",
+                "level": "some_experience",
+                "model_outline": "anthropic/claude-opus-4-8",
+                "model_lesson": "anthropic/claude-haiku-4-5",
+            },
+        )
+        assert resp.status_code == 202, resp.text
+        path_id = resp.json()["id"]
+        await spawn.drain()
+
+    row = await _path_row(path_id)
+    assert row.model_outline == "anthropic/claude-opus-4-8"
+    assert row.model_lesson == "anthropic/claude-haiku-4-5"
+
+
+@pytest.mark.anyio
+async def test_no_override_leaves_path_on_config_defaults(
+    app: FastAPI, spawn: CollectingSpawn, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A create with no picker fields records NULL overrides; the orchestrator then
+    # falls back to the configured slots (the non-admin/default path is unchanged).
+    async with _client(app) as client:
+        await _sign_in(client, monkeypatch, OWNER)
+        path_id = await _create(client, spawn, "Rust ownership", "some_experience")
+
+    row = await _path_row(path_id)
+    assert row.model_outline is None
+    assert row.model_lesson is None
+
+
+# --------------------------------------------------------------------------- #
 # 401: anonymous requests are rejected through the shared envelope
 # --------------------------------------------------------------------------- #
 
@@ -610,3 +747,64 @@ async def test_poll_as_trigger_self_heals_lost_outline(
         healed = await _poll(client, spawn, path_id)
         assert healed["status"] == "ready"
         assert healed["units"]
+
+
+@pytest.mark.anyio
+async def test_non_admin_override_at_rate_cap_is_403_not_429(
+    app: FastAPI, spawn: CollectingSpawn, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Enforcement precedes the rate limit: the capability gate answers first."""
+    monkeypatch.setattr(settings, "rate_limit_paths_per_day", 1)
+    async with _client(app) as client:
+        await _sign_in(client, monkeypatch, OWNER)
+        first = await client.post(
+            "/api/v1/paths", json={"topic": "Topic one", "level": "new_to_it"}
+        )
+        assert first.status_code == 202
+        await spawn.drain()
+        resp = await client.post(
+            "/api/v1/paths",
+            json={
+                "topic": "Topic two",
+                "level": "new_to_it",
+                "model_outline": "anthropic/claude-haiku-4-5",
+            },
+        )
+        assert resp.status_code == 403, resp.text
+        assert resp.json()["error"]["code"] == "forbidden"
+
+
+@pytest.mark.anyio
+async def test_outline_retry_reroutes_the_persisted_override(
+    app: FastAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Retry re-reads the row: the schema-change justification, pinned.
+
+    The outline override must drive the RE-claimed outline run too — resume
+    correctness is exactly why the override is persisted (§5.4/D6).
+    """
+    resolver, calls = recording_resolver()
+    collector = CollectingSpawn()
+    monkeypatch.setattr(gen_module.generation_orchestrator, "_resolve_model", resolver)
+    monkeypatch.setattr(gen_module.generation_orchestrator, "_spawn", collector)
+
+    async with _client(app) as client:
+        await _sign_in(client, monkeypatch, ADMIN)
+        resp = await client.post(
+            "/api/v1/paths",
+            json={
+                "topic": "[force-outline-failure] anything",
+                "level": "new_to_it",
+                "model_outline": "anthropic/claude-opus-4-8",
+            },
+        )
+        assert resp.status_code == 202
+        path_id = resp.json()["id"]
+        await collector.drain()
+        calls.clear()
+
+        retry = await client.post(f"/api/v1/paths/{path_id}/retry")
+        assert retry.status_code == 202
+        await collector.drain()
+
+    assert "anthropic/claude-opus-4-8" in calls, "retry did not re-route the override"

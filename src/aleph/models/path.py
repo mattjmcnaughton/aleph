@@ -59,6 +59,15 @@ class Path(Base, UUIDAuditMixin):
         DateTime(timezone=True),
         nullable=True,
     )
+    # Admin model-picker overrides (AL-052, TDD §5.3/D14). An admin may select the
+    # outline/lesson model per-path from ``MODEL_ALLOWLIST``; the choice is stored
+    # here — not held on the request — so the DB-driven resume/reconcile
+    # (§5.4/D6) re-generates with the chosen model rather than the config default.
+    # ``NULL`` means "use the configured slot" (the default for every non-admin
+    # and un-overridden create). Enforcement (admin-only, allowlist-bound) lives
+    # at the create route; this column trusts an already-validated id.
+    model_outline: Mapped[str | None] = mapped_column(Text, nullable=True)
+    model_lesson: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     user: Mapped[User] = relationship(back_populates="paths")
     units: Mapped[list[Unit]] = relationship(

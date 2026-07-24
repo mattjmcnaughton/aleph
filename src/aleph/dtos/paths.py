@@ -16,7 +16,7 @@ reads as ``failed``, §5.4) and ``unlock_state`` (the derived learner axis —
 from typing import Annotated
 from uuid import UUID
 
-from pydantic import BaseModel, StringConstraints
+from pydantic import BaseModel, ConfigDict, StringConstraints
 
 from aleph.domains.progression import UnlockState
 from aleph.models import LessonGenerationState, Level, PathStatus
@@ -31,10 +31,28 @@ TopicStr = Annotated[
 
 
 class CreatePathRequest(BaseModel):
-    """``POST /api/v1/paths`` body: the topic + onboarding level (W1)."""
+    """``POST /api/v1/paths`` body: the topic + onboarding level (W1).
+
+    ``model_outline``/``model_lesson`` are the **admin** model-picker overrides
+    (AL-052, TDD §5.3/D14): optional bare OpenRouter ids the frontend picker
+    (AL-065) sends, one per generation slot, selected from the ``MODEL_ALLOWLIST``
+    the session endpoint exposes to admins. Omitted (the common case) means the
+    configured slot default. They are *authorization-* and *allowlist-*enforced
+    server-side at the route (403 non-admin, 422 off-allowlist) — the field
+    merely carries the request; the wire field being present is never itself a
+    grant.
+    """
+
+    # ``model_outline``/``model_lesson`` start with the ``model_`` prefix pydantic
+    # protects by default; the picker wire contract fixes these names (parity with
+    # the ``MODEL_OUTLINE``/``MODEL_LESSON`` config slots), so opt out of the
+    # protected namespace rather than rename.
+    model_config = ConfigDict(protected_namespaces=())
 
     topic: TopicStr
     level: Level
+    model_outline: str | None = None
+    model_lesson: str | None = None
 
 
 class CreatePathResponse(BaseModel):

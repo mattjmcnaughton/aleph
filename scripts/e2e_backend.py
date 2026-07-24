@@ -43,6 +43,9 @@ def create_stub_app() -> FastAPI:
     settings.model_outline = STUB_MODEL_ID
     settings.model_lesson = STUB_MODEL_ID
     settings.model_judge = STUB_MODEL_ID
+    # Keep the admin picker inside the stub too: an allowlisted real model id
+    # would escape the deterministic stub (empty API key) in e2e (AL-052 note).
+    settings.model_allowlist = STUB_MODEL_ID
     settings.rate_limit_paths_per_day = 0
     settings.rate_limit_lesson_generations_per_day = 0
 
