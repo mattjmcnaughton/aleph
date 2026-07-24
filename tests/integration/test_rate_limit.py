@@ -144,6 +144,43 @@ async def test_admin_is_exempt_over_real_rows() -> None:
 
 
 @pytest.mark.anyio
+async def test_outline_cap_counts_paths_with_attempt_today() -> None:
+    """The retry cap counts ``paths`` by ``generation_started_at`` (the claim
+    stamp), not ``created_at`` — so it bounds outline attempts, whether from a
+    create or a retry, within the UTC day."""
+    async with db.async_session() as session:
+        user = await create_user(session, username="outline", subject="outline")
+
+        # Two paths with an outline attempt today, one yesterday, one never.
+        for _ in range(2):
+            path = await _make_path(session, user_id=user.id)
+            await session.execute(
+                update(Path).where(Path.id == path.id).values(generation_started_at=NOW)
+            )
+        old = await _make_path(session, user_id=user.id)
+        await session.execute(
+            update(Path)
+            .where(Path.id == old.id)
+            .values(generation_started_at=YESTERDAY)
+        )
+        await _make_path(session, user_id=user.id)  # never attempted (NULL stamp)
+        await session.flush()
+
+        # Cap of 2 → the two attempted today put the learner at the cap; deny.
+        with pytest.raises(HTTPException) as excinfo:
+            await _limiter(session, paths=2).check_outline_generation(
+                user_id=user.id, is_admin=False
+            )
+        assert excinfo.value.status_code == 429
+
+        # Cap of 3 → only two count today (yesterday's + never-attempted excluded);
+        # under the cap, allowed.
+        await _limiter(session, paths=3).check_outline_generation(
+            user_id=user.id, is_admin=False
+        )
+
+
+@pytest.mark.anyio
 async def test_lesson_generation_cap_counts_rows_started_today() -> None:
     async with db.async_session() as session:
         user = await create_user(session, username="lessons", subject="lessons")

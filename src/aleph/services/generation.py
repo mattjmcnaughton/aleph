@@ -250,14 +250,15 @@ class GenerationOrchestrator:
         reconstructing and rebinding the module attribute) is deliberate: a
         rebind would not reach references AL-050 already imported.
 
-        **AL-050, revisit this choice.** Singleton mutation-in-place is the seam
-        precisely because AL-050 imports the module-level
-        :data:`generation_orchestrator` directly. If AL-050 instead resolves the
-        orchestrator from FastAPI app state (a DI provider) rather than importing
-        the singleton, prefer constructing a fresh, already-bound orchestrator in
-        the lifespan and storing *that* on ``app.state`` — no in-place mutation, no
-        shared global. The executor keeps ``bind_runtime`` for now because the
-        import-the-singleton access pattern is what exists today.
+        **Standing decision (AL-050 resolved).** AL-050 imports the module-level
+        :data:`generation_orchestrator` directly (see ``routers/v1/paths.py``),
+        so singleton mutation-in-place *is* the seam: a rebind of the module
+        attribute would not reach references the router already imported.
+        Constructing a fresh, already-bound orchestrator on ``app.state`` was
+        considered and not adopted — it would only pay off if the router resolved
+        the orchestrator via a FastAPI DI provider, which it deliberately does
+        not. Import-the-singleton + ``bind_runtime`` is the intended pattern, not
+        a placeholder; AL-051 follows it too.
         """
         self._spawn = spawn
         self._model_slot = model_slot
@@ -754,6 +755,19 @@ class GenerationOrchestrator:
         return PathOutline(units=unit_outlines)
 
     # -- retries (explicit learner loops) ---------------------------------- #
+
+    def trigger_outline_retry(self, path_id: uuid.UUID) -> None:
+        """Fire-and-forget an outline retry through the spawn seam (AL-050 route).
+
+        The public trigger the retry route calls: it spawns :meth:`retry_outline`
+        through the same registry-bound ``spawn`` seam create uses (strong ref,
+        concurrency bound, shutdown cancel), so the request returns ``202``
+        immediately and the client polls ``GET /paths/{id}`` for the result —
+        never blocking the HTTP worker on a model call (§5.4/D5). Keeping the
+        ``_spawn`` call here (not in the router) keeps the private seam private:
+        the route depends only on this public method.
+        """
+        self._spawn(self.retry_outline(path_id))
 
     async def retry_outline(self, path_id: uuid.UUID) -> None:
         """Re-run a ``failed`` outline (POST /paths/{id}/retry, §5.5).

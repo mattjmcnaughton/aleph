@@ -86,6 +86,24 @@ class PathRepository:
         )
         return list(result.scalars())
 
+    async def list_for_user_with_effective_status(
+        self, *, user_id: uuid.UUID
+    ) -> list[tuple[Path, PathStatus]]:
+        """A learner's paths (newest first) each paired with **effective** status.
+
+        The switcher list (``GET /paths``, §6) reports the same effective status
+        the detail poll does (a stale ``generating`` reads as ``failed``), so the
+        two surfaces never disagree on a crashed outline — computed in SQL here
+        (one query) rather than per-row. Ordering matches
+        :meth:`list_for_user` (``created_at`` desc, ``id`` tiebreak).
+        """
+        result = await self.session.execute(
+            select(Path, self._effective_status_expr().label("effective_status"))
+            .where(Path.user_id == user_id)
+            .order_by(Path.created_at.desc(), Path.id)
+        )
+        return [(path, PathStatus(status)) for path, status in result.all()]
+
     async def effective_status(self, path_id: uuid.UUID) -> PathStatus | None:
         """The path's **effective** status: a stale ``generating`` reads as failed.
 

@@ -45,7 +45,6 @@ from aleph.models import (
 from aleph.services.generation import GenerationOrchestrator
 from aleph.services.stub_model import (
     StubModelForcedError,
-    build_stub_model,
     force_lesson_failure,
 )
 from aleph.services.stub_model import (
@@ -67,11 +66,11 @@ from aleph.services.stub_model import (
     _user_text as stub_user_text,
 )
 
-from .conftest import create_user
+from .conftest import CollectingSpawn, create_user, stub_resolver
 
 if TYPE_CHECKING:
     import uuid
-    from collections.abc import Callable, Coroutine
+    from collections.abc import Callable
     from typing import Any
 
     from pydantic_ai.messages import ModelMessage
@@ -80,31 +79,12 @@ if TYPE_CHECKING:
 
 
 # --------------------------------------------------------------------------- #
-# Test doubles: a collecting spawn + a controllable model at the resolver seam
+# Test doubles: a controllable model at the resolver seam
+#
+# ``CollectingSpawn`` and ``stub_resolver`` live in ``conftest`` (shared with the
+# ``test_paths_api`` HTTP surface); the controllable/capturing resolvers below are
+# local to this module.
 # --------------------------------------------------------------------------- #
-
-
-class CollectingSpawn:
-    """A ``spawn`` seam that records tasks so a test can await them.
-
-    Production passes ``asyncio.create_task`` (AL-041 wraps it with a registry +
-    semaphore); tests need to await the fire-and-forget work deterministically.
-    """
-
-    def __init__(self) -> None:
-        self.tasks: list[asyncio.Task[Any]] = []
-
-    def __call__(self, coro: Coroutine[Any, Any, Any]) -> asyncio.Task[Any]:
-        task = asyncio.create_task(coro)
-        self.tasks.append(task)
-        return task
-
-    async def drain(self) -> None:
-        """Await every spawned task (including ones spawned while draining)."""
-        while self.tasks:
-            batch = self.tasks
-            self.tasks = []
-            await asyncio.gather(*batch)
 
 
 @dataclass
@@ -161,12 +141,6 @@ def controllable_resolver(control: ModelControl) -> Callable[[str], Model]:
         )
 
     model = FunctionModel(respond)
-    return lambda _model_id: model
-
-
-def stub_resolver() -> Callable[[str], Model]:
-    """A ``resolve_model_fn`` returning the real deterministic stub (sentinels)."""
-    model = build_stub_model()
     return lambda _model_id: model
 
 

@@ -31,8 +31,10 @@ TEMPLATE_PREFIX = "aleph_test_base"
 RUN_ID = uuid.uuid4().hex[:12]
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
+    from collections.abc import Callable, Coroutine, Generator
+    from typing import Any
 
+    from pydantic_ai.models import Model
     from sqlalchemy.ext.asyncio import AsyncSession
 
 
@@ -192,6 +194,48 @@ def build_authprobe_app() -> FastAPI:
         return {"id": str(user.id)}
 
     return app
+
+
+# --------------------------------------------------------------------------- #
+# Shared generation test doubles
+#
+# ``CollectingSpawn`` and ``stub_resolver`` are the drainable spawn seam and the
+# deterministic-stub model resolver used by every integration test that drives
+# the generation orchestrator (``test_generation`` and the ``test_paths_api``
+# HTTP surface). They live here in the shared conftest rather than in one test
+# module so neither has to reach across into the other's namespace.
+# --------------------------------------------------------------------------- #
+
+
+class CollectingSpawn:
+    """A ``spawn`` seam that records tasks so a test can await them.
+
+    Production passes ``asyncio.create_task`` (AL-041 wraps it with a registry +
+    semaphore); tests need to await the fire-and-forget work deterministically.
+    """
+
+    def __init__(self) -> None:
+        self.tasks: list[asyncio.Task[Any]] = []
+
+    def __call__(self, coro: Coroutine[Any, Any, Any]) -> asyncio.Task[Any]:
+        task = asyncio.create_task(coro)
+        self.tasks.append(task)
+        return task
+
+    async def drain(self) -> None:
+        """Await every spawned task (including ones spawned while draining)."""
+        while self.tasks:
+            batch = self.tasks
+            self.tasks = []
+            await asyncio.gather(*batch)
+
+
+def stub_resolver() -> Callable[[str], Model]:
+    """A ``resolve_model_fn`` returning the real deterministic stub (sentinels)."""
+    from aleph.services.stub_model import build_stub_model
+
+    model = build_stub_model()
+    return lambda _model_id: model
 
 
 async def create_user(
