@@ -26,7 +26,11 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8000
 
-    otel_exporter_otlp_endpoint: str = "http://localhost:4318"
+    # Optional extra OTLP export target (empty by default, AL-005/AL-003): a
+    # non-empty value adds a BatchSpanProcessor in ``telemetry.py``. Kept empty
+    # in dev/CI so no exporter dials localhost:4318 (that connection-refused
+    # spam was the AL-003 finding); Logfire export is gated by LOGFIRE_TOKEN.
+    otel_exporter_otlp_endpoint: str = ""
 
     database_url: str = "postgresql+asyncpg://localhost:5432/aleph"
 
@@ -281,6 +285,19 @@ class Settings(BaseSettings):
     # serial per-path chain that awaits its sub-generations inline). Must admit at
     # least one permit (``ge=1``): zero would deadlock every generation.
     max_concurrent_generations: int = Field(default=8, ge=1)
+
+    # --- AL-005: Logfire instrumentation (TDD §9 / D11) -----------------------
+    # Appended as a self-contained block at the END of Settings (other AL-0xx
+    # branches append their own config blocks; keep them separate to avoid merge
+    # conflicts). Logfire is the single telemetry sink — spans and structlog
+    # events both flow to it (see ``telemetry.py`` / ``logging.py``).
+
+    # The Logfire write token is the ONLY switch that turns on network export.
+    # Unset (the dev/CI default) yields a clean no-op: with
+    # ``send_to_logfire="if-token-present"`` no exporter is created and nothing
+    # dials the network. Set the real project token via ``LOGFIRE_TOKEN`` in
+    # production (a Fly secret).
+    logfire_token: str = ""
 
 
 settings = Settings()
