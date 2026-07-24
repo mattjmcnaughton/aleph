@@ -8,22 +8,48 @@
 # uploaded, a dispatched run fails immediately with the harness's exit-2
 # message rather than silently skipping.
 #
-# The job fails only on a Layer 1 hard floor (refusal-branch correctness,
-# outline caps, lesson bands) or a harness error — soft scores are reported
-# (job log + job summary + artifact), never gated on.
+# The job fails on a hard floor (Layer 1's refusal-branch correctness, outline
+# caps and lesson bands, plus Layer 2's `safe` rubric item), on a seed-set pass
+# rate below PRD §9's 90% gate, or on a harness error. Soft scores (MaxDuration,
+# the model_requests metric) are reported — job log, job summary, artifact —
+# and never gated on.
 name: Evals
 
 on:
   workflow_dispatch:
     inputs:
+      mode:
+        description: >-
+          seed-set = generate the seed set and gate on it; agreement =
+          calibration only, judging evals/human_labels.yaml with MODEL_JUDGE and
+          reporting judge↔human agreement (no generation, much cheaper). Run
+          `agreement` after any change to the judge prompt or the calibration
+          examples.
+        required: false
+        default: seed-set
+        type: choice
+        options:
+          - seed-set
+          - agreement
       models:
         description: >-
-          Comma-separated OpenRouter model ids to sweep; each is bound to both
-          the outline and lesson slots (empty = the configured MODEL_OUTLINE /
-          MODEL_LESSON)
+          seed-set mode only. Comma-separated OpenRouter model ids to sweep;
+          each is bound to both the outline and lesson slots (empty = the
+          configured MODEL_OUTLINE / MODEL_LESSON). The judge always stays on
+          MODEL_JUDGE — it is the measuring instrument, so it must not vary with
+          what is being measured.
         required: false
         default: ""
         type: string
+      judge:
+        description: >-
+          seed-set mode only. Run the Layer 2 binary judge (MODEL_JUDGE). Uncheck
+          for a cheap Layer-1-only structural pass — one judge call per artifact
+          is the bulk of a run's cost. Ignored in agreement mode, which exists to
+          measure the judge.
+        required: false
+        default: true
+        type: boolean
 
 permissions:
   contents: read
@@ -52,16 +78,30 @@ jobs:
 
       # `models` is dispatcher-supplied text: it goes through the environment,
       # never interpolated into the script body, so it cannot close the quote
-      # and run as shell.
+      # and run as shell. `mode` and `judge` are a choice and a boolean, so
+      # GitHub constrains them to the declared values.
       - name: Run seed-set evals
+        if: inputs.mode == 'seed-set'
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           MODELS: ${{ inputs.models }}
+          JUDGE_FLAG: ${{ inputs.judge && '--judge' || '--no-judge' }}
         run: |
           mkdir -p .artifacts/evals
           uv run --no-sync python -m evals \
             --models "$MODELS" \
+            "$JUDGE_FLAG" \
             --report .artifacts/evals/report.json
+
+      - name: Run judge↔human agreement
+        if: inputs.mode == 'agreement'
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          mkdir -p .artifacts/evals
+          uv run --no-sync python -m evals \
+            --agreement \
+            --report .artifacts/evals/agreement.json
 
       - name: Upload eval report
         if: always()

@@ -23,7 +23,7 @@ Python web application using FastAPI, uvicorn, OpenTelemetry, uv, ruff, ty, and 
 | `just test-e2e` | Run e2e tests |
 | `just test-all` | Run all tests |
 | `just test-external` | Run tests hitting external services |
-| `just evals` | Run the agent eval harness (needs `OPENROUTER_API_KEY`; `--smoke` = offline) |
+| `just evals` | Run the agent eval harness (needs `OPENROUTER_API_KEY`; `--smoke` = offline, `--agreement` = judge calibration) |
 | `just gate` | Fast pre-push check (fmt + lint + typecheck + test-unit) |
 | `just gate-expensive` | Full check (gate + integration + e2e) |
 | `just gate-external` | Everything (gate-expensive + external) |

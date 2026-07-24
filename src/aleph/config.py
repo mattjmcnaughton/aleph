@@ -85,6 +85,15 @@ class Settings(BaseSettings):
     # premature tiering; per-slot refinement is driven by evals + cost data.
     model_outline: str = "anthropic/claude-sonnet-5"
     model_lesson: str = "anthropic/claude-sonnet-5"
+    # MODEL_JUDGE is **eval-only**: it is read by ``evals/`` (the Layer 2 binary
+    # judge, TDD §11) and by nothing on the request path — asserted by
+    # ``tests/unit/test_evals_judge.py``. Its refinement direction differs in
+    # kind from the other two (§5.3): move it **cross-provider** (e.g.
+    # ``openai/gpt-5.6-terra``), because LLM judges show self-preference bias
+    # and a Claude judge grading Claude-written lessons would inflate the very
+    # ≥ 90% ship gate the judge exists to make trustworthy. Switching provider
+    # is this env var plus a re-run of ``just evals --agreement``; judge↔human
+    # calibration is the real control either way (docs/evals.md).
     model_judge: str = "anthropic/claude-sonnet-5"
 
     # Comma-separated OpenRouter ids an admin may select per-request for the
