@@ -27,6 +27,13 @@ export function pollBackoffMs(completedPolls: number): number {
 export interface PollingConfig<T> {
   /** True once the polled resource has reached a state that won't change. */
   isTerminal: (data: T | undefined) => boolean;
+  /**
+   * Optional: given the query's latest error, true when that error is *terminal*
+   * — it will never resolve, so polling must stop (e.g. a `404`). Transient
+   * errors (a network blip, a `500`) don't match and keep polling through the
+   * backoff, since TanStack keeps the last-good data while the query retries.
+   */
+  isErrorTerminal?: (error: unknown) => boolean;
 }
 
 /**
@@ -48,6 +55,8 @@ export function nextPollInterval<T>(
 export interface PollableQuery<T> {
   state: {
     data: T | undefined;
+    /** The query's latest error (`null` when the last fetch succeeded). */
+    error?: unknown;
     dataUpdateCount: number;
   };
 }
@@ -65,8 +74,17 @@ export interface PollableQuery<T> {
  * onboarding retry therefore `resetQueries` (not `invalidateQueries`) to clear
  * the count and restore the 2s cadence; any future in-place "resume polling"
  * path must do the same.
+ *
+ * A query in a *terminal error* state (per `config.isErrorTerminal`) stops the
+ * loop just like a terminal success — otherwise an errored query keeps firing
+ * `refetchInterval` forever (each firing a fresh, still-failing fetch).
  */
 export function makePollingRefetchInterval<T>(config: PollingConfig<T>) {
-  return (query: PollableQuery<T>): number | false =>
-    nextPollInterval<T>(query.state.data, Math.max(0, query.state.dataUpdateCount - 1), config);
+  return (query: PollableQuery<T>): number | false => {
+    const { data, error, dataUpdateCount } = query.state;
+    if (error != null && config.isErrorTerminal?.(error)) {
+      return false;
+    }
+    return nextPollInterval<T>(data, Math.max(0, dataUpdateCount - 1), config);
+  };
 }

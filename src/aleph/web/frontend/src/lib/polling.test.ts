@@ -66,4 +66,32 @@ describe("makePollingRefetchInterval", () => {
     const refetchInterval = makePollingRefetchInterval<string>({ isTerminal });
     expect(refetchInterval({ state: { data: "done", dataUpdateCount: 9 } })).toBe(false);
   });
+
+  it("stops polling on a terminal error (e.g. a 404 that will never resolve)", () => {
+    const refetchInterval = makePollingRefetchInterval<string>({
+      isTerminal,
+      isErrorTerminal: (error) => (error as { status?: number })?.status === 404,
+    });
+    expect(
+      refetchInterval({ state: { data: undefined, error: { status: 404 }, dataUpdateCount: 2 } }),
+    ).toBe(false);
+  });
+
+  it("keeps polling through a transient (non-terminal) error", () => {
+    const refetchInterval = makePollingRefetchInterval<string>({
+      isTerminal,
+      isErrorTerminal: (error) => (error as { status?: number })?.status === 404,
+    });
+    // A 500 is transient: last-good data may still resolve, so keep the backoff.
+    expect(
+      refetchInterval({ state: { data: "pending", error: { status: 500 }, dataUpdateCount: 2 } }),
+    ).toBe(3000);
+  });
+
+  it("ignores errors when no isErrorTerminal predicate is configured", () => {
+    const refetchInterval = makePollingRefetchInterval<string>({ isTerminal });
+    expect(
+      refetchInterval({ state: { data: "pending", error: { status: 404 }, dataUpdateCount: 1 } }),
+    ).toBe(2000);
+  });
 });

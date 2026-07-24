@@ -168,6 +168,19 @@ export interface PathUnit {
   lessons: PathLesson[];
 }
 
+/**
+ * Per-path lesson roll-up (`PathProgressDTO`, docs/api.md / `dtos/paths.py`): the
+ * counts behind both the "Your paths" switcher summary and the path-view header.
+ * The wire field is an **object**, not a scalar — a bare count can't distinguish
+ * "generated" from "completed". AL-062 derives its `n of m complete` readout from
+ * the `unlock_state`s in `units`; AL-064 (the switcher) consumes these counts.
+ */
+export interface PathProgress {
+  total_lessons: number;
+  generated_lessons: number;
+  completed_lessons: number;
+}
+
 /** `GET /api/v1/paths/{id}` body — the poll target (docs/api.md). */
 export interface PathDetail {
   id: string;
@@ -176,7 +189,7 @@ export interface PathDetail {
   status: PathStatus;
   /** Non-null **only** when `status == "refused"` (docs/api.md). */
   refusal_message: string | null;
-  progress: number;
+  progress: PathProgress;
   units: PathUnit[];
 }
 
@@ -229,7 +242,45 @@ export function pathQueryOptions(id: string | null) {
   });
 }
 
+/**
+ * When the path view can stop polling `GET /paths/{id}` (§5.4, §14). The view
+ * lands here the moment the outline is `ready`, but on-demand generation keeps
+ * running: the available lesson (and its `PREFETCH_N` successors, §14) can still
+ * be `generating`. So the poll runs while the outline is non-terminal **or** any
+ * lesson in the payload is still generating, and stops once everything visible
+ * is stable — matching the shared backoff cadence in `./polling`.
+ */
+export function isPathViewTerminal(detail: PathDetail | undefined): boolean {
+  if (detail === undefined) return false;
+  if (!isPathStatusTerminal(detail.status)) return false;
+  const anyLessonResolving = detail.units.some((unit) =>
+    unit.lessons.some((lesson) => {
+      // A prefetching successor (any unlock state, §14) still mid-generation.
+      if (lesson.generation_state === "generating") return true;
+      // The reachable gap (§14): the outline is `ready` and a lesson is already
+      // `available`, but its content is still `ungenerated` — `poll_path` spawns
+      // the resume *then* snapshots, so the ready payload can precede the claim.
+      // Stopping here would strand the learner on an available-but-empty lesson,
+      // so keep polling until that lesson's generation state is terminal.
+      if (lesson.unlock_state === "available")
+        return !isLessonStateTerminal(lesson.generation_state);
+      return false;
+    }),
+  );
+  return !anyLessonResolving;
+}
+
 /** True once `apiFetch` raised the daily-cap envelope (`429 rate_limited`). */
 export function isRateLimited(error: unknown): boolean {
   return error instanceof ApiError && (error.status === 429 || error.code === "rate_limited");
+}
+
+/**
+ * True once `apiFetch` raised a `404` — a deep link to a path that doesn't
+ * exist (deleted, or never owned by this learner). Terminal for polling: unlike
+ * a transient network blip, a 404 never resolves, and each poll of the real
+ * `GET /paths/{id}` spawns a backend resume, so retrying forever is harmful.
+ */
+export function isNotFound(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 404;
 }
