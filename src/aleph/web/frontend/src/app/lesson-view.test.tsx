@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { configureLessons, seedLesson } from "../mocks/lessons";
+import { seedPath } from "../mocks/paths";
 import { App } from "./app";
 
 // Lesson view (§8, TDD): the Read passage → Quick check → Outcome/explanation →
@@ -22,6 +23,24 @@ function options() {
 }
 
 describe("Lesson view — /lessons/$lessonId", () => {
+  it("[navigation] links through the path topic from the lesson breadcrumb", async () => {
+    seedPath({ id: PATH_ID, topic: "TypeScript", level: "new_to_it" });
+    seedLesson({
+      id: "les-crumb",
+      path_id: PATH_ID,
+      title: "What TypeScript adds",
+    });
+    await gotoLesson("les-crumb");
+
+    const breadcrumb = await screen.findByRole("navigation", { name: "Breadcrumb" });
+    const pathLink = await screen.findByRole("link", { name: "TypeScript" });
+    expect(breadcrumb.textContent).toMatch(/Your paths.*TypeScript.*What TypeScript adds/);
+    expect(pathLink.getAttribute("href")).toContain(`/paths/${PATH_ID}`);
+    expect(breadcrumb.querySelector('[aria-current="page"]')?.textContent).toBe(
+      "What TypeScript adds",
+    );
+  });
+
   it("[AL-063] renders a ready lesson: title, Read passage, Quick check stem + options", async () => {
     seedLesson({
       id: "les-ready",

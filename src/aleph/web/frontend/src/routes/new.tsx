@@ -14,6 +14,7 @@ import {
   retryPath,
 } from "../lib/api";
 import { ModelPicker } from "../components/model-picker";
+import { Breadcrumbs } from "../components/breadcrumbs";
 import { PRIMARY_CTA, RetryNotices, Spinner, StateCard } from "../components/state-card";
 import { sessionQueryOptions } from "../lib/auth";
 import {
@@ -141,6 +142,8 @@ function NewPath() {
 
   return (
     <main className="mx-auto w-full max-w-[480px] px-4 py-8">
+      <Breadcrumbs current="New path" />
+
       <p className="kicker">New path</p>
       <h1 className="mt-2 text-3xl font-semibold leading-tight tracking-tight">
         What do you want to learn?
