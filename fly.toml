@@ -1,0 +1,56 @@
+# fly.toml — https://fly.io/docs/reference/configuration/
+#
+# Deployment shape per TDD §13/D3: one Fly machine, Neon Postgres behind
+# DATABASE_URL, Alembic migrations as the release command. Everything in [env]
+# is non-secret and therefore committed; every secret is set with
+# `flyctl secrets set` (see docs/deploy.md).
+
+app = 'aleph'
+primary_region = 'ewr'
+
+[build]
+  build-target = 'production'
+
+[deploy]
+  # Runs once per release, on its own machine, before the new app machines take
+  # traffic. Retries internally so a cold Neon endpoint does not fail the deploy.
+  release_command = '/app/docker/release.sh'
+
+[env]
+  # ENV=production arms the config guards in src/aleph/config.py: the `stub`
+  # model becomes unreachable, real auth secrets become mandatory, and the
+  # session cookie is forced Secure. It is deliberately committed rather than a
+  # secret — forgetting it would silently *disable* those guards.
+  ENV = 'production'
+  LOG_LEVEL = 'INFO'
+  LOG_FORMAT = 'json'
+  # No HOST/PORT: the image's CMD hardcodes `--host 0.0.0.0 --port 8000` and
+  # nothing reads `Settings.host`/`Settings.port`, so entries here would only
+  # look like they bound the listener. `internal_port` below is the real knob.
+  SESSION_COOKIE_SECURE = 'true'
+  OIDC_PROVIDER = 'auth0'
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = 'stop'
+  auto_start_machines = true
+  min_machines_running = 0
+  # Single machine for the MVP (§13). The claim protocol (§5.4) already tolerates
+  # more than one, so this is a cost choice, not a correctness one — but note the
+  # reconciler and the MAX_CONCURRENT_GENERATIONS semaphore are per-process, so
+  # raising this multiplies the effective concurrency ceiling.
+  max_machines_running = 1
+  processes = ['app']
+
+  [[http_service.checks]]
+    interval = '15s'
+    timeout = '2s'
+    grace_period = '30s'
+    method = 'GET'
+    path = '/readyz'
+
+[[vm]]
+  memory = '512mb'
+  cpu_kind = 'shared'
+  cpus = 1

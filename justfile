@@ -152,6 +152,49 @@ compose-db-up:
 compose-keycloak-up:
     docker compose up -d --wait keycloak
 
+# Build the production image and smoke the Compose stack over HTTP (docs/deploy.md)
+compose-smoke:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # Only the app port is published, and it is overridable because a `just
+    # dev-be` may be holding 8000. The smoke's database (`smoke-db`) publishes no
+    # host port at all — it is reached over the Compose network — so the
+    # machine's own Postgres on 5432 is never involved.
+    export ALEPH_APP_PORT="${ALEPH_APP_PORT:-8000}"
+    base="http://127.0.0.1:${ALEPH_APP_PORT}"
+    smoke_services=(smoke-db migrate app)
+    teardown() {
+        # Scoped to the smoke's own containers and their *anonymous* volumes. A
+        # project-wide `docker compose down -v` would also delete the `pgdata`
+        # named volume the dev `db` service keeps a developer's local database
+        # in — running the smoke must never cost someone their dev data.
+        docker compose rm --stop --force --volumes "${smoke_services[@]}" \
+            >/dev/null 2>&1 || true
+    }
+    cleanup() {
+        # Both services, because a failed migration is otherwise invisible: the
+        # app never starts, so app-only logs would show nothing at all.
+        docker compose logs --no-color --tail 50 migrate app || true
+        teardown
+    }
+    # Registered *before* `up`, so a failure during build, migrate, or startup
+    # still prints logs and still tears the stack down.
+    trap cleanup EXIT
+    teardown
+    # `app` pulls in `smoke-db` and the one-shot `migrate` via depends_on;
+    # keycloak stays down (the smoke asserts unauthenticated surfaces only).
+    # `--wait` blocks until `migrate` has exited 0 and the app's healthcheck
+    # passes, so readiness is the compose file's business, not a polling loop's.
+    docker compose up --build -d --wait --wait-timeout 300 app
+    # Liveness, readiness (a real query against the migrated database), the SPA
+    # shell served by the same process, and the auth boundary in both directions.
+    curl -fsS "$base/healthz" | grep -q '"status":"ok"'
+    curl -fsS "$base/readyz" | grep -q '"status":"ready"'
+    curl -fsS "$base/" | grep -q '<div id="root">'
+    curl -fsS "$base/api/v1/auth/session" | grep -q '"authenticated":false'
+    curl -sS "$base/api/v1/paths" | grep -q '"code":"unauthenticated"'
+    echo "compose smoke OK"
+
 # Stop Compose services
 compose-down:
     docker compose down

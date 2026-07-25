@@ -1,3 +1,32 @@
+# Shared by the two production-image services below (`migrate` and `app`): one
+# build target and one environment, so the two cannot drift.
+#
+# ENV=production on purpose. It arms the config guards (no `stub` model, real
+# auth secrets required, Secure cookie forced), so the smoke fails loudly if the
+# production configuration surface regresses. The values below are throwaway but
+# deliberately non-default — the dev session secret is *rejected* in production,
+# which is the point of the guard.
+#
+# `migrate` shares it rather than carrying a DATABASE_URL alone: `alembic/env.py`
+# imports `aleph.config.settings` at module import, and Fly's release machine
+# carries the app's environment. A migrate service without these values would run
+# the migration leg with the guards disarmed — testing something production does
+# not do.
+x-smoke: &smoke
+  build:
+    context: .
+    target: production
+  environment:
+    ENV: production
+    DATABASE_URL: postgresql+asyncpg://postgres:postgres@smoke-db:5432/aleph
+    LOG_LEVEL: INFO
+    LOG_FORMAT: json
+    SESSION_SECRET_KEY: aleph-compose-smoke-session-secret
+    OIDC_PROVIDER: keycloak
+    OIDC_ISSUER: http://keycloak:8080/realms/aleph
+    OIDC_CLIENT_ID: aleph
+    OIDC_CLIENT_SECRET: aleph-dev-secret
+
 services:
   db:
     image: postgres:16
@@ -32,6 +61,70 @@ services:
         [
           "CMD-SHELL",
           "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /realms/aleph/.well-known/openid-configuration HTTP/1.1\\r\\nHost: 127.0.0.1\\r\\nConnection: close\\r\\n\\r\\n' >&3 && grep -q '200 OK' <&3",
+        ]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+
+  # --- production-image smoke stack (`just compose-smoke`) --------------------
+  # Not the day-to-day dev loop: `just dev` runs the app natively against the
+  # `db` service above. These three exist to prove the artifact AL-100 ships —
+  # that `docker build` produces an image which migrates a real database and
+  # serves the API + SPA shell.
+
+  # Deliberately NOT the `db` service above. The smoke throws its database away
+  # on every run, and `db` keeps its state in the `pgdata` *named* volume that a
+  # developer's local data lives in — reusing it would mean running the smoke
+  # wipes the dev database. `smoke-db` has no `volumes:` entry at all, so
+  # Postgres' data directory is an anonymous volume that dies with the container.
+  smoke-db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: aleph
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    # No `ports:` on purpose: `migrate` and `app` reach it over the Compose
+    # network, and the smoke asserts over HTTP against the app's published port
+    # only. Publishing nothing means the smoke can never collide with (or be
+    # mistaken for) the machine's own Postgres on 5432.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d aleph"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  # One-shot: the same command Fly runs as its release_command, so the migration
+  # path is exercised by the smoke rather than first discovered in production.
+  migrate:
+    <<: *smoke
+    command: ["/app/docker/release.sh"]
+    depends_on:
+      smoke-db:
+        condition: service_healthy
+
+  app:
+    <<: *smoke
+    ports:
+      - "${ALEPH_APP_PORT:-8000}:8000"
+    depends_on:
+      smoke-db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    # The OIDC provider is registered lazily (discovery happens on the first
+    # login), so the smoke needs no Keycloak: it asserts the unauthenticated
+    # surfaces. `just compose-keycloak-up` still brings the realm up if you want
+    # to drive a real sign-in against the image by hand.
+    #
+    # This healthcheck is the smoke's readiness gate: `docker compose up --wait`
+    # blocks on it (and on `migrate` exiting 0), which is why the justfile has no
+    # polling loop of its own. `python -c` rather than curl because the slim
+    # runtime image ships no curl — only the venv's interpreter.
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import json, urllib.request; print(json.load(urllib.request.urlopen('http://127.0.0.1:8000/readyz', timeout=5))['status'])\"",
         ]
       interval: 5s
       timeout: 10s

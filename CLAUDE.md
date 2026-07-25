@@ -27,6 +27,7 @@ Python web application using FastAPI, uvicorn, OpenTelemetry, uv, ruff, ty, and 
 | `just gate` | Fast pre-push check (fmt + lint + typecheck + test-unit) |
 | `just gate-expensive` | Full check (gate + integration + e2e) |
 | `just gate-external` | Everything (gate-expensive + external) |
+| `just compose-smoke` | Build the production image and smoke it over HTTP (see `docs/deploy.md`) |
 | `just dev` | Start backend and frontend dev servers |
 | `just dev-be` | Start backend dev server only |
 | `just dev-fe` | Start frontend dev server only |
@@ -73,8 +74,8 @@ src/aleph/web/frontend/tests/e2e/  # Playwright browser suite (E2E, phone viewpo
 - Tests are organized by type: `tests/unit/`, `tests/integration/`, `tests/external/`
   (backend), and the Playwright browser suite in `src/aleph/web/frontend/tests/e2e/`.
   Mark tests that hit external services with `@pytest.mark.external` (opt-in, never in
-  CI); tag workflow-proving tests with `@pytest.mark.workflow("W1")`. CI runs three jobs
-  — gate / integration / e2e (see `docs/ci.md`).
+  CI); tag workflow-proving tests with `@pytest.mark.workflow("W1")`. CI runs four jobs
+  — gate / integration / e2e / compose-smoke (see `docs/ci.md`).
 - **Agent evals** (`evals/`) are opt-in and cost money: `just evals` locally (or
   `just evals --smoke` offline), or dispatch the `Evals` GitHub Actions workflow. Never
   part of `just gate` or the CI gate. See `docs/evals.md`.
@@ -90,13 +91,27 @@ src/aleph/web/frontend/tests/e2e/  # Playwright browser suite (E2E, phone viewpo
 
 ## Commit Conventions
 
-**Always use [Conventional Commits](https://www.conventionalcommits.org/)** —
-`type(optional-scope): description`. Common types: `feat`, `fix`, `perf`, `docs`,
-`chore`, `refactor`, `test`, `style`, `ci`, `build`. Add `BREAKING CHANGE:` in the body
-(or `!` after the type) for a breaking change.
+**Always use [Conventional Commits](https://www.conventionalcommits.org/) for every
+commit.** Releases are automated with `semantic-release` (see `.releaserc.json` and
+`.github/workflows/release.yml`): the commit type decides the next version, and a
+published release builds the image and deploys to Fly.io ([`docs/deploy.md`](docs/deploy.md)).
+Non-conventional commits are ignored by the analyzer — they ship no release and no
+deploy.
 
-A semantic-release pipeline will later key releases off commit type — keep history
-conventional so it is ready for it.
+Format: `type(optional-scope): description`
+
+| Type | Release | Use for |
+| ---- | ------- | ------- |
+| `fix` | patch (x.y.**z**) | Bug fixes — **and any change that should reach production**, e.g. shipping a UI tweak |
+| `feat` | minor (x.**y**.z) | New features |
+| `perf` | patch | Performance improvements |
+| `docs`, `chore`, `refactor`, `test`, `style`, `ci`, `build` | none | Changes that should not cut a release |
+
+Add `BREAKING CHANGE:` in the commit body (or `!` after the type, e.g. `feat!:`) for a
+major (**x**.y.z) bump.
+
+If a change needs to reach production, commit it as `fix` (or `feat`) — a
+`chore`/`docs` commit will not deploy.
 
 ## More Information
 
@@ -108,3 +123,4 @@ front-loading. Start with:
 - [`docs/development.md`](docs/development.md) — environment setup, debugging, common tasks.
 - [`docs/api.md`](docs/api.md) — API endpoint reference.
 - [`docs/evals.md`](docs/evals.md) — the agent eval harness (`evals/`) and evaluation strategy.
+- [`docs/deploy.md`](docs/deploy.md) — the Fly.io/Neon runbook, the release pipeline, and every production secret.
