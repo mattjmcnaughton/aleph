@@ -166,12 +166,25 @@ Use `@pytest.mark.external` for tests that hit external services (they must skip
 without `OPENROUTER_API_KEY`); CI never runs them. Tag a test that proves a PRD workflow
 with `@pytest.mark.workflow("W1")` — shared vocabulary only, no enforcement machinery.
 
-## Docker
+## Docker (the production image)
+
+`Dockerfile` builds what Fly runs (see [deploy.md](deploy.md)): a pnpm/Vite frontend
+build, a uv-installed backend virtualenv with no dev or eval dependencies, and a slim
+runtime that serves the API and the built SPA from one process.
 
 ```sh
-# Build image
-docker build -t aleph .
+# Build it
+docker build --target production -t aleph .
 
-# Run container
-docker run -p 8000:8000 aleph
+# Boot the whole stack and prove it serves (build + migrate + HTTP assertions)
+just compose-smoke
 ```
+
+`just compose-smoke` builds the image, migrates a throwaway database, and asserts the
+app serves — it is also a CI job. It runs against its own `smoke-db` service, so it
+cannot disturb the `db` service (and `pgdata` volume) your local database lives in;
+override `ALEPH_APP_PORT` if 8000 is busy. Full description:
+[deploy.md § The Compose smoke](deploy.md#the-compose-smoke-just-compose-smoke).
+
+Running the image by hand needs a reachable database and, under `ENV=production`, real
+auth secrets — `docker compose up app` supplies both.

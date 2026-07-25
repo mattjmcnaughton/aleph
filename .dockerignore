@@ -24,6 +24,9 @@ venv/
 .pytest_cache/
 .coverage
 htmlcov/
+test-results/
+playwright-report/
+.artifacts/
 
 # IDE
 .idea/
@@ -50,7 +53,21 @@ Dockerfile
 docker-compose.yml
 docker-compose.override.yml
 
-# Excluded from production image
+# Excluded from the production image. `evals/` is the load-bearing one: the eval
+# harness is dev-only and must never ship (same guarantee tests/unit/test_packaging.py
+# pins for the wheel). The Dockerfile also never COPYs any of these, so this is
+# belt-and-braces plus a smaller build context — which matters for
+# `flyctl deploy --remote-only`, where the context crosses the network.
 tests/
 docs/
+evals/
+queries/
+scripts/
 .github/
+
+# Frontend — the image builds dist/ itself from source; a stale local build or a
+# node_modules tree must not ride along.
+**/node_modules/
+**/dist/
+**/.vite/
+**/*.tsbuildinfo

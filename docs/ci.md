@@ -1,14 +1,33 @@
 # Continuous Integration
 
-GitHub Actions workflow in [`.github/workflows/ci.yml`](../.github/workflows/ci.yml),
-run on every push/PR to `main`. Three independent jobs, all required green. The
-layout mirrors the sanctioned habagou shape (gate / integration / e2e).
+Three GitHub Actions workflows. [`ci.yml`](../.github/workflows/ci.yml) runs on every
+push/PR to `main`; [`release.yml`](../.github/workflows/release.yml) runs after a
+green CI on `main` (and can be dispatched as a dry run);
+[`evals.yml`](../.github/workflows/evals.yml) is dispatch-only because it spends
+money.
+
+| Workflow | Trigger | Purpose |
+| -------- | ------- | ------- |
+| **CI** | push/PR to `main` | Correctness gates (below) |
+| **Release** | after a green CI on `main`, or `workflow_dispatch` | semantic-release → GHCR image → Fly deploy ([deploy.md](deploy.md)) |
+| **Evals** | `workflow_dispatch` only | Agent quality measurement ([evals.md](evals.md)) |
+
+## CI (`ci.yml`)
+
+Four independent jobs, all required green. The layout mirrors the sanctioned habagou
+shape (gate / integration / e2e / compose-smoke).
 
 | Job | Command | Services | Purpose |
 | --- | ------- | -------- | ------- |
 | **gate** | `just gate` | none | Formatting (ruff/biome), linting, typecheck (ty/tsc), backend + frontend unit tests. |
 | **integration** | `just test-integration` | Postgres 16 + Keycloak | API against a real per-test Postgres database and the real OIDC code flow. |
 | **e2e** | `just test-e2e` | Postgres 16 + Keycloak | Playwright browser suite (phone viewport) against the stub-model backend + dev frontend. |
+| **compose-smoke** | `just compose-smoke` | Compose Postgres | Builds the **production image** and proves it serves: `/healthz`, `/readyz` against a migrated database, the SPA shell, and the auth boundary in both directions. |
+
+The first three run the app from a source checkout; `compose-smoke` is the only job
+that runs the artifact Fly will run. Full description — what it builds, what it
+asserts, and why it cannot touch a developer's database — lives in
+[deploy.md § The Compose smoke](deploy.md#the-compose-smoke-just-compose-smoke).
 
 No job calls an LLM provider: the stub model (`services/stub_model.py`) is
 deterministic and offline, the live-provider contract tests (`tests/external/`)

@@ -190,3 +190,19 @@ jobs:
             .artifacts/test-results/playwright.json
             src/aleph/web/frontend/test-results/
           if-no-files-found: error
+
+  # The deploy artifact itself (AL-100, TDD §13/D3): build the production image
+  # and prove the thing that ships actually serves. The three jobs above run the
+  # app from a source checkout; only this one runs the image Fly will run — the
+  # multi-stage frontend build, the release-command migration, and the SPA served
+  # from the same process as the API.
+  compose-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install just
+        run: sudo apt-get update && sudo apt-get install -y just
+
+      - name: Run Compose smoke
+        run: just compose-smoke
