@@ -19,6 +19,7 @@ import {
   Spinner,
   StateCard,
 } from "../components/state-card";
+import { Breadcrumbs } from "../components/breadcrumbs";
 import { makePollingRefetchInterval } from "../lib/polling";
 import { useRetryGeneration } from "../lib/use-retry-generation";
 
@@ -63,6 +64,8 @@ function PathView() {
 
   return (
     <main data-testid="path-view" className="mx-auto w-full max-w-[480px] px-4 py-8">
+      {detail ? <Breadcrumbs current={detail.topic} /> : null}
+
       {detail === undefined ? (
         pathQuery.isError ? (
           <UnavailableState />

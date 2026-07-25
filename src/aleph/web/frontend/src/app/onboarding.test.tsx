@@ -29,6 +29,15 @@ function topicInput() {
 }
 
 describe("Onboarding — /new", () => {
+  it("[navigation] shows Your paths as the parent of New path", async () => {
+    await gotoNewPath();
+
+    const breadcrumb = await screen.findByRole("navigation", { name: "Breadcrumb" });
+    expect(breadcrumb.textContent).toMatch(/Your paths.*New path/);
+    expect(screen.getByRole("link", { name: "Your paths" }).getAttribute("href")).toBe("/");
+    expect(breadcrumb.querySelector('[aria-current="page"]')?.textContent).toBe("New path");
+  });
+
   it("[AL-061] captures topic + level and shows a visible generating state", async () => {
     // Keep the outline in `generating` so the loading surface is observable.
     configurePaths({ pollsBeforeResolve: 999 });

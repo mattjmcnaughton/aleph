@@ -37,6 +37,16 @@ async function settle(): Promise<void> {
 }
 
 describe("Path view — /paths/$pathId", () => {
+  it("[navigation] shows a breadcrumb back to Your paths", async () => {
+    seedPath({ id: "p-crumb", topic: "Cell biology", level: "new_to_it" });
+    await gotoPath("p-crumb");
+
+    const breadcrumb = await screen.findByRole("navigation", { name: "Breadcrumb" });
+    expect(breadcrumb.textContent).toMatch(/Your paths.*Cell biology/);
+    expect(screen.getByRole("link", { name: "Your paths" }).getAttribute("href")).toBe("/");
+    expect(breadcrumb.querySelector('[aria-current="page"]')?.textContent).toBe("Cell biology");
+  });
+
   it("[AL-062] renders a fresh path: first lesson available, the rest locked", async () => {
     seedPath({ id: "p-fresh", topic: "TypeScript", level: "new_to_it", units: FRESH_PATH_UNITS });
     await gotoPath("p-fresh");

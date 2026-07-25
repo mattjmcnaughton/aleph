@@ -13,7 +13,9 @@ import {
   isNotFound,
   lessonQueryKey,
   lessonQueryOptions,
+  pathQueryOptions,
 } from "../lib/api";
+import { Breadcrumbs } from "../components/breadcrumbs";
 import {
   CheckIcon,
   LockIcon,
@@ -72,6 +74,12 @@ function LessonView() {
     ...lessonQueryOptions(lessonId),
     refetchInterval: stalled ? false : makePollingRefetchInterval(lessonViewPollConfig),
   });
+  const detail = lessonQuery.data;
+
+  // Lesson detail carries the parent path id, while the human-readable topic
+  // lives on path detail. This cache-friendly lookup makes a deep-linked lesson
+  // breadcrumb as descriptive as one reached from the path rail.
+  const breadcrumbPathQuery = useQuery(pathQueryOptions(detail?.path_id ?? null));
 
   const generate = useRetryGeneration({ mutationFn: generateLesson, queryKey: lessonQueryKey });
 
@@ -112,8 +120,6 @@ function LessonView() {
     },
   });
 
-  const detail = lessonQuery.data;
-
   // The reachable-but-unresolving window: an unlocked lesson still short of a
   // terminal generation state. Arm a one-shot timer while we sit here; if it
   // fires before generation resolves, degrade (C1). A poll flipping to
@@ -132,6 +138,16 @@ function LessonView() {
 
   return (
     <main data-testid="lesson-view" className="mx-auto w-full max-w-[480px] px-4 py-8">
+      {detail ? (
+        <Breadcrumbs
+          current={detail.title}
+          path={{
+            id: detail.path_id,
+            topic: breadcrumbPathQuery.data?.topic ?? "Path",
+          }}
+        />
+      ) : null}
+
       {detail === undefined ? (
         lessonQuery.isError ? (
           <UnavailableState />
