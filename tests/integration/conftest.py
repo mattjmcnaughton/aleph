@@ -25,6 +25,7 @@ from aleph import db
 from aleph.app import create_app
 from aleph.config import settings
 from aleph.dependencies import get_current_user
+from aleph.logging import configure_logging
 from aleph.models import User
 
 TEMPLATE_PREFIX = "aleph_test_base"
@@ -36,6 +37,11 @@ if TYPE_CHECKING:
 
     from pydantic_ai.models import Model
     from sqlalchemy.ext.asyncio import AsyncSession
+
+
+def pytest_configure() -> None:
+    """Install compact, credential-safe logging in every pytest-xdist worker."""
+    configure_logging()
 
 
 @pytest.fixture(scope="session")
