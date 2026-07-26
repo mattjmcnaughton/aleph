@@ -1,3 +1,10 @@
+# [1.1.0](https://github.com/mattjmcnaughton/aleph/compare/v1.0.0...v1.1.0) (2026-07-26)
+
+
+### Features
+
+* **frontend:** improve local navigation ([6a306da](https://github.com/mattjmcnaughton/aleph/commit/6a306dae3d222135f8487c915fd467e253e64dc5))
+
 # 1.0.0 (2026-07-25)
 
 
