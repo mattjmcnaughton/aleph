@@ -1,3 +1,10 @@
+## [1.1.1](https://github.com/mattjmcnaughton/aleph/compare/v1.1.0...v1.1.1) (2026-07-26)
+
+
+### Bug Fixes
+
+* **deploy:** target provisioned Fly app ([b733272](https://github.com/mattjmcnaughton/aleph/commit/b7332725e09370624c549bccd5af2609d80d029b))
+
 # [1.1.0](https://github.com/mattjmcnaughton/aleph/compare/v1.0.0...v1.1.0) (2026-07-26)
 
 
