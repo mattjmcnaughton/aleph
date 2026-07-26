@@ -1,6 +1,7 @@
 # Deploy: Fly.io cutover and runbook
 
-Production is a public Fly.io app (`aleph`) with Postgres on [Neon](https://neon.tech/)
+Production is a public Fly.io app (`aleph-prod-mattjmcnaughton`) with Postgres on
+[Neon](https://neon.tech/)
 (Neon project **`aleph`**, Free tier, pooled endpoint) — TDD
 [§13/D3](tdds/phase-1-path-generation.md). Continuous deployment: merge to `main` →
 CI green → semantic-release → (in parallel) publish the image to GHCR **and**
@@ -24,7 +25,7 @@ Fly cutover — see [The Compose smoke](#the-compose-smoke-just-compose-smoke).
 | ---- | ---- |
 | [`Dockerfile`](../Dockerfile) | Three stages: pnpm/Vite frontend build → uv-installed backend venv → slim `production` runtime. The built SPA lands in the package tree at `src/aleph/web/frontend/dist`, which is where `aleph.web.serve.mount_frontend` looks, so one process serves the API and the shell. |
 | [`docker/release.sh`](../docker/release.sh) | `alembic upgrade head` with retries. Fly's `release_command`, and the Compose smoke's one-shot `migrate` service. |
-| [`fly.toml`](../fly.toml) | App `aleph`, region `ewr`, `internal_port` 8000, `/readyz` check, single machine, non-secret `[env]`. |
+| [`fly.toml`](../fly.toml) | App `aleph-prod-mattjmcnaughton`, region `ewr`, `internal_port` 8000, `/readyz` check, single machine, non-secret `[env]`. |
 | [`.releaserc.json`](../.releaserc.json) + [`package.json`](../package.json) | semantic-release config and its toolchain (repo root — *not* the frontend manifest). |
 | [`.github/workflows/release.yml`](../.github/workflows/release.yml) | semantic-release → GHCR image → `flyctl deploy`, triggered only by a green CI run on `main`. Hand dispatch is a hardcoded dry run. |
 
@@ -72,8 +73,9 @@ postgresql+asyncpg://USER:PASSWORD@HOST/DB?ssl=require
 
 ## Secrets
 
-Everything below is set with `flyctl secrets set -a aleph`. Non-secret configuration
-lives in `fly.toml` `[env]` and is committed.
+Everything below is set with
+`flyctl secrets set -a aleph-prod-mattjmcnaughton`. Non-secret configuration lives
+in `fly.toml` `[env]` and is committed.
 
 ### Required
 
@@ -135,21 +137,21 @@ reach Neon on its first run. Custom domain and certs come **after** the first de
 Use `apps create` (not `fly launch`) — `fly.toml` is already in the repo:
 
 ```sh
-flyctl apps create aleph
+flyctl apps create aleph-prod-mattjmcnaughton
 ```
 
-Confirm `app = 'aleph'` in `fly.toml` matches.
+Confirm `app = 'aleph-prod-mattjmcnaughton'` in `fly.toml` matches.
 
 ### 2. Set secrets
 
 ```sh
 # Required — Neon pooled URL, rewritten per the recipe above.
-flyctl secrets set -a aleph \
+flyctl secrets set -a aleph-prod-mattjmcnaughton \
   DATABASE_URL='postgresql+asyncpg://neondb_owner:PASSWORD@ep-xxx-pooler.REGION.aws.neon.tech/neondb?ssl=require'
 
 # Required — session signing key and the Auth0 client credentials.
 python -c 'import secrets; print(secrets.token_urlsafe(32))'
-flyctl secrets set -a aleph \
+flyctl secrets set -a aleph-prod-mattjmcnaughton \
   SESSION_SECRET_KEY='<random value above>' \
   OIDC_ISSUER='https://<tenant>.auth0.com/' \
   OIDC_CLIENT_ID='<Auth0 Regular Web Application client ID>' \
@@ -157,11 +159,12 @@ flyctl secrets set -a aleph \
   OPENROUTER_API_KEY='<OpenRouter API key>'
 
 # Optional — trace + product-event export (AL-103).
-flyctl secrets set -a aleph LOGFIRE_TOKEN='<Logfire write token>'
+flyctl secrets set -a aleph-prod-mattjmcnaughton LOGFIRE_TOKEN='<Logfire write token>'
 ```
 
 On a brand-new app, secrets are often **Staged** until Machines exist
-(`flyctl secrets list -a aleph` says so) and `flyctl secrets deploy` cannot run yet
+(`flyctl secrets list -a aleph-prod-mattjmcnaughton` says so) and
+`flyctl secrets deploy` cannot run yet
 ("no machines available"). The first-deploy steps below create Machines, which makes
 staged secrets live.
 
@@ -192,20 +195,20 @@ Machines first:
 
 ```sh
 # 1) Create Machines without running migrations
-flyctl deploy --app aleph --remote-only --skip-release-command
+flyctl deploy --app aleph-prod-mattjmcnaughton --remote-only --skip-release-command
 
 # 2) Confirm secrets are no longer Staged
-flyctl secrets list -a aleph
-flyctl secrets deploy -a aleph   # only if still Staged
+flyctl secrets list -a aleph-prod-mattjmcnaughton
+flyctl secrets deploy -a aleph-prod-mattjmcnaughton   # only if still Staged
 
 # 3) Full deploy — release_command migrates with DATABASE_URL live
-flyctl deploy --app aleph --remote-only
+flyctl deploy --app aleph-prod-mattjmcnaughton --remote-only
 ```
 
 If secrets are already live, one full deploy is enough:
 
 ```sh
-flyctl deploy --app aleph --remote-only
+flyctl deploy --app aleph-prod-mattjmcnaughton --remote-only
 ```
 
 What to expect:
@@ -214,13 +217,13 @@ What to expect:
   `alembic upgrade head`, retried up to `ALEPH_MIGRATE_ATTEMPTS` (default 10) times
   because a Neon Free endpoint may be cold.
 - After the release succeeds, app machines start and serve on the Fly proxy
-  (`https://aleph.fly.dev`).
+  (`https://aleph-prod-mattjmcnaughton.fly.dev`).
 
 ```sh
-flyctl logs -a aleph
-flyctl releases -a aleph
-curl -fsS https://aleph.fly.dev/healthz
-curl -fsS https://aleph.fly.dev/readyz
+flyctl logs -a aleph-prod-mattjmcnaughton
+flyctl releases -a aleph-prod-mattjmcnaughton
+curl -fsS https://aleph-prod-mattjmcnaughton.fly.dev/healthz
+curl -fsS https://aleph-prod-mattjmcnaughton.fly.dev/readyz
 ```
 
 ### 4. Custom domain + DNS + TLS
@@ -228,12 +231,12 @@ curl -fsS https://aleph.fly.dev/readyz
 Only after a successful deploy, so the app has allocated IPs.
 
 ```sh
-flyctl certs add <custom-domain> -a aleph
-flyctl certs setup <custom-domain> -a aleph   # re-print the expected DNS records
-flyctl ips list -a aleph
+flyctl certs add <custom-domain> -a aleph-prod-mattjmcnaughton
+flyctl certs setup <custom-domain> -a aleph-prod-mattjmcnaughton
+flyctl ips list -a aleph-prod-mattjmcnaughton
 # If IPv4/IPv6 are missing:
-flyctl ips allocate-v4 -a aleph
-flyctl ips allocate-v6 -a aleph
+flyctl ips allocate-v4 -a aleph-prod-mattjmcnaughton
+flyctl ips allocate-v6 -a aleph-prod-mattjmcnaughton
 ```
 
 DNS for `mattjmcnaughton.com` is managed in
@@ -243,7 +246,7 @@ there. Pick one pattern; do not mix conflicting records for the same name:
 | Hostname | Recommended records |
 | -------- | ------------------- |
 | Apex (`example.com`) | **A** → Fly IPv4 and **AAAA** → Fly IPv6 from `fly ips list` / `fly certs setup`. Prefer A/AAAA over CNAME at the apex unless the provider supports CNAME flattening (ANAME/ALIAS). |
-| Subdomain (`aleph.mattjmcnaughton.com`) | **CNAME** → the `*.fly.dev` target shown by `fly certs setup` (typically `aleph.fly.dev`), **or** A/AAAA like the apex. |
+| Subdomain (`aleph.mattjmcnaughton.com`) | **CNAME** → the `*.fly.dev` target shown by `fly certs setup` (for this app, `aleph-prod-mattjmcnaughton.fly.dev`), **or** A/AAAA like the apex. |
 
 Certificate issuance also needs domain validation via at least one of: AAAA pointing
 at the app, an `_acme-challenge` CNAME (DNS-01), or a `_fly-ownership` TXT (when
@@ -255,7 +258,7 @@ Flexible causes redirect loops — and add the `_fly-ownership` TXT.
 Then:
 
 ```sh
-flyctl certs check <custom-domain> -a aleph
+flyctl certs check <custom-domain> -a aleph-prod-mattjmcnaughton
 curl -fsSI https://<custom-domain>/readyz
 ```
 
@@ -264,7 +267,7 @@ Finally, update the Auth0 application's Allowed Callback URL to the custom domai
 ### 5. Enable continuous deploy
 
 ```sh
-flyctl tokens create deploy -a aleph
+flyctl tokens create deploy -a aleph-prod-mattjmcnaughton
 # GitHub → Settings → Secrets and variables → Actions → New repository secret
 # Name: FLY_API_TOKEN
 ```
@@ -303,8 +306,8 @@ the `image` and `deploy` jobs additionally require `github.event_name ==
 'workflow_run'`, which a dispatch cannot satisfy.
 
 If you genuinely need to ship without a qualifying merge, deploy by hand
-(`flyctl deploy --app aleph --remote-only`) — visible and deliberate, rather than a
-button that looks like a rehearsal.
+(`flyctl deploy --app aleph-prod-mattjmcnaughton --remote-only`) — visible and
+deliberate, rather than a button that looks like a rehearsal.
 
 The same plan can be computed locally without any credentials — this is version
 arithmetic over the commit history, nothing more:
@@ -321,13 +324,15 @@ pnpm exec semantic-release --dry-run --no-ci \
 ```sh
 # Redeploy a checked-out tag (Fly rebuilds)
 git checkout vX.Y.Z
-flyctl deploy --app aleph --remote-only
+flyctl deploy --app aleph-prod-mattjmcnaughton --remote-only
 
 # Or redeploy a previous Fly-built image (from `fly releases --image`)
-flyctl deploy --app aleph --image registry.fly.io/aleph:<deployment-tag> --remote-only
+flyctl deploy --app aleph-prod-mattjmcnaughton \
+  --image registry.fly.io/aleph-prod-mattjmcnaughton:<deployment-tag> \
+  --remote-only
 
-flyctl releases -a aleph
-flyctl logs -a aleph
+flyctl releases -a aleph-prod-mattjmcnaughton
+flyctl logs -a aleph-prod-mattjmcnaughton
 ```
 
 ## The Compose smoke (`just compose-smoke`)
