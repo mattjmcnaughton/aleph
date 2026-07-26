@@ -5,7 +5,7 @@
 # is non-secret and therefore committed; every secret is set with
 # `flyctl secrets set` (see docs/deploy.md).
 
-app = 'aleph'
+app = 'aleph-prod-mattjmcnaughton'
 primary_region = 'ewr'
 
 [build]

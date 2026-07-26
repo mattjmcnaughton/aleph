@@ -83,7 +83,7 @@ trim habagou-specifics), keeping habagou's layering rules intact:
 | Rate limiting | `services/rate_limit.py` | Caps from §14 |
 | Evals harness shape (dev-only group, CLI, opt-in workflow) | `evals/`, `.github/workflows/evals.yml`, `docs/evals.md` | Extend with LLM judge (§11) |
 | Live smoke tests | `tests/external/`, `just test-external` | One real outline + one real lesson round trip |
-| Fly + Neon deploy, semantic-release CD | `docs/deploy.md`, `fly.toml`, `.releaserc.json`, release workflow | App `aleph`; same Neon URL rewriting, `release_command` migrations |
+| Fly + Neon deploy, semantic-release CD | `docs/deploy.md`, `fly.toml`, `.releaserc.json`, release workflow | App `aleph-prod-mattjmcnaughton`; same Neon URL rewriting, `release_command` migrations |
 | Conventional-commit release policy | habagou CLAUDE.md | Same table |
 
 ### 2.3 Build new for Aleph
@@ -536,7 +536,8 @@ emitted); never mock what a fake or the real thing can stand in for.
 
 ## 13. Deployment & ops
 
-Habagou's runbook (`habagou/docs/deploy.md`) with names swapped: Fly app `aleph`, Neon
+Habagou's runbook (`habagou/docs/deploy.md`) with names swapped: Fly app
+`aleph-prod-mattjmcnaughton`, Neon
 project `aleph` (pooled URL rewritten for asyncpg: `postgresql+asyncpg://`,
 `ssl=require`, drop `channel_binding`), `release_command` runs Alembic migrations,
 semantic-release on merge-to-main cuts version → GHCR mirror + `flyctl deploy`.
