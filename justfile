@@ -71,7 +71,7 @@ test-unit-fe:
 
 # Run integration tests
 test-integration:
-    uv run pytest -n auto tests/integration
+    uv run pytest -n auto --durations=20 tests/integration
 
 # Run e2e tests (Playwright browser suite, phone viewport — TDD §12)
 test-e2e:
