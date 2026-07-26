@@ -1,3 +1,10 @@
+## [1.1.2](https://github.com/mattjmcnaughton/aleph/compare/v1.1.1...v1.1.2) (2026-07-26)
+
+
+### Performance Improvements
+
+* **integration:** reduce structured logging overhead ([25273b8](https://github.com/mattjmcnaughton/aleph/commit/25273b8fa896f39a111b26533b0bbe0d68512872))
+
 ## [1.1.1](https://github.com/mattjmcnaughton/aleph/compare/v1.1.0...v1.1.1) (2026-07-26)
 
 
