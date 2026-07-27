@@ -39,6 +39,7 @@ interface StoredLesson {
   /** The keyed answer — NEVER serialized until an Attempt exists (W6). */
   correctIndex: number;
   explanation: string;
+  /** GitHub-Flavored Markdown, as the lesson agent emits (rendered, not printed). */
   readPassage: string;
   /** First-wins recorded Attempt, or null until the learner attempts. */
   attempt: LessonAttempt | null;

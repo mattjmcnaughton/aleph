@@ -131,10 +131,11 @@ def _pick(seq: tuple[str, ...], seed: int) -> str:
     return seq[seed % len(seq)]
 
 
-# The topic is interpolated ~14× into a Read passage; an unbounded topic would
+# The topic is interpolated ~12× into a Read passage; an unbounded topic would
 # push the passage past §14's ~500-word cap (a 12-word topic → ~532 words). Cap
 # the topic *as used in the passage* so the band holds for any topic length.
-# 8 words keeps the worst case ≈ 476 words, comfortably inside 500.
+# 8 words keeps the worst case ≈ 457 words, comfortably inside 500 (and a
+# one-word topic ≈ 366, comfortably above the 200 floor).
 _PASSAGE_TOPIC_MAX_WORDS = 8
 
 
@@ -184,29 +185,64 @@ def _build_outline(topic: str) -> PathOutline:
 
 
 def _build_read_passage(topic: str, position: int) -> str:
-    """A deterministic Read passage (~200-500 words, §14 band) for a lesson.
+    """A deterministic Markdown Read passage (~200-500 words, §14 band).
 
-    The topic is truncated (:func:`_passage_topic`) for interpolation so the
-    word band holds regardless of how long the caller's topic is.
+    The passage is **GitHub-Flavored Markdown**, like the real agent's output
+    (``agents/lesson.py``): headings, prose, a bulleted list, a fenced code block,
+    a GFM table, and a blockquote. That is deliberate — the stub is what CI's e2e
+    suite renders, so the Markdown path through ``components/markdown.tsx`` is
+    exercised on every run rather than only against a live model. Keep at least
+    one instance of each construct here; dropping one silently stops testing that
+    branch of the renderer.
+
+    The topic is truncated (:func:`_passage_topic`) for interpolation so the word
+    band holds regardless of how long the caller's topic is. Word counting is the
+    validator's whitespace split, which counts Markdown punctuation (``##``,
+    ``-``, the fences, the table pipes) as words — the fixed scaffolding below is
+    budgeted with that included.
     """
     seed = _seed(f"{topic}|passage|{position}")
     topic = _passage_topic(topic)
+    aspect = _pick(_ASPECTS, seed)
     lead = (
-        f"This is lesson {position} on {topic}. It builds directly on the earlier "
-        f"lessons in the path, extending rather than repeating them."
+        f"## Lesson {position}: the {aspect} of {topic}\n\n"
+        f"This is lesson {position} on **{topic}**. It builds directly on the "
+        f"earlier lessons in the path, extending rather than repeating them."
     )
-    body = [
+    body = "\n\n".join(
         f"The {_pick(_ASPECTS, seed + i)} of {topic} reward careful, "
         f"{_pick(_ADJECTIVES, seed + i)} study, and this passage walks through "
         f"them one idea at a time so the reader can follow without prior context."
-        for i in range(12)
-    ]
-    close = (
-        f"By the end of lesson {position}, a learner should be able to explain the "
-        f"{_pick(_ASPECTS, seed)} of {topic} in their own words and recognise them "
-        f"in practice. The Quick check below confirms that understanding."
+        for i in range(7)
     )
-    return " ".join([lead, *body, close])
+    bullets = "### What to hold on to\n\n" + "\n".join(
+        f"- The {_pick(_ASPECTS, seed + i)} of {topic} stay "
+        f"{_pick(_ADJECTIVES, seed + i)} once the earlier lessons have landed."
+        for i in range(3)
+    )
+    code = (
+        "### In practice\n\n"
+        "```python\n"
+        f"def lesson_{position}(learner):\n"
+        f'    """Apply the {aspect} covered above."""\n'
+        f"    return learner.practise({aspect!r})\n"
+        "```\n\n"
+        f"Read `lesson_{position}` as a sketch, not a runnable API: it names the "
+        f"one move this lesson asks a learner to make."
+    )
+    table = (
+        "| Idea | Why it matters |\n"
+        "| --- | --- |\n"
+        f"| {_pick(_ASPECTS, seed + 1)} | Carries over into the next lesson. |\n"
+        f"| {_pick(_ASPECTS, seed + 2)} | Explains the Quick check below. |"
+    )
+    close = (
+        f"> By the end of lesson {position}, a learner should be able to explain "
+        f"the {aspect} of {topic} in their own words and recognise them in "
+        f"practice.\n\n"
+        "The Quick check below confirms that understanding."
+    )
+    return "\n\n".join([lead, body, bullets, code, table, close])
 
 
 def _build_lesson(topic: str, position: int) -> LessonContent:
@@ -225,9 +261,11 @@ def _build_lesson(topic: str, position: int) -> LessonContent:
             stem=f"Which statement best captures lesson {position} on {topic}?",
             options=options,
             correct_index=correct_index,
+            # Inline Markdown only, matching the contract the real prompt states
+            # for an explanation (no block structure in the small callout).
             explanation=(
-                f"Option {correct_index + 1} matches the passage's treatment of "
-                f"{topic}; the others distort or misattribute it."
+                f"Option **{correct_index + 1}** matches the passage's treatment "
+                f"of {topic}; the others distort or misattribute it."
             ),
         ),
     )

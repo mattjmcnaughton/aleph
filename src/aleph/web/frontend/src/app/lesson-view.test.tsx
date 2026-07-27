@@ -59,6 +59,53 @@ describe("Lesson view — /lessons/$lessonId", () => {
     expect(screen.getByTestId("lesson-view-id").textContent).toBe("les-ready");
   });
 
+  it("renders the Read passage as Markdown, not as literal source text", async () => {
+    seedLesson({
+      id: "les-markdown",
+      path_id: PATH_ID,
+      readPassage: [
+        "## Structural typing",
+        "",
+        "TypeScript checks **shape**, not name.",
+        "",
+        "- structural, not nominal",
+        "- erased at runtime",
+        "",
+        "```ts",
+        "type Point = { x: number };",
+        "```",
+      ].join("\n"),
+    });
+    await gotoLesson("les-markdown");
+
+    const passage = await screen.findByTestId("lesson-read-passage");
+    expect(passage.querySelector("h2")?.textContent).toBe("Structural typing");
+    expect(passage.querySelector("strong")?.textContent).toBe("shape");
+    expect(passage.querySelectorAll("li")).toHaveLength(2);
+    expect(passage.querySelector("pre")?.textContent).toContain("type Point");
+    // The syntax itself is consumed, never printed.
+    expect(passage.textContent).not.toContain("##");
+    expect(passage.textContent).not.toContain("**");
+  });
+
+  it("renders the Outcome explanation as Markdown", async () => {
+    seedLesson({
+      id: "les-md-explanation",
+      path_id: PATH_ID,
+      correctIndex: 0,
+      explanation: "Option **1** matches, because `string` is a type.",
+    });
+    await gotoLesson("les-md-explanation");
+
+    fireEvent.click((await screen.findAllByTestId("quick-check-option"))[0]);
+    fireEvent.click(screen.getByTestId("quick-check-submit"));
+
+    const explanation = await screen.findByTestId("outcome-explanation");
+    expect(explanation.querySelector("strong")?.textContent).toBe("1");
+    expect(explanation.querySelector("code")?.textContent).toBe("string");
+    expect(explanation.textContent).not.toContain("**");
+  });
+
   it("[AL-063][a11y] options are native single-select radios (C4)", async () => {
     seedLesson({ id: "les-radio", path_id: PATH_ID });
     await gotoLesson("les-radio");

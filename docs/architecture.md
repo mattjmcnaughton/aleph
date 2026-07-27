@@ -53,6 +53,8 @@ DTOs (Pydantic models) are used at the router and service level for API I/O. The
 
 The frontend is scaffolded separately into `src/aleph/web/frontend/` using the `frontend-react` Copier template. In development, the frontend dev server runs independently with API proxying. In production, built static files are served by FastAPI via `web/serve.py`.
 
+**Generated content is Markdown, rendered at the edge.** The lesson agent writes the Read passage as GitHub-Flavored Markdown (a bounded subset — see [`docs/api.md`](api.md)); it is stored and served as source, and `src/components/markdown.tsx` is the single place that turns it into DOM. That component is the security boundary for model-generated text: `react-markdown` + `remark-gfm`, no `rehype-raw` and no `dangerouslySetInnerHTML`, so raw HTML is escaped rather than executed and dangerous URL protocols are stripped. Any new surface showing generated prose should render through it rather than reaching for its own Markdown pipeline.
+
 ## Toolchain
 
 | Tool | Purpose |
