@@ -74,6 +74,7 @@ synonym (say **path**, not "course"; **Quick check**, not "quiz question").
 | --- | --- |
 | **Nocturne** | Aleph's visual system — dark, teal, mobile-first — established in the mocks. New surfaces extend it. |
 | **Mobile-first** | Every surface is designed for a phone first, desktop second. |
+| **Sidebar** | The desktop-only left column (≥1024px) holding the Switcher and, on a lesson, the current path's rail. Absent on a phone. |
 
 ---
 

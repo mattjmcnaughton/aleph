@@ -10,6 +10,7 @@ import {
   pathsListQueryOptions,
 } from "../lib/api";
 import { PRIMARY_CTA, PRIMARY_CTA_BASE, StateCard } from "../components/state-card";
+import { Workspace } from "../components/workspace";
 import { sessionQueryOptions } from "../lib/auth";
 import { levelLabel } from "../lib/onboarding";
 import { makePollingRefetchInterval } from "../lib/polling";
@@ -118,24 +119,28 @@ function Home() {
   const paths = pathsQuery.data?.paths;
 
   return (
-    <main data-testid="paths-switcher" className="mx-auto w-full max-w-[480px] px-4 py-8">
-      <p className="kicker">Your paths</p>
-      <h1 className="mt-2 text-3xl font-semibold leading-tight tracking-tight">
-        Welcome back, {firstName}.
-      </h1>
-      <p className="mt-3 text-base leading-6 text-mist">
-        Name a topic and Aleph drafts a learning path you can work through, lesson by lesson.
-      </p>
+    <Workspace testid="paths-switcher" width="switcher">
+      <div className="lg:flex lg:items-end lg:justify-between lg:gap-8">
+        <div className="min-w-0">
+          <p className="kicker">Your paths</p>
+          <h1 className="mt-2 text-3xl font-semibold leading-tight tracking-tight">
+            Welcome back, {firstName}.
+          </h1>
+          <p className="mt-3 text-base leading-6 text-mist">
+            Name a topic and Aleph drafts a learning path you can work through, lesson by lesson.
+          </p>
+        </div>
 
-      <button
-        type="button"
-        ref={newPathRef}
-        data-testid="new-path-button"
-        onClick={() => navigate({ to: "/new" })}
-        className={`mt-6 ${PRIMARY_CTA}`}
-      >
-        New path
-      </button>
+        <button
+          type="button"
+          ref={newPathRef}
+          data-testid="new-path-button"
+          onClick={() => navigate({ to: "/new" })}
+          className={`mt-6 ${PRIMARY_CTA} lg:mt-0 lg:w-auto lg:shrink-0`}
+        >
+          New path
+        </button>
+      </div>
 
       {paths === undefined ? (
         pathsQuery.isError ? (
@@ -146,7 +151,10 @@ function Home() {
       ) : paths.length === 0 ? (
         <EmptyState />
       ) : (
-        <ul data-testid="paths-list" className="mt-8 space-y-3">
+        <ul
+          data-testid="paths-list"
+          className="mt-8 space-y-3 lg:space-y-0 lg:border-t lg:border-divider"
+        >
           {paths.map((path) => (
             <li key={path.id}>
               <PathRow path={path} deletion={deletion} />
@@ -154,7 +162,7 @@ function Home() {
           ))}
         </ul>
       )}
-    </main>
+    </Workspace>
   );
 }
 
@@ -166,16 +174,35 @@ const ROW_VARIANT: Partial<Record<PathStatus, "refusal" | "error">> = {
   failed: "error",
 };
 
+// Phone: a full card fill per status. Desktop (`lg:`): the row becomes a
+// table-ish line and the tint becomes a 2px inset bar instead (mock #2c rows
+// 4-5) — `lg:shadow-none` for the ordinary row, an inset `lg:shadow-[...]` for
+// refusal/error, so exactly one `lg:shadow-*` utility is ever active per row.
 const ROW_TONE = {
-  neutral: "border-divider bg-surface",
-  refusal: "border-iris-700 bg-iris-900",
-  error: "border-danger-border/60 bg-danger-bg",
+  neutral: "border-divider bg-surface lg:shadow-none",
+  refusal: "border-iris-700 bg-iris-900 lg:shadow-[inset_2px_0_0_theme(colors.iris.700)]",
+  error:
+    "border-danger-border/60 bg-danger-bg lg:shadow-[inset_2px_0_0_theme(colors.danger.DEFAULT)]",
 } as const;
+
+const ROW_BASE =
+  "rounded-lg border p-4 shadow-sm lg:flex lg:items-center lg:gap-8 lg:rounded-none lg:border-0 lg:border-b lg:border-divider lg:bg-transparent lg:px-2 lg:py-5";
 
 const ROW_STATUS_TONE = {
   neutral: "text-mist",
   refusal: "text-iris-300",
   error: "text-danger",
+} as const;
+
+// How wide the status column gets at `lg` (mock #2c). A neutral row's status is
+// two words in a fixed column, so every row's Delete button lines up. Refusal
+// and failure are whole sentences and take the flexible column the mock gives
+// them instead — those rows carry no progress block, so the width is free, and
+// squeezing a sentence into 110px wraps it to three ragged lines.
+const ROW_STATUS_WIDTH = {
+  neutral: "lg:w-[110px] lg:shrink-0",
+  refusal: "lg:min-w-0 lg:flex-1",
+  error: "lg:min-w-0 lg:flex-1",
 } as const;
 
 /**
@@ -221,40 +248,45 @@ function PathRow({ path, deletion }: { path: PathSummary; deletion: DeletePath }
       data-path-id={path.id}
       data-status={path.status}
       data-variant={rowVariant}
-      className={`rounded-lg border p-4 shadow-sm ${ROW_TONE[variant]}`}
+      className={`${ROW_BASE} ${ROW_TONE[variant]}`}
     >
       <Link
         to="/paths/$pathId"
         params={{ pathId: path.id }}
         data-testid="path-item-open"
-        className="block rounded-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-teal"
+        className="block rounded-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-teal lg:flex lg:flex-1 lg:items-center lg:gap-8"
       >
-        <p data-testid="path-item-topic" className="text-base font-semibold leading-snug">
-          {path.topic}
-        </p>
-        <p
-          data-testid="path-item-level"
-          className="mt-1 font-mono text-[11px] uppercase tracking-kicker text-slate"
-        >
-          {levelLabel(path.level)}
-        </p>
+        <div className="min-w-0 lg:flex-1">
+          <p data-testid="path-item-topic" className="text-base font-semibold leading-snug">
+            {path.topic}
+          </p>
+          <p
+            data-testid="path-item-level"
+            className="mt-1 font-mono text-[11px] uppercase tracking-kicker text-slate"
+          >
+            {levelLabel(path.level)}
+          </p>
+        </div>
 
         {total > 0 ? (
-          <>
+          <div className="lg:w-[260px] lg:shrink-0">
             {/* Decorative bar; the text below is the accessible readout. */}
             <div
               aria-hidden="true"
-              className="mt-3 h-[6px] overflow-hidden rounded-full bg-porcelain/10"
+              className="mt-3 h-[6px] overflow-hidden rounded-full bg-porcelain/10 lg:mt-0"
             >
               <span className="block h-full bg-teal" style={{ width: `${percent}%` }} />
             </div>
             <p data-testid="path-item-progress" className="mt-2 text-sm text-mist">
               {done} of {total} {total === 1 ? "lesson" : "lessons"} complete
             </p>
-          </>
+          </div>
         ) : null}
 
-        <p data-testid="path-item-status" className={`mt-1 text-sm ${ROW_STATUS_TONE[variant]}`}>
+        <p
+          data-testid="path-item-status"
+          className={`mt-1 text-sm lg:mt-0 ${ROW_STATUS_WIDTH[variant]} ${ROW_STATUS_TONE[variant]}`}
+        >
           {statusLabel(path)}
         </p>
       </Link>
@@ -274,11 +306,17 @@ function PathRow({ path, deletion }: { path: PathSummary; deletion: DeletePath }
           data-testid="path-delete-button"
           aria-label={`Delete ${path.topic}`}
           onClick={() => deletion.ask(path.id)}
-          className="mt-3 rounded-md border border-divider px-3 py-1.5 text-sm text-mist transition-colors hover:border-danger-border hover:text-danger"
+          className="mt-3 rounded-md border border-divider px-3 py-1.5 text-sm text-mist transition-colors hover:border-danger-border hover:text-danger lg:mt-0 lg:shrink-0"
         >
           Delete
         </button>
       )}
+
+      {/* Desktop-only row chevron (mock #2c) — decorative, the whole row is a
+          link via `path-item-open`. */}
+      <span aria-hidden="true" className="hidden shrink-0 text-slate lg:block">
+        ›
+      </span>
     </div>
   );
 }

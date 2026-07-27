@@ -57,6 +57,8 @@ The frontend is scaffolded separately into `src/aleph/web/frontend/` using the `
 
 A ` ```mermaid ` fence routes to `src/components/mermaid.tsx` instead of a code block. Mermaid is ~635 kB, so it is behind a dynamic `import()` — Vite code-splits it and only a lesson that actually draws something pays for it. It renders at `securityLevel: "strict"` (mermaid's own DOMPurify pass over the SVG, HTML labels and `click` directives disabled); that sanitised SVG is the one `dangerouslySetInnerHTML` in the codebase, and only mermaid's output may ever reach it. An unparseable chart falls back to its source as a code block rather than an error, because model-written mermaid is often subtly invalid and a lesson must stay readable regardless.
 
+**The desktop shell is CSS-only, at Tailwind's `lg` breakpoint (1024px).** No `matchMedia`, no JS viewport state, no width-conditional rendering — every route ships the same markup at every width, and `lg:` utilities alone widen it. `src/components/workspace.tsx` owns the two-column layout (a `sidebar` beside a widened `main`) and each route's own content cap at `lg`; `src/components/sidebar.tsx` owns the sidebar's two sections — the "Your paths" Switcher and, on a lesson, the current path's condensed rail (the Outline). The phone surface is unchanged by construction: below `lg` every desktop-only element collapses to `hidden` or its ordinary single-column layout, so the existing mobile routes, tests, and Playwright journeys never had to move.
+
 ## Toolchain
 
 | Tool | Purpose |
