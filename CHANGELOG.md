@@ -1,3 +1,10 @@
+## [1.3.1](https://github.com/mattjmcnaughton/aleph/compare/v1.3.0...v1.3.1) (2026-07-27)
+
+
+### Bug Fixes
+
+* **web:** serve the SPA shell on a deep-link refresh ([b98c539](https://github.com/mattjmcnaughton/aleph/commit/b98c539eb1f186ace5dcc762c359553b2b4a8ce4))
+
 # [1.3.0](https://github.com/mattjmcnaughton/aleph/compare/v1.2.0...v1.3.0) (2026-07-27)
 
 
