@@ -157,6 +157,7 @@ def test_lesson_passage_is_markdown() -> None:
     assert "\n### " in passage  # a subsection heading
     assert "\n- " in passage  # a bulleted list
     assert "```python" in passage  # a fenced code block with a language
+    assert "```mermaid" in passage  # a diagram, rendered by components/mermaid.tsx
     assert "\n| " in passage  # a GFM table
     assert "\n> " in passage  # a blockquote
     assert "**" in passage  # inline emphasis

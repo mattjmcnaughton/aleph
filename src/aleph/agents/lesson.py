@@ -78,7 +78,8 @@ class LessonContent(BaseModel):
     ``read_passage`` is **GitHub-Flavored Markdown** (see :data:`SYSTEM_PROMPT`
     for the exact subset the agent may use), not plain text: the frontend renders
     it through ``components/markdown.tsx`` so a lesson can carry headings, lists,
-    tables, and fenced code blocks. It is stored and transported verbatim — the
+    tables, fenced code blocks, and ```mermaid diagrams. It is stored and
+    transported verbatim — the
     API serves the Markdown source and rendering happens only at the edge, so the
     string is untrusted-by-construction and the renderer, not this schema, is what
     keeps raw HTML out of the DOM.
@@ -321,13 +322,27 @@ commands, filenames, and literal values
 - fenced code blocks with a language tag (```python, ```sql, ```bash, ...) \
 whenever showing code, a command, or structured data is clearer than describing it
 - tables for genuinely tabular comparisons, and > blockquotes for a short aside
+- a ```mermaid fenced block when a picture teaches something the prose cannot: a \
+process or decision flow, a state machine, a sequence of interactions, a \
+hierarchy or a relationship between concepts
+
+Mermaid rules, because a broken diagram helps nobody. Use at most one diagram \
+per lesson, and only when it earns its place — most lessons need none, and a \
+diagram is never a substitute for explaining the idea in prose. Keep it small \
+(roughly ten nodes at most): it is read on a phone. Stick to the common, stable \
+diagram types — `flowchart TD`, `sequenceDiagram`, `stateDiagram-v2`, \
+`erDiagram`, `classDiagram` — and to their plain syntax. Quote any node label \
+containing punctuation, as in `A["Owner drops value"]`. Do not use `click` \
+directives, embedded HTML or images in labels, styling/theme directives, or \
+newer syntax you are unsure of. Always explain the diagram in the prose around \
+it, so the lesson still reads correctly for someone who cannot see it.
 
 Do not use raw HTML, images, or footnotes — the renderer does not support them, \
 and raw HTML shows up as literal, broken-looking text. Reach for structure when \
 it earns its place: a conceptual passage may \
 be nothing but prose, while a hands-on one may be mostly code. Prose is the \
 default; never turn the whole passage into a bare bullet list. Note that the word \
-band counts every word in the passage, code blocks included.
+band counts every word in the passage, code blocks and diagrams included.
 
 Then write the Quick check: a clear question stem, the number of answer options \
 you are told to use with exactly one correct, the zero-based index of the correct \

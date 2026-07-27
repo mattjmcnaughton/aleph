@@ -1,27 +1,49 @@
 // Markdown rendering for generated lesson content, styled in Nocturne.
 //
 // The lesson agent writes the Read passage (and the Quick check explanation) as
-// GitHub-Flavored Markdown so it can use headings, lists, tables, and fenced code
-// blocks instead of one undifferentiated wall of prose. This module is the single
-// place that turns that Markdown into DOM — every surface renders it the same way.
+// GitHub-Flavored Markdown so it can use headings, lists, tables, fenced code
+// blocks, and mermaid diagrams instead of one undifferentiated wall of prose.
+// This module is the single place that turns that Markdown into DOM — every
+// surface renders it the same way.
 //
 // **Safety.** The content is model-generated, so it is untrusted input. We rely on
 // react-markdown's default posture and deliberately keep it: no `rehype-raw`, so
 // embedded raw HTML is escaped to inert text rather than executed, and the
 // built-in `urlTransform` strips dangerous URL protocols (`javascript:`, `data:`)
-// from links. Nothing here ever touches `dangerouslySetInnerHTML`. Adding a
-// raw-HTML plugin would hand an LLM-authored string a script tag — don't.
+// from links. No Markdown text ever reaches `dangerouslySetInnerHTML` — the sole
+// exception in this pipeline is the SVG mermaid itself emits, which mermaid
+// sanitises (see `mermaid.tsx`). Adding a raw-HTML plugin would hand an
+// LLM-authored string a script tag — don't.
 //
 // **Mobile-first.** The lesson column is 480px at its widest, so the two elements
 // that can't reflow — fenced code blocks and tables — scroll horizontally inside
 // their own container rather than pushing the page sideways.
 
+import { isValidElement, type ReactNode } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { Mermaid } from "./mermaid";
 
 // The plugin list is module-level (not inline) so its identity is stable across
 // renders and react-markdown doesn't rebuild the processor on every poll tick.
 const REMARK_PLUGINS = [remarkGfm];
+
+/**
+ * The chart source of a ```mermaid fence, or null for any other `pre`.
+ *
+ * react-markdown gives every fenced block the same shape — a `pre` wrapping a
+ * single `code` whose className carries `language-<tag>` and whose children are
+ * the block's text. This reads that shape defensively: anything that doesn't
+ * match exactly falls through to null and renders as an ordinary code block.
+ */
+function mermaidSource(children: ReactNode): string | null {
+  if (!isValidElement<{ className?: string; children?: ReactNode }>(children)) return null;
+  const { className, children: code } = children.props;
+  if (typeof className !== "string" || !className.split(/\s+/).includes("language-mermaid")) {
+    return null;
+  }
+  return typeof code === "string" ? code : null;
+}
 
 // Nocturne treatments for the block/inline elements the agent is told it may use
 // (see `SYSTEM_PROMPT` in src/aleph/agents/lesson.py). Anything not listed falls
@@ -95,11 +117,19 @@ const COMPONENTS: Components = {
   // A fenced code block: the one element with no upper bound on line length, so
   // it scrolls on its own axis. The `[&_code]` resets undo the inline chip styling
   // for the `code` element react-markdown nests inside every `pre`.
-  pre: ({ children }) => (
-    <pre className="overflow-x-auto rounded-md border border-divider bg-elevated p-4 font-mono text-[13px] leading-6 text-porcelain [&_code]:bg-transparent [&_code]:p-0 [&_code]:text-[inherit] [&_code]:text-porcelain">
-      {children}
-    </pre>
-  ),
+  //
+  // ```mermaid is the one fence that isn't code: it is diagram source, and it
+  // routes to the lazily-loaded renderer instead (which draws its own container,
+  // including the code-block fallback when a chart won't parse).
+  pre: ({ children }) => {
+    const chart = mermaidSource(children);
+    if (chart !== null) return <Mermaid source={chart} />;
+    return (
+      <pre className="overflow-x-auto rounded-md border border-divider bg-elevated p-4 font-mono text-[13px] leading-6 text-porcelain [&_code]:bg-transparent [&_code]:p-0 [&_code]:text-[inherit] [&_code]:text-porcelain">
+        {children}
+      </pre>
+    );
+  },
   // GFM tables (remark-gfm). Same reflow problem as code blocks: the wrapper owns
   // the horizontal scroll so a wide table never widens the page on a phone.
   table: ({ children }) => (

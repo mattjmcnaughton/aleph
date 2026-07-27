@@ -83,6 +83,13 @@ disclosed). Same **trigger + poll** model: `POST /lessons/{id}/generate` returns
   plugin, and dangerous URL protocols stripped. `explanation` (inside `attempt`)
   may carry **inline** Markdown only. The Quick check's `stem` and `options` are
   plain text.
+- **A ` ```mermaid ` fence is a diagram**, at most one per lesson. The renderer
+  (`components/mermaid.tsx`) loads mermaid lazily, draws at
+  `securityLevel: "strict"`, and falls back to showing the chart source as a code
+  block when it doesn't parse — model-written mermaid is often subtly invalid, so
+  a client that renders diagrams needs that fallback. The prompt also requires the
+  surrounding prose to explain the diagram, so a client that renders it as plain
+  source loses nothing but the picture.
 - **Answer-hiding (W6, TDD §6).** `quick_check` carries **only** `stem` +
   `options` — never the keyed answer. `correct_index` and `explanation` live
   **only** inside `attempt`, which is `null` until the learner records an
