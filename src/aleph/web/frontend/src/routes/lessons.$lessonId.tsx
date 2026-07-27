@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import {
   type LessonAttempt,
   type LessonDetail,
+  type PathDetail,
   PATHS_QUERY_PREFIX,
   type QuickCheck,
   attemptLesson,
@@ -17,6 +18,7 @@ import {
 } from "../lib/api";
 import { Breadcrumbs } from "../components/breadcrumbs";
 import { Markdown } from "../components/markdown";
+import { Sidebar, SwitcherSection, OutlineSection } from "../components/sidebar";
 import {
   CheckIcon,
   LockIcon,
@@ -27,6 +29,7 @@ import {
   Spinner,
   StateCard,
 } from "../components/state-card";
+import { Workspace } from "../components/workspace";
 import { makePollingRefetchInterval } from "../lib/polling";
 import { useRetryGeneration } from "../lib/use-retry-generation";
 
@@ -79,8 +82,13 @@ function LessonView() {
 
   // Lesson detail carries the parent path id, while the human-readable topic
   // lives on path detail. This cache-friendly lookup makes a deep-linked lesson
-  // breadcrumb as descriptive as one reached from the path rail.
+  // breadcrumb as descriptive as one reached from the path rail — and the same
+  // cached payload is what the desktop sidebar's outline and the prev/next
+  // footer below are derived from, so neither adds a second fetch of its own.
   const breadcrumbPathQuery = useQuery(pathQueryOptions(detail?.path_id ?? null));
+  const pathDetail = breadcrumbPathQuery.data;
+  const readyPathDetail =
+    pathDetail?.status === "ready" && pathDetail.units.length > 0 ? pathDetail : undefined;
 
   const generate = useRetryGeneration({ mutationFn: generateLesson, queryKey: lessonQueryKey });
 
@@ -138,7 +146,18 @@ function LessonView() {
   }, [awaitingGeneration]);
 
   return (
-    <main data-testid="lesson-view" className="mx-auto w-full max-w-[480px] px-4 py-8">
+    <Workspace
+      testid="lesson-view"
+      width="lesson"
+      sidebar={
+        <Sidebar>
+          <SwitcherSection currentPathId={detail?.path_id} />
+          {readyPathDetail ? (
+            <OutlineSection detail={readyPathDetail} activeLessonId={lessonId} />
+          ) : null}
+        </Sidebar>
+      }
+    >
       {detail ? (
         <Breadcrumbs
           current={detail.title}
@@ -183,11 +202,87 @@ function LessonView() {
         />
       )}
 
+      {detail && readyPathDetail ? (
+        <LessonNav pathDetail={readyPathDetail} currentPosition={detail.position_in_path} />
+      ) : null}
+
       {/* Stable id seam the path-view + e2e suites key on (keep this testid). */}
       <p data-testid="lesson-view-id" className="mt-10 font-mono text-xs text-slate">
         {lessonId}
       </p>
-    </main>
+    </Workspace>
+  );
+}
+
+// --- Desktop-only prev/next footer (mock #2a) -------------------------------
+
+/**
+ * Replaces "Back to your path" on desktop, where the sidebar outline is
+ * already on screen: the next lesson is one click away instead of a trip back
+ * to the path view. Derived from the same cached path detail as the sidebar's
+ * outline — neighbours are found by `position_in_path`, the single total order
+ * (docs/CONTEXT.md) progression and prefetch already key on.
+ */
+function LessonNav({
+  pathDetail,
+  currentPosition,
+}: {
+  pathDetail: PathDetail;
+  currentPosition: number;
+}) {
+  const lessons = pathDetail.units.flatMap((unit) => unit.lessons);
+  const prev = lessons.find((lesson) => lesson.position_in_path === currentPosition - 1);
+  const next = lessons.find((lesson) => lesson.position_in_path === currentPosition + 1);
+
+  if (!prev && !next) return null;
+
+  return (
+    <div
+      data-testid="lesson-nav"
+      className="mt-11 hidden items-center justify-between gap-4 border-t border-divider pt-6 lg:flex"
+    >
+      {prev ? (
+        <Link
+          to="/lessons/$lessonId"
+          params={{ lessonId: prev.id }}
+          data-testid="lesson-nav-prev"
+          className="flex max-w-[44%] items-center gap-2.5 rounded-md border border-divider px-4 py-2.5 text-sm text-mist transition-colors hover:border-teal/40 hover:text-porcelain"
+        >
+          <span className="text-slate">‹</span>
+          <span className="min-w-0 truncate">{prev.title}</span>
+        </Link>
+      ) : null}
+
+      {next?.unlock_state === "locked" ? (
+        <span className="font-mono text-[11px] uppercase tracking-kicker text-slate">
+          Answer to continue
+        </span>
+      ) : null}
+
+      {next ? (
+        next.unlock_state === "locked" ? (
+          <button
+            type="button"
+            disabled
+            data-testid="lesson-nav-next"
+            className="flex max-w-[44%] cursor-not-allowed items-center gap-2.5 rounded-md border border-divider px-4 py-2.5 text-sm text-faint"
+          >
+            <span className="min-w-0 truncate">{next.title}</span>
+            <span>›</span>
+          </button>
+        ) : (
+          <Link
+            to="/lessons/$lessonId"
+            params={{ lessonId: next.id }}
+            data-testid="lesson-nav-next"
+            className="flex max-w-[44%] items-center gap-2.5 rounded-md border border-divider px-4 py-2.5 text-sm text-mist transition-colors hover:border-teal/40 hover:text-porcelain"
+          >
+            <span className="min-w-0 truncate">{next.title}</span>
+            <span>›</span>
+          </Link>
+        )
+      ) : null}
+    </div>
   );
 }
 

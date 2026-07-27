@@ -8,7 +8,7 @@ export function AppHeader() {
 
   return (
     <header className="sticky top-0 z-10 border-b border-divider bg-night/85 backdrop-blur">
-      <div className="mx-auto flex w-full max-w-[480px] items-center justify-between px-4 py-3">
+      <div className="mx-auto flex w-full max-w-[480px] items-center justify-between px-4 py-3 lg:max-w-none lg:px-6">
         <Link to="/" aria-label="Aleph home" className="inline-flex">
           <AlephLogo />
         </Link>

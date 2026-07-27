@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
 import {
   type PathDetail,
   type PathLesson,
@@ -10,16 +10,11 @@ import {
   pathQueryOptions,
   retryPath,
 } from "../lib/api";
-import {
-  CheckIcon,
-  LockIcon,
-  PRIMARY_CTA,
-  PlayIcon,
-  RetryNotices,
-  Spinner,
-  StateCard,
-} from "../components/state-card";
+import { PRIMARY_CTA, PlayIcon, RetryNotices, Spinner, StateCard } from "../components/state-card";
 import { Breadcrumbs } from "../components/breadcrumbs";
+import { LessonMarker, UNLOCK_STATE_LABEL } from "../components/lesson-marker";
+import { Sidebar, SwitcherSection } from "../components/sidebar";
+import { Workspace } from "../components/workspace";
 import { makePollingRefetchInterval } from "../lib/polling";
 import { useRetryGeneration } from "../lib/use-retry-generation";
 
@@ -63,7 +58,15 @@ function PathView() {
   }
 
   return (
-    <main data-testid="path-view" className="mx-auto w-full max-w-[480px] px-4 py-8">
+    <Workspace
+      testid="path-view"
+      width="path"
+      sidebar={
+        <Sidebar>
+          <SwitcherSection currentPathId={pathId} />
+        </Sidebar>
+      }
+    >
       {detail ? <Breadcrumbs current={detail.topic} /> : null}
 
       {detail === undefined ? (
@@ -86,7 +89,7 @@ function PathView() {
       ) : (
         <ReadyPath detail={detail} onOpenLesson={openLesson} />
       )}
-    </main>
+    </Workspace>
   );
 }
 
@@ -105,10 +108,40 @@ function ReadyPath({
   const allComplete = total > 0 && complete === total;
   const percent = total === 0 ? 0 : Math.round((complete / total) * 100);
 
+  // The continue card's subject (mock #2b): the one lesson the learner can open
+  // right now, plus the unit holding it (for the "Unit — lesson N of total"
+  // byline). Exactly one lesson is ever `available` under the single total order
+  // progression enforces, so `find` is the whole selection. Undefined only when
+  // nothing is available at all — a complete path, which `CompleteBanner`
+  // already covers, or an outline whose first lesson has yet to unlock.
+  const continueLesson = lessons.find((lesson) => lesson.unlock_state === "available");
+  const continueUnit = continueLesson
+    ? detail.units.find((unit) => unit.lessons.some((lesson) => lesson.id === continueLesson.id))
+    : undefined;
+
   return (
     <>
-      <p className="kicker">Path</p>
-      <h1 className="mt-2 text-3xl font-semibold leading-tight tracking-tight">{detail.topic}</h1>
+      <div className="lg:flex lg:items-end lg:justify-between lg:gap-8">
+        <div className="min-w-0">
+          <p className="kicker">Path</p>
+          <h1 className="mt-2 text-3xl font-semibold leading-tight tracking-tight">
+            {detail.topic}
+          </h1>
+        </div>
+        {/* The percentage alone, and only at `lg` (mock #2b). Deliberately not
+            the "n of m complete" sentence too: `path-progress` below already
+            carries it at every width, and printing it twice on one screen reads
+            as a mistake. `aria-hidden` because this is the same number said a
+            second way — `path-progress` stays the one announced readout. */}
+        <p
+          data-testid="path-progress-percent"
+          aria-hidden="true"
+          className="hidden shrink-0 font-mono text-[28px] leading-none text-teal lg:block"
+        >
+          {percent}
+          <span className="text-base text-mist">%</span>
+        </p>
+      </div>
 
       <div className="mt-4">
         {/* Decorative bar; the text below is the accessible progress readout. */}
@@ -120,14 +153,72 @@ function ReadyPath({
         </p>
       </div>
 
-      {allComplete ? <CompleteBanner /> : null}
+      {allComplete ? (
+        <CompleteBanner />
+      ) : continueLesson && continueUnit ? (
+        <ContinueCard
+          lesson={continueLesson}
+          unit={continueUnit}
+          total={total}
+          started={complete > 0}
+        />
+      ) : null}
 
-      <ol data-testid="path-rail" className="mt-8 space-y-8">
+      <ol
+        data-testid="path-rail"
+        className="mt-8 space-y-8 lg:grid lg:grid-cols-2 lg:gap-x-8 lg:gap-y-7 lg:space-y-0"
+      >
         {detail.units.map((unit, index) => (
           <UnitBlock key={unit.id} unit={unit} index={index} onOpenLesson={onOpenLesson} />
         ))}
       </ol>
     </>
+  );
+}
+
+/**
+ * The mock #2b continue panel — desktop-only, one obvious next action instead
+ * of scanning the two-up rail for the available lesson. `started` picks the
+ * kicker: the mock's "Pick up where you left off" is a claim about the past, so
+ * a path whose first lesson is still its available one gets the honest opener
+ * instead.
+ */
+function ContinueCard({
+  lesson,
+  unit,
+  total,
+  started,
+}: {
+  lesson: PathLesson;
+  unit: PathUnit;
+  total: number;
+  started: boolean;
+}) {
+  return (
+    <div
+      data-testid="path-continue"
+      data-started={started || undefined}
+      className="mt-6 hidden items-center justify-between gap-6 rounded-lg border border-teal bg-teal/10 px-6 py-5 lg:flex"
+    >
+      <div className="min-w-0">
+        <p className="font-mono text-[11px] font-medium uppercase tracking-kicker text-teal">
+          {started ? "Pick up where you left off" : "Start your path"}
+        </p>
+        <p className="mt-1.5 text-lg font-semibold leading-snug">{lesson.title}</p>
+        <p className="mt-1 text-sm text-mist">
+          {unit.title} — lesson {lesson.position_in_path + 1} of {total}
+        </p>
+      </div>
+      <Link
+        to="/lessons/$lessonId"
+        params={{ lessonId: lesson.id }}
+        data-testid="path-continue-link"
+        className="inline-flex shrink-0 items-center gap-2 rounded-md bg-teal px-5 py-3 text-sm font-semibold text-night transition-colors hover:bg-teal-bright"
+      >
+        Continue
+        <PlayIcon />
+      </Link>
+    </div>
   );
 }
 
@@ -216,44 +307,6 @@ function LessonRow({
         </span>
       ) : null}
     </button>
-  );
-}
-
-/** Screen-reader label per unlock state (the marker icon is aria-hidden). */
-const UNLOCK_STATE_LABEL: Record<PathLesson["unlock_state"], string> = {
-  complete: "Complete",
-  available: "Available",
-  locked: "Locked",
-};
-
-function LessonMarker({ state }: { state: PathLesson["unlock_state"] }) {
-  if (state === "complete") {
-    return (
-      <span
-        aria-hidden="true"
-        className="grid h-6 w-6 shrink-0 place-items-center rounded-full border border-divider text-teal"
-      >
-        <CheckIcon />
-      </span>
-    );
-  }
-  if (state === "locked") {
-    return (
-      <span
-        aria-hidden="true"
-        className="grid h-6 w-6 shrink-0 place-items-center rounded-full border border-divider text-slate"
-      >
-        <LockIcon />
-      </span>
-    );
-  }
-  return (
-    <span
-      aria-hidden="true"
-      className="grid h-6 w-6 shrink-0 place-items-center rounded-full border border-teal text-teal"
-    >
-      <PlayIcon />
-    </span>
   );
 }
 
