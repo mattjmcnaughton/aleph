@@ -324,6 +324,16 @@ export async function expectLessonContent(page: Page): Promise<number> {
   await expect(passageEl.locator("li")).not.toHaveCount(0);
   await expect(passageEl.locator("pre code")).not.toHaveCount(0);
   await expect(passageEl.locator("table th")).not.toHaveCount(0);
+  // The mermaid diagram draws for real here: a browser, the lazily-loaded
+  // library, and the stub's always-valid flowchart. `data-mermaid-status`
+  // distinguishes a drawn diagram from this component's source fallback, so a
+  // silently-degrading renderer fails the journey rather than passing on the
+  // fallback's text.
+  await expect(passageEl.getByTestId("mermaid-diagram")).toHaveAttribute(
+    "data-mermaid-status",
+    "rendered",
+  );
+  await expect(passageEl.locator("[data-testid='mermaid-diagram'] svg")).not.toHaveCount(0);
   // Consumed syntax never reaches the learner as literal characters.
   expect(passage).not.toContain("```");
   expect(passage).not.toContain("**");

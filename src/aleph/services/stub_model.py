@@ -134,8 +134,8 @@ def _pick(seq: tuple[str, ...], seed: int) -> str:
 # The topic is interpolated ~12× into a Read passage; an unbounded topic would
 # push the passage past §14's ~500-word cap (a 12-word topic → ~532 words). Cap
 # the topic *as used in the passage* so the band holds for any topic length.
-# 8 words keeps the worst case ≈ 457 words, comfortably inside 500 (and a
-# one-word topic ≈ 366, comfortably above the 200 floor).
+# 8 words keeps the worst case ≈ 445 words, comfortably inside 500 (and a
+# one-word topic ≈ 361, comfortably above the 200 floor).
 _PASSAGE_TOPIC_MAX_WORDS = 8
 
 
@@ -189,9 +189,10 @@ def _build_read_passage(topic: str, position: int) -> str:
 
     The passage is **GitHub-Flavored Markdown**, like the real agent's output
     (``agents/lesson.py``): headings, prose, a bulleted list, a fenced code block,
-    a GFM table, and a blockquote. That is deliberate — the stub is what CI's e2e
-    suite renders, so the Markdown path through ``components/markdown.tsx`` is
-    exercised on every run rather than only against a live model. Keep at least
+    a GFM table, a ```mermaid diagram, and a blockquote. That is deliberate — the
+    stub is what CI's e2e suite renders, so the Markdown path through
+    ``components/markdown.tsx`` (and the lazily-loaded mermaid renderer behind it)
+    is exercised on every run rather than only against a live model. Keep at least
     one instance of each construct here; dropping one silently stops testing that
     branch of the renderer.
 
@@ -213,7 +214,7 @@ def _build_read_passage(topic: str, position: int) -> str:
         f"The {_pick(_ASPECTS, seed + i)} of {topic} reward careful, "
         f"{_pick(_ADJECTIVES, seed + i)} study, and this passage walks through "
         f"them one idea at a time so the reader can follow without prior context."
-        for i in range(7)
+        for i in range(6)
     )
     bullets = "### What to hold on to\n\n" + "\n".join(
         f"- The {_pick(_ASPECTS, seed + i)} of {topic} stay "
@@ -236,13 +237,25 @@ def _build_read_passage(topic: str, position: int) -> str:
         f"| {_pick(_ASPECTS, seed + 1)} | Carries over into the next lesson. |\n"
         f"| {_pick(_ASPECTS, seed + 2)} | Explains the Quick check below. |"
     )
+    # A deliberately minimal, always-valid flowchart. It exists so the e2e suite
+    # renders a real diagram through ``components/mermaid.tsx`` in a real browser;
+    # keep it to plain `flowchart TD` with quoted labels — the same conservative
+    # syntax the prompt asks the model for — so it cannot start failing to parse.
+    diagram = (
+        "The three moves of this lesson, in order:\n\n"
+        "```mermaid\n"
+        "flowchart TD\n"
+        '    A["Read the passage"] --> B["Answer the Quick check"]\n'
+        '    B --> C["Mark the lesson complete"]\n'
+        "```"
+    )
     close = (
         f"> By the end of lesson {position}, a learner should be able to explain "
         f"the {aspect} of {topic} in their own words and recognise them in "
         f"practice.\n\n"
         "The Quick check below confirms that understanding."
     )
-    return "\n\n".join([lead, body, bullets, code, table, close])
+    return "\n\n".join([lead, body, bullets, code, table, diagram, close])
 
 
 def _build_lesson(topic: str, position: int) -> LessonContent:

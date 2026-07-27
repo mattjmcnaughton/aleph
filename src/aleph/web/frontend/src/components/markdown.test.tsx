@@ -75,6 +75,27 @@ describe("Markdown", () => {
     expect(root.querySelector("tbody td")?.textContent).toBe("Ownership");
   });
 
+  it("routes a ```mermaid fence to the diagram renderer, not to a code block", () => {
+    const root = renderMarkdown(
+      ["```mermaid", "flowchart TD", '    A["Start"] --> B["End"]', "```"].join("\n"),
+    );
+
+    // jsdom can't draw SVG, so the renderer sits in its source fallback — the
+    // point here is only that the fence was routed to it at all.
+    const diagram = root.querySelector("[data-testid='mermaid-diagram']");
+    expect(diagram).not.toBeNull();
+    expect(diagram?.textContent).toContain("flowchart TD");
+  });
+
+  it("leaves every other fenced block as an ordinary code block", () => {
+    const root = renderMarkdown(
+      ["```python", "x = 1", "```", "", "```", "no language", "```"].join("\n"),
+    );
+
+    expect(root.querySelector("[data-testid='mermaid-diagram']")).toBeNull();
+    expect(root.querySelectorAll("pre")).toHaveLength(2);
+  });
+
   it("[security] escapes raw HTML to text instead of rendering it", () => {
     // No rehype-raw: an LLM-authored (or prompt-injected) tag must not become
     // DOM. react-markdown escapes it, so it survives as inert visible text.
