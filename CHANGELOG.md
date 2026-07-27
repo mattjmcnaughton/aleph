@@ -1,3 +1,11 @@
+# [1.2.0](https://github.com/mattjmcnaughton/aleph/compare/v1.1.2...v1.2.0) (2026-07-27)
+
+
+### Features
+
+* **lessons:** generate and render the Read passage as Markdown ([d900861](https://github.com/mattjmcnaughton/aleph/commit/d90086195ed7959c45fb8101cf25b7f202928940))
+* **lessons:** render mermaid diagrams in the Read passage ([c1f43cf](https://github.com/mattjmcnaughton/aleph/commit/c1f43cf72ac2c6adf08083726ed750f9e3c6b1fe))
+
 ## [1.1.2](https://github.com/mattjmcnaughton/aleph/compare/v1.1.1...v1.1.2) (2026-07-26)
 
 
