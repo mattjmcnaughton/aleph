@@ -16,6 +16,20 @@ test("@smoke renders the sign-in surface for an anonymous visitor", async ({ pag
   await expect(page.getByRole("link", { name: /Continue with/ })).toBeVisible();
 });
 
+// A deep link into a client-side route must be served the SPA shell, so the
+// router — not the server — decides what happens next. Against the harness's
+// vite dev server this passes on the dev server's own history fallback; it
+// earns its keep against BASE_URL (prod smoke), where the backend serves the
+// built dist/. `just compose-smoke` fences the same behaviour on the image.
+test("@smoke serves the SPA shell on a deep-link refresh", async ({ page }) => {
+  await page.goto("/paths/e185b126-b796-4e2d-96cb-f09f0944875b");
+
+  // Anonymous, so the root gate redirects to sign-in — the point is that a
+  // rendered app answered at all, rather than a raw JSON error envelope.
+  await expect(page).toHaveURL(/\/login$/);
+  await expect(page.getByRole("heading", { name: "Sign in to Aleph" })).toBeVisible();
+});
+
 test("@smoke reports an anonymous session from the real API", async ({ request }) => {
   // Proxied through the vite dev server to the stub backend — the same call the
   // SPA's session gate makes. It must answer 200 (never 401) when signed out.
