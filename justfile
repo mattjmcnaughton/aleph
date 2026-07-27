@@ -191,6 +191,14 @@ compose-smoke:
     curl -fsS "$base/healthz" | grep -q '"status":"ok"'
     curl -fsS "$base/readyz" | grep -q '"status":"ready"'
     curl -fsS "$base/" | grep -q '<div id="root">'
+    # A deep link into a client-side route (a refresh or a shared link) must
+    # reach the SPA shell, not the JSON error envelope. Only the production
+    # image serves dist/ — the dev/e2e vite server's own history fallback hides
+    # this — so this is the one place the real mount gets exercised.
+    curl -fsS "$base/paths/e185b126-b796-4e2d-96cb-f09f0944875b" | grep -q '<div id="root">'
+    # ...while the backend's own 404s and missing assets stay real 404s.
+    curl -sS "$base/api/v1/nonexistent" | grep -q '"code":"not_found"'
+    curl -sS "$base/assets/stale-deadbeef.js" | grep -q '"code":"not_found"'
     curl -fsS "$base/api/v1/auth/session" | grep -q '"authenticated":false'
     curl -sS "$base/api/v1/paths" | grep -q '"code":"unauthenticated"'
     echo "compose smoke OK"
