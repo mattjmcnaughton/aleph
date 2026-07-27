@@ -1,3 +1,10 @@
+# [1.3.0](https://github.com/mattjmcnaughton/aleph/compare/v1.2.0...v1.3.0) (2026-07-27)
+
+
+### Features
+
+* **frontend:** add the desktop web view ([b651b92](https://github.com/mattjmcnaughton/aleph/commit/b651b926f705113ebfecc71889b788b2afac112b))
+
 # [1.2.0](https://github.com/mattjmcnaughton/aleph/compare/v1.1.2...v1.2.0) (2026-07-27)
 
 
