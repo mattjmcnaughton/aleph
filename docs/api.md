@@ -75,6 +75,14 @@ disclosed). Same **trigger + poll** model: `POST /lessons/{id}/generate` returns
 - `read_passage` / `quick_check` are non-null **only** when `generation_state ==
   generated`. `generation_error` is non-null **only** when `generation_state ==
   failed` (a generic, learner-safe message — never raw provider text).
+- **`read_passage` is GitHub-Flavored Markdown**, served as source and rendered
+  at the edge (`web/frontend/src/components/markdown.tsx`). The agent is
+  prompted for a bounded subset — headings (`##`/`###`), lists, emphasis, inline
+  code, fenced code blocks, GFM tables, blockquotes — and no raw HTML or images.
+  A client that renders it must treat it as untrusted model output: no raw-HTML
+  plugin, and dangerous URL protocols stripped. `explanation` (inside `attempt`)
+  may carry **inline** Markdown only. The Quick check's `stem` and `options` are
+  plain text.
 - **Answer-hiding (W6, TDD §6).** `quick_check` carries **only** `stem` +
   `options` — never the keyed answer. `correct_index` and `explanation` live
   **only** inside `attempt`, which is `null` until the learner records an

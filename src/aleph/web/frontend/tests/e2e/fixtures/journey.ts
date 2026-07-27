@@ -313,8 +313,20 @@ export function quickCheckOptions(page: Page): Locator {
  * Returns the option count so the caller can pick an answer.
  */
 export async function expectLessonContent(page: Page): Promise<number> {
-  const passage = (await page.getByTestId("lesson-read-passage").innerText()).trim();
+  const passageEl = page.getByTestId("lesson-read-passage");
+  const passage = (await passageEl.innerText()).trim();
   expect(passage.length).toBeGreaterThan(0);
+
+  // The Read passage is Markdown and must arrive rendered, not printed. The stub
+  // model emits every construct the real agent is prompted for, so a real browser
+  // proves the whole chain — agent output → API → components/markdown.tsx.
+  await expect(passageEl.locator("h2")).not.toHaveCount(0);
+  await expect(passageEl.locator("li")).not.toHaveCount(0);
+  await expect(passageEl.locator("pre code")).not.toHaveCount(0);
+  await expect(passageEl.locator("table th")).not.toHaveCount(0);
+  // Consumed syntax never reaches the learner as literal characters.
+  expect(passage).not.toContain("```");
+  expect(passage).not.toContain("**");
 
   await expect(page.getByTestId("quick-check")).toBeVisible();
   const stem = (await page.getByTestId("quick-check-stem").innerText()).trim();

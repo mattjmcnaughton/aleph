@@ -146,6 +146,22 @@ def test_lesson_passage_stays_in_band_for_a_long_topic() -> None:
     assert _PASSAGE_MIN_WORDS <= words <= _PASSAGE_MAX_WORDS
 
 
+def test_lesson_passage_is_markdown() -> None:
+    # The stub's passages are what CI's e2e suite renders, so they must carry the
+    # Markdown constructs the real agent is prompted for — otherwise the
+    # frontend's Markdown path (components/markdown.tsx) ships untested.
+    result = _lesson_agent().run_sync(_lesson_prompt("Rust ownership", 1)).output
+    passage = result.read_passage
+
+    assert "\n## " in f"\n{passage}"  # a section heading
+    assert "\n### " in passage  # a subsection heading
+    assert "\n- " in passage  # a bulleted list
+    assert "```python" in passage  # a fenced code block with a language
+    assert "\n| " in passage  # a GFM table
+    assert "\n> " in passage  # a blockquote
+    assert "**" in passage  # inline emphasis
+
+
 def test_lesson_prompt_without_position_raises() -> None:
     # The AL-032 contract: a lesson prompt must carry position_in_path=<N>.
     # Missing it is loud (a silent default to 1 would hide continuity bugs).

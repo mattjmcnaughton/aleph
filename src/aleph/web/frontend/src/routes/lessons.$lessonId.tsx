@@ -16,6 +16,7 @@ import {
   pathQueryOptions,
 } from "../lib/api";
 import { Breadcrumbs } from "../components/breadcrumbs";
+import { Markdown } from "../components/markdown";
 import {
   CheckIcon,
   LockIcon,
@@ -224,12 +225,14 @@ function ReadyLesson({
       <p className="kicker">Lesson</p>
       <h1 className="mt-2 text-3xl font-semibold leading-tight tracking-tight">{detail.title}</h1>
 
-      <div
-        data-testid="lesson-read-passage"
-        className="mt-5 whitespace-pre-line text-base leading-7 text-porcelain"
-      >
-        {detail.read_passage}
-      </div>
+      {/* The Read passage is Markdown (the lesson agent writes GFM), so it is
+          rendered rather than printed: headings, lists, tables, and fenced code
+          blocks all carry structure the old `whitespace-pre-line` text node
+          flattened. `read_passage` is null only while ungenerated, a state this
+          branch never renders — the `?? ""` is a type narrowing, not a case. */}
+      <Markdown testid="lesson-read-passage" className="mt-5 text-base">
+        {detail.read_passage ?? ""}
+      </Markdown>
 
       {quickCheck !== null ? (
         <QuickCheckBlock
@@ -412,9 +415,12 @@ function OutcomeReveal({ reveal }: { reveal: LessonAttempt }) {
       <p className={`text-sm font-semibold ${correct ? "text-teal" : "text-iris-300"}`}>
         {correct ? "Correct." : "Not quite."}
       </p>
-      <p data-testid="outcome-explanation" className="mt-2 text-sm leading-6 text-porcelain">
+      {/* Inline Markdown only here (the prompt asks for no block structure in an
+          explanation), but it goes through the same renderer so an agent's
+          `inline code` and emphasis read as such instead of as stray backticks. */}
+      <Markdown testid="outcome-explanation" className="mt-2 text-sm [&_p]:text-sm [&_p]:leading-6">
         {reveal.explanation}
-      </p>
+      </Markdown>
     </div>
   );
 }
