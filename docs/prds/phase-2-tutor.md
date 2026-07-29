@@ -6,6 +6,11 @@
 > Companion doc: the **[Phase 2 TDD](../tdds/phase-2-tutor.md)** owns the technical design — reply
 > transport, context assembly, prompt construction, storage schema, and model routing. This PRD
 > stops at the product boundary.
+>
+> Implementation is tracked in GitHub issues labeled
+> [`tdd-tutor`](https://github.com/mattjmcnaughton/aleph/issues?q=is%3Aissue+label%3Atdd-tutor)
+> — the issues (parent epic + children) are the source of truth for ticket content and status
+> (TDD §15); no ticket list is duplicated here.
 
 ## 1. Summary
 
