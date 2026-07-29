@@ -298,7 +298,9 @@ block regardless of the aggregate rate.
 - **No regenerate + no adaptivity → a bad generation is a dead end.** Mitigation: the eval gate, plus
   **delete-the-path-and-start-fresh** as the reset escape hatch (§5.5); revisit per-lesson regenerate
   if the path-start / continuation metrics disappoint. *(Open: do we need a lightweight "this lesson
-  looks wrong" signal even in MVP?)*
+  looks wrong" signal even in MVP?* — **answered in Phase 2**: the tutor emits one as a side effect of
+  §5.7b, specific to the disputed claim and requiring no learner-facing UI. See
+  [Phase 2 PRD §5.7b](phase-2-tutor.md#57b-when-the-tutor-disagrees-with-the-lesson).)
 - **On-demand generation latency is in the learner's critical path.** Mitigation: prefetch +N ahead;
   needs a real latency budget (owned by the TDD).
 - **Judge quality bounds eval quality.** A weak binary judge passes bad content. Mitigation: the
