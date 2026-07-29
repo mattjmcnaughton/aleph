@@ -5,10 +5,11 @@ code — same word, same meaning, everywhere. When a term here has a precise nam
 synonym (say **path**, not "course"; **Quick check**, not "quiz question").
 
 > Status: **living document, started at the Phase 1 PRD, extended by the Phase 1 TDD** (states,
-> generation mechanics, model slots) **and the Phase 2 PRD** (the tutor). References:
+> generation mechanics, model slots), **the Phase 2 PRD** (the tutor) **and the Phase 2 TDD**
+> (the tutor model slot, reply transport). References:
 > [`README.md`](../README.md) · [`roadmap.md`](roadmap.md) ·
 > [Phase 1 PRD](prds/phase-1-path-generation.md) · [Phase 1 TDD](tdds/phase-1-path-generation.md) ·
-> [Phase 2 PRD](prds/phase-2-tutor.md).
+> [Phase 2 PRD](prds/phase-2-tutor.md) · [Phase 2 TDD](tdds/phase-2-tutor.md).
 
 ## Core domain
 
@@ -37,7 +38,7 @@ synonym (say **path**, not "course"; **Quick check**, not "quiz question").
 | **On-demand generation** | Generating a lesson's content when the learner reaches it, rather than all up front. |
 | **Prefetch (+N)** | Generating the next *N* lessons ahead of where the learner is, to hide generation latency. |
 | **Continuity** | The rule that lesson *N+1* is generated with awareness of the content of lessons *1…N*, so the path builds on itself and never re-teaches or contradicts earlier lessons. |
-| **Multi-model architecture** | More than one model is used across generation. Realized in the TDD as three configurable **model slots** — *outline*, *lesson*, *judge* — each an OpenRouter model id (TDD §5.3). |
+| **Multi-model architecture** | More than one model is used across generation. Realized as configurable **model slots** — *outline*, *lesson*, *judge* (Phase 1 TDD §5.3), plus *tutor* (Phase 2 TDD §5.3) — each an OpenRouter model id. |
 | **Path status** | The lifecycle of a path's outline generation: *pending* → *generating* → *ready*, with *failed* (retryable) and *refused* (terminal, safety) branches (TDD §4). |
 | **Refused** | The path status when the outline agent declines an over-the-boundary topic via its structured refusal output. A first-class result with a graceful message — never conflated with *failed* (TDD D12). |
 | **Trigger + poll** | The delivery model for generated content: a POST triggers generation and returns immediately; the client polls a GET until the state resolves (TDD D5, §5.4). |
@@ -66,14 +67,16 @@ this document for what is deferred.
 | **Tutor** | The context-aware chat that knows where the learner is. It reads the path and speaks about it; in Phase 2 it changes nothing. ("Tutor" names the feature and the assistant's turn in a conversation — the product has no separate assistant persona name.) |
 | **Rail** | The tutor's surface: a docked right column on desktop, a sheet over the lesson on a phone. One surface, two presentations — not two features. |
 | **Conversation** | The persisted thread of messages, **one per path** (not per lesson). Survives moving between lessons and between sessions; deleted with its path. |
-| **Message** | One turn in a conversation — learner or tutor — recording the **lesson it was asked in**, and optionally a **Quote** or a **Tutor check**. |
+| **Message** | A single utterance in a conversation — learner or tutor — recording the **lesson it was asked in**, and optionally a **Tutor check**. |
+| **Turn** | One learner Message and the tutor Message it produced, as a unit. Turns persist atomically — a turn exists whole or not at all — and are what the tutor's carried-context window counts (Phase 2 TDD §5.2). Two Messages make one Turn; avoid "turn" for a single message. |
 | **Scope** | What the tutor can see for a turn. **Lesson scope** (Phase 2): the current lesson's Read passage, Quick check, the learner's Attempt, plus the Path digest. **Path scope** (deferred): every unit and lesson with progress, but never a lesson's body. |
 | **Path digest** | The thin whole-path context available in lesson scope: topic, level, and the ordered unit/lesson **names with unlock state**. Names and state only — never another lesson's Read passage. It is how the tutor answers "have I covered this already?". |
 | **Context chip** | The line above the composer naming the current Scope (*Reading · Generic constraints*). The learner-facing statement of what the tutor can see. |
-| **Quote** | A span of the current Read passage the learner selected and sent with their question. Visible in the sent message and part of that turn's context. |
+| **Quote** | A span of the current Read passage the learner selected and sent with their question. Visible in the sent message and part of that turn's context. (**Phase 2B** — selection-to-quote was cut from Phase 2; see the phase boundaries below.) |
 | **Suggestion** | A one-tap ask offered by the rail — *Explain this simpler · Go deeper · Quiz me on this · Show me a real example*. Sent as if typed; never a constraint on free text. |
-| **Tutor check** | A question the **tutor** asks back inside a conversation, with options and immediate feedback. **Ephemeral and non-scoring**: it is not a Quick check, creates no **Attempt**, and touches no progress or metric. (Distinct entity, distinct name — do not call it a Quick check.) |
+| **Tutor check** | A question the **tutor** asks back inside a conversation, with options and immediate feedback. **Non-scoring and outside progress**: it is not a Quick check, creates no **Attempt**, and touches no progress or metric. It persists only as an artifact of its conversation, deleted with it. (Distinct entity, distinct name — do not call it a Quick check, and avoid "ephemeral": it *is* stored, with the learner's answer, for the life of the thread.) |
 | **Grounded** | The property that a tutor reply is anchored in the current lesson's Read passage and does not contradict it. The first eval rubric item for tutor replies. |
+| **Contradiction handling** | The tutor's behavior on a **checkable factual error** in a lesson: correct it, attribute the difference plainly, and say what the Quick check expects (Phase 2 PRD §5.7b). Nothing is regenerated or mutated. Incomplete is not wrong — a level-scoped simplification is never flagged. (A machine-readable *flag event* was cut from Phase 2; the behavior lives in reply text only.) |
 
 ## Quality, safety & measurement
 
@@ -105,6 +108,7 @@ Some terms name things that exist in the mocks but are **not** Phase 1. Use them
 - **Tutor** in **lesson scope** — the in-lesson rail (**Phase 2**, above).
 - **Path scope** / scope switching / lesson citations as links / the **Shaky** badge on a lesson with
   missed Quick checks — the in-path tutor (**Phase 2B**, a follow-on slice against the Phase 2 PRD).
+- **Quote** / selection-to-quote — cut from Phase 2 to keep the first slice simple (**Phase 2B**).
 - **Flashcard** / **spaced repetition** / grading (**Again/Hard/Good/Easy**) — retention loop (**Phase 3**).
 - **Shape your path** — adaptive, learner-approved path edits: proposals, ghost-row previews, apply,
   undo, change history (**Phase 4**). Shown in the Phase 2 mock, but deferred — it collides with

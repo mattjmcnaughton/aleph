@@ -3,9 +3,9 @@
 **Status:** Draft · **Owner:** solo builder · **Roadmap item:** [Phase 2](../roadmap.md#phase-2--the-tutor)
 **References:** [`README.md`](../../README.md) · [`roadmap.md`](../roadmap.md) · [`CONTEXT.md`](../CONTEXT.md) (ubiquitous language) · [Phase 1 PRD](phase-1-path-generation.md) · mock: [phase-2 tutor](../mocks/aleph-phase-2-tutor.html)
 
-> Companion doc: the **Phase 2 TDD** (not yet written) owns the technical design — reply transport,
-> context assembly, prompt construction, storage schema, and model routing. This PRD stops at the
-> product boundary.
+> Companion doc: the **[Phase 2 TDD](../tdds/phase-2-tutor.md)** owns the technical design — reply
+> transport, context assembly, prompt construction, storage schema, and model routing. This PRD
+> stops at the product boundary.
 
 ## 1. Summary
 
@@ -15,7 +15,7 @@ rather than a generated course: a chat that knows exactly what you are reading.
 This phase ships the **in-lesson tutor** only. Inside a lesson, a docked rail (a sheet on a phone)
 carries the lesson's **Read passage**, its **Quick check**, and your **Attempt** as context — so
 "explain this simpler," "go deeper," and "quiz me on this" resolve against the words in front of
-you. Select any sentence and it rides into the composer as a quote. The tutor can also answer thin
+you. The tutor can also answer thin
 questions about where you are in the path ("have I covered this already?") from a **path digest** of
 lesson names and completion state — but it never reads another lesson's body, and it never changes
 anything.
@@ -60,12 +60,11 @@ that.
 **Core stories**
 1. *As a learner reading a lesson,* I ask the tutor to explain a passage more simply, and get an
    answer about **this** passage — not a generic definition.
-2. *As a learner,* I select the exact sentence that lost me and ask about it, without retyping it.
-3. *As a learner,* I ask to be quizzed on what I just read, and get a question that does not count
+2. *As a learner,* I ask to be quizzed on what I just read, and get a question that does not count
    against my lesson.
-4. *As a learner,* I ask whether I have covered something already, and the tutor knows where I am in
+3. *As a learner,* I ask whether I have covered something already, and the tutor knows where I am in
    the path.
-5. *As a learner,* I come back tomorrow and my conversation is still there.
+4. *As a learner,* I come back tomorrow and my conversation is still there.
 
 ## 4. Scope
 
@@ -73,10 +72,9 @@ that.
 - The **tutor rail** in a lesson: docked right column on desktop, a sheet over the lesson on a phone.
 - **Lesson scope** context: Read passage, Quick check, the learner's Attempt and Outcome, plus a
   **path digest** (§5.2).
-- **Selection to quote:** select passage text, send it as a quoted question (§5.4).
 - **Suggestions:** a small set of one-tap asks — *Explain this simpler · Go deeper · Quiz me on this ·
   Show me a real example* (§5.3).
-- **Tutor check:** an ephemeral question the tutor asks back, explicitly outside lesson progress (§5.5).
+- **Tutor check:** a non-scoring question the tutor asks back, explicitly outside lesson progress (§5.5).
 - **Streaming replies** and a defined state for every failure (§5.6, §5.7).
 - **One conversation per path**, persisted, with each message tagged by the lesson it was asked in (§5.8).
 - A disabled-by-default daily-message config knob on the Phase 1 rate limiter — no cap behaviour,
@@ -94,6 +92,7 @@ These are in the mock. They are not this phase. Naming them here is the point: t
 | --- | --- | --- |
 | **In-path tutor** — the rail on the path view, whole-path scope, answers citing lessons as links, the "Shaky" badge on lessons with missed Quick checks | Turn 2 (2b) | **Phase 2B** — a follow-on slice against this PRD's §6 seams, no new PRD needed |
 | **Scope switching** — the context chip's one-tap "Ask about the whole path", the lesson-name dividers in a mixed-scope thread | Turn 2 | **Phase 2B** |
+| **Selection to quote** — select a span of the Read passage, "Ask the tutor about this", the quote riding into the composer and that turn's context | Turn 2 (2a) | **Phase 2B** — slick, but not load-bearing for activation, and touch-selection UI is the phase's fiddliest frontend work. The `messages` schema takes a quote column additively when it lands |
 | **Path editing** — proposals, ghost-row previews, apply, undo, change history, destructive-change semantics | Turn 3 | **Phase 4** (adaptive paths), where the roadmap already puts it |
 | **Flashcard drafting from conversation** | — | **Phase 3** |
 
@@ -141,18 +140,14 @@ content, and any tutor write to progress or path structure.
 - Suggestions are shown in the empty state and after a reply settles. They are a starting vocabulary,
   not a menu the learner is confined to — the composer always accepts free text.
 
-**5.4 Selection to quote**
-- Selecting text in the Read passage raises an **"Ask the tutor about this"** affordance.
-- Taking it opens the rail (if closed) with the selected text attached to the composer as a **quote**,
-  above the learner's typed question. The quote is visible in the sent message and is part of the
-  tutor's context for that turn.
-- The quote is a span of the Read passage the learner is on; there is no free-form or cross-lesson
-  quoting.
+**5.4 Selection to quote — deferred to Phase 2B**
+- Removed from this phase's scope (§4). The section number stays reserved so cross-references
+  hold; the requirement text lives with the mock (Turn 2a) and returns with Phase 2B.
 
 **5.5 Tutor check**
 - "Quiz me on this" produces a **Tutor check**: a question the tutor asks, with selectable options
   and immediate feedback, rendered inside the conversation.
-- A Tutor check is **ephemeral and non-scoring**. It is not a Quick check, it does not create an
+- A Tutor check is **non-scoring and outside progress**. It is not a Quick check, it does not create an
   **Attempt**, it does not affect lesson completion, progression, or any §7 metric derived from
   Attempts. The UI says so plainly ("this doesn't count toward the lesson").
 - After answering, the learner can ask for another or ask why the answer is right.
@@ -204,19 +199,21 @@ would have phrased differently would teach learners to distrust every lesson. Th
 to guard against, and it is why the eval rubric (§9, item 1) treats over-flagging as a violation
 symmetrically with contradiction.
 
-**Every flag is emitted as a product event** (§5.9), carrying the lesson and the disputed claim.
-Nothing is automatic: no regeneration (Phase 1 content is immutable), no auto-delete, no learner-facing
-report UI. It is telemetry, and it feeds the eval seed set.
+**The correction is the whole feature this phase — there is no emitted flag signal.** Nothing is
+automatic: no regeneration (Phase 1 content is immutable), no auto-delete, no learner-facing report
+UI, and (a deliberate draft-1 cut) no structured telemetry event either. Real conversations are
+captured on Logfire spans, so contradictions remain findable by operator review and can seed the
+evals; a machine-readable flag event is the additive path back if that review proves too coarse.
 
-> This closes an open question from the [Phase 1 PRD §11](phase-1-path-generation.md#11-risks--open-questions)
-> — *"do we need a lightweight 'this lesson looks wrong' signal even in MVP?"* — as a side effect
-> rather than a feature. The tutor is a lesson-quality detector running **in production on real
-> generated content**, which the eval harness by construction cannot be: it only ever runs a fixed
-> seed set. The signal is also strictly better than the thumbs-down button that question implied,
-> because it is **specific** (it names the claim, not just the lesson) and because it fires **without
-> the learner having to notice anything is wrong** — and the learner, being the person currently
-> learning the material, is the least equipped to notice. Acting on the signal needs a phase that can
-> edit a path; that is **Phase 4**.
+> This *partially* answers an open question from the [Phase 1 PRD §11](phase-1-path-generation.md#11-risks--open-questions)
+> — *"do we need a lightweight 'this lesson looks wrong' signal even in MVP?"*. The tutor is a
+> lesson-quality detector running **in production on real generated content**, which the eval
+> harness by construction cannot be — and it corrects errors **without the learner having to notice
+> anything is wrong**, which the learner, currently learning the material, is the least equipped to
+> do. What this phase does *not* ship is the structured signal itself (the paragraph above): the
+> detection lives in reply text and Logfire spans, not an event. If the corrections turn out to be
+> frequent enough to want counting, the flag event is a small additive step — and acting on it needs
+> a phase that can edit a path; that is **Phase 4**.
 
 **5.8 Conversation & persistence**
 - There is **one conversation per path**, persisted server-side against the account and restored on
@@ -231,11 +228,12 @@ report UI. It is telemetry, and it feeds the eval seed set.
 
 **5.9 Instrumentation**
 - Events sufficient to compute every §7 metric: at minimum conversation started, message sent (with
-  lesson, position in path, whether it came from a suggestion or a quote), reply completed
-  (success/failure/refusal, latency to first token, latency to completion, token counts), tutor check
-  shown, tutor check answered (with outcome), **lesson contradiction flagged** (§5.7b — with the
-  lesson and the disputed claim) — each stamped with account, path, lesson, and timestamp, in the
-  shape Phase 1's product events already use.
+  lesson, position in path, whether it came from a suggestion), reply completed
+  (success/failure, latency to first token, latency to completion, token counts), tutor check
+  shown, tutor check answered (with outcome) — each stamped with account, path, lesson, and
+  timestamp, in the shape Phase 1's product events already use. (Refusals and lesson corrections
+  are deliberately not machine-tagged this phase — §5.7b; both behaviors are eval-policed and
+  reviewable on Logfire spans.)
 - **Session** and **Day** keep their Phase 1 definitions.
 
 ## 6. AI system design (product view)
@@ -249,7 +247,7 @@ account → path → conversation → messages
 
 - **conversation** — one per path, owned by the account.
 - **message** — a turn in the conversation: role (learner or tutor), content, the **lesson it was
-  asked in**, an optional **quote** span, and an optional **Tutor check** payload.
+  asked in**, and an optional **Tutor check** payload.
 
 Nothing in Phase 1's model is written by the tutor. No new state is added to lessons, attempts, or
 progress.
@@ -257,7 +255,7 @@ progress.
 **Context assembly.** The distinguishing design decision of this phase is *what goes into the
 prompt*, and it is deliberately a named seam rather than an inline concern: a single place that,
 given a conversation and a current lesson, produces the tutor's context — the lesson's Read passage
-and Quick check, the Attempt if any, the path digest, the quote if any, and the prior turns. Phase 2B
+and Quick check, the Attempt if any, the path digest, and the prior turns. Phase 2B
 adds a path-scope variant behind the same seam, exactly as Phase 1's `build_prior_context()` seam
 absorbs a future running-summary upgrade (TDD D7).
 
@@ -307,7 +305,7 @@ a positive gap, read alongside the adoption number below (a large gap on 2% adop
 - **Tutor adoption:** % of activated learners who send ≥ 1 tutor message.
 - **Repeat use:** % of tutor users who use it in more than one lesson.
 - **Depth:** median messages per conversation, and per lesson-with-tutor-use.
-- **Entry mix:** share of messages originating from a suggestion, a quote, or free text — tells us
+- **Entry mix:** share of messages originating from a suggestion or free text — tells us
   whether the suggestions are doing the teaching the mock claims they do.
 - **Tutor check uptake:** % of tutor users who take at least one Tutor check.
 
@@ -320,10 +318,9 @@ a positive gap, read alongside the adoption number below (a large gap on 2% adop
   somewhere sane. Cost per learner is already covered by Phase 1's existing guardrail — Logfire
   records per-call tokens for every model call automatically — so this phase adds no cost metric of
   its own.
-- **Contradiction flag rate** (§5.7b): the share of replies that flag a lesson error. This reads two
-  ways and both matter — a high rate means either genuinely poor generated content (a Phase 1 eval
-  gap) or an over-eager tutor (a rubric 1 failure), and the two are distinguished by sampling the
-  flagged claims, not by the rate alone.
+- **Lesson corrections** (§5.7b) have no flag-rate metric this phase (no emitted signal — a
+  deliberate cut). The failure directions still matter — poor generated content vs. an over-eager
+  tutor — and are watched through rubric 1 and by sampling real conversations on Logfire spans.
 - **Latency:** p95 time to first token, and p95 to a complete reply.
 - **Reply failure rate**, and **eval pass rate** (§9) above the gate.
 
@@ -337,10 +334,8 @@ Open a lesson → open the tutor → send "Explain this simpler" → a reply str
 *this* passage → the learner can still answer the Quick check and mark complete.
 *Pass:* a grounded reply renders and the lesson remains completable.
 
-**W10 — Selection becomes a question**
-Select a sentence in the Read passage → take "Ask the tutor about this" → the rail opens with the
-quote attached → send a question → the reply addresses the quoted span, and the quote is visible in
-the sent message.
+**W10 — Selection becomes a question** *(deferred to Phase 2B with §5.4; the number stays
+reserved so W11–W16 keep their names.)*
 
 **W11 — Conversation persists**
 Send a message in lesson 6 → mark complete → move to lesson 7 → the thread is still there → sign out,
@@ -366,8 +361,7 @@ harmful content, the conversation continues.
 **W16 — A wrong lesson is corrected, not papered over**
 On a lesson seeded with a known factual error whose Quick check is keyed to it (the e2e stub model
 makes this deterministic) → ask the tutor about the claim → the reply corrects it **and** says what
-the Quick check expects → a contradiction event is emitted → the lesson is still completable and its
-content is unchanged (§5.7b).
+the Quick check expects → the lesson is still completable and its content is unchanged (§5.7b).
 
 ## 9. Evals (AI components)
 
@@ -395,7 +389,7 @@ is therefore written as properties that can be violated, not qualities to be rat
 
 **Harness.** Extends the Phase 1 eval harness rather than standing up a second one: a fixed seed set
 of **(lesson, question) pairs** across the existing seed topics × levels, covering each suggestion,
-a quoted-selection ask, a path-fact ask, an answer-seeking ask (rubric 5), and an over-the-boundary
+a path-fact ask, an answer-seeking ask (rubric 5), and an over-the-boundary
 ask (rubric 6). Deterministic pre-filters do the cheap work first — rubric 5 in particular is largely
 checkable without a judge, since the correct option is known.
 
@@ -441,10 +435,11 @@ rubric 6 failure a hard block regardless of the aggregate.
   Quick check expects — but the resolution has its own failure mode: **over-flagging**. Lessons
   legitimately simplify, and a tutor that treats every simplification as an error would teach
   learners to distrust the content. Rubric 1 makes over-flagging a violation symmetrically with
-  contradiction, and §7 tracks the flag rate as a guardrail. *Open: whether a prompted model can hold
-  the "incomplete is not wrong" line reliably enough* — if the flag rate comes in high and mostly
-  false, the honest fallback is to keep the correction behavior and drop the emitted signal, not to
-  loosen rubric 1.
+  contradiction. *Open: whether a prompted model can hold the "incomplete is not wrong" line
+  reliably enough* — this phase already ships the cautious posture (correction behavior, no emitted
+  signal — §5.7b), so the question is watched through rubric 1 and by sampling real conversations,
+  and the answer decides whether a flag event is ever worth adding. Rubric 1 is not loosened either
+  way.
 - **Streaming is a new transport.** Phase 1 is uniformly trigger + poll. Introducing progressive
   delivery touches the frontend polling infra, the e2e harness's determinism, and the deploy target.
   Owned by the TDD, but flagged as the phase's main architectural risk.
@@ -460,7 +455,7 @@ rubric 6 failure a hard block regardless of the aggregate.
 ## 12. Release criteria
 
 Phase 2 is shipped when:
-- [ ] W9–W16 pass end-to-end on real topics, on a phone-sized viewport.
+- [ ] W9 and W11–W16 pass end-to-end on real topics, on a phone-sized viewport (W10 deferred, §5.4).
 - [ ] A learner can get a genuinely grounded answer about a real lesson, on a phone, and finish that
       lesson — the phase's magic moment works end to end.
 - [ ] Conversations persist across lessons and sessions (W11); deleting a path removes its conversation.
@@ -476,7 +471,7 @@ Phase 2 is shipped when:
 - [ ] Carried context is bounded (§6): a long conversation does not crowd the lesson out of the
       tutor's context or drag out time-to-first-token.
 - [ ] A lesson the tutor believes is wrong is corrected rather than papered over or silently
-      contradicted (W16), and the flag is emitted as telemetry only — no path or lesson is mutated.
+      contradicted (W16) — no path or lesson is mutated, and no learner-facing flag UI appears.
 - [ ] The rail extends **Nocturne** — iris for the tutor, teal for the path — and matches the mock on
       both viewports.
 
@@ -501,6 +496,7 @@ Phase 2 is shipped when:
 | --- | --- |
 | Turn 1 (1a) desktop rail, (1b) mobile entry points, (1c) empty / streaming / quiz / error states | Yes — §5.1, §5.6, §5.7 |
 | Turn 1 (1c) the daily-cap panel | No — no cap in this phase (§5.7); the panel is drawn and waiting |
-| Turn 2 (2a) in-lesson tutor, selection-to-quote, suggestions | Yes — §5.2, §5.3, §5.4 |
+| Turn 2 (2a) in-lesson tutor, suggestions | Yes — §5.2, §5.3 |
+| Turn 2 (2a) selection-to-quote | No — Phase 2B (§4, §5.4) |
 | Turn 2 (2b) in-path tutor, scope switching, citations as links, "Shaky" badge | No — Phase 2B |
 | Turn 3 proposals, ghost rows, apply, undo, change history | No — Phase 4 |
