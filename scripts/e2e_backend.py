@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from aleph.config import STUB_MODEL_ID, settings
+from aleph.config import MODEL_SLOTS, STUB_MODEL_ID, settings
 
 if TYPE_CHECKING:
     from fastapi import FastAPI
@@ -40,14 +40,18 @@ def create_stub_app() -> FastAPI:
     projects share one backend + user and would otherwise exhaust the daily
     quota.
     """
-    settings.model_outline = STUB_MODEL_ID
-    settings.model_lesson = STUB_MODEL_ID
-    settings.model_judge = STUB_MODEL_ID
+    # Every slot, from the one list ``config`` also guards production with — a
+    # slot stubbed there but missed here would send that surface's calls at a
+    # live provider, the one thing this factory exists to prevent.
+    for slot in MODEL_SLOTS:
+        setattr(settings, slot, STUB_MODEL_ID)
     # Keep the admin picker inside the stub too: an allowlisted real model id
-    # would escape the deterministic stub (empty API key) in e2e (AL-052 note).
+    # would escape the deterministic stub (empty API key) in e2e (AL-052 note),
+    # including via the tutor's per-message model override.
     settings.model_allowlist = STUB_MODEL_ID
     settings.rate_limit_paths_per_day = 0
     settings.rate_limit_lesson_generations_per_day = 0
+    settings.rate_limit_tutor_messages_per_day = 0
 
     # Imported lazily so mutating settings above lands before app assembly.
     from aleph.app import create_app

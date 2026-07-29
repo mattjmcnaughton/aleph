@@ -10,6 +10,19 @@ from pydantic_settings import BaseSettings
 # model instead of an OpenRouter-backed one. Guarded out of production below.
 STUB_MODEL_ID = "stub"
 
+# Every ``Settings`` field that names a model slot, in declaration order. Single
+# source of truth: the production stub guard (``_forbid_stub_in_production``)
+# iterates it, and ``scripts/e2e_backend.py`` stubs each entry. A new slot added
+# to ``Settings`` but missed by a hand-synced copy of this list would silently
+# escape the guard — that is how ``stub`` would end up serving production
+# tutoring. Add the field here and both call sites follow.
+MODEL_SLOTS: tuple[str, ...] = (
+    "model_outline",
+    "model_lesson",
+    "model_judge",
+    "model_tutor",
+)
+
 # The convenient dev default for ``session_secret_key``. It is published in this
 # repo, so signing production cookies with it yields forgeable sessions; the
 # production guard below rejects it (a bare emptiness check can never fire
@@ -131,17 +144,22 @@ class Settings(BaseSettings):
 
         The stub is the deterministic CI/e2e model (D9); reaching it in
         production would silently serve canned content, so it is rejected here
-        rather than at resolution time. This covers both the three fixed model
+        rather than at resolution time. This covers both the fixed model
         slots *and* the admin picker's ``MODEL_ALLOWLIST`` — once AL-052's
         per-request picker lands, an allowlisted ``stub`` would let an admin
         select it in prod and call ``resolve_model("stub")``, bypassing a
-        slot-only guard.
+        slot-only guard. The picker's reach grew again in Phase 2 (the tutor
+        takes it as a per-message override, §5.3), so the allowlist arm covers
+        the tutor slot as well.
+
+        The slot arm iterates :data:`MODEL_SLOTS`, so a new slot is guarded the
+        moment it is listed there. ``tests/unit/test_config_models.py``
+        parametrizes over an independent literal list — deliberately not over
+        the constant, which would make the test tautological.
         """
         if self.is_production:
             offenders = [
-                slot
-                for slot in ("model_outline", "model_lesson", "model_judge")
-                if getattr(self, slot) == STUB_MODEL_ID
+                slot for slot in MODEL_SLOTS if getattr(self, slot) == STUB_MODEL_ID
             ]
             if STUB_MODEL_ID in self.allowlist_ids:
                 offenders.append("model_allowlist")
@@ -307,6 +325,53 @@ class Settings(BaseSettings):
     # dials the network. Set the real project token via ``LOGFIRE_TOKEN`` in
     # production (a Fly secret).
     logfire_token: str = ""
+
+    # --- AL-201: the tutor (Phase 2 TDD §5.3, §13, D4/D8/D9) ------------------
+    # Appended as this phase's self-contained block at the END of Settings
+    # (every AL-xxx branch appends its own block; keep them separate to avoid
+    # merge conflicts). All numbers here are §13's provisional ones.
+
+    # The fourth model slot, resolved through ``services/openrouter.py`` like the
+    # rest. Starts on the same strong model as every other slot (D4's
+    # uniform-start discipline); §5.3's refinement direction for this one is
+    # *down* (e.g. ``anthropic/claude-haiku-4-5``) once tutor evals hold and TTFT
+    # data favors it — streaming already hides most perceived latency, so the
+    # move waits for evidence. **It is also listed in ``MODEL_SLOTS``** — the
+    # production stub guard iterates that constant, so a slot missing from it
+    # would let the deterministic stub serve production tutoring. Admins may
+    # override it per message (never persisted, §5.3); the override rides the
+    # same shared ``model_allowlist``.
+    model_tutor: str = "anthropic/claude-sonnet-5"
+
+    # Carried-history window in *turns* (a learner message + its tutor reply, as
+    # a unit), most recent first, dropped rather than summarized (D6). Bounded
+    # is the invariant — the number is tunable, and the summary upgrade slots in
+    # behind ``services/tutor_context.py`` without touching this. Must be
+    # positive (``ge=1``): a zero window would send every turn contextless.
+    tutor_context_turns: int = Field(default=10, ge=1)
+
+    # Whole-stream bound in seconds on a single reply: a hung provider ends in a
+    # terminal ``error`` event, never a dead stream (§5.4). Must be positive
+    # (``gt=0``): zero would time out every reply before its first token.
+    tutor_reply_timeout: int = Field(default=90, gt=0)
+
+    # Process-wide ceiling on concurrent tutor replies — deliberately its *own*
+    # semaphore, isolated from ``max_concurrent_generations`` (D9): a learner
+    # waiting mid-sentence must not queue behind batch prefetch work. Must admit
+    # at least one permit (``ge=1``): zero would deadlock every reply.
+    max_concurrent_tutor_replies: int = Field(default=8, ge=1)
+
+    # PRD §5.7's cap knob, counted over live learner-message rows by the Phase 1
+    # limiter. Ships **disabled** (D8): 0 or negative disables the cap, matching
+    # the other ``rate_limit_*`` settings. The refund-proof usage table (one-tap
+    # "new conversation" must not refund quota) is the recorded precondition for
+    # ever raising this above 0 — deliberately not built while the cap is off.
+    rate_limit_tutor_messages_per_day: int = 0
+
+    # How often the SSE stream emits a ``: ping`` comment frame during model
+    # silence (§5.4), in seconds, so proxy idle timeouts never kill a healthy
+    # stream. Must be positive (``gt=0``): zero would busy-write the socket.
+    sse_heartbeat_seconds: float = Field(default=15.0, gt=0)
 
 
 settings = Settings()
