@@ -42,16 +42,28 @@ success metrics, end-to-end workflows, and AI evals.
 
 ## Phase 2 — The tutor
 
+> 📄 **Full spec:** [Phase 2 PRD — The tutor (in-lesson)](prds/phase-2-tutor.md) ·
+> mock: [phase-2 tutor](mocks/aleph-phase-2-tutor.html)
+
 With a real path to talk about, we add the feature that makes Aleph a tutor and
 not just a generated course: a context-aware chat that always knows where you
-are. Docked as a right rail on the web and a tab on mobile, the tutor carries the
-current lesson's context inside a lesson and the whole-path context on the path
-view — so "explain this simpler," "go deeper," and "quiz me on this" all resolve
-against exactly what you're looking at. It can answer questions, reframe an
-explanation, and reference what you've already covered ("you're on Generics, with
-Utility Types still ahead"). This phase is chat and comprehension only; it reads
-your path and speaks about it, but it does not yet change your path or your
-flashcards — those hooks come next, once the conversation itself is solid.
+are. Docked as a right rail on the web and a sheet over the lesson on mobile, the
+tutor carries the current lesson's context — its Read passage, its Quick check,
+and your answer to it — so "explain this simpler," "go deeper," and "quiz me on
+this" all resolve against exactly what you're looking at. Select a sentence and it
+rides into the composer as a quote. It can also reference what you've already
+covered ("you're on Generics, with Utility Types still ahead") from a thin digest
+of lesson names and progress, without reading another lesson's content. This phase
+is chat and comprehension only; it reads your path and speaks about it, but it does
+not change your path or your flashcards.
+
+The phase ships the **in-lesson** tutor first, on its own. The whole-path tutor —
+the rail on the path view, scope switching, and answers that cite lessons as links
+— is a follow-on slice (2B) against the same PRD, gated on whether learners talk to
+the in-lesson tutor at all. Both are specified in the PRD; only the first is built
+before we look at the numbers. Path *editing*, which the Phase 2 mock also explores,
+stays in Phase 4 where it belongs — it depends on resolving a collision with Phase
+1's continuity and immutability rules, which the PRD records.
 
 ## Phase 3 — Flashcards and spaced repetition
 
@@ -77,6 +89,15 @@ you keep confusing. Every change is a suggestion you accept or decline, never a
 silent rewrite, and each is small and legible ("one short lesson, then straight
 into Utility Types"). This phase depends on both the tutor and the quiz/flashcard
 signal already existing, which is why it comes fourth rather than first.
+
+Design work for this already exists: Turn 3 of the [Phase 2 mock](mocks/aleph-phase-2-tutor.html)
+draws the proposal card, the ghost-row preview in the path, apply-with-undo, the
+change history, and how a change that throws away finished work reads differently.
+It is drawn as conversational and learner-initiated ("add those two", "cut the
+decorators stuff"); Phase 4's own contribution is the *system* proposing edits
+unprompted from miss data. The hard part is not the UI — it is that inserting or
+removing a unit mid-path breaks Phase 1's continuity and immutability rules. See
+[Phase 2 PRD §4](prds/phase-2-tutor.md#4-scope).
 
 ## Phase 5 — Momentum
 
