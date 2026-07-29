@@ -17,6 +17,8 @@ def test_model_slots_default_to_sonnet() -> None:
     assert settings.model_outline == "anthropic/claude-sonnet-5"
     assert settings.model_lesson == "anthropic/claude-sonnet-5"
     assert settings.model_judge == "anthropic/claude-sonnet-5"
+    # Phase 2 added a fourth slot on the same uniform start (Phase 2 TDD §5.3/D4).
+    assert settings.model_tutor == "anthropic/claude-sonnet-5"
 
 
 def test_allowlist_default_and_parsing() -> None:
@@ -38,17 +40,32 @@ def test_allowlist_parsing_trims_and_drops_empties() -> None:
 
 
 def test_stub_allowed_outside_production() -> None:
-    # The stub is the CI/e2e model (D9); it must be selectable in dev/CI.
-    settings = Settings(env="development", model_outline="stub", model_lesson="stub")
+    # The stub is the CI/e2e model (D9); it must be selectable in dev/CI — for
+    # the Phase 2 tutor slot as much as the Phase 1 ones.
+    settings = Settings(
+        env="development", model_outline="stub", model_lesson="stub", model_tutor="stub"
+    )
     assert settings.model_outline == "stub"
+    assert settings.model_tutor == "stub"
 
 
-@pytest.mark.parametrize("slot", ["model_outline", "model_lesson", "model_judge"])
+# Spelled out rather than parametrized over ``config.MODEL_SLOTS``: the point is
+# to catch a slot dropped from that constant, which parametrizing over it could
+# never do (the case would vanish with the entry).
+@pytest.mark.parametrize(
+    "slot", ["model_outline", "model_lesson", "model_judge", "model_tutor"]
+)
 def test_stub_rejected_in_production(slot: str) -> None:
     # Config guard: the deterministic stub must never resolve in production.
     # ``model_validate`` takes a dict (dynamic slot key), triggering the same
     # after-validator that ``Settings(...)`` would.
-    with pytest.raises(ValidationError, match="stub"):
+    #
+    # The regex matches the guard's own wording *and* names the slot. A bare
+    # ``match="stub"`` passed vacuously: pydantic echoes the offending input
+    # (``input_value={'env': 'production', <slot>: 'stub'}``) into the rendered
+    # error, so any *other* production validator firing would satisfy it — and a
+    # slot missing from the offenders tuple would go undetected.
+    with pytest.raises(ValidationError, match=rf"not allowed in production.+{slot}"):
         Settings.model_validate({"env": "production", slot: "stub"})
 
 
