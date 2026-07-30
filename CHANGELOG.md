@@ -1,3 +1,10 @@
+# [1.4.0](https://github.com/mattjmcnaughton/aleph/compare/v1.3.1...v1.4.0) (2026-07-30)
+
+
+### Features
+
+* **tutor:** conversations/messages schema, migration 0003 and conversations repository (AL-200) ([ec3c401](https://github.com/mattjmcnaughton/aleph/commit/ec3c401395f18048e3327797b24daf29cd7843bc)), closes [#83](https://github.com/mattjmcnaughton/aleph/issues/83)
+
 ## [1.3.1](https://github.com/mattjmcnaughton/aleph/compare/v1.3.0...v1.3.1) (2026-07-27)
 
 
