@@ -1,3 +1,10 @@
+# [1.6.0](https://github.com/mattjmcnaughton/aleph/compare/v1.5.0...v1.6.0) (2026-07-30)
+
+
+### Features
+
+* **tutor:** conversation read/clear and Tutor-check-answer endpoints (AL-221) ([2dc6c23](https://github.com/mattjmcnaughton/aleph/commit/2dc6c23db426f9b040f06c8202d7c8640693e815)), closes [#88](https://github.com/mattjmcnaughton/aleph/issues/88)
+
 # [1.5.0](https://github.com/mattjmcnaughton/aleph/compare/v1.4.0...v1.5.0) (2026-07-30)
 
 
