@@ -1,3 +1,10 @@
+# [1.8.0](https://github.com/mattjmcnaughton/aleph/compare/v1.7.0...v1.8.0) (2026-07-30)
+
+
+### Features
+
+* **tutor:** turn service and streamed SSE send endpoint (AL-220) ([7fde665](https://github.com/mattjmcnaughton/aleph/commit/7fde66521e63d239a1c73733a180cf1178870b91)), closes [#89](https://github.com/mattjmcnaughton/aleph/issues/89)
+
 # [1.7.0](https://github.com/mattjmcnaughton/aleph/compare/v1.6.0...v1.7.0) (2026-07-30)
 
 
