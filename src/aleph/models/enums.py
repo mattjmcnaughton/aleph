@@ -27,6 +27,31 @@ class PathStatus(StrEnum):
     REFUSED = "refused"
 
 
+class MessageRole(StrEnum):
+    """Who spoke a Message in a conversation (CONTEXT.md: Tutor, Turn).
+
+    Two members only: the learner and the tutor. There is no system/tool role —
+    a turn is exactly one ``learner`` message and the ``tutor`` message it
+    produced (Phase 2 TDD §4).
+    """
+
+    LEARNER = "learner"
+    TUTOR = "tutor"
+
+
+class MessageSource(StrEnum):
+    """How a learner Message was entered (CONTEXT.md: Suggestion).
+
+    Applies to learner rows only (app-enforced, not a CHECK constraint — Phase 2
+    TDD §4); ``NULL`` on tutor rows. It is the entry-mix datum behind the §7
+    suggestion-usage metric. Selection-to-quote is Phase 2B; when it lands this
+    enum gains a ``quote`` member additively.
+    """
+
+    TYPED = "typed"
+    SUGGESTION = "suggestion"
+
+
 class LessonGenerationState(StrEnum):
     """Whether a lesson's content exists yet (TDD §4).
 

@@ -1,0 +1,184 @@
+"""Data access for the tutor's conversations and messages (Phase 2 TDD §4/D2).
+
+The one interesting primitive here is :meth:`ConversationRepository.insert_turn`:
+a turn (CONTEXT.md — a learner Message and the tutor Message it produced) is
+written as a pair at ``max + 1`` / ``max + 2``, so a turn exists whole or not at
+all (D2). There is no state machine and no stale recovery to support: a tutor
+reply is request-scoped, so a stream that dies persists nothing and there is
+nothing to reclaim.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
+
+from sqlalchemy import delete, func, select
+from sqlalchemy.dialects.postgresql import insert
+
+from aleph.models import Conversation, Lesson, Message, MessageRole, Path
+from aleph.repositories._generation import affected_rows
+
+if TYPE_CHECKING:
+    import uuid
+
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from aleph.models import MessageSource
+
+
+@dataclass(frozen=True)
+class ThreadMessage:
+    """A message paired with the title of the lesson it was asked in.
+
+    The conversation response (§6) reports a lesson title alongside every
+    message; resolving it in the thread query keeps that a single join rather
+    than a per-message lookup at the service layer.
+    """
+
+    message: Message
+    lesson_title: str
+
+
+class ConversationRepository:
+    """Data access for :class:`~aleph.models.Conversation` / ``Message`` rows.
+
+    Constructed per-request with the caller's :class:`AsyncSession` (repository
+    convention); it never opens or commits transactions — the service layer owns
+    the unit of work, which is exactly what makes a turn atomic (D2).
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def get_for_path(self, path_id: uuid.UUID) -> Conversation | None:
+        """The path's conversation, or ``None`` before the first turn."""
+        result = await self.session.execute(
+            select(Conversation).where(Conversation.path_id == path_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def upsert_for_path(self, path_id: uuid.UUID) -> tuple[Conversation, bool]:
+        """Get the path's conversation, creating it if this is the first turn.
+
+        Returns ``(conversation, created)``. ``created`` is what lets the caller
+        emit ``tutor_conversation_started`` exactly once (§5.5) — including when
+        two sends race: the ``ON CONFLICT DO NOTHING`` means the loser inserts
+        nothing, reports ``created=False`` and still receives the winner's row,
+        so ``UNIQUE (path_id)`` is never violated by the normal path (it stays a
+        loud backstop for a genuinely duplicated insert).
+
+        The loser seeing the winner's row assumes READ COMMITTED (the app's
+        isolation level): under REPEATABLE READ the re-read would run against a
+        snapshot older than the winner's commit and find nothing.
+        """
+        result = await self.session.execute(
+            insert(Conversation)
+            .values(path_id=path_id)
+            .on_conflict_do_nothing(constraint="uq_conversations_path")
+            .returning(Conversation.id)
+        )
+        created = result.scalar_one_or_none() is not None
+
+        conversation = await self.get_for_path(path_id)
+        if conversation is None:  # pragma: no cover - unreachable under READ COMMITTED
+            raise RuntimeError(f"conversation for path {path_id} disappeared")
+        return conversation, created
+
+    async def load_thread(self, path_id: uuid.UUID) -> list[ThreadMessage]:
+        """The path's messages in ``position`` order, each with its lesson title.
+
+        An empty list when the path has no conversation yet — the read endpoint
+        answers ``200`` with an empty thread rather than ``404`` (§6).
+        """
+        result = await self.session.execute(
+            select(Message, Lesson.title)
+            .join(Conversation, Message.conversation_id == Conversation.id)
+            .join(Lesson, Message.lesson_id == Lesson.id)
+            .where(Conversation.path_id == path_id)
+            .order_by(Message.position)
+        )
+        return [
+            ThreadMessage(message=message, lesson_title=title)
+            for message, title in result.all()
+        ]
+
+    async def insert_turn(
+        self,
+        *,
+        conversation_id: uuid.UUID,
+        lesson_id: uuid.UUID,
+        learner_content: str,
+        source: MessageSource,
+        tutor_content: str,
+        tutor_check: dict[str, Any] | None = None,
+    ) -> tuple[Message, Message]:
+        """Append a whole turn: the learner message and the tutor reply.
+
+        Positions are assigned here, at persist time: ``max + 1`` for the
+        learner row and ``max + 2`` for the tutor row (§4). The two rows are
+        flushed together, so the caller's transaction is what makes the turn
+        atomic (D2) — a stream that fails before the caller commits leaves the
+        thread exactly as it was.
+
+        The per-conversation in-flight lock (D9) is what keeps two sends from
+        computing the same ``max``; if it is ever bypassed,
+        ``uq_messages_conversation_position`` raises an ``IntegrityError`` here
+        rather than silently interleaving two turns.
+        """
+        highest = await self.session.scalar(
+            select(func.max(Message.position)).where(
+                Message.conversation_id == conversation_id
+            )
+        )
+        base = highest or 0
+
+        learner_message = Message(
+            conversation_id=conversation_id,
+            lesson_id=lesson_id,
+            position=base + 1,
+            role=MessageRole.LEARNER,
+            content=learner_content,
+            source=source,
+        )
+        tutor_message = Message(
+            conversation_id=conversation_id,
+            lesson_id=lesson_id,
+            position=base + 2,
+            role=MessageRole.TUTOR,
+            content=tutor_content,
+            tutor_check=tutor_check,
+        )
+        self.session.add_all([learner_message, tutor_message])
+        await self.session.flush()
+        return learner_message, tutor_message
+
+    async def delete_for_path(self, path_id: uuid.UUID) -> bool:
+        """Drop the path's conversation ("new conversation", PRD §5.8).
+
+        The ``ON DELETE CASCADE`` removes the messages; nothing Phase 1 owns is
+        touched. Returns whether a row was removed, so the endpoint can stay
+        idempotent (``204`` either way) without a pre-read.
+        """
+        result = await self.session.execute(
+            delete(Conversation).where(Conversation.path_id == path_id)
+        )
+        return affected_rows(result) > 0
+
+    async def get_message_for_user(
+        self, *, message_id: uuid.UUID, user_id: uuid.UUID
+    ) -> Message | None:
+        """Fetch a message only if it belongs to ``user_id`` (ownership guard).
+
+        The join walks message -> conversation -> path -> user, so the
+        check-answer endpoint (§6) sees ``None`` — indistinguishable from a
+        missing row — for someone else's message, which is what the
+        404-never-403 rule needs.
+        """
+        result = await self.session.execute(
+            select(Message)
+            .join(Conversation, Message.conversation_id == Conversation.id)
+            .join(Path, Conversation.path_id == Path.id)
+            .where(Message.id == message_id, Path.user_id == user_id)
+        )
+        return result.scalar_one_or_none()

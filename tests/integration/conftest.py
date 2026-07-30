@@ -18,6 +18,7 @@ import asyncpg
 import pytest
 from alembic.config import Config
 from fastapi import Depends, FastAPI
+from sqlalchemy import text
 from sqlalchemy.engine import URL, make_url
 
 from alembic import command
@@ -71,7 +72,13 @@ def template_database(base_database_url: URL) -> Generator[None]:
 
 
 @pytest.fixture(autouse=True)
-def isolated_database(base_database_url: URL) -> Generator[None]:
+def isolated_database(base_database_url: URL) -> Generator[str]:
+    """Clone a fresh database for this test; yields its URL.
+
+    Autouse, so most tests never name it. Tests that drive Alembic directly
+    (the migration up/down test) request it by name to learn which database to
+    point the migration runner at.
+    """
     database_name = f"aleph_test_{uuid.uuid4().hex}"
     test_url = _with_database(base_database_url, database_name)
     template_name = _database_name(base_database_url)
@@ -81,7 +88,7 @@ def isolated_database(base_database_url: URL) -> Generator[None]:
         created = True
         asyncio.run(db.configure_database_url(_render_url(test_url)))
 
-        yield
+        yield _render_url(test_url)
     finally:
         asyncio.run(db.dispose_engine())
         if created:
@@ -94,7 +101,7 @@ def _create_template_database(template_url: URL) -> None:
     try:
         asyncio.run(_create_database(template_url))
         created = True
-        _run_migrations(_render_url(template_url))
+        run_alembic(_render_url(template_url), "head")
     except Exception:
         asyncio.run(db.dispose_engine())
         if created:
@@ -143,24 +150,45 @@ async def _drop_database(database_url: URL) -> None:
         await connection.close()
 
 
-async def _connect_admin(database_url: URL) -> asyncpg.Connection:
-    admin_url = _with_database(database_url, "postgres")
+async def connect(database_url: URL | str) -> asyncpg.Connection:
+    """Open a raw asyncpg connection to ``database_url``.
+
+    Unpacks a SQLAlchemy URL into asyncpg's keywords; a ``host`` query parameter
+    wins over the host component, so a socket-directory URL
+    (``...@/db?host=/var/run/postgresql``) connects the way it reads.
+    """
+    url = database_url if isinstance(database_url, URL) else make_url(database_url)
     return await asyncpg.connect(
-        user=admin_url.username,
-        password=admin_url.password,
-        database=admin_url.database,
-        host=admin_url.query.get("host") or admin_url.host,
-        port=admin_url.port,
+        user=url.username,
+        password=url.password,
+        database=url.database,
+        host=url.query.get("host") or url.host,
+        port=url.port,
     )
 
 
-def _run_migrations(database_url: str) -> None:
+async def _connect_admin(database_url: URL) -> asyncpg.Connection:
+    return await connect(_with_database(database_url, "postgres"))
+
+
+def run_alembic(database_url: str, revision: str, *, downgrade: bool = False) -> None:
+    """Drive Alembic against ``database_url``, up or down to ``revision``.
+
+    ``alembic/env.py`` reads the URL from :mod:`aleph.config` at run time, so the
+    setting (and ``DATABASE_URL``, which a fresh ``Settings`` read would pick up)
+    is swapped for the duration and restored afterwards. Synchronous: ``env.py``
+    calls ``asyncio.run``, so this must never be invoked from a running loop.
+    """
     previous_env_url = os.environ.get("DATABASE_URL")
     previous_settings_url = settings.database_url
     os.environ["DATABASE_URL"] = database_url
     settings.database_url = database_url
     try:
-        command.upgrade(Config("alembic.ini"), "head")
+        config = Config("alembic.ini")
+        if downgrade:
+            command.downgrade(config, revision)
+        else:
+            command.upgrade(config, revision)
     finally:
         settings.database_url = previous_settings_url
         if previous_env_url is None:
@@ -264,6 +292,30 @@ def recording_resolver() -> tuple[Callable[[str], Model], list[str]]:
         return model
 
     return resolve, calls
+
+
+async def wait_until_lock_waiters(expected: int) -> None:
+    """Block (yielding, no timed sleep) until ``expected`` backends on *this* test
+    database are waiting on a lock.
+
+    Deterministic synchronization for contention tests: instead of sleeping and
+    hoping the competitor has reached the lock, poll ``pg_stat_activity`` until
+    it provably has. Covers both row locks and the transaction-id wait a
+    conflicting unique-index insert performs. Scoped to ``current_database()`` so
+    parallel xdist workers (each its own cloned DB) never cross-count.
+    """
+    while True:
+        async with db.async_session() as monitor:
+            result = await monitor.execute(
+                text(
+                    "SELECT count(*) FROM pg_stat_activity "
+                    "WHERE wait_event_type = 'Lock' "
+                    "AND datname = current_database()"
+                )
+            )
+            if (result.scalar() or 0) >= expected:
+                return
+        await asyncio.sleep(0)  # yield the loop; not a timed wait
 
 
 async def create_user(
