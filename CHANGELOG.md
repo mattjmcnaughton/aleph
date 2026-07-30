@@ -1,3 +1,10 @@
+# [1.10.0](https://github.com/mattjmcnaughton/aleph/compare/v1.9.0...v1.10.0) (2026-07-30)
+
+
+### Features
+
+* **tutor:** product events and saved metric queries (AL-240) ([8a4fe4f](https://github.com/mattjmcnaughton/aleph/commit/8a4fe4fb87c126475b9ec49ba1332d1bf33bacc2)), closes [#92](https://github.com/mattjmcnaughton/aleph/issues/92)
+
 # [1.9.0](https://github.com/mattjmcnaughton/aleph/compare/v1.8.0...v1.9.0) (2026-07-30)
 
 
