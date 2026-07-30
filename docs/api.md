@@ -120,6 +120,42 @@ itself** (`POST /lessons/{failed-id}/generate`), which re-claims it and, on
 success, resumes the chain. A future ticket may make completion refuse (or warn
 on) an ungenerated head; today the gating is deliberately generation-agnostic.
 
+## Tutor (`/api/v1`, AL-221, Phase 2 TDD §6)
+
+Session-cookie protected (`401` via the shared envelope when anonymous). Address
+by UUID; another learner's path or message reads/acts as `404` (existence not
+disclosed) — Phase 1's conventions verbatim.
+
+**The whole surface is feature-flagged.** Every route below sits behind a
+router-level `require_tutor_enabled` dependency: when the `tutor` flag (see
+*Feature flags* below) resolves **off** for the caller, the route answers `404`
+— for that account the tutor does not exist. `404`, not `403`, for the same
+reason ownership failures are: `403` would confirm the feature exists. The gate
+runs *after* authentication, so an anonymous request is still `401`. This is
+what lets Phase 2 merge and deploy dark while admins (`ADMIN_DEFAULT_FLAGS`)
+dogfood it in production; launch is AL-270 flipping the default.
+
+| Method | Path | Body | Success | Notes |
+| ------ | ---- | ---- | ------- | ----- |
+| `GET` | `/api/v1/paths/{id}/conversation` | — | `200 {messages: [...]}` | The path's whole thread, oldest first. Each message: `{id, role, content, lesson_id, lesson_title, tutor_check, created_at}`. **`200` with an empty list when no conversation exists** (the row is created lazily on the first completed turn) — never `404`. There is one conversation **per path**, not per lesson, so `lesson_id`/`lesson_title` (the lesson the message was asked in, PRD §5.8) vary down a single thread. **Unpaginated this phase** (accepted risk, TDD §14). |
+| `DELETE` | `/api/v1/paths/{id}/conversation` | — | `204` | **New conversation** (PRD §5.8): drops the conversation row; `ON DELETE CASCADE` removes its messages. **Idempotent** — clearing an already-empty thread is still `204`. Touches no Phase 1 state (the path and its lessons are untouched). Never refunds quota (D8 — the tutor cap is disabled at its default of 0, so there are no usage rows to refund). |
+| `POST` | `/api/v1/messages/{id}/tutor-check-answer` | `{selected_index}` | `204` | Records the learner's choice into the message's Tutor check as `answered_index`, so a revisit renders the revealed card. Ownership walks message → conversation → path → user (`404` otherwise). A message with **no** Tutor check is `409 conflict`; a `selected_index` outside the stored `options` is `422 validation_error`. Answering twice **overwrites** (a Tutor check is not graded, so there is no first-wins rule to protect). **Creates no Attempt** and changes no lesson, progression, or Attempt-derived metric (PRD §5.5 / W12). |
+
+`POST /api/v1/paths/{id}/conversation/messages` — the streamed send — lands with
+AL-220 and inherits the same flag gate.
+
+**`tutor_check` payload.** On a tutor message that posed one (`null` everywhere
+else): `{stem, options, correct_index, explanation, answered_index}`.
+`answered_index` is `null` until the check-answer route records one.
+
+**A deliberate asymmetry with the Quick check.** `QuickCheckDTO` hides
+`correct_index`/`explanation` until an Attempt exists — Phase 1's answer-hiding
+invariant (W6). `TutorCheckDTO` **carries** both on delivery, by design: a Tutor
+check is the tutor's own non-scoring question, its feedback is immediate and
+client-side, and nothing downstream grades it. The invariant protected is the
+*Quick check's* answer, and that protection is behavioural (TDD D7 — prompt
+rule, deterministic pre-filter, W13), not a property of this DTO.
+
 ## Feature flags (admin) (`/api/v1/admin`, AL-203)
 
 Flags are **defined in code** (`services/feature_flags.py`); the database stores
