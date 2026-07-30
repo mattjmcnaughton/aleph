@@ -21,6 +21,7 @@ property of this DTO.
 """
 
 from datetime import datetime
+from enum import StrEnum
 from typing import Annotated
 from uuid import UUID
 
@@ -143,3 +144,68 @@ class SendMessageRequest(BaseModel):
     content: TutorMessageStr
     source: MessageSource = MessageSource.TYPED
     model: str | None = None
+
+
+# --------------------------------------------------------------------------- #
+# The streamed send's wire events (AL-220, TDD §5.4)
+#
+# Named SSE events, JSON data. The shapes live here with the rest of the tutor
+# contract so the rail's stream parser (AL-230) and the turn service share one
+# definition; ``services/sse.py`` owns the framing, this owns what rides in it.
+# --------------------------------------------------------------------------- #
+
+
+class TutorErrorCode(StrEnum):
+    """The ``code`` on a terminal ``error`` event (TDD §5.6).
+
+    A small, closed vocabulary so the client can word an upstream failure
+    honestly — the PRD's named wording gap: a provider outage must not be
+    reported as "check your connection". Deliberately *not* the HTTP envelope's
+    code set: pre-stream failures already speak that vocabulary as ordinary JSON
+    errors, and by the time an SSE ``error`` frame is possible the status line
+    is long since ``200``.
+    """
+
+    #: The whole-stream bound (``TUTOR_REPLY_TIMEOUT``) elapsed. The learner
+    #: sees "this took too long", never a dead stream.
+    TIMEOUT = "timeout"
+    #: The model provider failed, refused, or behaved unexpectedly (including a
+    #: run that exhausted its retry budget). Upstream, not the learner's link.
+    UPSTREAM_ERROR = "upstream_error"
+    #: Anything else — our bug, not theirs. Nothing is persisted either way.
+    INTERNAL_ERROR = "internal_error"
+
+
+class MessageDeltaDTO(BaseModel):
+    """``event: delta`` — one streamed fragment of the reply's Markdown.
+
+    Fragments concatenate to the reply verbatim; the client renders the running
+    accumulation through the same ``Markdown`` component (the security
+    boundary), never a second pipeline.
+    """
+
+    text: str
+
+
+class MessageDoneDTO(BaseModel):
+    """``event: done`` — terminal success: the turn is persisted (D2).
+
+    Carries **both** ids because the turn is a unit: the learner row is what the
+    client reconciles its optimistic bubble against, and the tutor row is what a
+    Tutor-check answer is later posted to.
+    """
+
+    learner_message_id: UUID
+    tutor_message_id: UUID
+
+
+class MessageErrorDTO(BaseModel):
+    """``event: error`` — terminal failure: **nothing** is persisted (D2).
+
+    A partial reply is discarded on both sides; a turn exists whole or not at
+    all. ``message`` is learner-facing copy, ``code`` is for the client's
+    wording decisions (see :class:`TutorErrorCode`).
+    """
+
+    code: TutorErrorCode
+    message: str

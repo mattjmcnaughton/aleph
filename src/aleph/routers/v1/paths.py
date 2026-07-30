@@ -83,10 +83,10 @@ class ModelOverrides:
     model_lesson: str | None
 
 
-def _validate_override(
+def validate_model_override(
     model_id: str | None, *, is_admin: bool, allowed: tuple[str, ...]
 ) -> str | None:
-    """Enforce the picker rules on one slot's requested id (TDD §5.3, habagou).
+    """Enforce the picker rules on one requested model id (TDD §5.3, habagou).
 
     An absent override is always fine. Present, it is **admin-only** (the hidden
     picker is cosmetic; this is the real gate) and **allowlist-bound**:
@@ -98,6 +98,11 @@ def _validate_override(
 
     Both render through the shared envelope (``app.py`` maps ``403``→``forbidden``
     and ``422``→``validation_error``).
+
+    Public because Phase 2's tutor takes the same picker as a **per-message**
+    override (§5.3) and the epic's rule is that shared rules are shared code:
+    ``routers/v1/tutor.py`` imports this rather than respelling three lines that
+    decide who may spend money on which model.
     """
     if model_id is None:
         return None
@@ -121,14 +126,14 @@ def resolve_model_overrides(
 
     The single enforcement seam ``POST /paths`` calls before any billed work:
     each present override is admin-only and allowlist-bound (see
-    :func:`_validate_override`). Pure over ``(is_admin, allowed)`` so the rules
+    :func:`validate_model_override`). Pure over ``(is_admin, allowed)`` so the rules
     are unit-testable without a request or DB (``tests/unit/test_model_picker``).
     """
     return ModelOverrides(
-        model_outline=_validate_override(
+        model_outline=validate_model_override(
             body.model_outline, is_admin=is_admin, allowed=allowed
         ),
-        model_lesson=_validate_override(
+        model_lesson=validate_model_override(
             body.model_lesson, is_admin=is_admin, allowed=allowed
         ),
     )

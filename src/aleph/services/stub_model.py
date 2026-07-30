@@ -86,6 +86,7 @@ from pydantic_ai.models.function import DeltaToolCall, FunctionModel
 
 from aleph.agents.lesson import LessonContent, QuickCheck
 from aleph.agents.outline import LessonOutline, PathOutline, Refusal, UnitOutline
+from aleph.agents.tutor import TUTOR_CHECK_TOOL_NAME as AGENT_TUTOR_CHECK_TOOL_NAME
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Sequence
@@ -121,12 +122,15 @@ _SENTINEL_RE = re.compile(
 )
 
 
-# The `pose_tutor_check` tool, named as a **string**: `agents/tutor.py` (AL-210)
-# is being built in parallel and does not exist yet, and the streamed branch only
-# needs the name to emit the call. (Importing it later would be fine — services
-# may import agents — but the name keeps the two tickets independent.) AL-220's
-# integration tests own the round trip.
-TUTOR_CHECK_TOOL_NAME = "pose_tutor_check"
+# The `pose_tutor_check` tool's name, **imported from the agent that registers
+# it** rather than restated here (AL-220). AL-202 shipped it as a string literal
+# because `agents/tutor.py` was being built in parallel and did not exist yet;
+# now that it does, the honest arrangement is one definition and an import —
+# services may import agents, and a stub emitting a tool call the agent does not
+# register is a silent, CI-green way for the whole check path to stop working.
+# Re-exported under the same name because every existing consumer (and the e2e
+# suite) reaches for it here.
+TUTOR_CHECK_TOOL_NAME = AGENT_TUTOR_CHECK_TOOL_NAME
 
 # The canonical, checkable factual error `[force-lesson-error]` plants in a
 # generated Read passage, and the correction the tutor streams back (W16).

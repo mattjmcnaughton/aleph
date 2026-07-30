@@ -171,10 +171,13 @@ compose-smoke:
         docker compose rm --stop --force --volumes "${smoke_services[@]}" \
             >/dev/null 2>&1 || true
     }
+    stream_headers="$(mktemp)"
+    stream_body="$(mktemp)"
     cleanup() {
         # Both services, because a failed migration is otherwise invisible: the
         # app never starts, so app-only logs would show nothing at all.
         docker compose logs --no-color --tail 50 migrate app || true
+        rm -f "$stream_headers" "$stream_body"
         teardown
     }
     # Registered *before* `up`, so a failure during build, migrate, or startup
@@ -201,6 +204,96 @@ compose-smoke:
     curl -sS "$base/assets/stale-deadbeef.js" | grep -q '"code":"not_found"'
     curl -fsS "$base/api/v1/auth/session" | grep -q '"authenticated":false'
     curl -sS "$base/api/v1/paths" | grep -q '"code":"unauthenticated"'
+    # --- the tutor's streamed send, through the real image (Phase 2 §12) ------
+    #
+    # Streaming is Phase 2's headline operational risk: a buffering proxy or a
+    # stripped header turns progressive rendering back into blocking JSON with no
+    # error to show for it. Everything below the HTTP boundary is covered by the
+    # integration suite; what only the image can prove is that
+    # `text/event-stream`, the no-store/no-buffering headers and a *flushed*
+    # event survive uvicorn and the port publish.
+    #
+    # This is the smoke's one authenticated check, so it seeds its own account
+    # and signs the session cookie itself (Keycloak stays down — bringing an
+    # identity provider up to test a transport would be a much bigger stack for
+    # no more signal). The seed runs inside the container, through the app's own
+    # models, so it cannot drift from the schema the image ships.
+    seed="$(docker compose exec -T app python - <<'PY' | tr -d '\r'
+    import asyncio, base64, json
+
+    from itsdangerous import TimestampSigner
+
+    from aleph import db
+    from aleph.config import settings
+    from aleph.models import (
+        Lesson, LessonGenerationState, Level, Path, QuickCheck, Unit, User,
+    )
+
+
+    async def seed() -> None:
+        async with db.async_session() as session:
+            user = User(
+                issuer="https://smoke.invalid", subject="compose-smoke",
+                username="smoke", display_name="Smoke", email="smoke@example.com",
+            )
+            session.add(user)
+            await session.flush()
+            path = Path(user_id=user.id, topic="Rust ownership", level=Level.SOME_EXPERIENCE)
+            session.add(path)
+            await session.flush()
+            unit = Unit(path=path, position=1, title="Foundations", summary="s")
+            session.add(unit)
+            await session.flush()
+            lesson = Lesson(
+                unit=unit, path=path, position_in_path=1, position_in_unit=1,
+                title="What ownership is",
+                generation_state=LessonGenerationState.GENERATED,
+                read_passage="## Lesson 1: the core concepts\n\nOwnership is Rust's memory model.",
+            )
+            session.add(lesson)
+            await session.flush()
+            session.add(QuickCheck(
+                lesson_id=lesson.id, stem="Which binding owns the value?",
+                options=["The first", "The second", "Both"], correct_index=1,
+                explanation="A move transfers ownership.",
+            ))
+            await session.commit()
+            # The same signed cookie Starlette's SessionMiddleware would set: a
+            # base64 JSON payload carrying only the local user id.
+            payload = base64.b64encode(json.dumps({"user_id": str(user.id)}).encode())
+            cookie = TimestampSigner(settings.session_secret_key).sign(payload).decode()
+            print(path.id)
+            print(lesson.id)
+            print(cookie)
+
+
+    asyncio.run(seed())
+    PY
+    )"
+    tutor_path="$(printf '%s\n' "$seed" | sed -n 1p)"
+    tutor_lesson="$(printf '%s\n' "$seed" | sed -n 2p)"
+    tutor_cookie="$(printf '%s\n' "$seed" | sed -n 3p)"
+    curl -sS -N --max-time 60 -D "$stream_headers" -o "$stream_body" \
+        -H "Cookie: session=${tutor_cookie}" \
+        -H 'Content-Type: application/json' \
+        -d "{\"lesson_id\":\"${tutor_lesson}\",\"content\":\"Why does a move invalidate the source?\"}" \
+        "$base/api/v1/paths/${tutor_path}/conversation/messages"
+    grep -qi '^HTTP/1.1 200' "$stream_headers"
+    grep -qi '^content-type: text/event-stream' "$stream_headers"
+    grep -qi '^cache-control: no-store' "$stream_headers"
+    grep -qi '^x-accel-buffering: no' "$stream_headers"
+    # Chunked, and therefore *not* a buffered whole-body response with a length:
+    # the one header pair that tells a buffering regression from a healthy stream.
+    grep -qi '^transfer-encoding: chunked' "$stream_headers"
+    ! grep -qi '^content-length:' "$stream_headers"
+    # A real, well-formed SSE frame arrived. Today it is an `error` frame — the
+    # smoke ships no OpenRouter credential and `ENV=production` forbids the
+    # deterministic stub, so the model call fails at once — and that a terminal
+    # error still reaches the learner as a *stream event* is precisely §5.6's
+    # promise: never a dead stream. The assertion stays on the frame's shape so
+    # it keeps holding if the stack ever gains a real model.
+    head -n 1 "$stream_body" | grep -q '^event: '
+    grep -q '^data: {' "$stream_body"
     echo "compose smoke OK"
 
 # Stop Compose services

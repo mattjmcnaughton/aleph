@@ -24,9 +24,10 @@ the mark runs in a fresh session. Every mark is fenced — a lost claim's mark i
 silent no-op, so a stalled worker never overwrites a fresh re-claim.
 
 **Module-level DB access (AL-010 landmine).** Sessions come from an injected
-``session_factory``. The default resolves ``db.async_session`` *through the
-module* at call time (never captured at import), so the per-test database fixture
-that reassigns ``db.async_session`` is honoured.
+``session_factory``, defaulting to :func:`aleph.db.new_session`, which resolves
+``db.async_session`` *through the module* at call time (never captured at
+import), so the per-test database fixture that reassigns ``db.async_session`` is
+honoured.
 
 Public surface consumed by the API tickets (AL-050/051) and the reconciler
 (AL-041):
@@ -72,6 +73,7 @@ from aleph.agents.outline import (
     build_outline_agent,
 )
 from aleph.config import settings as global_settings
+from aleph.db import new_session
 from aleph.models import LessonGenerationState, Level
 from aleph.repositories import (
     LessonRepository,
@@ -168,19 +170,6 @@ AGENT_LEVEL: dict[Level, AgentLevel] = {
 }
 
 
-def _default_session_factory() -> AbstractAsyncContextManager[AsyncSession]:
-    """A fresh session from the module-level maker, resolved at call time.
-
-    Reads ``db.async_session`` off the module object (not a captured value) so
-    the per-test fixture's ``configure_database_url`` reassignment is seen
-    (AL-010 landmine). Spawned tasks each open their own short-lived sessions
-    from here — never the request's session (TDD §5.4 invariant).
-    """
-    from aleph import db
-
-    return db.async_session()
-
-
 @dataclass(frozen=True)
 class PathStatusSnapshot:
     """A path's poll-target state: effective status + refusal + progress (§6).
@@ -242,7 +231,7 @@ class GenerationOrchestrator:
     def __init__(
         self,
         *,
-        session_factory: SessionFactory = _default_session_factory,
+        session_factory: SessionFactory = new_session,
         spawn: Spawn = asyncio.create_task,
         resolve_model_fn: ResolveModel = resolve_model,
         config: Settings = global_settings,

@@ -37,9 +37,13 @@ class _FakeUsage:
         self.paths: dict[uuid.UUID, list[datetime]] = {}
         self.outlines: dict[uuid.UUID, list[datetime]] = {}
         self.lessons: dict[uuid.UUID, list[datetime]] = {}
+        self.tutor_messages: dict[uuid.UUID, list[datetime]] = {}
 
     def add_path(self, user_id: uuid.UUID, when: datetime) -> None:
         self.paths.setdefault(user_id, []).append(when)
+
+    def add_tutor_message(self, user_id: uuid.UUID, when: datetime) -> None:
+        self.tutor_messages.setdefault(user_id, []).append(when)
 
     def add_outline(self, user_id: uuid.UUID, when: datetime) -> None:
         self.outlines.setdefault(user_id, []).append(when)
@@ -62,18 +66,25 @@ class _FakeUsage:
     ) -> int:
         return sum(1 for t in self.lessons.get(user_id, []) if t >= since)
 
+    async def count_tutor_messages_since(
+        self, *, user_id: uuid.UUID, since: datetime
+    ) -> int:
+        return sum(1 for t in self.tutor_messages.get(user_id, []) if t >= since)
+
 
 def _limiter(
     usage: _FakeUsage,
     *,
     paths: int = 10,
     lessons: int = 100,
+    tutor_messages: int = 0,
     now: datetime = DAY_ONE,
 ) -> DailyRateLimiter:
     return DailyRateLimiter(
         usage,
         paths_per_day=paths,
         lesson_generations_per_day=lessons,
+        tutor_messages_per_day=tutor_messages,
         now=lambda: now,
     )
 
@@ -201,3 +212,70 @@ async def test_friendly_429_message_names_the_cap() -> None:
     assert isinstance(detail, str)
     assert "10" in detail
     assert "tomorrow" in detail.lower()
+
+
+# --------------------------------------------------------------------------- #
+# The tutor message cap (AL-220, Phase 2 TDD §7 / D8)
+#
+# The knob exists and the behaviour does not: ``RATE_LIMIT_TUTOR_MESSAGES_PER_DAY``
+# ships at 0, which ``_exempt`` already reads as disabled. These pin that the
+# default is genuinely inert, that the cap bites when an operator raises it, and
+# that admins stay exempt — the three things that have to hold before the knob
+# could ever be turned up.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.anyio
+async def test_tutor_message_cap_is_disabled_at_the_default_of_zero() -> None:
+    """Cap 0 (the shipped default, D8) never consults the count at all."""
+    usage = _FakeUsage()
+    for _ in range(50):
+        usage.add_tutor_message(USER, DAY_ONE)
+
+    await _limiter(usage, tutor_messages=0).check_tutor_message(
+        user_id=USER, is_admin=False
+    )
+
+
+@pytest.mark.anyio
+async def test_tutor_message_cap_allows_up_to_cap_then_denies() -> None:
+    usage = _FakeUsage()
+    limiter = _limiter(usage, tutor_messages=3)
+
+    for _ in range(3):
+        await limiter.check_tutor_message(user_id=USER, is_admin=False)
+        usage.add_tutor_message(USER, DAY_ONE)
+
+    with pytest.raises(HTTPException) as excinfo:
+        await limiter.check_tutor_message(user_id=USER, is_admin=False)
+    assert excinfo.value.status_code == status.HTTP_429_TOO_MANY_REQUESTS
+    detail = excinfo.value.detail
+    assert isinstance(detail, str)
+    assert "3" in detail
+    assert "tomorrow" in detail.lower()
+
+
+@pytest.mark.anyio
+async def test_tutor_message_cap_exempts_admins_and_rolls_over() -> None:
+    usage = _FakeUsage()
+    for _ in range(20):
+        usage.add_tutor_message(USER, DAY_ONE)
+
+    await _limiter(usage, tutor_messages=3).check_tutor_message(
+        user_id=USER, is_admin=True
+    )
+    await _limiter(usage, tutor_messages=3, now=DAY_TWO).check_tutor_message(
+        user_id=USER, is_admin=False
+    )
+
+
+@pytest.mark.anyio
+async def test_tutor_message_cap_is_per_account() -> None:
+    usage = _FakeUsage()
+    for _ in range(3):
+        usage.add_tutor_message(USER, DAY_ONE)
+
+    limiter = _limiter(usage, tutor_messages=3)
+    with pytest.raises(HTTPException):
+        await limiter.check_tutor_message(user_id=USER, is_admin=False)
+    await limiter.check_tutor_message(user_id=OTHER, is_admin=False)

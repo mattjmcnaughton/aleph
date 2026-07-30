@@ -31,24 +31,34 @@ and drives the process:
   halts the reconciler, cancels in-flight generation tasks, and unbinds. Rows
   left mid-flight revert via stale recovery — the state machine makes
   cancellation safe, so there is no cleanup-on-cancel logic anywhere (§5.4).
+
+**Phase 2 adds a second, deliberately separate bound** (Phase 2 TDD D9):
+:class:`TutorReplyLimiter`. A tutor reply is request-scoped — a learner is
+present, waiting mid-sentence — so it gets its *own* semaphore
+(``MAX_CONCURRENT_TUTOR_REPLIES``) rather than sharing generation's, and it
+does **not** use the task registry: there is no background work to keep alive
+and nothing to reclaim if the process dies. The same object owns the
+per-conversation in-flight guard, because the two are one policy — "how much
+tutoring may run at once, and never twice on one thread".
 """
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import structlog
 
 from aleph.config import settings as global_settings
-from aleph.repositories import PathRepository
 
-# The default session factory is defined once in ``generation.py`` and shared
-# here (rather than duplicated): both open a fresh short-lived session from the
-# module-level maker resolved at call time (the AL-010 landmine the orchestrator
-# guards against). ``_`` prefix kept — it is a package-internal seam default.
-from aleph.services.generation import _default_session_factory
+# The one default session factory: a fresh short-lived session from the
+# module-level maker, resolved at call time (the AL-010 landmine the
+# orchestrator guards against). It lives in ``db.py`` so every consumer shares
+# one public seam rather than borrowing a private name from a sibling service.
+from aleph.db import new_session
+from aleph.repositories import PathRepository
 
 if TYPE_CHECKING:
     import uuid
@@ -64,6 +74,120 @@ if TYPE_CHECKING:
     SessionFactory = Callable[[], AbstractAsyncContextManager[AsyncSession]]
 
 logger = structlog.get_logger(__name__)
+
+
+class ConversationBusyError(RuntimeError):
+    """A reply is already in flight on this conversation (Phase 2 D9).
+
+    Raised by :meth:`TutorReplyLimiter.reserve`. ``services/tutor.py`` maps it to
+    the ``409 conflict`` the send endpoint answers *before* any stream opens —
+    the composer is disabled client-side, but the server is the enforcer.
+    """
+
+
+@dataclass(eq=False)
+class ReplyReservation:
+    """One claim on one conversation — the receipt :meth:`reserve` hands back.
+
+    **Why a token and not the ``path_id``.** Release has to be idempotent (the
+    frame that owns it may run after a failure, a timeout, or a disconnect), and
+    an idempotent *keyed* release is unsafe: between one reply's release and a
+    late second release for the same key, a new request can legitimately reserve
+    the same conversation, and the late call would free the successor's claim —
+    re-opening the D9 race it exists to close. A token releases only the claim
+    it *is*: :meth:`TutorReplyLimiter.release` drops it only while it is still
+    the conversation's current holder, so a late or duplicated release is a
+    genuine no-op rather than a silent theft.
+
+    Identity, not value, is what distinguishes two successive claims on one path
+    (``eq=False``): two reservations for the same ``path_id`` are different
+    objects and the limiter compares them with ``is``.
+    """
+
+    path_id: uuid.UUID
+
+
+class TutorReplyLimiter:
+    """The tutor's two runtime bounds: a semaphore + per-conversation exclusion.
+
+    **The semaphore** (``MAX_CONCURRENT_TUTOR_REPLIES``) is process-wide and
+    *its own*, never generation's (D9): batch prefetch work must never make a
+    learner wait mid-sentence, and the two workloads have opposite latency
+    profiles. It bounds the model run only — not the whole request — so queue
+    time is not charged against ``TUTOR_REPLY_TIMEOUT``, exactly as the
+    generation permit sits outside its per-call timeout.
+
+    **The reservation** is one in-flight reply per conversation, keyed by
+    ``path_id`` (a conversation is one-per-path and created lazily, so the path
+    is the stable identity — there may be no conversation row yet). It is what
+    makes D2's position assignment race-free in practice: two concurrent sends
+    can never compute the same ``max(position)``, so
+    ``uq_messages_conversation_position`` stays a loud backstop rather than a
+    live failure mode.
+
+    :meth:`reserve` and :meth:`release` are separate calls rather than a context
+    manager because the acquisition and the release genuinely happen in
+    different frames: the route reserves *before* it returns a response (so the
+    conflict is an ordinary JSON ``409``, pre-stream), and the **response
+    object** releases in a ``finally`` around its own ``__call__`` (so a
+    failure, a timeout, a disconnect — and, critically, a response whose body
+    generator is never started at all — all free the conversation).
+
+    ``reserve`` hands back a :class:`ReplyReservation` and ``release`` takes it,
+    which is what makes the release idempotent *per claim* rather than per key;
+    see :class:`ReplyReservation` for why the difference matters.
+
+    **Scope: one process.** The reservation is in-memory, so it does not
+    coordinate across machines — the app runs as a single Fly machine today, and
+    the database's unique constraint is the honest backstop if that ever stops
+    being true. A distributed lock would be real machinery for a risk this
+    deployment does not have.
+    """
+
+    def __init__(self, *, max_concurrent: int) -> None:
+        # Constructing a Semaphore needs no running loop (3.10+ binds lazily on
+        # first use), so this is safe at app-assembly time.
+        self._semaphore = asyncio.Semaphore(max_concurrent)
+        self._in_flight: dict[uuid.UUID, ReplyReservation] = {}
+
+    def slot(self) -> asyncio.Semaphore:
+        """The permit to hold around one model run (an async context manager)."""
+        return self._semaphore
+
+    @property
+    def in_flight(self) -> frozenset[uuid.UUID]:
+        """The conversations (by path id) with a reply in flight right now."""
+        return frozenset(self._in_flight)
+
+    def reserve(self, path_id: uuid.UUID) -> ReplyReservation:
+        """Claim the conversation, or raise :class:`ConversationBusyError`.
+
+        Atomic by construction: the check and the insert happen with no
+        ``await`` between them, so on a single event loop no two coroutines can
+        both see the conversation free.
+
+        Returns the claim's :class:`ReplyReservation` — the only thing
+        :meth:`release` accepts.
+        """
+        if path_id in self._in_flight:
+            raise ConversationBusyError(
+                f"a tutor reply is already in flight for path {path_id}"
+            )
+        reservation = ReplyReservation(path_id=path_id)
+        self._in_flight[path_id] = reservation
+        return reservation
+
+    def release(self, reservation: ReplyReservation) -> None:
+        """Free the conversation this reservation claimed. Idempotent per claim.
+
+        Releasing the *same* reservation twice is a no-op; releasing a stale one
+        after the conversation has been re-reserved is a no-op too, which is the
+        whole point of the token (see :class:`ReplyReservation`). Deliberately
+        forgiving and unable to raise: the caller is a ``finally``, and a double
+        release must never turn a failed reply into a 500.
+        """
+        if self._in_flight.get(reservation.path_id) is reservation:
+            del self._in_flight[reservation.path_id]
 
 
 class TaskRegistry:
@@ -158,7 +282,7 @@ class Reconciler:
         registry: TaskRegistry,
         interval_seconds: float,
         stale_after_seconds: float,
-        session_factory: SessionFactory = _default_session_factory,
+        session_factory: SessionFactory = new_session,
     ) -> None:
         self._orchestrator = orchestrator
         self._registry = registry
@@ -230,7 +354,7 @@ class GenerationLifecycle:
         orchestrator: GenerationOrchestrator,
         *,
         config: Settings = global_settings,
-        session_factory: SessionFactory = _default_session_factory,
+        session_factory: SessionFactory = new_session,
     ) -> None:
         self._orchestrator = orchestrator
         self._registry = TaskRegistry()

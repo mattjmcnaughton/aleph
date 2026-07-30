@@ -1,6 +1,6 @@
-"""Tutor API: read/clear the conversation, answer a Tutor check (AL-221, §6).
+"""Tutor API: send a turn, read/clear the thread, answer a Tutor check (§6).
 
-The tutor's non-streaming surface, layered like the paths and lessons routers
+The tutor's HTTP surface, layered like the paths and lessons routers
 (CLAUDE.md: routers -> services -> repositories). Phase 1's conventions apply
 verbatim: session-cookie auth (``get_current_user`` → ``401`` via the shared
 envelope), UUID addressing, and a resource owned by another learner reading as
@@ -17,6 +17,35 @@ AL-220's streamed send endpoint inherits it by construction; a new route cannot
 forget the gate. ``404`` rather than ``403`` for the same reason ownership is:
 ``403`` would confirm the feature exists and merely isn't yours.
 
+**One route streams** (AL-220): ``POST …/conversation/messages`` answers
+``text/event-stream`` and hands the reply back as it is produced (§5.4/D1). The
+split that keeps that honest is admission versus streaming — everything that can
+still be an ordinary JSON error (auth, ownership, the picker, lesson state, the
+in-flight conflict, the daily cap) happens in ``tutor_turn_service.admit``,
+*before* a response object exists; once the ``200`` is committed the only way to
+report a failure is an ``error`` event. All of that lifecycle lives in
+``services/tutor.py``: this route resolves the caller, gates the picker, frees
+the request's database session, and returns the response.
+
+**Two things a streaming route owns that a JSON one does not**, both here rather
+than in the service because both are properties of the *response object*:
+
+* :class:`ReservedStream` — the conversation's D9 reservation is released in a
+  ``finally`` around the response's own ``__call__``, the one frame ASGI
+  guarantees will run. The body generator is not that frame: Starlette can
+  create this response and then cancel it before the first ``__anext__`` (a
+  client that disconnects between admission and the first byte), and an async
+  generator that never started never runs its ``finally`` — not even on an
+  explicit ``aclose`` (PEP 525). Releasing there would wedge the conversation on
+  a permanent ``409`` until the process restarted.
+* **closing the request's session before returning.** ``OwnedPath`` resolves
+  ownership with a ``SELECT``, which autobegins a transaction and pins a pooled
+  connection until FastAPI unwinds the dependency stack — and for a streaming
+  response that unwind happens *after* the stream ends, up to
+  ``TUTOR_REPLY_TIMEOUT`` later. At ``MAX_CONCURRENT_TUTOR_REPLIES`` plus
+  everything queued behind them, that is how a streaming endpoint takes the rest
+  of the API down with it.
+
 **The tutor never writes Phase 1 state** (TDD §3). Recording a Tutor-check
 answer reassigns one JSONB payload on one message and nothing else — no
 Attempt, no progress, no path structure. That is a property of what this module
@@ -30,16 +59,19 @@ from typing import TYPE_CHECKING, Annotated
 from uuid import UUID  # noqa: TC003 - FastAPI resolves route-param annotations.
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.ext.asyncio import (  # noqa: TC002 - FastAPI resolves annotations.
     AsyncSession,
 )
 
+from aleph.authz import is_admin
+from aleph.config import settings
 from aleph.db import get_session
 from aleph.dependencies import get_current_user
 from aleph.dtos.tutor import (
     ConversationResponse,
     MessageDTO,
+    SendMessageRequest,
     TutorCheckAnswerRequest,
     TutorCheckDTO,
 )
@@ -47,10 +79,17 @@ from aleph.models import User  # noqa: TC001 - FastAPI resolves annotations.
 from aleph.repositories import ConversationRepository
 from aleph.routers.v1.paths import (  # noqa: TC001 - FastAPI resolves annotations.
     OwnedPath,
+    validate_model_override,
 )
 from aleph.services.feature_flags import FeatureFlag, FeatureFlagService
+from aleph.services.sse import SSE_HEADERS, SSE_MEDIA_TYPE
+from aleph.services.tutor import tutor_turn_service
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator, Callable
+
+    from starlette.types import Receive, Scope, Send
+
     from aleph.models import Message
     from aleph.repositories import ThreadMessage
 
@@ -117,6 +156,38 @@ def _ensure_answerable(message: Message, *, selected_index: int) -> None:
         )
 
 
+class ReservedStream(StreamingResponse):
+    """A ``StreamingResponse`` that frees its conversation when the response ends.
+
+    The reservation (Phase 2 D9, one in-flight reply per conversation) is claimed
+    during admission, before this object exists, and released here in a
+    ``finally`` around ``__call__`` — see the module docstring for why the body
+    generator's ``finally`` cannot be trusted with it.
+
+    ``release`` takes the claim's *token*, not the path id: between this
+    response's release and any later duplicate, a new request can legitimately
+    reserve the same conversation, and a keyed discard would free the
+    successor's claim. The token makes a late release a genuine no-op.
+    """
+
+    def __init__(
+        self,
+        content: AsyncIterator[str],
+        *,
+        release: Callable[[], None],
+        media_type: str,
+        headers: dict[str, str],
+    ) -> None:
+        super().__init__(content, media_type=media_type, headers=headers)
+        self._release = release
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            self._release()
+
+
 def _message_dto(entry: ThreadMessage) -> MessageDTO:
     """Translate one repository thread row (message + lesson title) to the wire."""
     message = entry.message
@@ -128,6 +199,75 @@ def _message_dto(entry: ThreadMessage) -> MessageDTO:
         lesson_title=entry.lesson_title,
         tutor_check=_check_dto(message.tutor_check),
         created_at=message.created_at,
+    )
+
+
+@router.post(
+    "/paths/{path_id}/conversation/messages",
+    response_class=StreamingResponse,
+)
+async def send_message(
+    path: OwnedPath,
+    body: SendMessageRequest,
+    user: CurrentUser,
+    session: Session,
+) -> StreamingResponse:
+    """Send a turn → ``text/event-stream``, the reply as it is produced (§5.4).
+
+    Ownership via ``OwnedPath`` (``404`` otherwise). The gates run in this order,
+    and the order is the contract:
+
+    1. **The picker**, first and before any billed work — a ``model`` override is
+       admin-only (``403``, checked before the allowlist so a non-admin never
+       learns its shape) and allowlist-bound (``422``). It is resolved **per
+       request and persisted nowhere**: Phase 1 pins its choice on the path row
+       because background resume has to route the same model, while a tutor reply
+       is request-scoped (D2), so there is nothing to resume and no column to
+       add. Which model served a reply is recoverable from the pydantic-ai span.
+    2. **Admission** (``services/tutor.py``): the lesson is on the path and
+       generated (``404``/``409``), the conversation has no reply in flight
+       (``409``, D9), the learner is under the daily cap (``429``, D8), and the
+       context assembles. All of these are ordinary JSON error envelopes —
+       **SSE starts only once the turn is admitted**, which is what makes a
+       pre-stream failure something a normal fetch error handler can read.
+    3. **The stream**: ``delta`` / ``tutor_check`` frames, a ``: ping`` comment
+       through model silence, and exactly one terminal ``done`` (the turn is
+       persisted, both ids on the wire) or ``error`` (nothing persisted, D2).
+
+    ``session`` is declared here only to be *closed*: FastAPI caches a dependency
+    per request, so this is the very instance ``OwnedPath`` resolved ownership
+    on, and closing it hands its pooled connection back before the stream opens
+    rather than when the dependency stack unwinds (module docstring). Closing is
+    idempotent, so the stack's own later teardown is a harmless no-op, and
+    everything downstream of here uses its own short-lived sessions.
+
+    The response is deliberately not a ``response_model``: its body is an event
+    stream, and the payload shapes that ride in it are the ``dtos/tutor.py``
+    stream DTOs rather than one envelope OpenAPI could describe.
+    """
+    admin = is_admin(user, settings)
+    model_id = (
+        validate_model_override(
+            body.model, is_admin=admin, allowed=settings.allowlist_ids
+        )
+        or settings.model_tutor
+    )
+    turn = await tutor_turn_service.admit(
+        path=path,
+        is_admin=admin,
+        lesson_id=body.lesson_id,
+        content=body.content,
+        source=body.source,
+        model_id=model_id,
+    )
+    # After admission: ``admit`` still reads ``path``'s loaded columns, and it is
+    # the last thing that does.
+    await session.close()
+    return ReservedStream(
+        tutor_turn_service.stream(turn),
+        release=lambda: tutor_turn_service.release(turn),
+        media_type=SSE_MEDIA_TYPE,
+        headers=SSE_HEADERS,
     )
 
 

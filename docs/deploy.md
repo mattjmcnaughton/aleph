@@ -353,8 +353,38 @@ What it does, in order:
    against the migrated database), the SPA shell (`<div id="root">`) served by the same
    process, and the auth boundary in both directions — an unauthenticated session
    endpoint that answers, and a protected endpoint that refuses.
-4. Tears down its own containers and their anonymous volumes, dumping `migrate` and
+4. **Streams a tutor turn** (Phase 2 TDD §12) — the smoke's one authenticated check.
+   It seeds an account, a path and a generated lesson *inside the container* through
+   the app's own models, signs a session cookie with the stack's
+   `SESSION_SECRET_KEY`, and POSTs `/api/v1/paths/{id}/conversation/messages`.
+   Keycloak stays down: bringing an identity provider up to test a transport would
+   be a much bigger stack for no more signal.
+5. Tears down its own containers and their anonymous volumes, dumping `migrate` and
    `app` logs first.
+
+### Why the smoke streams a tutor turn
+
+Streaming is Phase 2's headline operational risk: a buffering reverse proxy or a
+stripped header turns progressive rendering back into a blocking reply, with no
+error anywhere to show for it. Everything below the HTTP boundary is covered by the
+integration suite against a real ASGI app; what only the image can prove is that
+`text/event-stream`, `Cache-Control: no-store`, `X-Accel-Buffering: no` and a
+**flushed** event survive uvicorn and the port publish — so the smoke asserts those
+headers, that the response is `Transfer-Encoding: chunked` with **no**
+`Content-Length` (the signature of a buffered whole-body response), and that a
+well-formed SSE frame arrived.
+
+The stack ships **no** `OPENROUTER_API_KEY` (the smoke must never spend money) and
+`ENV=production` forbids the deterministic stub, so the model call fails at once and
+the frame that arrives is `event: error`. That a terminal failure still reaches the
+learner *as a stream event* is exactly TDD §5.6's promise — never a dead stream — so
+it is a sound thing to assert; the check is written against the frame's shape, not
+its contents, so it keeps holding if the stack ever gains a real model.
+
+The smoke also sets `FEATURE_FLAG_DEFAULTS=tutor:on`, because Phase 2 ships dark and
+the tutor routes answer `404` while the `tutor` flag is off. That is the switch in
+front of the production configuration, not part of it — the same lever AL-270 pulls
+at launch.
 
 Both `migrate` and `app` boot with `ENV=production` (a shared YAML anchor, so they
 cannot drift), which arms the config guards — no `stub` model, real auth secrets
@@ -374,7 +404,7 @@ something else is holding 8000 (the only port the smoke publishes).
 | - | ------------- | ---------------- | ------------------- |
 | Migrations | one-shot `migrate` service (`docker/release.sh`) | no | yes (`release_command`) |
 | Database | throwaway `smoke-db`, Compose-network only, discarded on teardown | Neon | Neon |
-| OIDC | configured but never contacted (discovery is lazy; the smoke asserts unauthenticated surfaces) | Auth0 | n/a |
+| OIDC | configured but never contacted (discovery is lazy; the one authenticated check signs its own session cookie) | Auth0 | n/a |
 | `ENV` | `production` — on purpose, so the guards are exercised | `production` | `production` |
 
 ## Troubleshooting
@@ -389,5 +419,7 @@ something else is holding 8000 (the only port the smoke publishes).
 | `fly secrets deploy`: no machines available | Expected before the first Machine-creating deploy. See §3. |
 | Login redirects to `http://` and fails | The proxy headers flags in the image `CMD` were lost, or `SESSION_COOKIE_SECURE` is not `true`. |
 | Path creation returns 503 | `OPENROUTER_API_KEY` unset — the rest of the app is unaffected. |
+| A tutor reply ends in `event: error` with `code: upstream_error` | The model call failed upstream — most often `OPENROUTER_API_KEY` unset or rejected (this is the *expected* outcome in the Compose smoke). Nothing is persisted, so the learner can simply ask again. |
+| The tutor's routes all answer `404` for a real account | The `tutor` flag resolves off for that caller. Check `FEATURE_FLAG_DEFAULTS`, the account's per-user override, and whether the email domain is in `ADMIN_EMAIL_DOMAINS`. |
 | Cert stuck / invalid | `fly certs check <domain>`; DNS matches `fly certs setup`; ownership TXT if behind a proxy. |
 | Scale-to-zero cold start | First request after idle wakes the machine. Acceptable for this app. **Note:** an in-flight generation does not survive the machine stopping — the reconciler re-claims it after `GENERATION_STALE_AFTER` on the next start (§5.4). |

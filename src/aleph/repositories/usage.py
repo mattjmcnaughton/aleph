@@ -10,6 +10,11 @@ undercount vs habagou's per-attempt counter; see ``services.rate_limit``).
 Counting persisted rows means the caps survive process restarts and
 multi-process deployments for free — there is no in-memory state to lose or
 shard — at the cost of one small ``COUNT`` query per check.
+
+Phase 2 adds one counter of the same shape: tutor messages, counted over the
+learner's **live** ``messages`` rows (AL-220, §7/D8). Its own quirk — "new
+conversation" deletes those rows and so refunds quota — is recorded rather than
+fixed, because the cap ships disabled; see ``services.rate_limit``.
 """
 
 from __future__ import annotations
@@ -18,7 +23,7 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import func, select
 
-from aleph.models import Lesson, Path
+from aleph.models import Conversation, Lesson, Message, MessageRole, Path
 
 if TYPE_CHECKING:
     import datetime
@@ -100,6 +105,37 @@ class UsageRepository:
             .where(
                 Path.user_id == user_id,
                 Lesson.generation_started_at >= since,
+            )
+        )
+        return result.scalar_one()
+
+    async def count_tutor_messages_since(
+        self, *, user_id: uuid.UUID, since: datetime.datetime
+    ) -> int:
+        """Count ``user_id``'s **learner** tutor messages created since ``since``.
+
+        The billed unit of a tutor turn is the learner's question: one question
+        buys one reply (Phase 2 §7 / D8), so counting learner rows counts turns
+        without double-counting the tutor's own row. Messages join
+        conversation → path for the learner filter, the same shape every other
+        counter here uses.
+
+        Counting **live rows** is the deliberate Phase 1 pattern, and it carries
+        the Phase 1 quirk the PRD already named: "new conversation" deletes the
+        conversation (cascading its messages), so a cleared thread refunds
+        quota. That is why the refund-proof append-only usage table is the
+        recorded precondition for enabling the cap — while
+        ``RATE_LIMIT_TUTOR_MESSAGES_PER_DAY`` is 0 this query is never run.
+        """
+        result = await self.session.execute(
+            select(func.count())
+            .select_from(Message)
+            .join(Conversation, Message.conversation_id == Conversation.id)
+            .join(Path, Conversation.path_id == Path.id)
+            .where(
+                Path.user_id == user_id,
+                Message.role == MessageRole.LEARNER,
+                Message.created_at >= since,
             )
         )
         return result.scalar_one()
