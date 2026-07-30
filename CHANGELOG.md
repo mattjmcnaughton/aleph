@@ -1,3 +1,11 @@
+# [1.5.0](https://github.com/mattjmcnaughton/aleph/compare/v1.4.0...v1.5.0) (2026-07-30)
+
+
+### Features
+
+* **flags:** feature-flag registry, per-user overrides and session delivery (AL-203) ([9d79e9d](https://github.com/mattjmcnaughton/aleph/commit/9d79e9d4fabf211cff1ddb8aa906c04963e41fd8)), closes [#99](https://github.com/mattjmcnaughton/aleph/issues/99)
+* **tutor:** tutor agent with the pose_tutor_check tool (AL-210) ([25ce4d8](https://github.com/mattjmcnaughton/aleph/commit/25ce4d840fbc9771e873d1d38fb597ed47ed58a6)), closes [#86](https://github.com/mattjmcnaughton/aleph/issues/86)
+
 # [1.4.0](https://github.com/mattjmcnaughton/aleph/compare/v1.3.1...v1.4.0) (2026-07-30)
 
 
