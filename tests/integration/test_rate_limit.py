@@ -21,8 +21,16 @@ from fastapi import HTTPException
 from sqlalchemy import update
 
 from aleph import db
-from aleph.models import Lesson, LessonGenerationState, Level, Path, Unit
-from aleph.repositories import UsageRepository
+from aleph.models import (
+    Lesson,
+    LessonGenerationState,
+    Level,
+    Message,
+    MessageSource,
+    Path,
+    Unit,
+)
+from aleph.repositories import ConversationRepository, UsageRepository
 from aleph.services.rate_limit import DailyRateLimiter
 
 from .conftest import create_user
@@ -35,11 +43,14 @@ NOW = datetime(2026, 7, 23, 15, 0, tzinfo=UTC)
 YESTERDAY = NOW - timedelta(days=1)
 
 
-def _limiter(session, *, paths: int = 10, lessons: int = 100) -> DailyRateLimiter:
+def _limiter(
+    session, *, paths: int = 10, lessons: int = 100, tutor_messages: int = 0
+) -> DailyRateLimiter:
     return DailyRateLimiter(
         UsageRepository(session),
         paths_per_day=paths,
         lesson_generations_per_day=lessons,
+        tutor_messages_per_day=tutor_messages,
         now=lambda: NOW,
     )
 
@@ -239,3 +250,118 @@ async def test_lesson_cap_is_per_account() -> None:
             await limiter.check_lesson_generation(user_id=capped.id, is_admin=False)
         # The other account's lessons are not counted against ``other``.
         await limiter.check_lesson_generation(user_id=other.id, is_admin=False)
+
+
+# --------------------------------------------------------------------------- #
+# The tutor message cap (AL-220, Phase 2 §7 / D8)
+# --------------------------------------------------------------------------- #
+
+
+async def _make_turn(
+    session,
+    *,
+    path: Path,
+    lesson: Lesson,
+    created_at: datetime | None = None,
+) -> None:
+    """Commit one whole turn (learner + tutor rows) onto ``path``'s thread."""
+    repository = ConversationRepository(session)
+    conversation, _created = await repository.upsert_for_path(path.id)
+    learner, tutor = await repository.insert_turn(
+        conversation_id=conversation.id,
+        lesson_id=lesson.id,
+        learner_content="Why does a move invalidate the source?",
+        source=MessageSource.TYPED,
+        tutor_content="Because ownership is unique.",
+    )
+    if created_at is not None:
+        # ``created_at`` has a server default, so backdate both rows explicitly
+        # to place the turn outside today's window.
+        await session.execute(
+            update(Message)
+            .where(Message.id.in_([learner.id, tutor.id]))
+            .values(created_at=created_at)
+        )
+
+
+@pytest.mark.anyio
+async def test_tutor_cap_counts_live_learner_rows_today() -> None:
+    """Learner rows only, today only — the tutor row never double-counts a turn."""
+    async with db.async_session() as session:
+        user = await create_user(session, username="tutor-cap", subject="tutor-cap")
+        path = await _make_path(session, user_id=user.id)
+        unit = Unit(path=path, position=1, title="Unit 1", summary="s")
+        session.add(unit)
+        await session.flush()
+        lesson = await _make_lesson(
+            session, path=path, unit=unit, position=1, generation_started_at=NOW
+        )
+
+        # Two turns today, one yesterday: four learner+tutor rows in today's
+        # window would trip a cap of 2 if the tutor rows counted, and three
+        # would if yesterday's did. Only the two live learner rows count.
+        await _make_turn(session, path=path, lesson=lesson)
+        await _make_turn(session, path=path, lesson=lesson)
+        await _make_turn(session, path=path, lesson=lesson, created_at=YESTERDAY)
+
+        with pytest.raises(HTTPException) as excinfo:
+            await _limiter(session, tutor_messages=2).check_tutor_message(
+                user_id=user.id, is_admin=False
+            )
+        assert excinfo.value.status_code == 429
+
+        await _limiter(session, tutor_messages=3).check_tutor_message(
+            user_id=user.id, is_admin=False
+        )
+
+
+@pytest.mark.anyio
+async def test_tutor_cap_is_per_account_and_admin_exempt() -> None:
+    async with db.async_session() as session:
+        capped = await create_user(session, username="tc-a", subject="tc-a")
+        other = await create_user(session, username="tc-b", subject="tc-b")
+        path = await _make_path(session, user_id=capped.id)
+        unit = Unit(path=path, position=1, title="Unit 1", summary="s")
+        session.add(unit)
+        await session.flush()
+        lesson = await _make_lesson(
+            session, path=path, unit=unit, position=1, generation_started_at=NOW
+        )
+        await _make_turn(session, path=path, lesson=lesson)
+
+        limiter = _limiter(session, tutor_messages=1)
+        with pytest.raises(HTTPException):
+            await limiter.check_tutor_message(user_id=capped.id, is_admin=False)
+        await limiter.check_tutor_message(user_id=capped.id, is_admin=True)
+        await limiter.check_tutor_message(user_id=other.id, is_admin=False)
+
+
+@pytest.mark.anyio
+async def test_clearing_the_thread_refunds_tutor_quota() -> None:
+    """The recorded D8 quirk, pinned as behaviour rather than left to prose.
+
+    "New conversation" deletes the conversation and cascades its messages, so
+    the live-row count drops and quota comes back. This is the precondition the
+    refund-proof usage table exists to remove — while the cap ships at 0 it can
+    never be observed, and this test is what keeps the trade-off honest if
+    anyone ever raises the knob.
+    """
+    async with db.async_session() as session:
+        user = await create_user(session, username="tc-refund", subject="tc-refund")
+        path = await _make_path(session, user_id=user.id)
+        unit = Unit(path=path, position=1, title="Unit 1", summary="s")
+        session.add(unit)
+        await session.flush()
+        lesson = await _make_lesson(
+            session, path=path, unit=unit, position=1, generation_started_at=NOW
+        )
+        await _make_turn(session, path=path, lesson=lesson)
+
+        limiter = _limiter(session, tutor_messages=1)
+        with pytest.raises(HTTPException):
+            await limiter.check_tutor_message(user_id=user.id, is_admin=False)
+
+        await ConversationRepository(session).delete_for_path(path.id)
+        await session.flush()
+
+        await limiter.check_tutor_message(user_id=user.id, is_admin=False)

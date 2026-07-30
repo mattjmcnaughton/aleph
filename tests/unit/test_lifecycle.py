@@ -12,13 +12,20 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import gc
+import uuid
 
 import pytest
 from structlog.testing import capture_logs
 
 from aleph.config import Settings
 from aleph.services.generation import GenerationOrchestrator
-from aleph.services.lifecycle import GenerationLifecycle, Reconciler, TaskRegistry
+from aleph.services.lifecycle import (
+    ConversationBusyError,
+    GenerationLifecycle,
+    Reconciler,
+    TaskRegistry,
+    TutorReplyLimiter,
+)
 
 
 @pytest.fixture
@@ -229,3 +236,111 @@ def test_config_rejects_nonpositive_reconciler_interval() -> None:
 def test_config_rejects_zero_concurrency_bound() -> None:
     with pytest.raises(ValueError, match="max_concurrent_generations"):
         Settings(max_concurrent_generations=0)
+
+
+# --------------------------------------------------------------------------- #
+# The tutor's runtime bounds (AL-220, Phase 2 TDD D9)
+#
+# Two independent guards on one object: a process-wide semaphore isolated from
+# generation's (a learner waiting mid-sentence must not queue behind batch
+# prefetch), and one in-flight reply per conversation (which is what makes the
+# turn's position assignment race-free in practice).
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.anyio
+async def test_tutor_reservation_is_exclusive_per_conversation() -> None:
+    limiter = TutorReplyLimiter(max_concurrent=8)
+    path = uuid.uuid4()
+    other = uuid.uuid4()
+
+    limiter.reserve(path)
+    # A second send on the same conversation is refused...
+    with pytest.raises(ConversationBusyError):
+        limiter.reserve(path)
+    # ...while a different conversation is unaffected.
+    limiter.reserve(other)
+
+    assert limiter.in_flight == frozenset({path, other})
+
+
+@pytest.mark.anyio
+async def test_tutor_reservation_is_reusable_after_release() -> None:
+    """A finished (or failed) reply frees the conversation for the next turn."""
+    limiter = TutorReplyLimiter(max_concurrent=8)
+    path = uuid.uuid4()
+
+    first = limiter.reserve(path)
+    limiter.release(first)
+    second = limiter.reserve(path)
+
+    assert limiter.in_flight == frozenset({path})
+    # Releasing twice is a no-op, not a KeyError: the response object's
+    # ``finally`` is the only releaser, but it must never turn a failed reply
+    # into a 500.
+    limiter.release(second)
+    limiter.release(second)
+    assert limiter.in_flight == frozenset()
+
+
+@pytest.mark.anyio
+async def test_a_stale_release_cannot_free_a_successors_reservation() -> None:
+    """Idempotence is **per claim**, which is why ``release`` takes a token.
+
+    A keyed ``discard(path_id)`` would be idempotent too — and wrong: a late
+    release from a finished reply would free the reservation a *new* request had
+    already taken, re-opening the D9 race the reservation exists to close. This
+    is the whole reason :meth:`TutorReplyLimiter.reserve` hands back a token.
+    """
+    limiter = TutorReplyLimiter(max_concurrent=8)
+    path = uuid.uuid4()
+
+    first = limiter.reserve(path)
+    limiter.release(first)
+    successor = limiter.reserve(path)
+
+    limiter.release(first)  # the late duplicate
+
+    assert limiter.in_flight == frozenset({path}), (
+        "a stale token must not release the successor's claim"
+    )
+    limiter.release(successor)
+    assert limiter.in_flight == frozenset()
+
+
+@pytest.mark.anyio
+async def test_tutor_slot_bounds_concurrent_replies() -> None:
+    """``MAX_CONCURRENT_TUTOR_REPLIES`` permits, enforced by the semaphore."""
+    limiter = TutorReplyLimiter(max_concurrent=2)
+    live = 0
+    high_water = 0
+    release = asyncio.Event()
+
+    async def reply() -> None:
+        nonlocal live, high_water
+        async with limiter.slot():
+            live += 1
+            high_water = max(high_water, live)
+            await release.wait()
+            live -= 1
+
+    tasks = [asyncio.create_task(reply()) for _ in range(4)]
+    # Let every task reach either the permit or the queue behind it.
+    for _ in range(10):
+        await asyncio.sleep(0)
+    assert high_water == 2, "the third reply must queue, not fan out"
+
+    release.set()
+    await asyncio.gather(*tasks)
+    assert high_water == 2
+
+
+@pytest.mark.anyio
+async def test_tutor_semaphore_is_isolated_from_generations() -> None:
+    """D9's point: the two bounds are separate objects with separate config."""
+    config = Settings(max_concurrent_generations=1, max_concurrent_tutor_replies=3)
+    lifecycle = GenerationLifecycle(GenerationOrchestrator(), config=config)
+    tutor = TutorReplyLimiter(max_concurrent=config.max_concurrent_tutor_replies)
+
+    assert tutor.slot() is not lifecycle._semaphore
+    assert tutor.slot()._value == 3

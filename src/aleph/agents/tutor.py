@@ -59,11 +59,12 @@ turns ride as pydantic-ai ``message_history`` built by the context seam
 prompt text (§5.1/§5.2).
 
 **Tool-name contract.** ``services/stub_model.py`` emits the ``pose_tutor_check``
-call **by name** (AL-202), because a name is all the streamed stub needs and it
-kept the two tickets independent. This module cannot import that constant — an
-agent may not import a service — so the two are pinned together by a unit test
-that imports both modules and asserts the agent's *registered* tool name equals
-``TUTOR_CHECK_TOOL_NAME``.
+call by name, and since AL-220 it **imports** :data:`TUTOR_CHECK_TOOL_NAME` from
+here rather than restating it (a service may import an agent; the reverse is
+what the layering forbids). The remaining thing a test has to pin is that the
+agent *registers* the tool under that constant rather than a literal of its
+own — a stub emitting a call the agent does not register would be a silent,
+CI-green way for the whole Tutor check path to stop working.
 """
 
 from __future__ import annotations
@@ -99,10 +100,10 @@ if TYPE_CHECKING:
 
 # --- the Tutor check tool's identity -------------------------------------------
 
-# The tool's wire name. Registered explicitly (rather than inferred from the
-# function name) so this constant is the single in-module source, and pinned to
-# ``services/stub_model.TUTOR_CHECK_TOOL_NAME`` by a unit test — see the module
-# docstring for why the dependency cannot run the other way.
+# The tool's wire name, and the single definition of it in the codebase:
+# ``services/stub_model.py`` imports this rather than keeping a copy. Registered
+# explicitly (rather than inferred from the function name) so the constant is
+# what actually reaches the model — see the module docstring.
 TUTOR_CHECK_TOOL_NAME = "pose_tutor_check"
 
 # What the no-op tool hands back. The card the learner sees is rendered by the
@@ -573,7 +574,32 @@ def tutor_check_already_posed(
 # Retry budget (Agent(retries=...)): a cap on tool-argument and output-validation
 # retries, so a model that keeps posing malformed checks still terminates. Lower
 # than the generation agents' 3 (TDD §5.1) — a learner is waiting mid-sentence.
+#
+# It is **one shared budget** for both kinds of retry, which is why exhausting it
+# has to be a first-class outcome rather than a surprise: pydantic-ai raises
+# ``UnexpectedModelBehavior``, and ``services/tutor.py`` treats that as a failed
+# reply — an ``error`` event with nothing persisted (D2), never a 500.
 _TUTOR_RETRIES = 2
+
+# The Tutor check tool's model-visible docstring, **built** rather than written,
+# so the option band is stated once. Everything a tool docstring says is schema
+# the model reads (pydantic-ai turns the Args section into the JSON-schema
+# parameter descriptions), so a hardcoded "3 or 4" here would be a second source
+# of truth for a rule ``agents/lesson.py`` owns — one that would keep instructing
+# the model correctly right up until the band changed, and then quietly stop.
+# Assigned to the function's ``__doc__`` before registration (an f-string cannot
+# *be* a docstring), which is the whole reason the tool is registered by call
+# rather than by decorator.
+_OPTION_BAND = f"{OPTION_COUNT_MIN} to {OPTION_COUNT_MAX}"
+_POSE_TUTOR_CHECK_DOC = f"""\
+Pose a Tutor check: one non-scoring multiple-choice question, in-thread.
+
+    Args:
+        stem: The question, as plain text.
+        options: {_OPTION_BAND} genuinely distinct, plausible answer options.
+        correct_index: Zero-based index of the correct option.
+        explanation: Short explanation of why that option is correct.
+    """
 
 
 def build_tutor_agent() -> Agent[TutorDeps, str]:
@@ -644,21 +670,21 @@ def build_tutor_agent() -> Agent[TutorDeps, str]:
             explanation=explanation,
         )
 
-    @agent.tool_plain(name=TUTOR_CHECK_TOOL_NAME, args_validator=_check_args)
     def pose_tutor_check(
         stem: str, options: list[str], correct_index: int, explanation: str
     ) -> str:
-        """Pose a Tutor check: one non-scoring multiple-choice question, in-thread.
-
-        Args:
-            stem: The question, as plain text.
-            options: 3 or 4 genuinely distinct, plausible answer options.
-            correct_index: Zero-based index of the correct option.
-            explanation: Short explanation of why that option is correct.
-        """
+        # Docstring assigned below (:data:`_POSE_TUTOR_CHECK_DOC`) — it states the
+        # option band, which belongs to ``agents/lesson.py``'s constants and must
+        # not be spelled out a second time here.
+        #
         # Deliberately a no-op (D5): the service renders the card from the tool
         # *call* it observes on the event stream, so there is nothing to do here.
         return TUTOR_CHECK_ACK
+
+    pose_tutor_check.__doc__ = _POSE_TUTOR_CHECK_DOC
+    agent.tool_plain(name=TUTOR_CHECK_TOOL_NAME, args_validator=_check_args)(
+        pose_tutor_check
+    )
 
     @agent.output_validator
     def _non_empty_reply(ctx: RunContext[TutorDeps], reply: str) -> str:

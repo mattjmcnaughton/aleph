@@ -37,6 +37,16 @@ patience (one outline call runs at a time under the concurrency permit, and the
 reconciler never auto-retries a real ``failed`` outline, so nothing re-drives it
 without a fresh learner-initiated request).
 
+**Tutor messages (``check_tutor_message``, AL-220 / Phase 2 §7, D8).** The tutor
+cap is the same shape one level down: ``RATE_LIMIT_TUTOR_MESSAGES_PER_DAY``
+counts the learner's **live** learner-message rows created today
+(``UsageRepository.count_tutor_messages_since``). It ships at **0 — disabled** —
+so on the default configuration the count is never queried. It inherits this
+module's stateless-counting quirks and adds the one PRD §5.7 names: "new
+conversation" deletes the rows, so clearing a thread refunds quota. Recorded,
+not fixed — the refund-proof append-only usage table is the precondition for
+ever raising the cap above 0, not draft-1 work.
+
 The check is called *before* the billed work, and admins are exempt via an
 injected ``is_admin`` flag (decoupled from ``authz`` on purpose — AL-050 wires
 the two together). On refusal it raises ``HTTPException(429, ...)`` with a
@@ -80,6 +90,10 @@ class UsageCounter(Protocol):
         self, *, user_id: uuid.UUID, since: datetime
     ) -> int: ...
 
+    async def count_tutor_messages_since(
+        self, *, user_id: uuid.UUID, since: datetime
+    ) -> int: ...
+
 
 def _utc_now() -> datetime:
     return datetime.now(UTC)
@@ -104,11 +118,13 @@ class DailyRateLimiter:
         *,
         paths_per_day: int,
         lesson_generations_per_day: int,
+        tutor_messages_per_day: int,
         now: Callable[[], datetime] = _utc_now,
     ) -> None:
         self._usage = usage
         self._paths_per_day = paths_per_day
         self._lesson_generations_per_day = lesson_generations_per_day
+        self._tutor_messages_per_day = tutor_messages_per_day
         self._now = now
 
     async def check_path_creation(self, *, user_id: uuid.UUID, is_admin: bool) -> None:
@@ -169,6 +185,34 @@ class DailyRateLimiter:
             ),
         )
 
+    async def check_tutor_message(self, *, user_id: uuid.UUID, is_admin: bool) -> None:
+        """Raise ``HTTPException(429)`` if ``user_id`` is at the daily tutor cap.
+
+        Call before admitting a tutor turn (Phase 2 §7 / D8). **Ships disabled**:
+        ``RATE_LIMIT_TUTOR_MESSAGES_PER_DAY`` defaults to 0, which
+        :meth:`_exempt` already reads as "no cap", so the count is never even
+        queried on the default configuration. The knob exists; the behaviour
+        does not.
+
+        The count is over **live learner-message rows** — the exact Phase 1
+        pattern, quirks included. The known one is the PRD §5.7 quirk: "new
+        conversation" deletes those rows, so clearing a thread refunds quota.
+        That is **recorded, not fixed** (D8): while the cap is 0 the count is
+        never consulted, so a refund-proof append-only usage table would be
+        machinery for a disabled feature. Building it is the *precondition* for
+        ever raising this cap above 0.
+        """
+        await self._check(
+            self._usage.count_tutor_messages_since,
+            cap=self._tutor_messages_per_day,
+            user_id=user_id,
+            is_admin=is_admin,
+            message=(
+                f"You've reached today's limit of {self._tutor_messages_per_day} "
+                "tutor questions. Please try again tomorrow."
+            ),
+        )
+
     async def _check(
         self,
         count_since: Callable[..., Awaitable[int]],
@@ -213,4 +257,5 @@ def build_daily_rate_limiter(session: AsyncSession) -> DailyRateLimiter:
         UsageRepository(session),
         paths_per_day=settings.rate_limit_paths_per_day,
         lesson_generations_per_day=settings.rate_limit_lesson_generations_per_day,
+        tutor_messages_per_day=settings.rate_limit_tutor_messages_per_day,
     )

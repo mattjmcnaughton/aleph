@@ -39,7 +39,7 @@ from pydantic_ai.models.function import FunctionModel
 
 from aleph.agents import lesson as lesson_agent_module
 from aleph.agents import tutor as tutor_agent_module
-from aleph.agents.lesson import QuickCheck
+from aleph.agents.lesson import OPTION_COUNT_MAX, OPTION_COUNT_MIN, QuickCheck
 from aleph.agents.tutor import (
     ATTEMPT_BLOCK,
     PATH_DIGEST_BLOCK,
@@ -602,15 +602,30 @@ def test_agent_retries_an_empty_reply() -> None:
 
 
 def test_pose_tutor_check_is_the_only_tool_and_matches_the_stub_name() -> None:
-    # Drift guard (AL-202 ↔ AL-210): the stub emits the call **by name** because
-    # ``agents/tutor.py`` may not import a service. Nothing else keeps the two in
-    # sync, so this test crosses the layers the modules must not — and D5's "no
-    # other tools" is asserted on the same wire-accurate list.
+    # Drift guard: the registered tool name is what actually reaches the model,
+    # and it must be the constant both this module and the streamed stub work
+    # from. The stub now *imports* that constant (AL-220 — services may import
+    # agents), so the copy that could drift is gone; what still needs a test is
+    # that the **registration** uses the constant rather than a literal of its
+    # own. D5's "no other tools" rides on the same wire-accurate list.
     respond = TutorResponder([[TextPart(content="ok")]])
     _run(respond)
     names = [tool.name for tool in respond.info_per_call[0].function_tools]
     assert names == [STUB_TUTOR_CHECK_TOOL_NAME]
     assert TUTOR_CHECK_TOOL_NAME == STUB_TUTOR_CHECK_TOOL_NAME
+
+
+def test_tool_schema_states_the_shared_option_bounds() -> None:
+    # The tool's argument descriptions are model-visible schema, so a hardcoded
+    # "3 or 4" there is a second source of truth for the option band — one that
+    # would keep instructing the model long after ``agents/lesson.py`` moved.
+    # The docstring is built from the shared constants; this pins that the built
+    # text is what pydantic-ai actually sends.
+    respond = TutorResponder([[TextPart(content="ok")]])
+    _run(respond)
+    tool = respond.info_per_call[0].function_tools[0]
+    options = tool.parameters_json_schema["properties"]["options"]
+    assert f"{OPTION_COUNT_MIN} to {OPTION_COUNT_MAX}" in options["description"]
 
 
 def test_tool_accepts_a_valid_check_and_returns_an_acknowledgment() -> None:

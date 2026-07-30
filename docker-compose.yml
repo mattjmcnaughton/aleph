@@ -26,6 +26,17 @@ x-smoke: &smoke
     OIDC_ISSUER: http://keycloak:8080/realms/aleph
     OIDC_CLIENT_ID: aleph
     OIDC_CLIENT_SECRET: aleph-dev-secret
+    # Phase 2 ships dark (epic #82): the `tutor` flag defaults **off**, so the
+    # smoke's SSE check would meet the router's 404 gate rather than the
+    # transport it exists to exercise. Flipping the global default here is the
+    # same lever AL-270 pulls at launch — the flag is deliberately not part of
+    # the production config being rehearsed, it is the switch in front of it.
+    FEATURE_FLAG_DEFAULTS: tutor:on
+    # Deliberately no OPENROUTER_API_KEY: the smoke must never spend money, and
+    # `ENV=production` forbids the deterministic stub (that guard is half of what
+    # this stack is here to prove). So the tutor's model call fails immediately
+    # and the reply ends in an `error` event — which is exactly the SSE frame the
+    # smoke needs to see arrive through the proxy chain.
 
 services:
   db:
