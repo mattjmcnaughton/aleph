@@ -43,8 +43,29 @@ async function parseErrorEnvelope(res: Response): Promise<ErrorEnvelope> {
   try {
     return (await res.json()) as ErrorEnvelope;
   } catch {
+    // A body that isn't JSON (a proxy's HTML 502) keeps the generic copy.
     return {};
   }
+}
+
+/**
+ * Build the shared `ApiError` from a non-2xx response.
+ *
+ * Exported for exactly one caller besides `apiFetch`: the tutor's streamed send
+ * (`lib/tutor-stream.ts`), which cannot go through `apiFetch` because it reads
+ * the body progressively — but whose *pre-stream* failure is an ordinary error
+ * envelope and must raise the identical shape. One implementation, so the two
+ * readings of the envelope cannot drift.
+ */
+export async function apiErrorFrom(res: Response): Promise<ApiError> {
+  const envelope = await parseErrorEnvelope(res);
+  return new ApiError(
+    envelope.error?.message ?? `API error: ${res.status} ${res.statusText}`,
+    res.status,
+    envelope.error?.code ?? `http_${res.status}`,
+    envelope.error?.request_id,
+    envelope.error?.details,
+  );
 }
 
 // TODO(AL-020): no global 401 -> /login seam here yet. The session is fetched
@@ -56,16 +77,7 @@ async function parseErrorEnvelope(res: Response): Promise<ErrorEnvelope> {
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, init);
   if (!res.ok) {
-    const envelope = await parseErrorEnvelope(res);
-    const code = envelope.error?.code ?? `http_${res.status}`;
-    const message = envelope.error?.message ?? `API error: ${res.status} ${res.statusText}`;
-    throw new ApiError(
-      message,
-      res.status,
-      code,
-      envelope.error?.request_id,
-      envelope.error?.details,
-    );
+    throw await apiErrorFrom(res);
   }
   if (res.status === 204) {
     return undefined as T;

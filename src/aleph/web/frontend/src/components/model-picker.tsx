@@ -1,6 +1,10 @@
 // The admin model picker (AL-065, TDD §5.3/D14): two slot selects — outline and
 // lesson — that pin which model generates this path, so an admin can A/B models
-// on real paths without a redeploy.
+// on real paths without a redeploy. `TutorModelPicker` at the bottom of this
+// file extends the same surface to Phase 2's tutor slot, under the same two
+// rules, differing only in what the choice *is*: a **per-message** override that
+// is resolved per request and persisted nowhere (Phase 2 TDD §5.3), so it lives
+// in the rail header rather than in a create form.
 //
 // Two rules the rest of the app depends on:
 //  1. **Admin-only, and absent otherwise.** A non-admin (or signed-out) session
@@ -138,5 +142,51 @@ export function ModelPicker({
         ))}
       </div>
     </fieldset>
+  );
+}
+
+/**
+ * The tutor slot's picker, for the rail header (Phase 2 §5.3). One compact
+ * select instead of the two-slot fieldset above, because there is one slot and
+ * the header has no room for a legend and hints — but the rules are identical:
+ * nothing renders for a non-admin, nothing renders with an empty allowlist, and
+ * the options are the session's ids verbatim.
+ *
+ * The difference worth knowing is semantic, not visual: Phase 1's picker pins a
+ * model *on the path row*, because a background resume must route the same
+ * model. A tutor reply is request-scoped, so this choice rides one message and
+ * is never persisted — which is exactly why it belongs beside the conversation
+ * it applies to, and why switching it mid-thread is a legitimate thing to do.
+ */
+export function TutorModelPicker({
+  isAdmin,
+  allowlist,
+  value,
+  onChange,
+}: {
+  isAdmin: boolean;
+  allowlist: readonly string[];
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  if (!isAdmin || allowlist.length === 0) {
+    return null;
+  }
+  return (
+    <select
+      data-testid="tutor-rail-model-picker"
+      aria-label="Tutor model (admin)"
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      className="max-w-[10rem] appearance-none rounded-md border border-divider bg-surface px-2 py-1.5 text-xs text-mist focus:border-iris focus:outline-none"
+    >
+      {/* The unset option: the message carries no `model` key at all. */}
+      <option value={MODEL_SLOT_DEFAULT}>Server default</option>
+      {allowlist.map((model) => (
+        <option key={model} value={model}>
+          {model}
+        </option>
+      ))}
+    </select>
   );
 }
