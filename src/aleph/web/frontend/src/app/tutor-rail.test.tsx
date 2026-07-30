@@ -151,6 +151,31 @@ describe("Tutor rail — one tree, two CSS presentations (D12)", () => {
     expect(screen.getAllByTestId("tutor-rail")).toHaveLength(1);
   });
 
+  it("[AL-260] gives the lesson bottom clearance below `lg` for as long as the rail is open", async () => {
+    useSession(flagOnSession);
+    seedReadyLesson();
+    await gotoLesson();
+    const main = await screen.findByTestId("lesson-view");
+
+    // Closed: the ordinary page — nothing sits over its tail to make room for.
+    expect(main.className).not.toMatch(/pb-\[75vh\]/);
+
+    await openRail();
+
+    // Open: 75vh of bottom padding, the sheet's own cap, so the tail of the
+    // lesson (the Quick check's submit, "Mark complete") can be scrolled clear
+    // of it. Cancelled at `lg`, where the rail is a column beside `main` and
+    // covers nothing.
+    expect(main.className).toMatch(/pb-\[75vh\]/);
+    expect(main.className).toMatch(/lg:pb-10/);
+
+    // ...and it leaves with the rail, rather than being a permanent hole at the
+    // bottom of every lesson.
+    fireEvent.click(screen.getByTestId("tutor-rail-collapse"));
+    await waitFor(() => expect(screen.queryByTestId("tutor-rail")).toBeNull());
+    expect(screen.getByTestId("lesson-view").className).not.toMatch(/pb-\[75vh\]/);
+  });
+
   it("[AL-230] collapse closes the rail and restores the mark (shared open state)", async () => {
     useSession(flagOnSession);
     seedReadyLesson();

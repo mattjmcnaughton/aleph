@@ -19,6 +19,22 @@ const WIDTH_CAP = {
   switcher: "lg:max-w-[1100px]",
 } as const;
 
+/**
+ * Room to scroll the tail of `main` out from under the open rail.
+ *
+ * Below `lg` the rail is a sheet `fixed` over the bottom of the viewport, up to
+ * `max-h-[75vh]` of it — so without this the last things on the page (on a
+ * lesson: the Quick check's submit and "Mark complete") sit under the sheet at
+ * maximum scroll, with nothing left to scroll into. Matching the sheet's own cap
+ * is what guarantees every control can be brought above its top edge. At `lg`
+ * the rail is a docked column beside `main` and covers nothing, so the padding
+ * goes straight back to the route's ordinary `py-10`.
+ *
+ * Still CSS only (D12): this is conditional on the rail being **open**, which is
+ * real shared state, and never on the viewport's width.
+ */
+const RAIL_CLEARANCE = "pb-[75vh] lg:pb-10";
+
 export function Workspace({
   testid,
   width,
@@ -42,6 +58,9 @@ export function Workspace({
    * presentation — the one `<aside>` below is a bottom sheet over the lesson,
    * and at `lg` a docked 400px column beside the lesson's 680px. Same tree, two
    * CSS presentations: no `matchMedia`, no width-conditional rendering.
+   *
+   * Occupying this slot also gives `main` its bottom clearance below `lg`
+   * (`RAIL_CLEARANCE`), so the sheet never strands the tail of the page.
    */
   tutorRail?: ReactNode;
   children: ReactNode;
@@ -59,7 +78,9 @@ export function Workspace({
 
       <main
         data-testid={testid}
-        className="mx-auto w-full max-w-[480px] px-4 py-8 lg:mx-0 lg:max-w-none lg:flex-1 lg:px-10 lg:py-10"
+        className={`mx-auto w-full max-w-[480px] px-4 py-8 lg:mx-0 lg:max-w-none lg:flex-1 lg:px-10 lg:py-10 ${
+          tutorRail ? RAIL_CLEARANCE : ""
+        }`}
       >
         <div className={`mx-auto w-full ${WIDTH_CAP[width]}`}>{children}</div>
       </main>
