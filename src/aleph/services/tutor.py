@@ -84,6 +84,7 @@ from pydantic_ai.messages import (
 from pydantic_ai.run import AgentRunResultEvent
 from sqlalchemy.exc import IntegrityError
 
+from aleph import events
 from aleph.agents.tutor import TUTOR_CHECK_TOOL_NAME, build_tutor_agent
 from aleph.config import settings as global_settings
 from aleph.db import new_session
@@ -95,6 +96,7 @@ from aleph.dtos.tutor import (
     TutorErrorCode,
 )
 from aleph.repositories import ConversationRepository, LessonRepository
+from aleph.services.generation import usage_tokens
 from aleph.services.lifecycle import (
     ConversationBusyError,
     ReplyReservation,
@@ -191,10 +193,16 @@ class AdmittedTurn:
     which is why admission and streaming are two calls rather than one. The
     reservation is **not** released by the stream: see
     :meth:`TutorTurnService.stream` and :meth:`TutorTurnService.release`.
+
+    ``account_id`` and ``position_in_path`` are here only so the whole lifecycle
+    can stamp its product events (TDD §9) without re-reading the path or the
+    lesson from a stream that deliberately holds no session.
     """
 
+    account_id: uuid.UUID
     path_id: uuid.UUID
     lesson_id: uuid.UUID
+    position_in_path: int
     content: str
     source: MessageSource
     model_id: str
@@ -208,7 +216,23 @@ class _ReplyResult:
 
     text: str
     tutor_check: dict[str, Any] | None
-    ttft_ms: int | None
+
+
+@dataclass
+class _ReplyMeasurement:
+    """What ``tutor_reply_completed`` reports, filled in *as the reply runs*.
+
+    A mutable out-parameter rather than a return value because the event fires
+    on **every** resolution (TDD §9) and the failing resolutions never return
+    anything: a reply that streamed for two seconds and then died still has a
+    time to first token, and reporting it as null would make a slow failure
+    indistinguishable from an instant one on the guardrail panel.
+    """
+
+    ttft_ms: int | None = None
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
 
 
 class TutorTurnService:
@@ -296,9 +320,22 @@ class TutorTurnService:
                 self._replies.release(reservation)
                 raise
 
-        return AdmittedTurn(
+        # Admission — not persistence — is when the learner's question exists:
+        # a reply that later fails is our failure, not an un-asked question, and
+        # D2 would otherwise erase it from the adoption and primary metrics
+        # entirely. A send refused above emits nothing; it never became a turn.
+        events.emit_tutor_message_sent(
+            account_id=path.user_id,
             path_id=path.id,
             lesson_id=lesson_id,
+            position_in_path=context.deps.position_in_path,
+            source=source.value,
+        )
+        return AdmittedTurn(
+            account_id=path.user_id,
+            path_id=path.id,
+            lesson_id=lesson_id,
+            position_in_path=context.deps.position_in_path,
             content=content,
             source=source,
             model_id=model_id,
@@ -384,18 +421,30 @@ class TutorTurnService:
 
         Every exit path pushes exactly one terminal frame (``done`` or ``error``)
         and then the sentinel, so the consumer never has to reason about how the
-        reply ended.
+        reply ended — and every exit path emits exactly one
+        ``tutor_reply_completed`` (TDD §9), which is why the emission lives in
+        the ``finally`` and the outcome is decided by which clause was taken.
+
+        **The three outcomes.** ``success`` is the settled turn (a refusal
+        included — an over-the-boundary ask answered gracefully is a real turn,
+        not machine-tagged this phase, D5). ``failure`` is any error, upstream or
+        ours. ``stopped`` is a :class:`asyncio.CancelledError`, which is what a
+        learner ending their own turn looks like from here: the consumer's
+        ``finally`` cancels this task when Starlette closes the generator, and
+        the rail's stop affordance and a plain disconnect are the same event on
+        the socket. It is re-raised untouched — cancellation is not ours to
+        swallow — but it is *not* a failure, and filing it as one would put
+        learner behaviour into the reply-failure guardrail.
         """
         started = time.perf_counter()
-        outcome = "error"
-        ttft_ms: int | None = None
+        outcome = "failure"
+        measured = _ReplyMeasurement()
         try:
             async with self._replies.slot():
                 # The permit bounds the model run only; the timeout is inside it
                 # so queue time is not charged against the reply's budget — the
                 # same shape as the generation permit and its per-call timeout.
-                reply = await self._run_reply(turn, queue)
-            ttft_ms = reply.ttft_ms
+                reply = await self._run_reply(turn, queue, measured)
             learner_id, tutor_id = await self._settle(turn, reply)
             await queue.put(
                 sse_event(
@@ -405,28 +454,37 @@ class TutorTurnService:
                     ),
                 )
             )
-            outcome = "ok"
+            outcome = "success"
         except TutorReplyError as exc:
             await queue.put(exc.frame)
+        except asyncio.CancelledError:
+            outcome = "stopped"
+            raise
         except Exception:
             logger.exception("tutor_reply_unhandled_error", path_id=str(turn.path_id))
             await queue.put(TutorReplyError(TutorErrorCode.INTERNAL_ERROR).frame)
         finally:
-            # Latency lands in the logs (and on the pydantic-ai span) rather than
-            # a product event: ``tutor_reply_completed`` and the TTFT p95 panel
-            # are AL-240's, and this is the measurement they lift.
-            logger.info(
-                "tutor_reply_streamed",
-                path_id=str(turn.path_id),
-                lesson_id=str(turn.lesson_id),
+            # PRD §5.9's "latency to first token" lives here and nowhere else —
+            # no Phase 1 event has it, because no Phase 1 surface streams.
+            events.emit_tutor_reply_completed(
+                account_id=turn.account_id,
+                path_id=turn.path_id,
+                lesson_id=turn.lesson_id,
+                position_in_path=turn.position_in_path,
                 outcome=outcome,
-                ttft_ms=ttft_ms,
+                ttft_ms=measured.ttft_ms,
                 duration_ms=round((time.perf_counter() - started) * 1000),
+                prompt_tokens=measured.prompt_tokens,
+                completion_tokens=measured.completion_tokens,
+                total_tokens=measured.total_tokens,
             )
             await queue.put(None)
 
     async def _run_reply(
-        self, turn: AdmittedTurn, queue: asyncio.Queue[str | None]
+        self,
+        turn: AdmittedTurn,
+        queue: asyncio.Queue[str | None],
+        measured: _ReplyMeasurement,
     ) -> _ReplyResult:
         """Stream one agent run, translating its events to SSE frames.
 
@@ -453,7 +511,6 @@ class TutorTurnService:
         # ``ModelRetry``'d call posed nothing.
         posed: dict[str, dict[str, Any]] = {}
         started = time.perf_counter()
-        ttft_ms: int | None = None
 
         try:
             # Resolving the model is inside the ``try`` deliberately: a provider
@@ -468,14 +525,16 @@ class TutorTurnService:
                     deps=turn.context.deps,
                     message_history=turn.context.message_history,
                     model=model,
-                ) as events,
+                ) as run_events,
             ):
-                async for event in events:
+                async for event in run_events:
                     try:
                         delta = _text_of(event)
                         if delta:
-                            if ttft_ms is None:
-                                ttft_ms = round((time.perf_counter() - started) * 1000)
+                            if measured.ttft_ms is None:
+                                measured.ttft_ms = round(
+                                    (time.perf_counter() - started) * 1000
+                                )
                             await queue.put(
                                 sse_event("delta", MessageDeltaDTO(text=delta))
                             )
@@ -492,8 +551,22 @@ class TutorTurnService:
                                 card = TutorCheckDTO.model_validate(payload)
                                 check = card.model_dump(mode="json")
                                 await queue.put(sse_event("tutor_check", card))
+                                # Emitted where the card reaches the rail, which
+                                # is what "shown" means (TDD §9). A call the
+                                # validator rejected never gets here.
+                                events.emit_tutor_check_shown(
+                                    account_id=turn.account_id,
+                                    path_id=turn.path_id,
+                                    lesson_id=turn.lesson_id,
+                                    position_in_path=turn.position_in_path,
+                                )
                         elif isinstance(event, AgentRunResultEvent):
                             text = str(event.result.output)
+                            (
+                                measured.prompt_tokens,
+                                measured.completion_tokens,
+                                measured.total_tokens,
+                            ) = usage_tokens(event.result)
                     except Exception as exc:
                         # Ours, not the model's — see the method docstring.
                         raise _EventTranslationError from exc
@@ -510,7 +583,7 @@ class TutorTurnService:
 
         if text is None:  # pragma: no cover - a completed run always has output
             raise TutorReplyError(TutorErrorCode.UPSTREAM_ERROR)
-        return _ReplyResult(text=text, tutor_check=check, ttft_ms=ttft_ms)
+        return _ReplyResult(text=text, tutor_check=check)
 
     async def _settle(
         self, turn: AdmittedTurn, reply: _ReplyResult
@@ -528,9 +601,7 @@ class TutorTurnService:
         try:
             async with self._session_factory() as session:
                 repository = ConversationRepository(session)
-                # ``created`` is what AL-240 will emit ``tutor_conversation_started``
-                # from; nothing this ticket owns needs it.
-                conversation, _created = await repository.upsert_for_path(turn.path_id)
+                conversation, created = await repository.upsert_for_path(turn.path_id)
                 learner, tutor = await repository.insert_turn(
                     conversation_id=conversation.id,
                     lesson_id=turn.lesson_id,
@@ -541,7 +612,18 @@ class TutorTurnService:
                 )
                 ids = (learner.id, tutor.id)
                 await session.commit()
-                return ids
+            # After the commit, so the event never claims a conversation a
+            # rolled-back transaction did not leave behind. ``created`` is the
+            # lazy upsert's own answer, which is what makes this fire exactly
+            # once per path rather than once per first-turn-shaped request.
+            if created:
+                events.emit_tutor_conversation_started(
+                    account_id=turn.account_id,
+                    path_id=turn.path_id,
+                    lesson_id=turn.lesson_id,
+                    position_in_path=turn.position_in_path,
+                )
+            return ids
         except IntegrityError as exc:
             logger.warning("tutor_turn_insert_conflicted", error=repr(exc))
             raise TutorReplyError(TutorErrorCode.INTERNAL_ERROR) from exc

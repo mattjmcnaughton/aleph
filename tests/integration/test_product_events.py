@@ -27,7 +27,7 @@ from aleph.auth import AuthIdentity
 from aleph.logging import configure_logging
 from aleph.services import generation as gen_module
 
-from .conftest import CollectingSpawn, stub_resolver
+from .conftest import CollectingSpawn, assert_event, captured_records, stub_resolver
 
 if TYPE_CHECKING:
     from fastapi import FastAPI
@@ -74,28 +74,6 @@ async def _sign_in(
     monkeypatch.setattr("aleph.routers.auth.fetch_identity", lambda *_a: identity)
     resp = await client.get("/auth/callback", follow_redirects=False)
     assert resp.status_code == 303
-
-
-def _logs(capfire) -> list[dict]:
-    return [
-        span
-        for span in capfire.exporter.exported_spans_as_dict()
-        if span["attributes"].get("logfire.span_type") == "log"
-    ]
-
-
-def _records(capfire, name: str) -> list[dict]:
-    return [span for span in _logs(capfire) if span["name"] == name]
-
-
-def _assert_event(capfire, name: str) -> dict:
-    """One captured record of ``name`` exists and carries its manifest fields."""
-    records = _records(capfire, name)
-    assert records, f"no {name} event captured"
-    attributes = records[0]["attributes"]
-    missing = events.EVENT_FIELDS[name] - set(attributes)
-    assert not missing, f"{name} missing fields {sorted(missing)}"
-    return attributes
 
 
 def _flat_lessons(path_body: dict) -> list[dict]:
@@ -160,38 +138,38 @@ async def test_full_journey_emits_every_product_event(
         path_id = await _drive_full_journey(client, spawn, "Rust ownership")
 
     # Account + path lifecycle.
-    account = _assert_event(capfire, events.ACCOUNT_CREATED)
+    account = assert_event(capfire, events.ACCOUNT_CREATED)
     assert account["account_id"]
-    created = _assert_event(capfire, events.PATH_CREATED)
+    created = assert_event(capfire, events.PATH_CREATED)
     assert created["path_id"] == path_id
     assert created["path_level"] == "some_experience"
 
     # Generation (fenced success), with the cost/latency fields.
-    outline = _assert_event(capfire, events.OUTLINE_GENERATED)
+    outline = assert_event(capfire, events.OUTLINE_GENERATED)
     assert outline["outcome"] == "ready"
     assert outline["success"] is True
     assert outline["path_id"] == path_id
     # Token usage is carried through, not silently zeroed (guards the
-    # ``_usage_tokens`` best-effort path from deflating the cost-per-path metric).
+    # ``usage_tokens`` best-effort path from deflating the cost-per-path metric).
     assert outline["total_tokens"] > 0
-    lesson_gen = _assert_event(capfire, events.LESSON_GENERATED)
+    lesson_gen = assert_event(capfire, events.LESSON_GENERATED)
     assert lesson_gen["outcome"] == "generated"
     assert lesson_gen["success"] is True
     assert lesson_gen["total_tokens"] > 0
 
     # Learner progression.
-    viewed = _assert_event(capfire, events.LESSON_VIEWED)
+    viewed = assert_event(capfire, events.LESSON_VIEWED)
     assert viewed["path_id"] == path_id
-    attempted = _assert_event(capfire, events.QUICK_CHECK_ATTEMPTED)
+    attempted = assert_event(capfire, events.QUICK_CHECK_ATTEMPTED)
     assert attempted["outcome"] in {"correct", "incorrect"}
     assert attempted["is_correct"] in {True, False}
-    _assert_event(capfire, events.LESSON_COMPLETED)
+    assert_event(capfire, events.LESSON_COMPLETED)
 
     # Path completion (derived) + deletion.
-    completed = _assert_event(capfire, events.PATH_COMPLETED)
+    completed = assert_event(capfire, events.PATH_COMPLETED)
     assert completed["path_id"] == path_id
     assert completed["lesson_count"] >= 1
-    deleted = _assert_event(capfire, events.PATH_DELETED)
+    deleted = assert_event(capfire, events.PATH_DELETED)
     assert deleted["path_id"] == path_id
 
 
@@ -245,7 +223,7 @@ async def test_quick_check_attempted_emitted_once_per_lesson(
         )
         assert second.status_code == 200, second.text
 
-    attempts = _records(capfire, events.QUICK_CHECK_ATTEMPTED)
+    attempts = captured_records(capfire, events.QUICK_CHECK_ATTEMPTED)
     assert len(attempts) == 1, (
         f"expected exactly one quick_check_attempted, got {len(attempts)}"
     )
@@ -260,7 +238,7 @@ async def test_account_created_only_on_first_sign_in(
         await _sign_in(first, monkeypatch, OWNER)
         await _sign_in(second, monkeypatch, OWNER)  # same identity → returning
     # Provisioned once; the returning sign-in reuses the row and emits nothing.
-    assert len(_records(capfire, events.ACCOUNT_CREATED)) == 1
+    assert len(captured_records(capfire, events.ACCOUNT_CREATED)) == 1
 
 
 @pytest.mark.anyio
@@ -287,14 +265,14 @@ async def test_outline_refused_and_failed_outcomes(
 
     outcomes = {
         record["attributes"]["path_id"]: record["attributes"]["outcome"]
-        for record in _records(capfire, events.OUTLINE_GENERATED)
+        for record in captured_records(capfire, events.OUTLINE_GENERATED)
     }
     assert outcomes[refused_id] == "refused"
     assert outcomes[failed_id] == "failed"
     # A failed outline never reports success (the failure-rate guardrail signal).
     failed_record = next(
         record["attributes"]
-        for record in _records(capfire, events.OUTLINE_GENERATED)
+        for record in captured_records(capfire, events.OUTLINE_GENERATED)
         if record["attributes"]["path_id"] == failed_id
     )
     assert failed_record["success"] is False

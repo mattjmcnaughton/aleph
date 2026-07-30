@@ -13,7 +13,11 @@ Everything is re-exported here so call sites keep importing
 from __future__ import annotations
 
 from aleph.repositories.attempts import AttemptRepository
-from aleph.repositories.conversations import ConversationRepository, ThreadMessage
+from aleph.repositories.conversations import (
+    ConversationRepository,
+    LocatedMessage,
+    ThreadMessage,
+)
 from aleph.repositories.feature_flags import FeatureFlagRepository
 from aleph.repositories.lessons import LessonRepository, PathGenerationProgress
 from aleph.repositories.paths import PathRepository
@@ -27,6 +31,7 @@ __all__ = [
     "ConversationRepository",
     "FeatureFlagRepository",
     "LessonRepository",
+    "LocatedMessage",
     "PathGenerationProgress",
     "PathRepository",
     "QuickCheckRepository",

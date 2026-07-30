@@ -64,10 +64,12 @@ from sqlalchemy.ext.asyncio import (  # noqa: TC002 - FastAPI resolves annotatio
     AsyncSession,
 )
 
+from aleph import events
 from aleph.authz import is_admin
 from aleph.config import settings
 from aleph.db import get_session
 from aleph.dependencies import get_current_user
+from aleph.domains.grading import Outcome
 from aleph.dtos.tutor import (
     ConversationResponse,
     MessageDTO,
@@ -323,6 +325,9 @@ async def answer_tutor_check(
 
     Ownership walks message → conversation → path → user in one join, so
     someone else's message is indistinguishable from a missing one (``404``).
+    That same query returns the event locator (path id and the lesson's
+    position, which the message row does not carry), so proving ownership and
+    stamping ``tutor_check_answered`` cost one round trip between them.
     Guards, in order:
 
     * a message with no Tutor check → ``409``. The row exists and is the
@@ -342,18 +347,49 @@ async def answer_tutor_check(
 
     Answering twice overwrites, deliberately unlike the Quick check's first-wins
     Attempt: first-wins exists because an Attempt is graded and feeds the §7
-    metrics, and neither is true here. (``tutor_check_answered`` lands with
-    AL-240, which owns whether a re-answer re-emits.)
+    metrics, and neither is true here.
+
+    **A re-answer re-emits** ``tutor_check_answered``, tagged
+    ``first_answer=False`` (AL-240's call on what AL-221 left open). The event
+    records a real state change — the payload really is rewritten, where a
+    repeat Quick-check submit writes nothing — and ``first_answer`` is what lets
+    any per-check rate exclude the repeats. See
+    :func:`aleph.events.emit_tutor_check_answered`.
+
+    ``Outcome`` here is the shared correct/incorrect vocabulary (CONTEXT.md),
+    not the Quick check's grading path: a Tutor check is non-scoring, so nothing
+    is graded, recorded as an Attempt, or first-wins about it.
     """
     repository = ConversationRepository(session)
-    message = await repository.get_message_for_user(
+    located = await repository.get_message_for_user(
         message_id=message_id, user_id=user.id
     )
-    if message is None:
+    if located is None:
         raise _not_found("message not found")
+    message = located.message
     _ensure_answerable(message, selected_index=body.selected_index)
+    # Read before the write: ``set_tutor_check_answer`` reassigns the payload,
+    # so "was this the first answer?" is only knowable beforehand.
+    check = message.tutor_check or {}
+    first_answer = check.get("answered_index") is None
+    outcome = (
+        Outcome.CORRECT
+        if body.selected_index == check.get("correct_index")
+        else Outcome.INCORRECT
+    )
+    lesson_id = message.lesson_id
     await repository.set_tutor_check_answer(
         message=message, selected_index=body.selected_index
     )
     await session.commit()
+    # The ownership query already carried the locator (TDD §9), so the event is
+    # stamped from the same row that proved the message was this learner's.
+    events.emit_tutor_check_answered(
+        account_id=user.id,
+        path_id=located.path_id,
+        lesson_id=lesson_id,
+        position_in_path=located.position_in_path,
+        outcome=outcome.value,
+        first_answer=first_answer,
+    )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
