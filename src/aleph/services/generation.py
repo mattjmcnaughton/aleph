@@ -155,10 +155,13 @@ def _usage_tokens(run: Any) -> tuple[int, int, int]:
 _LESSON_FAILED_MESSAGE = "Lesson generation failed. Please retry."
 _LESSON_TIMEOUT_MESSAGE = "Lesson generation timed out. Please retry."
 
-# Onboarding levels (DB enum) → the outline/lesson agents' level contract
-# (``beginner | intermediate | advanced``). The agents speak a fixed vocabulary;
-# the service owns the mapping (§5.1 "the service maps onboarding's levels").
-_AGENT_LEVEL: dict[Level, AgentLevel] = {
+# Onboarding levels (DB enum) → the agents' level contract (``beginner |
+# intermediate | advanced``). The agents speak a fixed vocabulary; the service
+# owns the mapping (§5.1 "the service maps onboarding's levels"). Public because
+# Phase 2's context seam (``services/tutor_context.py``) pitches a tutor reply to
+# the same level and the epic's rule is that shared vocabulary is shared code,
+# never copied — a fourth ``Level`` member must land in exactly one dict.
+AGENT_LEVEL: dict[Level, AgentLevel] = {
     Level.NEW_TO_IT: "beginner",
     Level.SOME_EXPERIENCE: "intermediate",
     Level.WORK_IN_IT: "advanced",
@@ -449,7 +452,7 @@ class GenerationOrchestrator:
         fence = claim.fence
         account_id = claim.account_id
         agent = build_outline_agent()
-        deps = OutlineDeps(level=_AGENT_LEVEL[claim.level], caps=self._outline_caps)
+        deps = OutlineDeps(level=AGENT_LEVEL[claim.level], caps=self._outline_caps)
         model = self._resolve_model(
             claim.model_outline
             if claim.model_outline is not None
@@ -754,7 +757,7 @@ class GenerationOrchestrator:
 
         deps = LessonDeps(
             topic=context.topic,
-            level=_AGENT_LEVEL[context.level],
+            level=AGENT_LEVEL[context.level],
             outline=context.outline,
             position_in_path=context.position_in_path,
             unit_title=context.unit_title,
