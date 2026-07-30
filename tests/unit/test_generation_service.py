@@ -13,7 +13,7 @@ from aleph.agents.outline import Level as AgentLevel
 from aleph.config import Settings
 from aleph.models import Level
 from aleph.services.generation import (
-    _AGENT_LEVEL,
+    AGENT_LEVEL,
     _lesson_caps_from,
     _outline_caps_from,
 )
@@ -45,6 +45,6 @@ def test_lesson_caps_built_from_settings() -> None:
 def test_every_onboarding_level_maps_to_an_agent_level() -> None:
     # Exhaustive: a new Level enum member without a mapping would KeyError deep in
     # generation, so pin the contract here.
-    assert set(_AGENT_LEVEL) == set(Level)
+    assert set(AGENT_LEVEL) == set(Level)
     valid_agent_levels = set(AgentLevel.__args__)  # type: ignore[attr-defined]
-    assert set(_AGENT_LEVEL.values()) <= valid_agent_levels
+    assert set(AGENT_LEVEL.values()) <= valid_agent_levels
