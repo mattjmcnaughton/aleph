@@ -36,6 +36,7 @@ import { useFeatureFlag } from "../../lib/feature-flags";
 import {
   type Conversation,
   type ConversationMessage,
+  answerTutorCheck,
   clearConversation,
   conversationQueryKey,
   conversationQueryOptions,
@@ -95,6 +96,12 @@ export interface TutorRailState {
   send: (content: string, source: TutorMessageSource) => void;
   stop: () => void;
   retry: () => void;
+
+  /**
+   * Record a Tutor-check answer (AL-231). Writes `answered_index` onto the
+   * cached message *first* — the reveal is that write — and posts afterwards.
+   */
+  answerCheck: (messageId: string, selectedIndex: number) => void;
 
   /** New conversation (PRD §5.8) — destructive, so it confirms first. */
   confirmingNew: boolean;
@@ -215,6 +222,73 @@ export function useTutorRail({
       }));
     },
     [pathId, lessonId, lessonTitle, queryClient],
+  );
+
+  /**
+   * The Tutor-check persist (AL-231). Deliberately has **no** `onError`: a
+   * failed record is silent. Nothing the learner can see depends on it — the
+   * reveal already happened from the delivered payload — and there is no action
+   * they could take to fix it, so an error surface would only be noise. It is a
+   * `mutate` (never `mutateAsync`), so a rejection lands in mutation state
+   * rather than as an unhandled rejection.
+   */
+  const { mutate: recordAnswer } = useMutation({
+    mutationFn: ({ messageId, selectedIndex }: { messageId: string; selectedIndex: number }) =>
+      answerTutorCheck(messageId, selectedIndex),
+  });
+
+  /**
+   * Answer a Tutor check: **the cache write is the reveal**, and the POST is
+   * fire-after (TDD §6, PRD §5.5).
+   *
+   * There is exactly one source of truth for whether a check is revealed —
+   * `answered_index` on the cached message — and it is the same one whether the
+   * learner just tapped an option, reopened the rail, or came back tomorrow.
+   * That is why this writes the cache optimistically instead of holding local
+   * component state: two sources would have to be reconciled on every revisit,
+   * and the server's own copy of `answered_index` is written by the very request
+   * this fires.
+   *
+   * **A failed persist is not rolled back.** The reveal came from the payload,
+   * not from the server, so un-revealing would take back an answer the learner
+   * has already read to report a failure they cannot act on. The optimistic
+   * value therefore stands until the next fresh `GET /conversation` — usually a
+   * new page load, though a reconnect or stale-time refetch can bring it sooner
+   * — which returns the server's truth: an unanswered check the learner may
+   * answer again. That is the honest outcome: the record really did not happen,
+   * and re-answering is last-wins, so nothing is corrupted by trying again.
+   *
+   * The cancel-then-write order is `appendTurn`'s, for `appendTurn`'s reason:
+   * a `GET` in flight would resolve without this answer and un-reveal the card;
+   * cancelling aborts it before the write lands.
+   */
+  const answerCheck = useCallback(
+    async (messageId: string, selectedIndex: number) => {
+      if (pathId === null) return;
+      const key = conversationQueryKey(pathId);
+      await queryClient.cancelQueries({ queryKey: key });
+      // Local first-wins: a second tap racing through the awaited cancel must
+      // not overwrite (and re-POST) an answer the learner already saw revealed.
+      const cached = queryClient.getQueryData<Conversation>(key);
+      const target = cached?.messages.find((message) => message.id === messageId);
+      if (target?.tutor_check?.answered_index != null) return;
+      queryClient.setQueryData<Conversation>(key, (old) =>
+        old === undefined
+          ? old
+          : {
+              messages: old.messages.map((message) =>
+                message.id === messageId && message.tutor_check !== null
+                  ? {
+                      ...message,
+                      tutor_check: { ...message.tutor_check, answered_index: selectedIndex },
+                    }
+                  : message,
+              ),
+            },
+      );
+      recordAnswer({ messageId, selectedIndex });
+    },
+    [pathId, queryClient, recordAnswer],
   );
 
   /**
@@ -361,6 +435,7 @@ export function useTutorRail({
       const question = pendingRef.current;
       if (question) void run(question);
     },
+    answerCheck: (messageId, selectedIndex) => void answerCheck(messageId, selectedIndex),
 
     confirmingNew,
     askNewConversation: () => setConfirmingNew(true),
