@@ -1,3 +1,10 @@
+# [1.11.0](https://github.com/mattjmcnaughton/aleph/compare/v1.10.0...v1.11.0) (2026-07-30)
+
+
+### Features
+
+* **tutor:** the Tutor check card (AL-231) ([966bdeb](https://github.com/mattjmcnaughton/aleph/commit/966bdeb1e84be5065c4cf3b7b97eee40e889b1a6)), closes [#91](https://github.com/mattjmcnaughton/aleph/issues/91)
+
 # [1.10.0](https://github.com/mattjmcnaughton/aleph/compare/v1.9.0...v1.10.0) (2026-07-30)
 
 
