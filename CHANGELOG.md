@@ -1,3 +1,10 @@
+# [1.7.0](https://github.com/mattjmcnaughton/aleph/compare/v1.6.0...v1.7.0) (2026-07-30)
+
+
+### Features
+
+* **tutor:** context assembly seam for in-lesson tutor turns (AL-211) ([986d03d](https://github.com/mattjmcnaughton/aleph/commit/986d03d2d081b94c9fdd6663fed782557b4827fa)), closes [#87](https://github.com/mattjmcnaughton/aleph/issues/87)
+
 # [1.6.0](https://github.com/mattjmcnaughton/aleph/compare/v1.5.0...v1.6.0) (2026-07-30)
 
 
