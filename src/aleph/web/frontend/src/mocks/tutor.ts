@@ -31,6 +31,12 @@ interface TutorConfig {
   hang: boolean;
   /** When set, the POST answers a pre-stream JSON envelope and never streams. */
   preStreamError: { status: number; code: string; message: string } | null;
+  /**
+   * When set, `POST /messages/{id}/tutor-check-answer` fails with this envelope
+   * (AL-231). The card's reveal is local and must survive it — the persist is
+   * fire-after, so a failure changes nothing the learner can see.
+   */
+  answerError: { status: number; code: string; message: string } | null;
 }
 
 const defaultConfig: TutorConfig = {
@@ -39,6 +45,7 @@ const defaultConfig: TutorConfig = {
   failWith: null,
   hang: false,
   preStreamError: null,
+  answerError: null,
 };
 
 let config: TutorConfig = { ...defaultConfig };
@@ -48,6 +55,9 @@ const store = new Map<string, ConversationMessage[]>();
 
 /** Every send body the fake received, in order — asserted on directly. */
 let sentBodies: SendTutorMessageInput[] = [];
+
+/** Every Tutor-check answer the fake received, in order (AL-231). */
+let answerRequests: TutorCheckAnswerRecord[] = [];
 
 /** How many `DELETE /conversation` calls landed (new conversation, PRD §5.8). */
 let clearCount = 0;
@@ -64,6 +74,7 @@ let heldStreams: Array<() => void> = [];
 export function resetTutor(): void {
   store.clear();
   sentBodies = [];
+  answerRequests = [];
   clearCount = 0;
   readCount = 0;
   abortedSendCount = 0;
@@ -77,6 +88,14 @@ export function configureTutor(overrides: Partial<TutorConfig>): void {
 
 export function tutorSendBodies(): SendTutorMessageInput[] {
   return sentBodies;
+}
+
+/**
+ * Every `POST /messages/{id}/tutor-check-answer` the fake received, in order —
+ * the request shape the card's fire-after persist is asserted against (AL-231).
+ */
+export function tutorAnswerRequests(): TutorCheckAnswerRecord[] {
+  return answerRequests;
 }
 
 export function tutorClearCount(): number {
@@ -101,6 +120,12 @@ export function finishTutorStream(): void {
   const held = heldStreams;
   heldStreams = [];
   for (const settle of held) settle();
+}
+
+/** One recorded Tutor-check answer: the message it addressed and the choice. */
+export interface TutorCheckAnswerRecord {
+  message_id: string;
+  selected_index: number;
 }
 
 export interface SeedMessageInput {
@@ -181,6 +206,36 @@ export const tutorHandlers = [
     store.delete(params.pathId as string);
     return new HttpResponse(null, { status: 204 });
   }),
+
+  // `POST /messages/{id}/tutor-check-answer` → 204 (AL-221). Addressed by
+  // *message* id, not path id: the answer belongs to the message that posed the
+  // check. Re-answering overwrites (last-wins, deliberately unlike the Quick
+  // check's first-wins Attempt), and nothing is graded here — the payload the
+  // card already holds carries `correct_index`, so this route only records.
+  http.post(
+    `${API_V1_BASE}/messages/:messageId/tutor-check-answer`,
+    async ({ params, request }) => {
+      const messageId = params.messageId as string;
+      const body = (await request.json()) as { selected_index: number };
+      answerRequests.push({ message_id: messageId, selected_index: body.selected_index });
+
+      if (config.answerError) {
+        const { status, code, message } = config.answerError;
+        return HttpResponse.json({ error: { code, message } }, { status });
+      }
+
+      // The route's out-of-range 422 is not faked: the card derives the index
+      // by mapping `options`, so an out-of-range request is unreachable from it.
+      for (const thread of store.values()) {
+        for (const message of thread) {
+          if (message.id === messageId && message.tutor_check) {
+            message.tutor_check = { ...message.tutor_check, answered_index: body.selected_index };
+          }
+        }
+      }
+      return new HttpResponse(null, { status: 204 });
+    },
+  ),
 
   http.post(`${API_V1_BASE}/paths/:pathId/conversation/messages`, async ({ params, request }) => {
     const pathId = params.pathId as string;

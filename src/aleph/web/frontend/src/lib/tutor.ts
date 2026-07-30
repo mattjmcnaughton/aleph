@@ -56,6 +56,29 @@ export function clearConversation(pathId: string): Promise<void> {
 }
 
 /**
+ * Record the learner's Tutor-check choice (AL-231, route from AL-221) → `204`.
+ *
+ * Addressed by **message** id: a check rides the tutor message that posed it.
+ * `selected_index` indexes that check's `options` — out of range is a `422`,
+ * because nothing grades a Tutor check and the index is only ever used to index
+ * `options` when re-rendering the revealed card.
+ *
+ * **This call grades nothing.** The delivered payload already carries
+ * `correct_index` + `explanation` (TDD §6), so the card reveals from what it is
+ * already holding and calls this *afterwards*, only so a revisited thread
+ * renders revealed. Re-answering overwrites (last-wins) — deliberately unlike
+ * the Quick check's first-wins Attempt, because an Attempt is graded and feeds
+ * the §7 metrics, and neither is true here.
+ */
+export function answerTutorCheck(messageId: string, selectedIndex: number): Promise<void> {
+  return apiFetch<void>(apiV1Path(`/messages/${messageId}/tutor-check-answer`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ selected_index: selectedIndex }),
+  });
+}
+
+/**
  * TanStack query key for one path's thread. The `"tutor"` head is its own
  * namespace rather than a branch of `["paths", …]`: lesson completion
  * invalidates that whole prefix (`PATHS_QUERY_PREFIX`), and a conversation has

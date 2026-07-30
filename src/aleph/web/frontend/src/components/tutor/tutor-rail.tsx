@@ -19,6 +19,7 @@ import { AlephGlyph } from "../aleph-logo";
 import { Markdown } from "../markdown";
 import { TutorModelPicker } from "../model-picker";
 import type { ConversationMessage } from "../../lib/tutor";
+import { TutorCheckCard } from "./tutor-check-card";
 import { TUTOR_MESSAGE_MAX_LENGTH, TUTOR_SUGGESTIONS, type TutorRailState } from "./use-tutor-rail";
 
 /**
@@ -89,7 +90,7 @@ export function TutorRail({ tutor }: { tutor: TutorRailState }) {
         {empty ? <EmptyState lessonTitle={tutor.lessonTitle} /> : null}
 
         {tutor.messages.map((message) => (
-          <MessageBubble key={message.id} message={message} />
+          <MessageBubble key={message.id} message={message} tutor={tutor} />
         ))}
 
         {streaming ? (
@@ -202,24 +203,38 @@ function RailHeader({ tutor }: { tutor: TutorRailState }) {
 
 // --- Messages ----------------------------------------------------------------
 
-function MessageBubble({ message }: { message: ConversationMessage }) {
+function MessageBubble({
+  message,
+  tutor,
+}: { message: ConversationMessage; tutor: TutorRailState }) {
   const isTutor = message.role === "tutor";
   return (
     <div
       data-testid="tutor-rail-message"
       data-role={message.role}
-      // The seam AL-231's card hangs off: a posed Tutor check rides the cached
-      // message, so it survives a collapse, a reopen, and a page revisit.
+      // A posed Tutor check rides the cached message, so it survives a collapse,
+      // a reopen, and a page revisit — and so does the answer written onto it.
       data-tutor-check={message.tutor_check ? "true" : undefined}
       className={isTutor ? "flex gap-2.5" : "flex justify-end"}
     >
       {isTutor ? <TutorGlyph size="2xs" /> : null}
       {isTutor ? (
-        // Generated prose goes through the one renderer, always (the security
-        // boundary — no second pipeline, no `dangerouslySetInnerHTML`).
-        <Markdown className="min-w-0 flex-1 text-sm [&_p]:text-sm [&_p]:leading-6">
-          {message.content}
-        </Markdown>
+        <div className="min-w-0 flex-1">
+          {/* Generated prose goes through the one renderer, always (the security
+              boundary — no second pipeline, no `dangerouslySetInnerHTML`). */}
+          <Markdown className="text-sm [&_p]:text-sm [&_p]:leading-6">{message.content}</Markdown>
+          {/* The card is part of the reply, under it — a Tutor check is posed
+           *in* the conversation (PRD §5.5), not in a surface beside it. */}
+          {message.tutor_check ? (
+            <TutorCheckCard
+              messageId={message.id}
+              check={message.tutor_check}
+              onAnswer={tutor.answerCheck}
+              onFollowUp={(content) => tutor.send(content, "suggestion")}
+              sending={tutor.status === "streaming"}
+            />
+          ) : null}
+        </div>
       ) : (
         <p className="max-w-[85%] whitespace-pre-wrap rounded-lg border border-divider bg-surface px-3 py-2 text-sm leading-6 text-porcelain">
           {message.content}
