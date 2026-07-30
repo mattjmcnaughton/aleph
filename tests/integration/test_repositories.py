@@ -22,7 +22,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import select, text, update
+from sqlalchemy import select, update
 
 from aleph import db
 from aleph.models import (
@@ -42,7 +42,7 @@ from aleph.repositories import (
     UnitRepository,
 )
 
-from .conftest import create_user
+from .conftest import create_user, wait_until_lock_waiters
 
 STALE_AGE = timedelta(minutes=4)  # > GENERATION_STALE_AFTER (3 min, §14)
 FRESH_AGE = timedelta(minutes=1)  # < stale window
@@ -102,29 +102,6 @@ async def _make_unit(session, *, path: Path, position: int = 1) -> Unit:
     session.add(unit)
     await session.flush()
     return unit
-
-
-async def _wait_until_lock_waiters(expected: int) -> None:
-    """Block (yielding, no timed sleep) until ``expected`` backends on *this* test
-    database are waiting on a row lock.
-
-    Deterministic synchronization for the row-lock contention test: instead of
-    sleeping and hoping the competitor has reached the lock, poll
-    ``pg_stat_activity`` until it provably has. Scoped to ``current_database()``
-    so parallel xdist workers (each its own cloned DB) never cross-count.
-    """
-    while True:
-        async with db.async_session() as monitor:
-            result = await monitor.execute(
-                text(
-                    "SELECT count(*) FROM pg_stat_activity "
-                    "WHERE wait_event_type = 'Lock' "
-                    "AND datname = current_database()"
-                )
-            )
-            if (result.scalar() or 0) >= expected:
-                return
-        await asyncio.sleep(0)  # yield the loop; not a timed wait
 
 
 # --------------------------------------------------------------------------- #
@@ -449,7 +426,7 @@ async def test_lesson_claim_row_lock_forces_overlap_exactly_one_winner() -> None
 
         b_task = asyncio.create_task(claim_b())
         # Deterministically wait until B is genuinely blocked on A's row lock.
-        await asyncio.wait_for(_wait_until_lock_waiters(1), timeout=10)
+        await asyncio.wait_for(wait_until_lock_waiters(1), timeout=10)
         # Release A; B unblocks, re-reads the fresh claim, and loses.
         await session_a.commit()
         fence_b = await b_task

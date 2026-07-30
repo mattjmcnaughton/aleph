@@ -16,6 +16,7 @@ from aleph.models.base import UUIDAuditMixin
 from aleph.models.enums import Level, PathStatus
 
 if TYPE_CHECKING:
+    from aleph.models.conversation import Conversation
     from aleph.models.lesson import Lesson
     from aleph.models.unit import Unit
     from aleph.models.users import User
@@ -81,4 +82,11 @@ class Path(Base, UUIDAuditMixin):
         cascade="all, delete-orphan",
         passive_deletes=True,
         order_by="Lesson.position_in_path",
+    )
+    # The tutor's thread: at most one per path (Phase 2 TDD §4), deleted with it.
+    conversation: Mapped[Conversation | None] = relationship(
+        back_populates="path",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        uselist=False,
     )

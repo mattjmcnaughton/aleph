@@ -9,8 +9,16 @@ sites keep importing ``from aleph.models import X``.
 from __future__ import annotations
 
 from aleph.models.attempt import Attempt
-from aleph.models.enums import LessonGenerationState, Level, PathStatus
+from aleph.models.conversation import Conversation
+from aleph.models.enums import (
+    LessonGenerationState,
+    Level,
+    MessageRole,
+    MessageSource,
+    PathStatus,
+)
 from aleph.models.lesson import Lesson
+from aleph.models.message import Message
 from aleph.models.path import Path
 from aleph.models.quick_check import QuickCheck
 from aleph.models.unit import Unit
@@ -18,9 +26,13 @@ from aleph.models.users import User
 
 __all__ = [
     "Attempt",
+    "Conversation",
     "Lesson",
     "LessonGenerationState",
     "Level",
+    "Message",
+    "MessageRole",
+    "MessageSource",
     "Path",
     "PathStatus",
     "QuickCheck",
