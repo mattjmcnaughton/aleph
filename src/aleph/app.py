@@ -13,6 +13,7 @@ from aleph.config import settings
 from aleph.errors import error_response
 from aleph.logging import configure_logging
 from aleph.routers import auth, health
+from aleph.routers.v1 import feature_flags as v1_feature_flags
 from aleph.routers.v1 import lessons as v1_lessons
 from aleph.routers.v1 import paths as v1_paths
 from aleph.services.generation import generation_orchestrator
@@ -75,6 +76,7 @@ def create_app() -> FastAPI:
     app.include_router(auth.router)
     app.include_router(v1_paths.router)
     app.include_router(v1_lessons.router)
+    app.include_router(v1_feature_flags.router)
 
     # Mount frontend static files (only serves if dist/ exists)
     mount_frontend(app)

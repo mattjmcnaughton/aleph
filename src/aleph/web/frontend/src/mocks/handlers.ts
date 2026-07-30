@@ -18,6 +18,10 @@ export const authenticatedSession: AuthSession = {
     email: "learner@example.com",
     is_admin: false,
     model_allowlist: [],
+    // Phase 2's flag ships dark (AL-203): the default fake learner sees the
+    // tutor off, so any surface gated on it must stay hidden unless a test
+    // deliberately serves a session with it on.
+    feature_flags: { tutor: false },
   },
 };
 
@@ -36,6 +40,8 @@ export const adminUser: AuthUser = {
   email: "admin@example.com",
   is_admin: true,
   model_allowlist: [...ADMIN_MODEL_ALLOWLIST],
+  // Admins dogfood the tutor before launch (ADMIN_DEFAULT_FLAGS, AL-203).
+  feature_flags: { tutor: true },
 };
 
 export const adminSession: AuthSession = {

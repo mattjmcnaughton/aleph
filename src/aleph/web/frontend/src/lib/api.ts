@@ -105,6 +105,15 @@ export interface AuthUser {
    * everyone else. Rendered as raw ids; no display labels in Phase 1.
    */
   model_allowlist: string[];
+  /**
+   * Resolved feature flags for this learner (AL-203): every flag in the
+   * backend's code registry mapped to its effective value. The backend resolves
+   * them (order: `services/feature_flags.py`, restated in `docs/api.md`); the
+   * frontend only reads the answer. Read it through `useFeatureFlag` in
+   * `lib/feature-flags.ts` rather than indexing directly — the hook is what
+   * makes an absent key resolve to off.
+   */
+  feature_flags: Record<string, boolean>;
 }
 
 export type AuthSession =

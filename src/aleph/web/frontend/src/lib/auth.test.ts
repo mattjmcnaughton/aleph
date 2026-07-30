@@ -12,6 +12,7 @@ const signedIn: AuthSession = {
     email: "dev@example.com",
     is_admin: false,
     model_allowlist: [],
+    feature_flags: {},
   },
 };
 

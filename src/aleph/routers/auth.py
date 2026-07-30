@@ -24,6 +24,7 @@ from aleph.db import get_session
 from aleph.dependencies import get_optional_current_user
 from aleph.dtos.auth import SessionDTO, UserDTO
 from aleph.services.auth import AuthService
+from aleph.services.feature_flags import FeatureFlagService
 
 router = APIRouter(tags=["auth"])
 logger = structlog.get_logger()
@@ -78,6 +79,11 @@ async def get_auth_session(
     Works for anonymous requests (``authenticated: false``) — the frontend calls
     it signed-out to decide whether to render the login gate, so it must never
     ``401``. Admins receive the model-picker allowlist; everyone else gets ``[]``.
+
+    This is also the **only** feature-flag delivery surface (AL-203): the
+    learner's resolved map rides the payload the SPA already fetches on every
+    load, so ``useFeatureFlag`` can gate a surface with no second request and
+    regular learners never touch the admin flag routes.
     """
     user = await get_optional_current_user(request, session)
     if user is None:
@@ -94,5 +100,6 @@ async def get_auth_session(
             email=user.email,
             is_admin=admin,
             model_allowlist=list(settings.allowlist_ids) if admin else [],
+            feature_flags=await FeatureFlagService(session).resolve_for_user(user),
         ),
     )

@@ -119,3 +119,54 @@ burn). This is spec-conformant, not a bug: recovery is to retry the **failed hea
 itself** (`POST /lessons/{failed-id}/generate`), which re-claims it and, on
 success, resumes the chain. A future ticket may make completion refuse (or warn
 on) an ungenerated head; today the gating is deliberately generation-agnostic.
+
+## Feature flags (admin) (`/api/v1/admin`, AL-203)
+
+Flags are **defined in code** (`services/feature_flags.py`); the database stores
+only per-user *exceptions*. Resolution order, highest first:
+
+**per-user override > `FEATURE_FLAG_DEFAULTS` > admin default > code default.**
+
+(The module docstring in `services/feature_flags.py` is the authoritative
+statement; this section restates it for API readers.) Each step is consulted only
+when the one above it is silent — in particular the **admin default applies only
+to flags `FEATURE_FLAG_DEFAULTS` does not mention**, so an explicit
+`FEATURE_FLAG_DEFAULTS=tutor:off` is a real kill switch that reaches admins too;
+an admin who wants to keep dogfooding takes a per-user override, which still wins
+over everything.
+
+Keys outside the code registry — a stale `FEATURE_FLAG_DEFAULTS` entry, a row for
+a deleted flag — are ignored everywhere, so removing a flag is a pure code change
+with no data migration.
+
+Every route below is **admin-only** (email domain in `ADMIN_EMAIL_DOMAINS`;
+anonymous → `401`, signed-in non-admin → `403`). Regular learners never call
+them: they receive their resolved map on the session probe (below).
+
+| Method | Path | Body | Success | Notes |
+| ------ | ---- | ---- | ------- | ----- |
+| `GET` | `/api/v1/admin/feature-flags` | — | `200 {flags: [...]}` | Every registered flag, sorted by key: `{key, enabled_default, override_count}`. `enabled_default` is the **global** default (code default with `FEATURE_FLAG_DEFAULTS` applied) — not the admin baseline, which is a property of the reader. `override_count` counts per-user override rows. |
+| `PUT` | `/api/v1/admin/feature-flags/{flag_key}/users/{user_id}` | `{enabled}` | `200 {flag_key, user_id, enabled}` | Force the flag on/off for one learner. Upsert: a repeat `PUT` updates in place (never a second row). `404` for an unregistered `flag_key` or an unknown `user_id`. |
+| `DELETE` | `/api/v1/admin/feature-flags/{flag_key}/users/{user_id}` | — | `204` | Clear the override so the default applies again. **Idempotent** — clearing an absent override is still `204`. `404` only for an unregistered `flag_key`. |
+
+**Session delivery.** `GET /api/v1/auth/session` carries the signed-in learner's
+resolved map as `user.feature_flags` (`{"tutor": false}`), so gating a surface
+costs no extra request. The frontend reads it through `useFeatureFlag(key)`
+(`lib/feature-flags.ts`), which resolves an unknown or not-yet-loaded key to
+**off** — a gate never flashes open before the session lands.
+
+**Registered flags.**
+
+| Key | Code default | Admin default | Purpose |
+| --- | ------------ | ------------- | ------- |
+| `tutor` | off | **on** (only while `FEATURE_FLAG_DEFAULTS` is silent about `tutor`) | The Phase 2 in-lesson tutor — the rail, its API, and its stream. Phase 2 merges and deploys **dark** behind it (epic #82 amendment 1) while admins dogfood in production; launch (AL-270) is setting `FEATURE_FLAG_DEFAULTS=tutor:on`, no code deploy. |
+
+**Operating it.** `FEATURE_FLAG_DEFAULTS` is a comma-separated list of
+`key:on` / `key:off` entries (`FEATURE_FLAG_DEFAULTS="tutor:on"`). Malformed and
+unknown entries are dropped rather than raising — it is a knob turned under
+pressure, and a typo must not keep the app from booting. Per-user overrides still
+win over it, so flipping the global default does not disturb anyone holding one;
+the admin baseline does **not** — an entry here is the last word for everyone
+without an override.
+No product events are emitted for admin flag ops (structlog only): these are
+operator actions, not learner behaviour, and PRD §5.7's event set is unchanged.

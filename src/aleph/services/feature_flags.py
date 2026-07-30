@@ -1,0 +1,187 @@
+"""Feature-flag registry and per-user resolution (AL-203, epic #82).
+
+Flags are **defined in code**: add a :class:`FeatureFlag` member and a default in
+:data:`FLAG_DEFAULTS` to introduce one. Their global default can then be flipped
+without a code deploy via ``settings.feature_flag_defaults``
+(``FEATURE_FLAG_DEFAULTS``), and per learner via ``user_feature_overrides`` rows
+managed through the admin API.
+
+**This module docstring is the single authoritative statement of the resolution
+order** (``docs/api.md`` restates it for API readers and must match); every other
+site — the DTO comment, the router, the frontend client — points here rather than
+respelling it.
+
+Resolution order — highest wins::
+
+    per-user override > settings default > admin default > code default
+
+Read as four steps, each only consulted when the one above it is silent:
+
+1. **per-user override** — a ``user_feature_overrides`` row for this user and
+   flag. Always wins, for learners and admins alike.
+2. **settings default** — an entry for this flag in
+   ``settings.feature_flag_defaults`` (``FEATURE_FLAG_DEFAULTS``). Because it
+   outranks the admin baseline, an explicit ``tutor:off`` silences *everyone*,
+   admins included: the operator knob is a real kill switch, and an admin who
+   wants to keep dogfooding takes a per-user override.
+3. **admin default** — :data:`ADMIN_DEFAULT_FLAGS` forced on for the admin class,
+   applied only to flags the settings map says nothing about.
+4. **code default** — :data:`FLAG_DEFAULTS`.
+
+Keys absent from the registry — stale settings entries or database rows for
+deleted flags — are ignored, so removing a flag from code needs no data
+migration and no cleanup pass.
+
+This is what lets Phase 2 ship dark (epic #82, owner amendment 1): ``tutor``
+defaults **off** globally but is in :data:`ADMIN_DEFAULT_FLAGS`, so every ticket
+merges and deploys with zero learner exposure while admins dogfood the tutor in
+production. Launch (AL-270) is one environment variable.
+
+Ported from habagou's service of the same name; adapted to aleph's
+``authz.is_admin(user, settings)`` signature, which takes the config explicitly,
+and to this ticket's precedence — habagou lets the admin baseline outrank the
+settings map, aleph does not (step 2 above).
+"""
+
+from __future__ import annotations
+
+from enum import StrEnum
+from typing import TYPE_CHECKING
+
+from aleph.authz import is_admin
+from aleph.config import settings as global_settings
+from aleph.dtos.feature_flags import FeatureFlagDTO
+from aleph.repositories import FeatureFlagRepository, UserRepository
+
+if TYPE_CHECKING:
+    import uuid
+
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from aleph.config import Settings
+    from aleph.models import User
+
+
+class FeatureFlag(StrEnum):
+    """Canonical feature flags.
+
+    A ``StrEnum`` member *is* its wire key, so the registry, the settings
+    parser, the database rows and the JSON the frontend reads all speak one
+    spelling with no mapping table.
+    """
+
+    # Phase 2's one flag: the in-lesson tutor (the rail, its API, its stream).
+    TUTOR = "tutor"
+
+
+# Code defaults per flag. Every FeatureFlag member gets an entry here; a flag
+# missing from this dict does not exist as far as resolution is concerned.
+FLAG_DEFAULTS: dict[FeatureFlag, bool] = {
+    # Off: Phase 2 merges and deploys dark until AL-270 flips it.
+    FeatureFlag.TUTOR: False,
+}
+
+
+# Flags that resolve to on for admins when nothing above them in the chain has
+# spoken, so a feature can ship dark and be dogfooded by the admin class before a
+# wider rollout. This baseline is the *weakest* say after the code default: it
+# applies only to flags with no entry in ``FEATURE_FLAG_DEFAULTS``, so an explicit
+# ``tutor:off`` there turns the flag off for admins too (kill switch), and a
+# per-user override beats it for everyone, admins included.
+ADMIN_DEFAULT_FLAGS: frozenset[FeatureFlag] = frozenset({FeatureFlag.TUTOR})
+
+
+def known_flag_keys() -> frozenset[str]:
+    """The registered flag keys (StrEnum members are their string keys)."""
+    return frozenset(str(flag) for flag in FLAG_DEFAULTS)
+
+
+def _admin_default_keys() -> frozenset[str]:
+    """String keys of the flags that default on for admins."""
+    return frozenset(str(flag) for flag in ADMIN_DEFAULT_FLAGS)
+
+
+def effective_defaults(config: Settings) -> dict[str, bool]:
+    """Code defaults with ``config.feature_flag_defaults`` applied on top.
+
+    Unregistered settings keys are dropped here rather than passed through — a
+    map is only ever built from the code registry, so a stale entry can never
+    invent a flag.
+    """
+    defaults = {str(flag): enabled for flag, enabled in FLAG_DEFAULTS.items()}
+    for key, enabled in config.feature_flag_default_map.items():
+        if key in defaults:
+            defaults[key] = enabled
+    return defaults
+
+
+class FeatureFlagService:
+    """Resolves flags for a learner and manages their per-user overrides."""
+
+    def __init__(
+        self, session: AsyncSession, *, config: Settings = global_settings
+    ) -> None:
+        self.session = session
+        self.config = config
+        self.repository = FeatureFlagRepository(session)
+        self.user_repository = UserRepository(session)
+
+    async def resolve_for_user(self, user: User) -> dict[str, bool]:
+        """The user's effective flag map, resolved by this module's order.
+
+        Admins get :data:`ADMIN_DEFAULT_FLAGS` forced on as their baseline, but
+        only for flags ``FEATURE_FLAG_DEFAULTS`` does not mention, and a per-user
+        override still beats both. The map is keyed by the registry, so a
+        database row for a deleted flag never leaks out.
+        """
+        defaults = effective_defaults(self.config)
+        if not defaults:
+            return {}
+        if is_admin(user, self.config):
+            admin_keys = _admin_default_keys()
+            # An explicit settings entry outranks the admin baseline, so the
+            # baseline only fills in flags the settings map is silent about.
+            settings_keys = self.config.feature_flag_default_map.keys()
+            defaults = {
+                key: True if key in admin_keys and key not in settings_keys else enabled
+                for key, enabled in defaults.items()
+            }
+        overrides = await self.repository.overrides_for_user(user_id=user.id)
+        return {key: overrides.get(key, enabled) for key, enabled in defaults.items()}
+
+    async def list_flags(self) -> list[FeatureFlagDTO]:
+        """Every registered flag with its effective default and override count."""
+        counts = await self.repository.override_counts()
+        return [
+            FeatureFlagDTO(
+                key=key,
+                enabled_default=enabled,
+                override_count=counts.get(key, 0),
+            )
+            for key, enabled in sorted(effective_defaults(self.config).items())
+        ]
+
+    async def set_user_override(
+        self, *, flag_key: str, user_id: uuid.UUID, enabled: bool
+    ) -> bool:
+        """Upsert a user's override; ``False`` if the user does not exist.
+
+        The row lock holds the account in place until the commit, so a
+        concurrent deletion cannot slip between the existence check and the
+        insert (which would surface as a foreign-key ``500``, not a ``404``).
+        """
+        if await self.user_repository.lock_by_id(user_id) is None:
+            return False
+        await self.repository.set_override(
+            user_id=user_id, flag_key=flag_key, enabled=enabled
+        )
+        await self.session.commit()
+        return True
+
+    async def clear_user_override(self, *, flag_key: str, user_id: uuid.UUID) -> bool:
+        """Delete a user's override; ``False`` if none existed."""
+        deleted = await self.repository.delete_override(
+            user_id=user_id, flag_key=flag_key
+        )
+        await self.session.commit()
+        return deleted

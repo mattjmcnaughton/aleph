@@ -28,6 +28,14 @@ class UserDTO(BaseModel):
     # ``MODEL_ALLOWLIST`` (TDD §14/D14). Populated for admins, ``[]`` for
     # everyone else.
     model_allowlist: list[str] = []
+    # The learner's resolved feature flags (AL-203): every flag in the code
+    # registry mapped to its effective value for *this* user. The resolution
+    # order is stated once, in ``aleph.services.feature_flags``' module
+    # docstring. Delivered on the session probe rather than a route of its own so
+    # gating a surface costs no extra request — the SPA already fetches this
+    # payload on every load. Keys outside the registry never appear, so a stale
+    # row cannot invent a flag.
+    feature_flags: dict[str, bool] = {}
 
 
 class SessionDTO(BaseModel):

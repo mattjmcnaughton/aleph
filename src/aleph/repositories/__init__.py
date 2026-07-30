@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from aleph.repositories.attempts import AttemptRepository
 from aleph.repositories.conversations import ConversationRepository, ThreadMessage
+from aleph.repositories.feature_flags import FeatureFlagRepository
 from aleph.repositories.lessons import LessonRepository, PathGenerationProgress
 from aleph.repositories.paths import PathRepository
 from aleph.repositories.quick_checks import QuickCheckRepository
@@ -24,6 +25,7 @@ from aleph.repositories.users import UserRepository
 __all__ = [
     "AttemptRepository",
     "ConversationRepository",
+    "FeatureFlagRepository",
     "LessonRepository",
     "PathGenerationProgress",
     "PathRepository",

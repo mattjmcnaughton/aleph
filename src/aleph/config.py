@@ -373,5 +373,35 @@ class Settings(BaseSettings):
     # stream. Must be positive (``gt=0``): zero would busy-write the socket.
     sse_heartbeat_seconds: float = Field(default=15.0, gt=0)
 
+    # --- AL-203: feature flags (epic #82, owner amendment 1) ------------------
+    # Appended as a self-contained block at the END of Settings (every AL-xxx
+    # branch appends its own; keep them separate to avoid merge conflicts).
+    # Flags are defined in code (``services/feature_flags.py``); this setting
+    # overrides their **global defaults**, so a flag flips without a code
+    # deploy — AL-270's launch is ``FEATURE_FLAG_DEFAULTS=tutor:on`` on the
+    # deployed app, no release cut.
+    #
+    # Comma-separated ``key:on`` / ``key:off`` entries. Malformed entries are
+    # dropped rather than raising: this is an operator knob turned under
+    # pressure (a mid-incident kill switch), and a typo that refuses to boot is
+    # a worse failure than one that leaves the default in place. Keys the code
+    # registry does not know are ignored for the same reason — an entry left
+    # behind by a deleted flag must never keep a deploy from starting. Per-user
+    # database overrides (the admin API) still win over these defaults: this
+    # moves the default, it does not force the flag on anyone holding an
+    # override.
+    feature_flag_defaults: str = ""
+
+    @property
+    def feature_flag_default_map(self) -> dict[str, bool]:
+        """Parsed ``feature_flag_defaults``: malformed entries dropped."""
+        parsed: dict[str, bool] = {}
+        for entry in self.feature_flag_defaults.split(","):
+            key, separator, state = entry.strip().partition(":")
+            key, state = key.strip(), state.strip().lower()
+            if separator and key and state in ("on", "off"):
+                parsed[key] = state == "on"
+        return parsed
+
 
 settings = Settings()
