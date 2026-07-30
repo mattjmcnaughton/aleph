@@ -165,6 +165,28 @@ class ConversationRepository:
         )
         return affected_rows(result) > 0
 
+    async def set_tutor_check_answer(
+        self, *, message: Message, selected_index: int
+    ) -> None:
+        """Record the learner's choice on a message's Tutor check (§6).
+
+        **Reassigns** the payload rather than editing it in place, and that is
+        the whole point: ``Message.tutor_check`` is plain ``JSONB`` with no ORM
+        mutation tracking, so ``message.tutor_check["answered_index"] = i`` is
+        invisible to the session and is never flushed — a silent no-op that
+        looks correct in the same request and loses the answer on the next read.
+
+        The rest of the payload is carried through untouched, so a re-answer
+        overwrites only ``answered_index``. A Tutor check is non-scoring and
+        outside progress (PRD §5.5): this writes no Attempt and touches no
+        Phase 1 table. The caller (which owns the unit of work) commits.
+        """
+        check = message.tutor_check
+        if check is None:  # pragma: no cover - the router 409s before reaching here
+            raise ValueError(f"message {message.id} has no tutor check")
+        message.tutor_check = {**check, "answered_index": selected_index}
+        await self.session.flush()
+
     async def get_message_for_user(
         self, *, message_id: uuid.UUID, user_id: uuid.UUID
     ) -> Message | None:

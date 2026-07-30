@@ -543,3 +543,70 @@ async def test_get_message_for_user_enforces_the_ownership_join() -> None:
             )
             is None
         )
+
+
+# --------------------------------------------------------------------------- #
+# Tutor-check answer write (AL-221, §6)
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.anyio
+async def test_set_tutor_check_answer_persists_by_reassigning_the_payload() -> None:
+    """``answered_index`` reaches the database, and the rest of the payload is kept.
+
+    The load-bearing detail is *how*: ``Message.tutor_check`` is plain ``JSONB``
+    with no ORM mutation tracking, so ``check["answered_index"] = i`` would look
+    right in memory and never be flushed. The assertion is made from a **fresh**
+    session — a new identity map, so only a real UPDATE can satisfy it.
+    """
+    _user_id, path_id, lesson_id = await _arrange_path_and_lesson()
+    async with db.async_session() as session:
+        _learner, tutor = await _insert_turn(
+            session, path_id=path_id, lesson_id=lesson_id, tutor_check=TUTOR_CHECK
+        )
+        await session.commit()
+        message_id = tutor.id
+
+    async with db.async_session() as session:
+        repository = ConversationRepository(session)
+        message = await repository.get_message_for_user(
+            message_id=message_id, user_id=_user_id
+        )
+        assert message is not None
+        await repository.set_tutor_check_answer(message=message, selected_index=2)
+        await session.commit()
+
+    async with db.async_session() as session:
+        stored = await session.scalar(
+            select(Message.tutor_check).where(Message.id == message_id)
+        )
+    assert stored == {**TUTOR_CHECK, "answered_index": 2}
+
+
+@pytest.mark.anyio
+async def test_set_tutor_check_answer_leaves_other_messages_alone() -> None:
+    """Answering one check never touches the sibling learner row."""
+    _user_id, path_id, lesson_id = await _arrange_path_and_lesson()
+    async with db.async_session() as session:
+        learner, tutor = await _insert_turn(
+            session, path_id=path_id, lesson_id=lesson_id, tutor_check=TUTOR_CHECK
+        )
+        await session.commit()
+        learner_id, message_id = learner.id, tutor.id
+
+    async with db.async_session() as session:
+        repository = ConversationRepository(session)
+        message = await repository.get_message_for_user(
+            message_id=message_id, user_id=_user_id
+        )
+        assert message is not None
+        await repository.set_tutor_check_answer(message=message, selected_index=0)
+        await session.commit()
+
+    async with db.async_session() as session:
+        assert (
+            await session.scalar(
+                select(Message.tutor_check).where(Message.id == learner_id)
+            )
+            is None
+        )
