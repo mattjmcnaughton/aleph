@@ -1,3 +1,10 @@
+# [1.9.0](https://github.com/mattjmcnaughton/aleph/compare/v1.8.0...v1.9.0) (2026-07-30)
+
+
+### Features
+
+* **tutor:** the rail — shell, conversation and streaming client (AL-230) ([309e607](https://github.com/mattjmcnaughton/aleph/commit/309e60732c639b90532214c1a39117dc1dbe0ddd)), closes [#90](https://github.com/mattjmcnaughton/aleph/issues/90)
+
 # [1.8.0](https://github.com/mattjmcnaughton/aleph/compare/v1.7.0...v1.8.0) (2026-07-30)
 
 
