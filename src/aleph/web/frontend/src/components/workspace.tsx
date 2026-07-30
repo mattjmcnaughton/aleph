@@ -23,6 +23,7 @@ export function Workspace({
   testid,
   width,
   sidebar,
+  tutorRail,
   children,
 }: {
   /** The route's existing `main` testid (`paths-switcher` / `path-view` /
@@ -32,6 +33,17 @@ export function Workspace({
   /** Omitted entirely (no `<aside>` at all) on the Switcher route, which has
    *  nothing selected yet to show a sidebar for. */
   sidebar?: ReactNode;
+  /**
+   * The tutor rail (Phase 2, AL-230 / TDD D12) — the third column, mirroring
+   * `sidebar`. It differs from the sidebar in one way only: the sidebar's
+   * `<aside>` is always in the DOM and hidden by CSS below `lg`, while this
+   * slot is passed only while the rail is **open**, because open/closed is real
+   * shared state the learner drives at every width. What is *not* JS is the
+   * presentation — the one `<aside>` below is a bottom sheet over the lesson,
+   * and at `lg` a docked 400px column beside the lesson's 680px. Same tree, two
+   * CSS presentations: no `matchMedia`, no width-conditional rendering.
+   */
+  tutorRail?: ReactNode;
   children: ReactNode;
 }) {
   return (
@@ -51,6 +63,18 @@ export function Workspace({
       >
         <div className={`mx-auto w-full ${WIDTH_CAP[width]}`}>{children}</div>
       </main>
+
+      {tutorRail ? (
+        <aside
+          data-testid="tutor-rail-column"
+          // Below `lg`: a sheet anchored to the bottom of the viewport, capped
+          // so the lesson stays visible behind it (the PRD's chosen entry).
+          // At `lg`: an ordinary flex sibling — the docked right column.
+          className="fixed inset-x-0 bottom-0 z-40 flex max-h-[75vh] flex-col rounded-t-lg border-t border-divider bg-night shadow-lg lg:static lg:z-auto lg:max-h-none lg:w-[400px] lg:shrink-0 lg:rounded-none lg:border-l lg:border-t-0 lg:shadow-none"
+        >
+          {tutorRail}
+        </aside>
+      ) : null}
     </div>
   );
 }

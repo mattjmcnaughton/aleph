@@ -29,6 +29,8 @@ import {
   Spinner,
   StateCard,
 } from "../components/state-card";
+import { TutorMark, TutorRail } from "../components/tutor/tutor-rail";
+import { useTutorRail } from "../components/tutor/use-tutor-rail";
 import { Workspace } from "../components/workspace";
 import { makePollingRefetchInterval } from "../lib/polling";
 import { useRetryGeneration } from "../lib/use-retry-generation";
@@ -145,10 +147,24 @@ function LessonView() {
     return () => clearTimeout(timer);
   }, [awaitingGeneration]);
 
+  // The tutor rail (AL-230). Gated twice — `useFeatureFlag("tutor")` inside the
+  // hook, and a lesson with generated content here — because lesson scope is
+  // empty without a Read passage to ground on. Neither gate renders a disabled
+  // affordance: there is no mark and no rail at all.
+  const tutor = useTutorRail({
+    pathId: detail?.path_id ?? null,
+    lessonId,
+    lessonTitle: detail?.title ?? "",
+    lessonReady: detail?.generation_state === "generated" && detail.unlock_state !== "locked",
+  });
+
   return (
     <Workspace
       testid="lesson-view"
       width="lesson"
+      // Passed only while open — open/closed is shared JS state; sheet-vs-column
+      // is CSS the slot itself owns (D12).
+      tutorRail={tutor.open ? <TutorRail tutor={tutor} /> : null}
       sidebar={
         <Sidebar>
           <SwitcherSection currentPathId={detail?.path_id} />
@@ -210,6 +226,10 @@ function LessonView() {
       <p data-testid="lesson-view-id" className="mt-10 font-mono text-xs text-slate">
         {lessonId}
       </p>
+
+      {/* The floating mark: the phone's way in, and the desktop's way back
+          after a collapse. Rendered exactly when the rail is closed. */}
+      <TutorMark tutor={tutor} />
     </Workspace>
   );
 }

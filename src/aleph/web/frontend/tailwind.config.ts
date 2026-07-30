@@ -66,6 +66,10 @@ export default {
         md: "0 0 0 1px #595d6c, 0 6px 18px rgba(0,0,0,0.55)", // --shadow-md
         lg: "0 0 0 1px #9397ab, 0 16px 40px rgba(0,0,0,0.65)", // --shadow-lg
         glow: "0 0 0 1px rgba(79,184,196,0.45), 0 10px 34px rgba(79,184,196,0.16)",
+        // The tutor's glow, iris to teal's (Phase 2 PRD §5.10 — iris marks the
+        // tutor, teal the path). Same recipe as `glow`, derived from iris
+        // DEFAULT (#9184d9) so the two accents read as one system.
+        "glow-iris": "0 0 0 1px rgba(145,132,217,0.45), 0 10px 34px rgba(145,132,217,0.16)",
       },
       letterSpacing: {
         kicker: "0.14em", // uppercase mono section kickers
