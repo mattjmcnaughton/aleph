@@ -229,6 +229,174 @@ def test_path_deleted(recorder: _Recorder) -> None:
 
 
 # --------------------------------------------------------------------------- #
+# The tutor (Phase 2, AL-240 / TDD §9)
+# --------------------------------------------------------------------------- #
+
+
+def test_tutor_conversation_started(recorder: _Recorder) -> None:
+    events.emit_tutor_conversation_started(
+        account_id=ACCOUNT, path_id=PATH, lesson_id=LESSON, position_in_path=5
+    )
+    assert recorder.records == [
+        (
+            "tutor_conversation_started",
+            {
+                "account_id": str(ACCOUNT),
+                "path_id": str(PATH),
+                "lesson_id": str(LESSON),
+                "position_in_path": 5,
+                "workflow": "W9",
+            },
+        )
+    ]
+
+
+@pytest.mark.parametrize("source", ["typed", "suggestion"])
+def test_tutor_message_sent(recorder: _Recorder, source: str) -> None:
+    """``source`` is the §7 entry-mix datum: suggestion vs free text."""
+    events.emit_tutor_message_sent(
+        account_id=ACCOUNT,
+        path_id=PATH,
+        lesson_id=LESSON,
+        position_in_path=5,
+        source=source,
+    )
+    name, fields = recorder.records[0]
+    assert name == "tutor_message_sent"
+    assert fields == {
+        "account_id": str(ACCOUNT),
+        "path_id": str(PATH),
+        "lesson_id": str(LESSON),
+        "position_in_path": 5,
+        "source": source,
+        "workflow": "W9",
+    }
+
+
+@pytest.mark.parametrize(
+    ("outcome", "success", "workflow"),
+    [("success", True, "W9"), ("failure", False, "W14"), ("stopped", False, "W9")],
+)
+def test_tutor_reply_completed_outcomes(
+    recorder: _Recorder, outcome: str, success: bool, workflow: str
+) -> None:
+    """Every resolution emits, and only ``failure`` is tagged W14.
+
+    A ``stopped`` reply is the learner ending their own turn, not a fault, so it
+    stays on W9 — tagging it W14 would put learner behaviour in the
+    failure-rate workflow slice.
+    """
+    events.emit_tutor_reply_completed(
+        account_id=ACCOUNT,
+        path_id=PATH,
+        lesson_id=LESSON,
+        position_in_path=5,
+        outcome=outcome,
+        ttft_ms=210,
+        duration_ms=1900,
+        prompt_tokens=1200,
+        completion_tokens=300,
+        total_tokens=1500,
+    )
+    name, fields = recorder.records[0]
+    assert name == "tutor_reply_completed"
+    assert fields == {
+        "account_id": str(ACCOUNT),
+        "path_id": str(PATH),
+        "lesson_id": str(LESSON),
+        "position_in_path": 5,
+        "outcome": outcome,
+        "success": success,
+        "ttft_ms": 210,
+        "duration_ms": 1900,
+        "prompt_tokens": 1200,
+        "completion_tokens": 300,
+        "total_tokens": 1500,
+        "workflow": workflow,
+    }
+
+
+def test_tutor_reply_completed_carries_a_null_ttft_when_no_delta_arrived(
+    recorder: _Recorder,
+) -> None:
+    """A reply that never produced a token has no time-to-first-token.
+
+    ``None`` rather than 0: a zero would be indistinguishable from an instant
+    first token and would drag the TTFT percentile panel down. The field is
+    still always present (the manifest is a fixed set), and the percentile SQL
+    skips NULLs.
+    """
+    events.emit_tutor_reply_completed(
+        account_id=ACCOUNT,
+        path_id=PATH,
+        lesson_id=LESSON,
+        position_in_path=5,
+        outcome="failure",
+        ttft_ms=None,
+        duration_ms=30000,
+    )
+    _name, fields = recorder.records[0]
+    assert fields["ttft_ms"] is None
+    assert fields["duration_ms"] == 30000
+    # Usage is optional at the call site but never absent from the record.
+    assert fields["prompt_tokens"] == 0
+    assert fields["total_tokens"] == 0
+
+
+def test_tutor_check_shown(recorder: _Recorder) -> None:
+    events.emit_tutor_check_shown(
+        account_id=ACCOUNT, path_id=PATH, lesson_id=LESSON, position_in_path=5
+    )
+    assert recorder.records == [
+        (
+            "tutor_check_shown",
+            {
+                "account_id": str(ACCOUNT),
+                "path_id": str(PATH),
+                "lesson_id": str(LESSON),
+                "position_in_path": 5,
+                "workflow": "W12",
+            },
+        )
+    ]
+
+
+@pytest.mark.parametrize(
+    ("outcome", "is_correct"), [("correct", True), ("incorrect", False)]
+)
+@pytest.mark.parametrize("first_answer", [True, False])
+def test_tutor_check_answered(
+    recorder: _Recorder, outcome: str, is_correct: bool, first_answer: bool
+) -> None:
+    """A re-answer emits too, distinguished by ``first_answer`` (AL-240 D).
+
+    Unlike the Quick check's first-wins Attempt, answering a Tutor check again
+    genuinely rewrites the stored payload, so the event fires on every real
+    write; ``first_answer`` is what keeps a per-check rate honest.
+    """
+    events.emit_tutor_check_answered(
+        account_id=ACCOUNT,
+        path_id=PATH,
+        lesson_id=LESSON,
+        position_in_path=5,
+        outcome=outcome,
+        first_answer=first_answer,
+    )
+    name, fields = recorder.records[0]
+    assert name == "tutor_check_answered"
+    assert fields == {
+        "account_id": str(ACCOUNT),
+        "path_id": str(PATH),
+        "lesson_id": str(LESSON),
+        "position_in_path": 5,
+        "outcome": outcome,
+        "is_correct": is_correct,
+        "first_answer": first_answer,
+        "workflow": "W12",
+    }
+
+
+# --------------------------------------------------------------------------- #
 # Manifest anchoring: every emitter's real field set == EVENT_FIELDS[event].
 # This is what makes the metric-coverage check (test_metrics_queries) honest —
 # the manifest cannot claim a field the emitter does not actually log.
@@ -264,6 +432,36 @@ def _drive_every_emitter() -> None:
     )
     events.emit_path_completed(account_id=ACCOUNT, path_id=PATH, lesson_count=1)
     events.emit_path_deleted(account_id=ACCOUNT, path_id=PATH)
+    events.emit_tutor_conversation_started(
+        account_id=ACCOUNT, path_id=PATH, lesson_id=LESSON, position_in_path=1
+    )
+    events.emit_tutor_message_sent(
+        account_id=ACCOUNT,
+        path_id=PATH,
+        lesson_id=LESSON,
+        position_in_path=1,
+        source="typed",
+    )
+    events.emit_tutor_reply_completed(
+        account_id=ACCOUNT,
+        path_id=PATH,
+        lesson_id=LESSON,
+        position_in_path=1,
+        outcome="success",
+        ttft_ms=1,
+        duration_ms=1,
+    )
+    events.emit_tutor_check_shown(
+        account_id=ACCOUNT, path_id=PATH, lesson_id=LESSON, position_in_path=1
+    )
+    events.emit_tutor_check_answered(
+        account_id=ACCOUNT,
+        path_id=PATH,
+        lesson_id=LESSON,
+        position_in_path=1,
+        outcome="correct",
+        first_answer=True,
+    )
 
 
 def test_manifest_matches_real_emission(recorder: _Recorder) -> None:

@@ -22,7 +22,7 @@ from sqlalchemy import text
 from sqlalchemy.engine import URL, make_url
 
 from alembic import command
-from aleph import db
+from aleph import db, events
 from aleph.app import create_app
 from aleph.config import settings
 from aleph.dependencies import get_current_user
@@ -358,3 +358,38 @@ def tutor_flag_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
     mysterious 404.
     """
     monkeypatch.setattr(settings, "feature_flag_defaults", "tutor:on")
+
+
+# --------------------------------------------------------------------------- #
+# Captured product events (AL-070 / AL-240)
+#
+# ``capfire`` (logfire's pytest11 plugin) exposes an in-memory exporter; the
+# StructlogProcessor ``configure_logging`` installs lands each ``events.py``
+# emission there as a *log* record whose ``name`` is the event name and whose
+# ``attributes`` are its fields. Shared by every suite that asserts a real route
+# emitted a real event.
+# --------------------------------------------------------------------------- #
+
+
+def captured_records(capfire: Any, name: str) -> list[dict[str, Any]]:
+    """Every captured log record for the product event ``name``, in order."""
+    return [
+        span
+        for span in capfire.exporter.exported_spans_as_dict()
+        if span["attributes"].get("logfire.span_type") == "log" and span["name"] == name
+    ]
+
+
+def assert_event(capfire: Any, name: str) -> dict[str, Any]:
+    """The first captured ``name`` record's attributes, manifest fields checked.
+
+    Asserting against ``EVENT_FIELDS`` here (rather than a hand-listed set) is
+    what makes this tier prove the *manifest* the metric queries are checked
+    against is what a real route really emits.
+    """
+    records = captured_records(capfire, name)
+    assert records, f"no {name} event captured"
+    attributes = records[0]["attributes"]
+    missing = events.EVENT_FIELDS[name] - set(attributes)
+    assert not missing, f"{name} missing fields {sorted(missing)}"
+    return attributes

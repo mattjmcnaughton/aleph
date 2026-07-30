@@ -40,6 +40,24 @@ class ThreadMessage:
     lesson_title: str
 
 
+@dataclass(frozen=True)
+class LocatedMessage:
+    """A message plus where it sits: its path and its lesson's position.
+
+    The product events are stamped with account, path, lesson and position (PRD
+    §5.7), but a ``Message`` row carries only its ``lesson_id`` — the path hangs
+    off its conversation and the position off its lesson. The ownership lookup
+    walks message -> conversation -> path anyway, so it returns the locator in
+    the same row: the check-answer route can stamp ``tutor_check_answered``
+    without a second query and without lazy-loading relationships on an async
+    session.
+    """
+
+    message: Message
+    path_id: uuid.UUID
+    position_in_path: int
+
+
 class ConversationRepository:
     """Data access for :class:`~aleph.models.Conversation` / ``Message`` rows.
 
@@ -189,18 +207,33 @@ class ConversationRepository:
 
     async def get_message_for_user(
         self, *, message_id: uuid.UUID, user_id: uuid.UUID
-    ) -> Message | None:
+    ) -> LocatedMessage | None:
         """Fetch a message only if it belongs to ``user_id`` (ownership guard).
 
         The join walks message -> conversation -> path -> user, so the
         check-answer endpoint (§6) sees ``None`` — indistinguishable from a
         missing row — for someone else's message, which is what the
         404-never-403 rule needs.
+
+        It returns the message's locator alongside it (TDD §9): the ownership
+        walk already visits the conversation for its path, and one more join to
+        the lesson yields the position, so the caller has everything the product
+        event is stamped with from the single query that proved ownership. The
+        lesson join is inner on purpose — a message cannot exist without one —
+        which is also why there is no "the locator went missing" branch to
+        handle.
         """
         result = await self.session.execute(
-            select(Message)
+            select(Message, Conversation.path_id, Lesson.position_in_path)
             .join(Conversation, Message.conversation_id == Conversation.id)
             .join(Path, Conversation.path_id == Path.id)
+            .join(Lesson, Lesson.id == Message.lesson_id)
             .where(Message.id == message_id, Path.user_id == user_id)
         )
-        return result.scalar_one_or_none()
+        row = result.one_or_none()
+        if row is None:
+            return None
+        message, path_id, position_in_path = row
+        return LocatedMessage(
+            message=message, path_id=path_id, position_in_path=position_in_path
+        )

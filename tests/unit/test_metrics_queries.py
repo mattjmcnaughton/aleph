@@ -44,6 +44,7 @@ _ARROW = re.compile(r"->>")
 # The §7 metrics that MUST have a saved query (the ticket's required set + the
 # guardrails shipped alongside). Filenames are the contract docs/metrics.md maps.
 _REQUIRED_QUERIES = {
+    # Phase 1 (AL-070).
     "activation_rate.sql",
     "first_lesson_activation.sql",
     "path_start_rate.sql",
@@ -51,6 +52,15 @@ _REQUIRED_QUERIES = {
     "return_rate.sql",
     "breadth.sql",
     "cost_per_path.sql",
+    # Phase 2 — the tutor (AL-240, Phase 2 PRD §7 / TDD §9).
+    "tutor_assisted_continuation.sql",
+    "tutor_adoption.sql",
+    "tutor_repeat_use.sql",
+    "tutor_depth.sql",
+    "tutor_entry_mix.sql",
+    "tutor_check_uptake.sql",
+    "tutor_completion_guardrail.sql",
+    "tutor_reply_failure_latency.sql",
 }
 
 

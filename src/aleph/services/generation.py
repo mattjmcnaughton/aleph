@@ -128,13 +128,19 @@ def _elapsed_ms(started: float) -> int:
     return round((time.perf_counter() - started) * 1000)
 
 
-def _usage_tokens(run: Any) -> tuple[int, int, int]:
+def usage_tokens(run: Any) -> tuple[int, int, int]:
     """``(prompt, completion, total)`` token counts off a pydantic-ai run result.
 
     Best-effort and defensive (advisory: never let a usage-accounting change break
     generation): a missing or shape-shifted usage surface yields zeros, so the
-    cost-per-path event field is always present but never load-bearing on the hot
-    path. Dollar cost proper lives on the model-call spans (TDD §10)."""
+    token event fields are always present but never load-bearing on the hot
+    path. Dollar cost proper lives on the model-call spans (TDD §10).
+
+    Public because ``services/tutor.py`` lifts the same triple off a streamed
+    run for ``tutor_reply_completed`` (Phase 2 TDD §9) — one reading of
+    pydantic-ai's usage surface, in one place, so a shape change is one fix.
+    ``run`` is any object with a ``usage`` (an ``AgentRunResult`` from either
+    ``agent.run`` or a streamed run's ``AgentRunResultEvent.result``)."""
     try:
         usage = run.usage
         return (
@@ -142,11 +148,11 @@ def _usage_tokens(run: Any) -> tuple[int, int, int]:
             int(usage.output_tokens or 0),
             int(usage.total_tokens or 0),
         )
-    except Exception:  # noqa: BLE001 - usage accounting must never fail generation
-        # Zeros here silently deflate the cost-per-path metric, so surface the
+    except Exception:  # noqa: BLE001 - usage accounting must never fail a reply
+        # Zeros here silently deflate the cost/token panels, so surface the
         # drift: a shape change in pydantic-ai's usage surface is a real signal to
         # investigate, not something to swallow into a silent 0.
-        logger.warning("generation_usage_unavailable", exc_info=True)
+        logger.warning("agent_usage_unavailable", exc_info=True)
         return 0, 0, 0
 
 
@@ -463,7 +469,7 @@ class GenerationOrchestrator:
             return False
 
         duration_ms = _elapsed_ms(started)
-        prompt_tokens, completion_tokens, total_tokens = _usage_tokens(run)
+        prompt_tokens, completion_tokens, total_tokens = usage_tokens(run)
         output = run.output
         if isinstance(output, Refusal):
             # A refusal still ran the model (it cost tokens/latency, W7).
@@ -784,7 +790,7 @@ class GenerationOrchestrator:
             return False
 
         duration_ms = _elapsed_ms(started)
-        prompt_tokens, completion_tokens, total_tokens = _usage_tokens(run)
+        prompt_tokens, completion_tokens, total_tokens = usage_tokens(run)
         # Persist content + quick check in a fresh, fenced transaction.
         generated = await self._persist_lesson(lesson_id, fence, run.output)
         if generated:

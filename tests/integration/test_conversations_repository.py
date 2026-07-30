@@ -500,6 +500,13 @@ async def test_next_turn_after_delete_starts_a_fresh_thread_at_position_one() ->
 
 @pytest.mark.anyio
 async def test_get_message_for_user_enforces_the_ownership_join() -> None:
+    """Ownership gates the read, and the same row carries the event locator.
+
+    The locator (path id + the lesson's ``position_in_path``) rides along
+    because a ``Message`` row carries neither, and the check-answer route has to
+    stamp ``tutor_check_answered`` with both (TDD §9) — resolving it here is what
+    keeps that a single query rather than a follow-up lookup.
+    """
     user_id, path_id, lesson_id = await _arrange_path_and_lesson()
     async with db.async_session() as session:
         await _insert_turn(
@@ -526,8 +533,10 @@ async def test_get_message_for_user_enforces_the_ownership_join() -> None:
             message_id=message_id, user_id=user_id
         )
         assert owned is not None
-        assert owned.id == message_id
-        assert owned.tutor_check == TUTOR_CHECK
+        assert owned.message.id == message_id
+        assert owned.message.tutor_check == TUTOR_CHECK
+        assert owned.message.lesson_id == lesson_id
+        assert (owned.path_id, owned.position_in_path) == (path_id, 1)
 
         # Someone else's message is indistinguishable from a missing one (the
         # 404-never-403 rule the endpoint relies on).
@@ -569,11 +578,13 @@ async def test_set_tutor_check_answer_persists_by_reassigning_the_payload() -> N
 
     async with db.async_session() as session:
         repository = ConversationRepository(session)
-        message = await repository.get_message_for_user(
+        located = await repository.get_message_for_user(
             message_id=message_id, user_id=_user_id
         )
-        assert message is not None
-        await repository.set_tutor_check_answer(message=message, selected_index=2)
+        assert located is not None
+        await repository.set_tutor_check_answer(
+            message=located.message, selected_index=2
+        )
         await session.commit()
 
     async with db.async_session() as session:
@@ -596,11 +607,13 @@ async def test_set_tutor_check_answer_leaves_other_messages_alone() -> None:
 
     async with db.async_session() as session:
         repository = ConversationRepository(session)
-        message = await repository.get_message_for_user(
+        located = await repository.get_message_for_user(
             message_id=message_id, user_id=_user_id
         )
-        assert message is not None
-        await repository.set_tutor_check_answer(message=message, selected_index=0)
+        assert located is not None
+        await repository.set_tutor_check_answer(
+            message=located.message, selected_index=0
+        )
         await session.commit()
 
     async with db.async_session() as session:
