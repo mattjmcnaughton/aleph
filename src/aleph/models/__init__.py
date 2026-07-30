@@ -17,6 +17,7 @@ from aleph.models.enums import (
     MessageSource,
     PathStatus,
 )
+from aleph.models.feature_flags import UserFeatureOverride
 from aleph.models.lesson import Lesson
 from aleph.models.message import Message
 from aleph.models.path import Path
@@ -38,4 +39,5 @@ __all__ = [
     "QuickCheck",
     "Unit",
     "User",
+    "UserFeatureOverride",
 ]

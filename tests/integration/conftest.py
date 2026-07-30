@@ -338,3 +338,23 @@ async def create_user(
     session.add(user)
     await session.flush()
     return user
+
+
+@pytest.fixture
+def tutor_flag_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Turn the ``tutor`` flag on globally for one test (AL-203).
+
+    Phase 2 ships dark: ``tutor`` resolves off for a plain learner, so an
+    integration test that drives the tutor surface as one would otherwise be
+    testing the flag gate rather than the tutor. Requesting this fixture flips
+    the *global default* — the same lever AL-270 pulls at launch and
+    ``scripts/e2e_backend.py`` sets for the browser suite — rather than making
+    the test's learner an admin or seeding an override row, so the surface is
+    exercised exactly as a post-launch learner meets it.
+
+    Shared here so every ticket that adds tutor coverage (AL-221, AL-220,
+    AL-240) reaches for one definition instead of respelling the settings
+    mutation, which is how "the fixture that forgot the flag" becomes a
+    mysterious 404.
+    """
+    monkeypatch.setattr(settings, "feature_flag_defaults", "tutor:on")
