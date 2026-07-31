@@ -47,6 +47,18 @@ conversation" deletes the rows, so clearing a thread refunds quota. Recorded,
 not fixed — the refund-proof append-only usage table is the precondition for
 ever raising the cap above 0, not draft-1 work.
 
+**Shaping messages (``check_shaping_message``, AL-320 / Phase 2B §7).** The same
+shape again, one rail across: ``RATE_LIMIT_SHAPING_MESSAGES_PER_DAY`` counts the
+learner's live **shaping** learner-message rows created today
+(``UsageRepository.count_shaping_messages_since``) and ships at **0 — disabled**,
+the 2A posture verbatim. Its own cap rather than a share of the tutor's, because
+the two rails are separately flag-gated and separately killable; the tutor's
+counter gained a conversation-kind filter in the same change so that a shaping
+turn cannot spend the tutor's budget. Applied **Additions** need no limiter of
+their own — the lessons they add are ordinary generations under
+``RATE_LIMIT_LESSON_GENERATIONS_PER_DAY``, and ``MAX_LESSONS_PER_PATH`` bounds
+path size at proposal *and* apply time.
+
 The check is called *before* the billed work, and admins are exempt via an
 injected ``is_admin`` flag (decoupled from ``authz`` on purpose — AL-050 wires
 the two together). On refusal it raises ``HTTPException(429, ...)`` with a
@@ -94,6 +106,10 @@ class UsageCounter(Protocol):
         self, *, user_id: uuid.UUID, since: datetime
     ) -> int: ...
 
+    async def count_shaping_messages_since(
+        self, *, user_id: uuid.UUID, since: datetime
+    ) -> int: ...
+
 
 def _utc_now() -> datetime:
     return datetime.now(UTC)
@@ -119,12 +135,14 @@ class DailyRateLimiter:
         paths_per_day: int,
         lesson_generations_per_day: int,
         tutor_messages_per_day: int,
+        shaping_messages_per_day: int = 0,
         now: Callable[[], datetime] = _utc_now,
     ) -> None:
         self._usage = usage
         self._paths_per_day = paths_per_day
         self._lesson_generations_per_day = lesson_generations_per_day
         self._tutor_messages_per_day = tutor_messages_per_day
+        self._shaping_messages_per_day = shaping_messages_per_day
         self._now = now
 
     async def check_path_creation(self, *, user_id: uuid.UUID, is_admin: bool) -> None:
@@ -213,6 +231,35 @@ class DailyRateLimiter:
             ),
         )
 
+    async def check_shaping_message(
+        self, *, user_id: uuid.UUID, is_admin: bool
+    ) -> None:
+        """Raise ``HTTPException(429)`` if ``user_id`` is at the daily shaping cap.
+
+        Call before admitting a shaping turn (Phase 2B §7). **Ships disabled**,
+        the 2A posture verbatim: ``RATE_LIMIT_SHAPING_MESSAGES_PER_DAY`` defaults
+        to 0, which :meth:`_exempt` reads as "no cap", so the count is never
+        queried on the default configuration. The knob exists; the behaviour does
+        not.
+
+        Its own cap and its own count, deliberately not a share of the tutor's:
+        the two rails are separately flag-gated and separately killable, so a
+        shaping burst must not be able to close the in-lesson tutor. Both counts
+        are over **live** learner-message rows and both carry the same recorded
+        quirk — "new conversation" deletes those rows, so clearing a thread
+        refunds quota, which is the precondition for ever raising either cap.
+        """
+        await self._check(
+            self._usage.count_shaping_messages_since,
+            cap=self._shaping_messages_per_day,
+            user_id=user_id,
+            is_admin=is_admin,
+            message=(
+                f"You've reached today's limit of {self._shaping_messages_per_day} "
+                "shaping messages. Please try again tomorrow."
+            ),
+        )
+
     async def _check(
         self,
         count_since: Callable[..., Awaitable[int]],
@@ -258,4 +305,5 @@ def build_daily_rate_limiter(session: AsyncSession) -> DailyRateLimiter:
         paths_per_day=settings.rate_limit_paths_per_day,
         lesson_generations_per_day=settings.rate_limit_lesson_generations_per_day,
         tutor_messages_per_day=settings.rate_limit_tutor_messages_per_day,
+        shaping_messages_per_day=settings.rate_limit_shaping_messages_per_day,
     )

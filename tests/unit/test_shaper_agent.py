@@ -30,6 +30,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 import pytest
+from pydantic_ai import ModelRetry
 from pydantic_ai.exceptions import UnexpectedModelBehavior
 from pydantic_ai.messages import (
     ModelRequest,
@@ -824,15 +825,11 @@ def test_validate_proposal_accepts_a_well_formed_proposal() -> None:
 def test_validate_proposal_rejects_a_violation(
     operations: list[ShapingOperation], summary: str, expected: str
 ) -> None:
-    from pydantic_ai import ModelRetry
-
     with pytest.raises(ModelRetry, match=expected):
         validate_proposal(operations, summary=summary, digest=_digest(), caps=_caps())
 
 
 def test_validate_proposal_rejects_an_unknown_operation_shape() -> None:
-    from pydantic_ai import ModelRetry
-
     with pytest.raises(ModelRetry, match="add_lessons"):
         validate_proposal(
             [{"remove_lesson": _LESSON_IDS[0]}],  # ty: ignore[invalid-argument-type]
@@ -860,8 +857,6 @@ def test_proposal_violation_returns_none_for_a_well_formed_proposal() -> None:
 def test_validate_proposal_raises_exactly_what_proposal_violation_names() -> None:
     # One source of truth: ``validate_proposal`` is the ModelRetry wrapper, so
     # the two can never drift into two different rulebooks.
-    from pydantic_ai import ModelRetry
-
     operations = [_addition(insert_at_position=1)]
     violation = proposal_violation(
         operations, summary="Adds a lesson at the top.", digest=_digest(), caps=_caps()

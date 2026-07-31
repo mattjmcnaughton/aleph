@@ -38,12 +38,16 @@ class _FakeUsage:
         self.outlines: dict[uuid.UUID, list[datetime]] = {}
         self.lessons: dict[uuid.UUID, list[datetime]] = {}
         self.tutor_messages: dict[uuid.UUID, list[datetime]] = {}
+        self.shaping_messages: dict[uuid.UUID, list[datetime]] = {}
 
     def add_path(self, user_id: uuid.UUID, when: datetime) -> None:
         self.paths.setdefault(user_id, []).append(when)
 
     def add_tutor_message(self, user_id: uuid.UUID, when: datetime) -> None:
         self.tutor_messages.setdefault(user_id, []).append(when)
+
+    def add_shaping_message(self, user_id: uuid.UUID, when: datetime) -> None:
+        self.shaping_messages.setdefault(user_id, []).append(when)
 
     def add_outline(self, user_id: uuid.UUID, when: datetime) -> None:
         self.outlines.setdefault(user_id, []).append(when)
@@ -71,6 +75,11 @@ class _FakeUsage:
     ) -> int:
         return sum(1 for t in self.tutor_messages.get(user_id, []) if t >= since)
 
+    async def count_shaping_messages_since(
+        self, *, user_id: uuid.UUID, since: datetime
+    ) -> int:
+        return sum(1 for t in self.shaping_messages.get(user_id, []) if t >= since)
+
 
 def _limiter(
     usage: _FakeUsage,
@@ -78,6 +87,7 @@ def _limiter(
     paths: int = 10,
     lessons: int = 100,
     tutor_messages: int = 0,
+    shaping_messages: int = 0,
     now: datetime = DAY_ONE,
 ) -> DailyRateLimiter:
     return DailyRateLimiter(
@@ -85,6 +95,7 @@ def _limiter(
         paths_per_day=paths,
         lesson_generations_per_day=lessons,
         tutor_messages_per_day=tutor_messages,
+        shaping_messages_per_day=shaping_messages,
         now=lambda: now,
     )
 
@@ -279,3 +290,73 @@ async def test_tutor_message_cap_is_per_account() -> None:
     with pytest.raises(HTTPException):
         await limiter.check_tutor_message(user_id=USER, is_admin=False)
     await limiter.check_tutor_message(user_id=OTHER, is_admin=False)
+
+
+# --------------------------------------------------------------------------- #
+# The shaping message cap (AL-320, Phase 2B TDD §7)
+#
+# The 2A posture verbatim — the knob exists, the behaviour does not — plus the
+# one property that is genuinely new: the two rails' budgets are separate, so a
+# shaping burst can never close the in-lesson tutor (or the reverse).
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.anyio
+async def test_shaping_message_cap_is_disabled_at_the_default_of_zero() -> None:
+    """Cap 0 (the shipped default, §7) never consults the count at all."""
+    usage = _FakeUsage()
+    for _ in range(50):
+        usage.add_shaping_message(USER, DAY_ONE)
+
+    await _limiter(usage, shaping_messages=0).check_shaping_message(
+        user_id=USER, is_admin=False
+    )
+
+
+@pytest.mark.anyio
+async def test_shaping_message_cap_allows_up_to_cap_then_denies() -> None:
+    usage = _FakeUsage()
+    limiter = _limiter(usage, shaping_messages=3)
+
+    for _ in range(3):
+        await limiter.check_shaping_message(user_id=USER, is_admin=False)
+        usage.add_shaping_message(USER, DAY_ONE)
+
+    with pytest.raises(HTTPException) as excinfo:
+        await limiter.check_shaping_message(user_id=USER, is_admin=False)
+    assert excinfo.value.status_code == status.HTTP_429_TOO_MANY_REQUESTS
+    detail = excinfo.value.detail
+    assert isinstance(detail, str)
+    assert "3" in detail
+    assert "tomorrow" in detail.lower()
+
+
+@pytest.mark.anyio
+async def test_shaping_message_cap_exempts_admins_and_rolls_over() -> None:
+    usage = _FakeUsage()
+    for _ in range(20):
+        usage.add_shaping_message(USER, DAY_ONE)
+
+    await _limiter(usage, shaping_messages=3).check_shaping_message(
+        user_id=USER, is_admin=True
+    )
+    await _limiter(usage, shaping_messages=3, now=DAY_TWO).check_shaping_message(
+        user_id=USER, is_admin=False
+    )
+
+
+@pytest.mark.anyio
+async def test_the_two_reply_caps_have_separate_budgets() -> None:
+    """A shaping burst must not spend the tutor's quota, or the reverse (§7).
+
+    The rails are separately flag-gated and separately killable, so one filling
+    the other's budget would be a kill switch nobody chose to throw.
+    """
+    usage = _FakeUsage()
+    limiter = _limiter(usage, tutor_messages=2, shaping_messages=2)
+    for _ in range(5):
+        usage.add_shaping_message(USER, DAY_ONE)
+
+    with pytest.raises(HTTPException):
+        await limiter.check_shaping_message(user_id=USER, is_admin=False)
+    await limiter.check_tutor_message(user_id=USER, is_admin=False)

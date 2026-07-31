@@ -17,6 +17,8 @@ import pytest
 from pydantic import ValidationError
 
 from aleph.config import STUB_MODEL_ID, Settings
+from aleph.services.feature_flags import FeatureFlag
+from scripts.e2e_backend import create_stub_app
 
 # Every env var this block reads, cleared so the "defaults" assertions below
 # describe the code defaults rather than whatever the ambient environment says.
@@ -115,9 +117,6 @@ def test_e2e_backend_boots_with_the_shaper_slot_stubbed_and_the_flag_on(
     And it signs in as a plain learner, so the ``shaping`` flag has to be on
     globally or W17–W21 would fail on an absent surface rather than a broken one.
     """
-    from aleph.services.feature_flags import FeatureFlag
-    from scripts.e2e_backend import create_stub_app
-
     create_stub_app()
 
     assert restored_live_settings.model_shaper == STUB_MODEL_ID

@@ -194,14 +194,29 @@ class ReservedStream(StreamingResponse):
 
 
 def _message_dto(entry: ThreadMessage) -> MessageDTO:
-    """Translate one repository thread row (message + lesson title) to the wire."""
+    """Translate one repository thread row (message + lesson title) to the wire.
+
+    Both lesson fields stay **non-null on this surface** (§6, unchanged): every
+    message in a ``lesson`` thread was asked in a lesson. Since Phase 2B the
+    columns themselves are nullable — a shaping message has no lesson (migration
+    ``0006``) — so the guard below states the thing this route relies on rather
+    than assuming it: a ``None`` here would mean a shaping row had reached the
+    in-lesson thread, which is a bug in the kind scoping and not a message to
+    render with a blank divider.
+    """
     message = entry.message
+    lesson_id = message.lesson_id
+    lesson_title = entry.lesson_title
+    if lesson_id is None or lesson_title is None:  # pragma: no cover - kind-scoped
+        raise RuntimeError(
+            f"message {message.id} is in a lesson thread but names no lesson"
+        )
     return MessageDTO(
         id=message.id,
         role=message.role,
         content=message.content,
-        lesson_id=message.lesson_id,
-        lesson_title=entry.lesson_title,
+        lesson_id=lesson_id,
+        lesson_title=lesson_title,
         tutor_check=_check_dto(message.tutor_check),
         created_at=message.created_at,
     )
@@ -384,7 +399,13 @@ async def answer_tutor_check(
         if body.selected_index == check.get("correct_index")
         else Outcome.INCORRECT
     )
+    # The ownership walk joins ``lessons`` inner, so a row that reached here has
+    # one. The narrow states that rather than assuming it, now that the column
+    # is nullable for shaping messages (migration ``0006``) — which that same
+    # join can never return.
     lesson_id = message.lesson_id
+    if lesson_id is None:  # pragma: no cover - excluded by the ownership join
+        raise _not_found("message not found")
     await repository.set_tutor_check_answer(
         message=message, selected_index=body.selected_index
     )

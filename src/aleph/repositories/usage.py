@@ -23,7 +23,14 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import func, select
 
-from aleph.models import Conversation, Lesson, Message, MessageRole, Path
+from aleph.models import (
+    Conversation,
+    ConversationKind,
+    Lesson,
+    Message,
+    MessageRole,
+    Path,
+)
 
 if TYPE_CHECKING:
     import datetime
@@ -126,6 +133,48 @@ class UsageRepository:
         quota. That is why the refund-proof append-only usage table is the
         recorded precondition for enabling the cap — while
         ``RATE_LIMIT_TUTOR_MESSAGES_PER_DAY`` is 0 this query is never run.
+
+        **Scoped to the in-lesson thread** (Phase 2B): a path now carries two
+        conversations, and shaping messages have their own cap (§7). Without the
+        kind filter a shaping turn would quietly spend the *tutor's* budget —
+        a change in what 2A's cap counts, made by a phase that promised not to
+        change 2A behaviour (W21).
+        """
+        return await self._count_learner_messages(
+            user_id=user_id, since=since, kind=ConversationKind.LESSON
+        )
+
+    async def count_shaping_messages_since(
+        self, *, user_id: uuid.UUID, since: datetime.datetime
+    ) -> int:
+        """Count ``user_id``'s **learner** shaping messages created since ``since``.
+
+        The Phase 2B twin (TDD §7), over live **shaping** learner-message rows:
+        same billed unit (one question buys one reply), same live-row counting,
+        the same thread-clear-refunds quirk, and the same recorded precondition
+        for ever raising the cap above its default of 0.
+
+        Applied **Additions** need no counter of their own: the lessons they add
+        are ordinary generations under ``RATE_LIMIT_LESSON_GENERATIONS_PER_DAY``,
+        and path size is bounded by ``MAX_LESSONS_PER_PATH`` at proposal *and*
+        apply time (§7).
+        """
+        return await self._count_learner_messages(
+            user_id=user_id, since=since, kind=ConversationKind.SHAPING
+        )
+
+    async def _count_learner_messages(
+        self,
+        *,
+        user_id: uuid.UUID,
+        since: datetime.datetime,
+        kind: ConversationKind,
+    ) -> int:
+        """``user_id``'s live learner rows in threads of ``kind``, since ``since``.
+
+        One query behind both caps: they differ by exactly the conversation kind,
+        and two spellings of "count the learner's messages" is how two caps start
+        counting subtly different things.
         """
         result = await self.session.execute(
             select(func.count())
@@ -134,6 +183,7 @@ class UsageRepository:
             .join(Path, Conversation.path_id == Path.id)
             .where(
                 Path.user_id == user_id,
+                Conversation.kind == kind,
                 Message.role == MessageRole.LEARNER,
                 Message.created_at >= since,
             )

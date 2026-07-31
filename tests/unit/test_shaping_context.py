@@ -36,6 +36,12 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 import pytest
+from pydantic_ai.messages import (
+    ModelRequest,
+    ModelResponse,
+    TextPart,
+    UserPromptPart,
+)
 
 from aleph.agents.shaper import (
     FIRST_SHAPEABLE_LESSON_ID_MARKER,
@@ -723,13 +729,6 @@ def test_a_poisoned_proposal_summary_cannot_restate_the_markers() -> None:
 
 def test_history_parts_are_plain_learner_tutor_text() -> None:
     """No system parts and no tool parts — 2A's rule, for the same reasons."""
-    from pydantic_ai.messages import (  # noqa: PLC0415 - local to this assertion
-        ModelRequest,
-        ModelResponse,
-        TextPart,
-        UserPromptPart,
-    )
-
     proposal = tutor("here is a plan", proposal=add_proposal())
     history = build_shaping_message_history(
         [learner("add something"), proposal], resolutions={}, turns=10

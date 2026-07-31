@@ -191,6 +191,89 @@ client-side, and nothing downstream grades it. The invariant protected is the
 *Quick check's* answer, and that protection is behavioural (TDD D7 — prompt
 rule, deterministic pre-filter, W13), not a property of this DTO.
 
+## Shaping (`/api/v1`, AL-320, Phase 2B TDD §5.4/§6)
+
+The **shaping rail**'s surface: a second conversation on the same path, about
+the path itself rather than about a lesson. Session-cookie protected (`401` via
+the shared envelope when anonymous); address by UUID; another learner's path
+reads/acts as `404` (existence not disclosed) — Phase 1's conventions verbatim,
+and the transport is the tutor's §5.4 stream **plus one named event**.
+
+**The whole surface is feature-flagged.** Every route below sits behind a
+router-level `require_shaping_enabled` dependency: when the `shaping` flag (see
+*Feature flags* below) resolves **off** for the caller, the route answers `404`
+— for that account shaping does not exist. It is a **separate** key from
+`tutor`: the in-lesson tutor is already launched, and shaping ships dark behind
+its own flag (admins dogfood it in production; launch is AL-370 flipping the
+default) and can be killed on its own.
+
+**Two threads, one path.** A path carries at most one conversation of each kind
+(`UNIQUE (path_id, kind)`). The routes below reach only the `shaping` one, and
+2A's `/paths/{id}/conversation` routes reach only the `lesson` one — neither
+rail ever shows the other's turns, and clearing one leaves the other untouched.
+Shaping messages are **path-level**, so they carry no `lesson_id`/`lesson_title`
+at all (the column is `NULL`; migration `0006`).
+
+| Method | Path | Body | Success | Notes |
+| ------ | ---- | ---- | ------- | ----- |
+| `POST` | `/api/v1/paths/{id}/shaping/conversation/messages` | `{content, source?, model?}` | `200 text/event-stream` | **Send a shaping turn** and stream the reply (§5.4). No `lesson_id` — shaping is about the path as a whole. `content` ≤ 2000 chars; `source` is `typed` (default) or `suggestion`. `model` is the **admin-only per-message override** binding the `MODEL_SHAPER` slot: `403 forbidden` for a non-admin (checked *before* the allowlist), `422 validation_error` off the shared `MODEL_ALLOWLIST`, resolved per request and **persisted nowhere**. Pre-stream failures are ordinary JSON error envelopes: `401`, `404` (path not the caller's, or the flag is off), **`409 conflict` when the path is not `ready`** (there is no structure to shape yet — PRD §5.1, server-enforced) or when a reply is already in flight on this shaping conversation, `422`, `429 rate_limited` (`RATE_LIMIT_SHAPING_MESSAGES_PER_DAY` — **disabled at its default of 0**, so `429` is unreachable on the default configuration; admins are exempt regardless). **SSE starts only once the turn is admitted.** |
+| `GET` | `/api/v1/paths/{id}/shaping/conversation` | — | `200 {messages: [...]}` | The path's whole shaping thread, oldest first. Each message: `{id, role, content, proposal, created_at}` — **no lesson fields**. `proposal` is non-null only on a tutor message that made one, and carries the stored payload plus its **derived** `resolution` (below). **`200` with an empty list when no conversation exists** (created lazily on the first completed turn) — never `404`. Readable on a non-`ready` path: the `ready` rule bounds *sending*. **Unpaginated this phase** (accepted risk, TDD §14). |
+| `DELETE` | `/api/v1/paths/{id}/shaping/conversation` | — | `204` | **New conversation** (PRD §5.8): drops the shaping conversation row; `ON DELETE CASCADE` removes its messages. **Idempotent**. Touches no Phase 1 state, and does not touch the in-lesson thread. **The Change history survives it** — `path_changes` hangs off the path and its `message_id` is `ON DELETE SET NULL`, so clearing the thread nulls the reference and keeps every row (an applied Change is real path structure; "new conversation" is not "undo everything"). Never refunds quota (the shaping cap is disabled at its default of 0, so there are no usage rows to refund). |
+
+### The shaping stream (§5.4)
+
+Identical to [the tutor's](#the-send-endpoints-event-stream-54) — same headers,
+same `delta` / `done` / `error` frames, same `: ping` heartbeat, same "exactly
+one terminal event", same `TUTOR_REPLY_TIMEOUT` semantics — **plus** one event.
+Shaping replies also share the tutor's concurrency pool
+(`MAX_CONCURRENT_TUTOR_REPLIES`) and its timeout (TDD D11: both are a learner
+waiting mid-sentence), while keeping their own one-in-flight lock per
+conversation, so a shaping reply and an in-lesson reply can run at once on one
+path.
+
+| Event | Data | When |
+| ----- | ---- | ---- |
+| `proposal` | `{operations, summary}` | The shaper called `propose_path_edit` and the payload passed validation. The data is the **bare validated payload** — no `resolution` (a proposal just made is pending). At most one per turn, emitted the moment the tool call is accepted, so it may land before, between or after `delta` frames: attach it to the message, not to a position in the text. A call the validator rejected delivers nothing. |
+
+**A turn exists whole or not at all.** The learner message and the reply — and
+the Proposal payload on the reply's row — are written in one transaction when
+the reply settles; a stream that fails, times out, is stopped or disconnects
+**before the reply settles** persists nothing. After it settles the turn is
+committed, so a client that disconnects between that commit and the `done` frame
+finds the whole turn — Proposal included — on its next read of the thread. Either
+way there is never half a turn.
+
+**Proposal payload.** `{operations, summary}`, where each operation is exactly
+one of two shapes (the closed vocabulary, TDD D1):
+
+- **Addition** — `{insert_at_position, lessons: [{title}], new_unit: {title, summary} | null, rationale, estimated_minutes}`
+- **Revision** — `{lesson_id, instruction, new_title | null, rationale}`
+
+Validated server-side by pure predicates shared with the evals: additions land
+at or after the learner's first non-engaged position, revisions name an
+unengaged lesson on this path, titles are non-empty and distinct, and the whole
+proposal stays inside `MAX_LESSONS_PER_PROPOSAL` and `MAX_LESSONS_PER_PATH`.
+
+**Persisting a Proposal is not applying one.** A stored proposal changes no path
+structure — no unit, no lesson, no progress — until the learner applies it. The
+apply/undo endpoints and `GET /paths/{id}/changes` land with AL-321.
+
+**`resolution` is derived, never stored** (TDD D3). On the conversation read
+each proposal reports one of:
+
+| Value | Meaning |
+| ----- | ------- |
+| `pending` | No change references it and nothing has superseded it — the card still offers **Apply**. |
+| `applied` | A live `path_changes` row references it. |
+| `undone` | That change was undone. |
+| `superseded` | A *later* proposal in the thread was applied and this one no longer validates against live path state. |
+
+**A declined edit is an ordinary turn.** An ask outside the two-shape vocabulary
+(remove, reorder, touch engaged work) gets a plain reply saying so and naming
+what shaping can do — no `proposal` event, no payload, and **no machine-readable
+marker of any kind**. The same is true of a safety refusal. The whole record of
+either is the text the learner read.
+
 ## Feature flags (admin) (`/api/v1/admin`, AL-203)
 
 Flags are **defined in code** (`services/feature_flags.py`); the database stores

@@ -42,9 +42,6 @@ from aleph.services.stub_model import (
     _build_outline as stub_build_outline,
 )
 from aleph.services.stub_model import (
-    _clean_topic as stub_clean_topic,
-)
-from aleph.services.stub_model import (
     _read_position as stub_read_position,
 )
 from aleph.services.stub_model import (
@@ -52,6 +49,9 @@ from aleph.services.stub_model import (
 )
 from aleph.services.stub_model import (
     _user_text as stub_user_text,
+)
+from aleph.services.stub_model import (
+    clean_topic as stub_clean_topic,
 )
 
 from .conftest import create_user

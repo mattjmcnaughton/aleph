@@ -27,7 +27,9 @@ class Message(Base, UUIDAuditMixin):
     if that lock is ever bypassed.
 
     ``lesson_id`` records **the lesson the message was asked in**, which is what
-    lets a revisited thread show where each turn happened.
+    lets a revisited thread show where each turn happened — and is therefore
+    ``NULL`` on a shaping message, which was asked about the path as a whole
+    (migration ``0006``; see the column).
 
     **Column applicability is by role and app-enforced — there are deliberately
     no CHECK constraints** (TDD §4): ``source`` belongs on learner rows,
@@ -69,10 +71,16 @@ class Message(Base, UUIDAuditMixin):
         nullable=False,
     )
     content: Mapped[str] = mapped_column(Text, nullable=False)
-    lesson_id: Mapped[uuid.UUID] = mapped_column(
+    # **NULL on a shaping message, always set on a lesson one** (migration
+    # ``0006``). An in-lesson turn is asked *in* a lesson and the thread renders
+    # its dividers from that; a **Shaping conversation** is about the path as a
+    # whole (PRD §5.1), so there is no lesson to record and naming one would put
+    # a false fact in the record. Applicability is by conversation kind and
+    # app-enforced, like every other column here — see the class docstring.
+    lesson_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid,
         ForeignKey("lessons.id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
     )
     source: Mapped[MessageSource | None] = mapped_column(
         Enum(
