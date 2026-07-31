@@ -21,6 +21,7 @@ MODEL_SLOTS: tuple[str, ...] = (
     "model_lesson",
     "model_judge",
     "model_tutor",
+    "model_shaper",
 )
 
 # The convenient dev default for ``session_secret_key``. It is published in this
@@ -149,8 +150,9 @@ class Settings(BaseSettings):
         per-request picker lands, an allowlisted ``stub`` would let an admin
         select it in prod and call ``resolve_model("stub")``, bypassing a
         slot-only guard. The picker's reach grew again in Phase 2 (the tutor
-        takes it as a per-message override, §5.3), so the allowlist arm covers
-        the tutor slot as well.
+        takes it as a per-message override, §5.3) and in Phase 2B (the shaper
+        takes the same per-message override, Phase 2B §5.3/D10), so the
+        allowlist arm covers those slots as well.
 
         The slot arm iterates :data:`MODEL_SLOTS`, so a new slot is guarded the
         moment it is listed there. ``tests/unit/test_config_models.py``
@@ -402,6 +404,47 @@ class Settings(BaseSettings):
             if separator and key and state in ("on", "off"):
                 parsed[key] = state == "on"
         return parsed
+
+    # --- AL-301: shaping (Phase 2B TDD §5.3, §13, D10/D11) --------------------
+    # Appended as this phase's self-contained block at the END of Settings
+    # (every AL-xxx branch appends its own block; keep them separate to avoid
+    # merge conflicts). All numbers here are Phase 2B §13's provisional ones.
+    #
+    # Deliberately *absent* from this block: a carried-turn window, a reply
+    # timeout and a concurrency bound for shaping replies. §13 reuses the tutor's
+    # ``tutor_context_turns`` / ``tutor_reply_timeout`` /
+    # ``max_concurrent_tutor_replies`` on purpose — one notion of "recent
+    # conversation", and one budget shared by the two interactive reply kinds
+    # (D11). Adding parallel knobs here would be the easy mistake; splitting them
+    # is a trivial follow-up if Logfire ever shows contention.
+
+    # The fifth model slot, resolved through ``services/openrouter.py`` like the
+    # rest. Starts on the same strong model as every other slot (the
+    # uniform-start discipline); §5.3's refinement direction for this one is *up
+    # or sideways*, never down — proposal structure quality is the product, and a
+    # bad Proposal burns learner trust plus real generation spend on Apply, while
+    # TTFT matters less than for the tutor (the payoff is a card, not prose).
+    # **It is also listed in ``MODEL_SLOTS``** — the production stub guard
+    # iterates that constant, so a slot missing from it would let the
+    # deterministic stub propose production path edits. Admins may override it
+    # per message (never persisted, §5.3); the override rides the same shared
+    # ``model_allowlist`` as the other slots.
+    model_shaper: str = "anthropic/claude-sonnet-5"
+
+    # Hard cap on the lessons a single Proposal may add or revise (§13): both the
+    # validator's bound and the prompt's instruction, so one Proposal stays small
+    # and legible (PRD §5.4) — a bigger ask becomes two Proposals rather than one
+    # unreadable card. Must be positive (``ge=1``): a zero cap would reject every
+    # Proposal the shaper could make.
+    max_lessons_per_proposal: int = Field(default=5, ge=1)
+
+    # PRD §7's cap knob for shaping messages, counted over live learner-message
+    # rows by the Phase 1 limiter like the other ``rate_limit_*`` settings. Ships
+    # **disabled**, the same posture as ``rate_limit_tutor_messages_per_day``: 0
+    # or negative disables the cap. The refund-proof usage table (one-tap "new
+    # conversation" must not refund quota) is the recorded precondition for ever
+    # raising this above 0 — deliberately not built while the cap is off.
+    rate_limit_shaping_messages_per_day: int = 0
 
 
 settings = Settings()

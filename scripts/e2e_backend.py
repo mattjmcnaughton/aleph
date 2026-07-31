@@ -52,13 +52,16 @@ def create_stub_app() -> FastAPI:
     settings.rate_limit_paths_per_day = 0
     settings.rate_limit_lesson_generations_per_day = 0
     settings.rate_limit_tutor_messages_per_day = 0
-    # Phase 2 ships dark behind the ``tutor`` flag (AL-203) — off globally, on
-    # for admins. The browser suite signs in as a plain learner, so without this
-    # the rail would be (correctly) hidden and every tutor spec would fail on an
-    # absent surface. Flipping the *global default* rather than seeding an admin
-    # account or an override row is deliberate: it exercises the tutor exactly
-    # as a post-launch learner meets it — AL-270's configuration, rehearsed.
-    settings.feature_flag_defaults = "tutor:on"
+    settings.rate_limit_shaping_messages_per_day = 0
+    # Phase 2 ships dark behind the ``tutor`` flag (AL-203) and Phase 2B behind
+    # ``shaping`` (AL-301) — both off globally, on for admins. The browser suite
+    # signs in as a plain learner, so without this the rails would be (correctly)
+    # hidden and every tutor/shaping spec would fail on an absent surface.
+    # Flipping the *global defaults* rather than seeding an admin account or
+    # override rows is deliberate: it exercises each surface exactly as a
+    # post-launch learner meets it — AL-270's and AL-370's configuration,
+    # rehearsed.
+    settings.feature_flag_defaults = "tutor:on,shaping:on"
 
     # Imported lazily so mutating settings above lands before app assembly.
     from aleph.app import create_app

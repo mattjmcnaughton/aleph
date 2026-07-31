@@ -231,6 +231,7 @@ costs no extra request. The frontend reads it through `useFeatureFlag(key)`
 | Key | Code default | Admin default | Purpose |
 | --- | ------------ | ------------- | ------- |
 | `tutor` | off | **on** (only while `FEATURE_FLAG_DEFAULTS` is silent about `tutor`) | The Phase 2 in-lesson tutor — the rail, its API, and its stream. Phase 2 merges and deploys **dark** behind it (epic #82 amendment 1) while admins dogfood in production; launch (AL-270) is setting `FEATURE_FLAG_DEFAULTS=tutor:on`, no code deploy. |
+| `shaping` | off | **on** (only while `FEATURE_FLAG_DEFAULTS` is silent about `shaping`) | Phase 2B shaping — the shaping rail, its API and its stream, and the apply/undo endpoints. Same posture, its own key (epic #114, adopted convention 1): Phase 2B merges and deploys **dark** while admins dogfood it, and launch (AL-370) is setting `FEATURE_FLAG_DEFAULTS=shaping:on`. Independent of `tutor`, so either can be flipped or killed without disturbing the other. |
 
 **Operating it.** `FEATURE_FLAG_DEFAULTS` is a comma-separated list of
 `key:on` / `key:off` entries (`FEATURE_FLAG_DEFAULTS="tutor:on"`). Malformed and

@@ -357,7 +357,36 @@ def tutor_flag_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
     mutation, which is how "the fixture that forgot the flag" becomes a
     mysterious 404.
     """
-    monkeypatch.setattr(settings, "feature_flag_defaults", "tutor:on")
+    _enable_flag_globally(monkeypatch, "tutor")
+
+
+@pytest.fixture
+def shaping_flag_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Turn the ``shaping`` flag on globally for one test (AL-301).
+
+    The Phase 2B twin of ``tutor_flag_enabled``, for the same reason: Phase 2B
+    ships dark, so a test that drives the shaping rail, its stream or its
+    apply/undo endpoints as a plain learner would otherwise be testing the flag
+    gate. Flipping the *global default* is the same lever AL-370 pulls at launch
+    and ``scripts/e2e_backend.py`` sets for the browser suite.
+    """
+    _enable_flag_globally(monkeypatch, "shaping")
+
+
+def _enable_flag_globally(monkeypatch: pytest.MonkeyPatch, key: str) -> None:
+    """Add ``key:on`` to ``FEATURE_FLAG_DEFAULTS``, keeping the entries already set.
+
+    Additive rather than assigning the whole string, so a test that requests both
+    flag fixtures gets both flags — the obvious ``setattr(..., "shaping:on")``
+    would silently clobber the tutor entry depending on fixture order.
+    """
+    entries = [
+        entry.strip()
+        for entry in settings.feature_flag_defaults.split(",")
+        if entry.strip() and not entry.strip().startswith(f"{key}:")
+    ]
+    entries.append(f"{key}:on")
+    monkeypatch.setattr(settings, "feature_flag_defaults", ",".join(entries))
 
 
 # --------------------------------------------------------------------------- #

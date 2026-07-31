@@ -106,7 +106,25 @@ def test_tutor_is_registered_and_ships_dark_but_on_for_admins() -> None:
     assert feature_flags.FeatureFlag.TUTOR == "tutor"
     assert feature_flags.FLAG_DEFAULTS[feature_flags.FeatureFlag.TUTOR] is False
     assert feature_flags.FeatureFlag.TUTOR in feature_flags.ADMIN_DEFAULT_FLAGS
-    assert feature_flags.known_flag_keys() == frozenset({"tutor"})
+
+
+def test_shaping_is_registered_and_ships_dark_but_on_for_admins() -> None:
+    """Phase 2B's one flag, registered the same way (epic #114, convention 1).
+
+    Off globally so every 2B ticket merges and deploys with zero learner
+    exposure; on for the admin class so admins dogfood shaping in production.
+    Launch (AL-370) is ``FEATURE_FLAG_DEFAULTS=shaping:on``, no code deploy.
+    """
+    assert feature_flags.FeatureFlag.SHAPING == "shaping"
+    assert feature_flags.FLAG_DEFAULTS[feature_flags.FeatureFlag.SHAPING] is False
+    assert feature_flags.FeatureFlag.SHAPING in feature_flags.ADMIN_DEFAULT_FLAGS
+
+
+def test_the_registry_is_exactly_the_two_phase_flags() -> None:
+    # The whole registry in one assertion: a flag added to the enum but missed by
+    # ``FLAG_DEFAULTS`` does not exist as far as resolution is concerned, and
+    # would silently resolve off everywhere.
+    assert feature_flags.known_flag_keys() == frozenset({"tutor", "shaping"})
 
 
 def test_effective_defaults_applies_settings_over_code_defaults(
