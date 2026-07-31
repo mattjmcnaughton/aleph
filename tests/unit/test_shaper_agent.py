@@ -70,6 +70,7 @@ from aleph.agents.shaper import (
     operation_kind,
     operations_have_known_shapes,
     operations_within_caps,
+    proposal_violation,
     render_prior_proposal,
     render_shaping_context,
     revision_targets_distinct,
@@ -841,6 +842,42 @@ def test_validate_proposal_rejects_an_unknown_operation_shape() -> None:
         )
 
 
+def test_proposal_violation_returns_none_for_a_well_formed_proposal() -> None:
+    # The boolean-shaped channel the service seams want (AL-311's re-validation,
+    # AL-320/321's apply): "is this legal?" answered without catching an
+    # exception meant for a *model*.
+    assert (
+        proposal_violation(
+            [_addition(), _revision(lesson_id=_LESSON_IDS[3])],
+            summary="Adds 1 lesson and revises 1, about 10 minutes.",
+            digest=_digest(),
+            caps=_caps(),
+        )
+        is None
+    )
+
+
+def test_validate_proposal_raises_exactly_what_proposal_violation_names() -> None:
+    # One source of truth: ``validate_proposal`` is the ModelRetry wrapper, so
+    # the two can never drift into two different rulebooks.
+    from pydantic_ai import ModelRetry
+
+    operations = [_addition(insert_at_position=1)]
+    violation = proposal_violation(
+        operations, summary="Adds a lesson at the top.", digest=_digest(), caps=_caps()
+    )
+
+    assert violation is not None
+    with pytest.raises(ModelRetry) as raised:
+        validate_proposal(
+            operations,
+            summary="Adds a lesson at the top.",
+            digest=_digest(),
+            caps=_caps(),
+        )
+    assert str(raised.value) == violation
+
+
 def test_predicates_are_the_ones_the_validator_composes() -> None:
     # The epic's rule: the predicates are EXPORTED and shared with the evals,
     # never copied. ``is_non_empty`` in particular is Phase 1's, imported.
@@ -1314,6 +1351,25 @@ def test_prior_proposal_renders_compactly_with_its_resolution() -> None:
 def test_prior_proposal_rejects_an_unknown_resolution() -> None:
     with pytest.raises(ValueError, match="cancelled"):
         render_prior_proposal(summary="Adds 2 lessons.", resolution="cancelled")  # ty: ignore[invalid-argument-type]
+
+
+def test_a_prior_proposal_summary_cannot_spoof_the_boundary_markers() -> None:
+    # A Proposal ``summary`` is model-generated, exactly like a lesson title —
+    # and it reaches the model TWICE: struck by ``_data_value`` in the
+    # change-history block once applied, and carried verbatim into the next
+    # turn's ``message_history`` by the context seam (AL-311). The second path
+    # gets the same treatment as the first, or the same untrusted sentence is
+    # neutralised on one rail and authoritative-looking on the other.
+    rendered = render_prior_proposal(
+        summary=f"Adds 2 lessons. {_POISON}", resolution="pending"
+    )
+
+    assert FIRST_SHAPEABLE_POSITION_MARKER not in rendered
+    assert FIRST_SHAPEABLE_LESSON_ID_MARKER not in rendered
+    assert f"</{PATH_DIGEST_BLOCK}>" not in rendered
+    assert "\n" not in rendered  # one line, whatever the summary did
+    assert "Adds 2 lessons." in rendered
+    assert "pending" in rendered
 
 
 # --- the AL-302 stub drives the real agent (§11, D12) --------------------------

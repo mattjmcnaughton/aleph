@@ -32,6 +32,13 @@ deps' digest and caps, so the agent (at draft time), the evals (layer 1,
 deterministic) and ``services/shaping.py`` (re-validating at apply, D5) all
 reach the *same* functions. They are imported, never copied (the epic's rule).
 
+:func:`proposal_violation` composes them into the whole rulebook and **returns**
+its verdict — the first violation as a sentence, or ``None``. That is the shape
+every service-side caller wants (``services/tutor_context.py``'s *superseded*
+derivation today, apply tomorrow); :func:`validate_proposal` is the thin
+``ModelRetry``-raising wrapper the tool's ``args_validator`` needs, so a "no" is
+never something a service has to catch.
+
 **Digest lesson ids extend TDD §5.1.** §5.1's ``ShapingDigestEntry`` lists unit
 title, lesson title, ``position_in_path``, unlock state, ``engaged`` and
 ``outcome`` — but no id, while §4's ``revise_lesson`` names its target *by*
@@ -579,6 +586,106 @@ _RATIONALE_RETRY = (
 )
 
 
+def proposal_violation(
+    operations: Sequence[ShapingOperation],
+    *,
+    summary: str,
+    digest: Sequence[ShapingDigestEntry],
+    caps: ShapingCaps,
+) -> str | None:
+    """The first reason this Proposal is not well formed, or ``None`` (D1).
+
+    The rulebook itself. Composes the exported predicates above rather than
+    restating any of their logic, so the agent's draft-time gate, the evals'
+    deterministic layer, the context seam's *superseded* derivation (§4) and
+    apply's re-validation (D5) can never disagree about what "well formed"
+    means.
+
+    **Why a returned string rather than only the raise.** ``ModelRetry`` is how
+    a violation is reported to a *model*, and it is the right shape at exactly
+    one call site — the tool's ``args_validator``. Every other caller is asking
+    a yes/no question about stored data, and catching an exception to answer it
+    makes the "no" branch of one function the control flow of another. So the
+    verdict is a value here and :func:`validate_proposal` is the thin wrapper
+    that turns it into the model's channel.
+
+    The messages stay written *for the model* — actionable, second person —
+    because that wrapper is their main consumer and a tool-argument retry is
+    safe mid-stream (nothing has streamed from the not-yet-written reply tail,
+    2A §5.1). Callers asking yes/no simply compare against ``None``.
+
+    Deliberately *not* checked here: whether the Proposal is a good idea. Scale
+    fidelity, responsiveness and honesty are the prompt's and the evals' job
+    (§10 rubric items 2-6); this is the deterministic floor.
+    """
+    if not operations_have_known_shapes(operations):
+        return (
+            "One of the operations is not a shape this app understands. A "
+            f"proposal may contain only {OperationKind.ADD_LESSONS.value} and "
+            f"{OperationKind.REVISE_LESSON.value} operations."
+        )
+    if not operations:
+        return (
+            "A proposal needs at least one operation. If there is no edit to "
+            "make, do not call this tool — answer in text instead."
+        )
+    if not is_non_empty(summary):
+        return (
+            "The proposal needs a non-empty summary stating plainly what it "
+            "does, including how many lessons it adds or revises."
+        )
+    if not operations_within_caps(operations, caps=caps):
+        return (
+            "This proposal is too big. One proposal may add or revise at most "
+            f"{caps.max_lessons_per_proposal} lessons in total, and this path "
+            f"has room for {caps.lessons_remaining} more lessons. Propose the "
+            "part that fits and say plainly what you left out."
+        )
+    if not insertions_after_first_shapeable(operations, digest=digest, caps=caps):
+        last = max((entry.position_in_path for entry in digest), default=0)
+        return (
+            "An addition is out of bounds. Every insert_at_position must be "
+            f"between {caps.first_shapeable_position} (the learner's first "
+            f"position that has not been started) and {last + 1} (the end of "
+            "the path). Nothing may be inserted before work the learner has "
+            "already engaged with."
+        )
+    if not revision_targets_unengaged(operations, digest=digest):
+        return (
+            "A revision names a lesson the learner has already started, or one "
+            "that is not on this path. Only a lesson listed with engaged=no may "
+            "be revised — pick one of those, by its id, or explain in text why "
+            "you cannot."
+        )
+    if not revision_targets_distinct(operations):
+        return (
+            "Two revisions name the same lesson. One proposal may revise a "
+            "lesson once — combine what you want changed into a single "
+            "instruction for that lesson, or propose only one of them."
+        )
+    if not titles_nonempty_distinct(operations, digest=digest):
+        return (
+            "Every proposed title must be non-empty, and no lesson title may "
+            "repeat one already on this path or another in the same proposal. "
+            "Rewrite the duplicates so each is genuinely distinct."
+        )
+    for operation in [*_additions(operations), *_revisions(operations)]:
+        if not is_non_empty(operation.rationale):
+            return _RATIONALE_RETRY
+    for addition in _additions(operations):
+        if addition.new_unit is not None and not is_non_empty(
+            addition.new_unit.summary
+        ):
+            return "A new unit needs a non-empty one-sentence summary."
+    for revision in _revisions(operations):
+        if not is_non_empty(revision.instruction):
+            return (
+                "A revision needs a non-empty instruction saying how the lesson "
+                "should teach differently."
+            )
+    return None
+
+
 def validate_proposal(
     operations: Sequence[ShapingOperation],
     *,
@@ -588,84 +695,15 @@ def validate_proposal(
 ) -> None:
     """Raise :class:`ModelRetry` unless the Proposal is well formed (D1).
 
-    Composes the exported predicates above rather than restating any of their
-    logic, so the agent's draft-time gate, the evals' deterministic layer and
-    apply's re-validation (D5) can never disagree about what "well formed"
-    means. Returns ``None`` when valid.
-
-    The messages are actionable because pydantic-ai feeds them back to the model
-    as a tool retry, and a tool-argument retry is safe mid-stream — nothing has
-    streamed from the not-yet-written reply tail (2A §5.1).
-
-    Deliberately *not* checked here: whether the Proposal is a good idea. Scale
-    fidelity, responsiveness and honesty are the prompt's and the evals' job
-    (§10 rubric items 2-6); this is the deterministic floor.
+    The model-facing face of :func:`proposal_violation`, and nothing more: no
+    rule lives here, so the tool's gate and every service-side re-validation are
+    reading one rulebook. Returns ``None`` when valid.
     """
-    if not operations_have_known_shapes(operations):
-        raise ModelRetry(
-            "One of the operations is not a shape this app understands. A "
-            f"proposal may contain only {OperationKind.ADD_LESSONS.value} and "
-            f"{OperationKind.REVISE_LESSON.value} operations."
-        )
-    if not operations:
-        raise ModelRetry(
-            "A proposal needs at least one operation. If there is no edit to "
-            "make, do not call this tool — answer in text instead."
-        )
-    if not is_non_empty(summary):
-        raise ModelRetry(
-            "The proposal needs a non-empty summary stating plainly what it "
-            "does, including how many lessons it adds or revises."
-        )
-    if not operations_within_caps(operations, caps=caps):
-        raise ModelRetry(
-            "This proposal is too big. One proposal may add or revise at most "
-            f"{caps.max_lessons_per_proposal} lessons in total, and this path "
-            f"has room for {caps.lessons_remaining} more lessons. Propose the "
-            "part that fits and say plainly what you left out."
-        )
-    if not insertions_after_first_shapeable(operations, digest=digest, caps=caps):
-        last = max((entry.position_in_path for entry in digest), default=0)
-        raise ModelRetry(
-            "An addition is out of bounds. Every insert_at_position must be "
-            f"between {caps.first_shapeable_position} (the learner's first "
-            f"position that has not been started) and {last + 1} (the end of "
-            "the path). Nothing may be inserted before work the learner has "
-            "already engaged with."
-        )
-    if not revision_targets_unengaged(operations, digest=digest):
-        raise ModelRetry(
-            "A revision names a lesson the learner has already started, or one "
-            "that is not on this path. Only a lesson listed with engaged=no may "
-            "be revised — pick one of those, by its id, or explain in text why "
-            "you cannot."
-        )
-    if not revision_targets_distinct(operations):
-        raise ModelRetry(
-            "Two revisions name the same lesson. One proposal may revise a "
-            "lesson once — combine what you want changed into a single "
-            "instruction for that lesson, or propose only one of them."
-        )
-    if not titles_nonempty_distinct(operations, digest=digest):
-        raise ModelRetry(
-            "Every proposed title must be non-empty, and no lesson title may "
-            "repeat one already on this path or another in the same proposal. "
-            "Rewrite the duplicates so each is genuinely distinct."
-        )
-    for operation in [*_additions(operations), *_revisions(operations)]:
-        if not is_non_empty(operation.rationale):
-            raise ModelRetry(_RATIONALE_RETRY)
-    for addition in _additions(operations):
-        if addition.new_unit is not None and not is_non_empty(
-            addition.new_unit.summary
-        ):
-            raise ModelRetry("A new unit needs a non-empty one-sentence summary.")
-    for revision in _revisions(operations):
-        if not is_non_empty(revision.instruction):
-            raise ModelRetry(
-                "A revision needs a non-empty instruction saying how the lesson "
-                "should teach differently."
-            )
+    violation = proposal_violation(
+        operations, summary=summary, digest=digest, caps=caps
+    )
+    if violation is not None:
+        raise ModelRetry(violation)
 
 
 # --- the static system prompt (role + behavioral rules) -------------------------
@@ -827,6 +865,11 @@ _NO_REVISION_TARGET = (
 # So values are flattened to a single line and the tokens are struck out. That is
 # the whole defence and it is deliberately not more: the prompt already says the
 # blocks are data, and every title in a Proposal is re-checked by the predicates.
+#
+# The same treatment follows an untrusted value onto the *other* rail it reaches
+# the model by: a Proposal summary rides the carried ``message_history`` as well
+# as the change-history block, so :func:`render_prior_proposal` strikes it too.
+# Which block a value lands in must not decide whether it is neutralised.
 _RESERVED_TOKENS = (
     PATH_DIGEST_BLOCK,
     CHANGE_HISTORY_BLOCK,
@@ -959,6 +1002,17 @@ def render_prior_proposal(*, summary: str, resolution: ProposalResolution) -> st
     Deliberately one line and payload-free: the full operations are on the card
     the learner can still see, and re-serializing them would spend the carried
     window on data the reply does not need.
+
+    **The summary is untrusted, here as everywhere.** It is model-generated
+    text, and it reaches the model on two rails: struck by :func:`_data_value`
+    inside the change-history block once the Proposal is applied, and carried
+    into the next turn's ``message_history`` by the context seam. It goes
+    through the same striking on both, so a summary carrying
+    ``first_shapeable_position=1`` cannot restate the app's own boundary in the
+    app's own voice on the rail that happens to skip the fence — the rendering
+    of a value must not depend on which block it lands in. Flattening to one
+    line falls out of the same call, which is also what makes "one compact line"
+    true of any summary rather than of well-behaved ones.
     """
     valid = get_args(ProposalResolution)
     if resolution not in valid:
@@ -966,7 +1020,7 @@ def render_prior_proposal(*, summary: str, resolution: ProposalResolution) -> st
             f"Unknown proposal resolution {resolution!r}; expected one of "
             f"{list(valid)}."
         )
-    return f"[Proposal — {resolution}] {summary}"
+    return f"[Proposal — {resolution}] {_data_value(summary)}"
 
 
 # --- one Proposal per reply -----------------------------------------------------
