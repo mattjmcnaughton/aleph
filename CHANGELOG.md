@@ -1,3 +1,10 @@
+# [1.14.0](https://github.com/mattjmcnaughton/aleph/compare/v1.13.0...v1.14.0) (2026-07-31)
+
+
+### Features
+
+* **db:** shaping schema, migration 0005 + changes repository (AL-300) ([01902c0](https://github.com/mattjmcnaughton/aleph/commit/01902c081e7de956ba2ada30b7de917166c37a00)), closes [#115](https://github.com/mattjmcnaughton/aleph/issues/115)
+
 # [1.13.0](https://github.com/mattjmcnaughton/aleph/compare/v1.12.0...v1.13.0) (2026-07-31)
 
 
