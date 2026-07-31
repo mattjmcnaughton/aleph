@@ -1,3 +1,10 @@
+# [1.15.0](https://github.com/mattjmcnaughton/aleph/compare/v1.14.0...v1.15.0) (2026-07-31)
+
+
+### Features
+
+* **services:** shaping context assembly seam (AL-311) ([07eb8a5](https://github.com/mattjmcnaughton/aleph/commit/07eb8a51db382d0346735001745c2cddd8bc4761)), closes [#119](https://github.com/mattjmcnaughton/aleph/issues/119)
+
 # [1.14.0](https://github.com/mattjmcnaughton/aleph/compare/v1.13.0...v1.14.0) (2026-07-31)
 
 
