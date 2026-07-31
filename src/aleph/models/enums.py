@@ -27,6 +27,47 @@ class PathStatus(StrEnum):
     REFUSED = "refused"
 
 
+class ConversationKind(StrEnum):
+    """Which thread a Conversation is (CONTEXT.md: Shaping conversation).
+
+    A path has at most one of each — ``UNIQUE (path_id, kind)`` (Phase 2B TDD
+    D3). ``lesson`` is the Phase 2A in-lesson thread, unchanged and the column's
+    default so every pre-2B row *is* one; ``shaping`` is the second thread, on
+    the path view. The in-lesson rail never shows shaping turns and vice versa,
+    which is what lets 2A's surface stay bit-identical (PRD §5.8).
+    """
+
+    LESSON = "lesson"
+    SHAPING = "shaping"
+
+
+class PathChangeKind(StrEnum):
+    """The edit a Change applied (CONTEXT.md: Addition, Revision).
+
+    Exactly the two operations of the proposal vocabulary (Phase 2B TDD D1) —
+    a closed vocabulary is what makes "consent is structural" checkable.
+    ``add_lessons`` inserts new lessons (optionally as a new unit);
+    ``revise_lesson`` regenerates one unengaged lesson's content. Removal and
+    reordering are Phase 4, and get a **declined edit** until then.
+    """
+
+    ADD_LESSONS = "add_lessons"
+    REVISE_LESSON = "revise_lesson"
+
+
+class PathChangeStatus(StrEnum):
+    """Whether a Change is in force (CONTEXT.md: Change, Undo).
+
+    ``applied`` -> ``undone`` and no further: once the learner engages with
+    anything the Change created or revised, undo closes and the row is permanent
+    history (Phase 2B TDD D8). There is no ``pending`` — a Change exists only
+    because **Apply** committed it.
+    """
+
+    APPLIED = "applied"
+    UNDONE = "undone"
+
+
 class MessageRole(StrEnum):
     """Who spoke a Message in a conversation (CONTEXT.md: Tutor, Turn).
 

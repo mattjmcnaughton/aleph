@@ -86,6 +86,17 @@ class Lesson(Base, UUIDAuditMixin):
         DateTime(timezone=True),
         nullable=True,
     )
+    # A learner-applied **Revision**'s instruction (Phase 2B TDD D7): set by
+    # ``apply_change`` alongside the reset to ``ungenerated``, read by the
+    # lesson prompt's revision block, and cleared when the row reaches
+    # ``generated`` again. ``NULL`` is every ordinary lesson — which is why the
+    # Phase 1 pipeline needs no changes to carry it.
+    #
+    # This column is the whole of the invariant amendment's storage: content is
+    # immutable once **engaged**, not once generated (CONTEXT.md / PRD §6), so
+    # ``generated -> ungenerated`` exists but only inside ``apply_change`` for
+    # an unengaged lesson (D2 guard).
+    revision_instruction: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     unit: Mapped[Unit] = relationship(back_populates="lessons")
     path: Mapped[Path] = relationship(back_populates="lessons")

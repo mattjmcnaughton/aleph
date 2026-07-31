@@ -11,16 +11,20 @@ from __future__ import annotations
 from aleph.models.attempt import Attempt
 from aleph.models.conversation import Conversation
 from aleph.models.enums import (
+    ConversationKind,
     LessonGenerationState,
     Level,
     MessageRole,
     MessageSource,
+    PathChangeKind,
+    PathChangeStatus,
     PathStatus,
 )
 from aleph.models.feature_flags import UserFeatureOverride
 from aleph.models.lesson import Lesson
 from aleph.models.message import Message
 from aleph.models.path import Path
+from aleph.models.path_change import PathChange
 from aleph.models.quick_check import QuickCheck
 from aleph.models.unit import Unit
 from aleph.models.users import User
@@ -28,6 +32,7 @@ from aleph.models.users import User
 __all__ = [
     "Attempt",
     "Conversation",
+    "ConversationKind",
     "Lesson",
     "LessonGenerationState",
     "Level",
@@ -35,6 +40,9 @@ __all__ = [
     "MessageRole",
     "MessageSource",
     "Path",
+    "PathChange",
+    "PathChangeKind",
+    "PathChangeStatus",
     "PathStatus",
     "QuickCheck",
     "Unit",

@@ -45,6 +45,7 @@ from aleph.domains.progression import UnlockState
 from aleph.models import (
     Attempt,
     Conversation,
+    ConversationKind,
     Lesson,
     LessonGenerationState,
     Level,
@@ -196,7 +197,9 @@ async def _lesson_id_at(path_id: uuid.UUID, position: int) -> uuid.UUID:
 async def _record_turns(path_id: uuid.UUID, lesson_id: uuid.UUID, count: int) -> None:
     async with db.async_session() as session:
         repository = ConversationRepository(session)
-        conversation, _created = await repository.upsert_for_path(path_id)
+        conversation, _created = await repository.upsert_for_path(
+            path_id, kind=ConversationKind.LESSON
+        )
         for index in range(1, count + 1):
             await repository.insert_turn(
                 conversation_id=conversation.id,
@@ -453,7 +456,9 @@ async def test_a_prior_tutor_check_rides_as_text_with_the_learners_answer() -> N
     _user_id, path_id, lesson_id = await _arrange()
     async with db.async_session() as session:
         repository = ConversationRepository(session)
-        conversation, _created = await repository.upsert_for_path(path_id)
+        conversation, _created = await repository.upsert_for_path(
+            path_id, kind=ConversationKind.LESSON
+        )
         await repository.insert_turn(
             conversation_id=conversation.id,
             lesson_id=lesson_id,

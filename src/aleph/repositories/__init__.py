@@ -1,7 +1,7 @@
 """Database repositories for Aleph domain models (data access layer).
 
 One module per bounded context (path, unit, lesson, quick check, attempt,
-conversation).
+conversation, change).
 Repositories are constructed with an injected :class:`AsyncSession` and never
 open or commit transactions — the service layer owns the unit of work. They
 import models and ``db`` only (layering: routers -> services -> repositories).
@@ -13,6 +13,7 @@ Everything is re-exported here so call sites keep importing
 from __future__ import annotations
 
 from aleph.repositories.attempts import AttemptRepository
+from aleph.repositories.changes import ChangeRepository
 from aleph.repositories.conversations import (
     ConversationRepository,
     LocatedMessage,
@@ -28,6 +29,7 @@ from aleph.repositories.users import UserRepository
 
 __all__ = [
     "AttemptRepository",
+    "ChangeRepository",
     "ConversationRepository",
     "FeatureFlagRepository",
     "LessonRepository",

@@ -13,7 +13,7 @@ from sqlalchemy import (
 )
 
 from aleph.config import settings
-from aleph.models import Lesson, LessonGenerationState, Path, Unit
+from aleph.models import Attempt, Lesson, LessonGenerationState, Path, QuickCheck, Unit
 from aleph.repositories._generation import (
     affected_rows,
     claimable_predicate,
@@ -152,6 +152,45 @@ class LessonRepository:
         return [
             (lesson, LessonGenerationState(state)) for lesson, state in result.all()
         ]
+
+    async def list_for_path_with_engagement(
+        self, path_id: uuid.UUID
+    ) -> list[tuple[Lesson, bool]]:
+        """A path's lessons paired with whether an **Attempt** exists on its check.
+
+        The database half of the **Engaged** boundary (Phase 2B TDD D2): this
+        supplies the two facts — the row's ``completed_at`` and this flag — and
+        :func:`aleph.domains.engagement.is_engaged` is the single predicate that
+        decides. Keeping the decision out of SQL is what lets proposal
+        validation, apply, undo and the evals share one rule instead of four
+        ``WHERE`` clauses that drift.
+
+        A correlated ``EXISTS`` rather than a join, for two reasons: it cannot
+        multiply rows if a lesson ever has more than one Attempt row, and it
+        short-circuits. The Attempt is not filtered by user — a lesson belongs
+        to exactly one path and a path to exactly one account, so every Attempt
+        on its Quick check is that learner's — which also matches D2's wording
+        ("an Attempt exists on the lesson's Quick check").
+
+        Ordered by ``position_in_path``, the path's total order, so the caller
+        can hand the result straight to
+        :func:`~aleph.domains.engagement.first_shapeable_position`. A lesson
+        with no Quick check yet (``ungenerated``) reports ``False`` rather than
+        dropping out.
+        """
+        has_attempt = (
+            select(1)
+            .select_from(QuickCheck)
+            .join(Attempt, Attempt.quick_check_id == QuickCheck.id)
+            .where(QuickCheck.lesson_id == Lesson.id)
+            .exists()
+        )
+        result = await self.session.execute(
+            select(Lesson, has_attempt.label("has_attempt"))
+            .where(Lesson.path_id == path_id)
+            .order_by(Lesson.position_in_path)
+        )
+        return [(lesson, attempted) for lesson, attempted in result.all()]
 
     # -- claim ------------------------------------------------------------- #
 
