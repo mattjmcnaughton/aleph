@@ -1,3 +1,10 @@
+# [1.12.0](https://github.com/mattjmcnaughton/aleph/compare/v1.11.1...v1.12.0) (2026-07-31)
+
+
+### Features
+
+* **config:** shaper model slot, Phase 2B settings block + shaping flag (AL-301) ([0488b0d](https://github.com/mattjmcnaughton/aleph/commit/0488b0dd8a493aae0f46f40d912ed48fd31891fe)), closes [#116](https://github.com/mattjmcnaughton/aleph/issues/116)
+
 ## [1.11.1](https://github.com/mattjmcnaughton/aleph/compare/v1.11.0...v1.11.1) (2026-07-31)
 
 
