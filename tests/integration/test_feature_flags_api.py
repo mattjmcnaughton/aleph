@@ -3,6 +3,8 @@
 AL-203 (epic #82, owner amendment 1). Phase 2 ships dark: the ``tutor`` flag
 defaults **off** globally and **on for admins**, so every Phase 2 ticket can
 merge and deploy with zero learner exposure while admins dogfood in production.
+Phase 2B's ``shaping`` flag (AL-301, epic #114) is registered the same way, so
+every resolved map here carries both keys and the assertions read them together.
 This module is the contract test for that story end to end:
 
 * the admin-only override API (403 / 404 / upsert / idempotent delete),
@@ -38,6 +40,10 @@ if TYPE_CHECKING:
 FLAGS_URL = "/api/v1/admin/feature-flags"
 SESSION_URL = "/api/v1/auth/session"
 TUTOR = "tutor"
+# Phase 2B's flag (AL-301), registered alongside ``tutor`` and shipping dark the
+# same way. It is in every resolved map below because the session carries the
+# whole registry, not just the flag a test is about.
+SHAPING = "shaping"
 
 LEARNER = AuthIdentity(
     issuer="https://issuer.example.test",
@@ -90,6 +96,25 @@ async def _flags_on_session(client: AsyncClient) -> dict[str, bool]:
     return response.json()["user"]["feature_flags"]
 
 
+def _resolved(*, tutor: bool, shaping: bool) -> dict[str, bool]:
+    """The full resolved map — the session carries **every** registered flag.
+
+    Spelled as a helper so a new flag joining the registry is one edit here
+    rather than one per assertion, while the assertions stay exact: an extra key
+    leaking into a learner's map (a stale override row, say) still fails.
+    """
+    return {TUTOR: tutor, SHAPING: shaping}
+
+
+def _flag_row(key: str, *, enabled_default: bool, override_count: int = 0) -> dict:
+    """One row of ``GET /api/v1/admin/feature-flags`` (the list is sorted by key)."""
+    return {
+        "key": key,
+        "enabled_default": enabled_default,
+        "override_count": override_count,
+    }
+
+
 async def _override_count() -> int:
     async with db.async_session() as session:
         return (
@@ -131,7 +156,10 @@ async def test_admin_lists_every_registered_flag(
         # ``enabled_default`` is the *global* default — the admin baseline is a
         # resolution-time concern, not a property of the flag.
         assert response.json() == {
-            "flags": [{"key": TUTOR, "enabled_default": False, "override_count": 0}]
+            "flags": [
+                _flag_row(SHAPING, enabled_default=False),
+                _flag_row(TUTOR, enabled_default=False),
+            ]
         }
 
 
@@ -162,21 +190,30 @@ async def test_unknown_flag_or_user_is_404(
 
 
 @pytest.mark.anyio
-async def test_tutor_ships_dark_but_resolves_on_for_admins(
+async def test_dark_flags_resolve_on_for_admins(
     app: FastAPI, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Amendment 1: off for learners, on for admins, defaults untouched."""
+    """Amendment 1: off for learners, on for admins, defaults untouched.
+
+    Both dark phases at once — Phase 2's ``tutor`` (AL-203) and Phase 2B's
+    ``shaping`` (AL-301) — because they are registered the same way and the
+    story is the same one: merge and deploy with zero learner exposure while
+    admins dogfood in production.
+    """
     async with _client(app) as learner:
         await _sign_in(learner, monkeypatch, LEARNER)
-        assert await _flags_on_session(learner) == {TUTOR: False}
+        assert await _flags_on_session(learner) == _resolved(tutor=False, shaping=False)
 
     async with _client(app) as admin:
         await _sign_in(admin, monkeypatch, ADMIN)
-        assert await _flags_on_session(admin) == {TUTOR: True}
-        # The global default is still off — nothing was mutated to make the
+        assert await _flags_on_session(admin) == _resolved(tutor=True, shaping=True)
+        # The global defaults are still off — nothing was mutated to make the
         # admin's map true.
         listed = (await admin.get(FLAGS_URL)).json()["flags"]
-        assert listed == [{"key": TUTOR, "enabled_default": False, "override_count": 0}]
+        assert listed == [
+            _flag_row(SHAPING, enabled_default=False),
+            _flag_row(TUTOR, enabled_default=False),
+        ]
 
 
 @pytest.mark.anyio
@@ -188,7 +225,7 @@ async def test_override_flips_a_learner_on_and_clears_idempotently(
         admin_id = await _sign_in(admin, monkeypatch, ADMIN)
         target = f"{FLAGS_URL}/{TUTOR}/users/{learner_id}"
 
-        assert await _flags_on_session(learner) == {TUTOR: False}
+        assert await _flags_on_session(learner) == _resolved(tutor=False, shaping=False)
 
         response = await admin.put(target, json={"enabled": True})
         assert response.status_code == 200, response.text
@@ -197,33 +234,36 @@ async def test_override_flips_a_learner_on_and_clears_idempotently(
             "user_id": str(learner_id),
             "enabled": True,
         }
-        assert await _flags_on_session(learner) == {TUTOR: True}
+        # The override moves its own flag only; ``shaping`` stays at its default.
+        assert await _flags_on_session(learner) == _resolved(tutor=True, shaping=False)
 
         # The override is one row, and it targets exactly one learner: the
         # admin's own map is unchanged.
         assert await _override_count() == 1
         assert (await admin.get(FLAGS_URL)).json()["flags"] == [
-            {"key": TUTOR, "enabled_default": False, "override_count": 1}
+            _flag_row(SHAPING, enabled_default=False),
+            _flag_row(TUTOR, enabled_default=False, override_count=1),
         ]
 
         # A repeat PUT updates in place rather than inserting a second row.
         assert (await admin.put(target, json={"enabled": False})).status_code == 200
         assert await _override_count() == 1
-        assert await _flags_on_session(learner) == {TUTOR: False}
+        assert await _flags_on_session(learner) == _resolved(tutor=False, shaping=False)
 
-        # An override wins for admins too — including over the admin baseline.
+        # An override wins for admins too — including over the admin baseline,
+        # which still holds for the flag the override says nothing about.
         admin_target = f"{FLAGS_URL}/{TUTOR}/users/{admin_id}"
         assert (await admin.put(admin_target, json={"enabled": False})).status_code == (
             200
         )
-        assert await _flags_on_session(admin) == {TUTOR: False}
+        assert await _flags_on_session(admin) == _resolved(tutor=False, shaping=True)
 
         # DELETE is idempotent: clearing an absent override is still a 204.
         assert (await admin.delete(target)).status_code == 204
         assert (await admin.delete(target)).status_code == 204
-        assert await _flags_on_session(learner) == {TUTOR: False}
+        assert await _flags_on_session(learner) == _resolved(tutor=False, shaping=False)
         assert (await admin.delete(admin_target)).status_code == 204
-        assert await _flags_on_session(admin) == {TUTOR: True}
+        assert await _flags_on_session(admin) == _resolved(tutor=True, shaping=True)
         assert await _override_count() == 0
 
 
@@ -237,14 +277,17 @@ async def test_settings_default_flips_the_flag_without_a_deploy(
         await _sign_in(admin, monkeypatch, ADMIN)
         monkeypatch.setattr(settings, "feature_flag_defaults", f"{TUTOR}:on")
 
-        assert await _flags_on_session(learner) == {TUTOR: True}
+        # One flag flipped, the other left dark: the entry is per key, so
+        # launching Phase 2 never launches Phase 2B by accident.
+        assert await _flags_on_session(learner) == _resolved(tutor=True, shaping=False)
         assert (await admin.get(FLAGS_URL)).json()["flags"] == [
-            {"key": TUTOR, "enabled_default": True, "override_count": 0}
+            _flag_row(SHAPING, enabled_default=False),
+            _flag_row(TUTOR, enabled_default=True),
         ]
 
         target = f"{FLAGS_URL}/{TUTOR}/users/{learner_id}"
         assert (await admin.put(target, json={"enabled": False})).status_code == 200
-        assert await _flags_on_session(learner) == {TUTOR: False}
+        assert await _flags_on_session(learner) == _resolved(tutor=False, shaping=False)
 
 
 @pytest.mark.anyio
@@ -260,7 +303,44 @@ async def test_tutor_flag_enabled_fixture_opens_the_surface_for_a_learner(
     async with _client(app) as learner:
         await _sign_in(learner, monkeypatch, LEARNER)
 
-        assert await _flags_on_session(learner) == {TUTOR: True}
+        assert await _flags_on_session(learner) == _resolved(tutor=True, shaping=False)
+
+
+@pytest.mark.anyio
+async def test_shaping_flag_enabled_fixture_opens_the_surface_for_a_learner(
+    app: FastAPI, monkeypatch: pytest.MonkeyPatch, shaping_flag_enabled: None
+) -> None:
+    """The Phase 2B twin, for the tickets that drive shaping as a learner.
+
+    AL-320/AL-321/AL-340 gate their coverage on this fixture; without it they
+    would be testing the 404 the flag gate returns rather than the shaping
+    surface. It moves ``shaping`` alone — the tutor stays dark, which is what
+    proves the two phases launch independently.
+    """
+    async with _client(app) as learner:
+        await _sign_in(learner, monkeypatch, LEARNER)
+
+        assert await _flags_on_session(learner) == _resolved(tutor=False, shaping=True)
+
+
+@pytest.mark.anyio
+async def test_both_flag_fixtures_compose(
+    app: FastAPI,
+    monkeypatch: pytest.MonkeyPatch,
+    tutor_flag_enabled: None,
+    shaping_flag_enabled: None,
+) -> None:
+    """Requesting both fixtures turns both flags on.
+
+    They mutate one setting (``FEATURE_FLAG_DEFAULTS``), so the additive helper
+    behind them is load-bearing: a plain assignment would leave whichever fixture
+    ran first silently undone, and the suite that needs both surfaces would meet
+    a 404 it could not explain.
+    """
+    async with _client(app) as learner:
+        await _sign_in(learner, monkeypatch, LEARNER)
+
+        assert await _flags_on_session(learner) == _resolved(tutor=True, shaping=True)
 
 
 @pytest.mark.anyio
@@ -278,7 +358,7 @@ async def test_stale_override_rows_are_ignored(
             )
             await session.commit()
 
-        assert await _flags_on_session(learner) == {TUTOR: False}
+        assert await _flags_on_session(learner) == _resolved(tutor=False, shaping=False)
 
 
 @pytest.mark.anyio

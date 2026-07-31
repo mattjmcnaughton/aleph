@@ -98,31 +98,28 @@ def test_non_positive_tutor_bounds_are_rejected(field: str) -> None:
 
 # --- scripts/e2e_backend.py ------------------------------------------------
 # The Playwright harness boots this factory. It mutates the module-level
-# ``settings`` singleton in place, so the whole singleton is snapshotted and
-# restored — whatever fields the factory grows next, they are restored too (an
-# escaped ``stub`` would silently reconfigure the rest of this worker's tests).
+# ``settings`` singleton in place, so ``restored_live_settings`` (tests/unit
+# conftest) hands over the singleton and puts it back afterwards — whatever
+# fields the factory grows next, they are restored too (an escaped ``stub``
+# would silently reconfigure the rest of this worker's tests).
 
 
-def test_e2e_backend_boots_with_the_tutor_slot_stubbed() -> None:
+def test_e2e_backend_boots_with_the_tutor_slot_stubbed(
+    restored_live_settings: Settings,
+) -> None:
     """The browser suite must never reach a live provider for a tutor reply."""
-    from aleph.config import settings as live_settings
     from scripts.e2e_backend import create_stub_app
 
-    snapshot = live_settings.model_dump()
-    try:
-        app = create_stub_app()
+    app = create_stub_app()
 
-        assert app.title == "aleph"
-        assert live_settings.model_tutor == STUB_MODEL_ID
-        # The Phase 1 slots stay stubbed too — the tutor assignment is an
-        # addition, not a replacement.
-        assert live_settings.model_outline == STUB_MODEL_ID
-        assert live_settings.model_lesson == STUB_MODEL_ID
-        assert live_settings.model_judge == STUB_MODEL_ID
-        # And the tutor message cap is lifted, like the other per-account caps:
-        # the e2e projects share one backend + user and would otherwise exhaust
-        # it.
-        assert live_settings.rate_limit_tutor_messages_per_day == 0
-    finally:
-        for name, value in snapshot.items():
-            setattr(live_settings, name, value)
+    assert app.title == "aleph"
+    assert restored_live_settings.model_tutor == STUB_MODEL_ID
+    # The Phase 1 slots stay stubbed too — the tutor assignment is an
+    # addition, not a replacement.
+    assert restored_live_settings.model_outline == STUB_MODEL_ID
+    assert restored_live_settings.model_lesson == STUB_MODEL_ID
+    assert restored_live_settings.model_judge == STUB_MODEL_ID
+    # And the tutor message cap is lifted, like the other per-account caps:
+    # the e2e projects share one backend + user and would otherwise exhaust
+    # it.
+    assert restored_live_settings.rate_limit_tutor_messages_per_day == 0

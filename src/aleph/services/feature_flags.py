@@ -35,7 +35,10 @@ migration and no cleanup pass.
 This is what lets Phase 2 ship dark (epic #82, owner amendment 1): ``tutor``
 defaults **off** globally but is in :data:`ADMIN_DEFAULT_FLAGS`, so every ticket
 merges and deploys with zero learner exposure while admins dogfood the tutor in
-production. Launch (AL-270) is one environment variable.
+production. Launch (AL-270) is one environment variable. ``shaping`` (Phase 2B,
+epic #114 adopted convention 1) is registered the same way and launches the same
+way (AL-370) — a separate flag, so shaping can ship dark or be killed without
+disturbing the already-launched tutor.
 
 Ported from habagou's service of the same name; adapted to aleph's
 ``authz.is_admin(user, settings)`` signature, which takes the config explicitly,
@@ -72,6 +75,11 @@ class FeatureFlag(StrEnum):
 
     # Phase 2's one flag: the in-lesson tutor (the rail, its API, its stream).
     TUTOR = "tutor"
+    # Phase 2B's one flag: shaping (the shaping rail, its API, its stream, and
+    # the apply/undo endpoints). Independent of ``TUTOR`` on purpose — the
+    # in-lesson tutor is already launched, and shaping must be able to ship dark
+    # and be killed on its own without disturbing it.
+    SHAPING = "shaping"
 
 
 # Code defaults per flag. Every FeatureFlag member gets an entry here; a flag
@@ -79,6 +87,9 @@ class FeatureFlag(StrEnum):
 FLAG_DEFAULTS: dict[FeatureFlag, bool] = {
     # Off: Phase 2 merges and deploys dark until AL-270 flips it.
     FeatureFlag.TUTOR: False,
+    # Off: Phase 2B merges and deploys dark until AL-370 flips it (epic #114,
+    # adopted convention 1).
+    FeatureFlag.SHAPING: False,
 }
 
 
@@ -88,7 +99,9 @@ FLAG_DEFAULTS: dict[FeatureFlag, bool] = {
 # applies only to flags with no entry in ``FEATURE_FLAG_DEFAULTS``, so an explicit
 # ``tutor:off`` there turns the flag off for admins too (kill switch), and a
 # per-user override beats it for everyone, admins included.
-ADMIN_DEFAULT_FLAGS: frozenset[FeatureFlag] = frozenset({FeatureFlag.TUTOR})
+ADMIN_DEFAULT_FLAGS: frozenset[FeatureFlag] = frozenset(
+    {FeatureFlag.TUTOR, FeatureFlag.SHAPING}
+)
 
 
 def known_flag_keys() -> frozenset[str]:
