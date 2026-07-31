@@ -456,21 +456,29 @@ safe on Neon in one transaction at this table's size). The streaming path is 2A'
 
 ## 15. Tickets
 
-GitHub issues, cut from this document in a follow-up PR — issues are the source of truth
-(the Phase 1/2 pattern):
+Implementation of this TDD is tracked in GitHub issues, cut from this document — **the
+issues are the source of truth for ticket content and status** (no tickets file in-repo,
+the Phase 1/2 pattern):
 
-- **Label:** `tdd-shape-your-path`; parent epic carrying shared context and the dependency
-  graph (the Phase 2 epic, [#82](https://github.com/mattjmcnaughton/aleph/issues/82), is
-  the template). `for-ai` / `for-human` split as before — expected `for-human` surface:
-  eval labeling and the production ship verification.
-- **Numbering:** AL-3xx. Natural seams, in dependency order: schema + migration 0004 +
-  changes repository (§4) → config + shaper slot (§5.3) → stub shaping sentinels (§11) →
-  shaper agent + predicates (§5.1) → shaping context seam (§5.2) → shaping turn service +
-  proposal SSE (§5.4–§5.5) → apply/undo transactions + endpoints + change history (§5.6–
-  §5.7, §6) → shaping rail frontend (§8) → proposal card + ghost rows + history UI (§8) →
-  instrumentation + queries (§9) → evals (§10, post-launch per the 2A convention if the
-  owner repeats it) → e2e W17–W21 (§11) → docs sweep (`api.md`, `metrics.md`, `evals.md`,
-  CONTEXT.md) → ship verification 👤.
+- **All Phase 2B tickets:** [`label:tdd-shape-your-path`](https://github.com/mattjmcnaughton/aleph/issues?q=is%3Aissue+label%3Atdd-shape-your-path)
+- **Parent epic** carrying shared context, working conventions (including the adopted 2A
+  conventions: ship dark behind the `shaping` flag; evals post-launch), and the
+  ordering/dependency graph:
+  [#114 — epic: Phase 2B — Shape your path (learner-initiated)](https://github.com/mattjmcnaughton/aleph/issues/114)
+- Every ticket additionally labeled
+  [`for-ai`](https://github.com/mattjmcnaughton/aleph/issues?q=is%3Aissue+label%3Atdd-shape-your-path+label%3Afor-ai)
+  (agent-implementable) or
+  [`for-human`](https://github.com/mattjmcnaughton/aleph/issues?q=is%3Aissue+label%3Atdd-shape-your-path+label%3Afor-human)
+  (judgment calls): the ship verification + flag flip (AL-370) and the eval calibration
+  labeling (AL-351).
+- **Numbering:** AL-3xx, one ticket per seam in dependency order — schema/migration 0004
+  (AL-300, §4) → config + shaper slot + flag (AL-301, §5.3) → stub sentinels (AL-302,
+  §11) → shaper agent + predicates (AL-310, §5.1) → context seam (AL-311, §5.2) → turn
+  service + proposal SSE (AL-320, §5.4–§5.5) → apply/undo + change history (AL-321,
+  §5.6–§5.7, §6) → shaping rail (AL-330, §8) → proposal card + ghost rows + history UI
+  (AL-331, §8) → events + queries (AL-340, §9) → e2e W17–W21 (AL-360, §11) → docs sweep
+  (AL-361) → ship verification 👤 (AL-370) → post-launch: evals (AL-350, §10) → calibration
+  labels 👤 (AL-351).
 
 ## Appendix — traceability (PRD's TDD-owned items)
 

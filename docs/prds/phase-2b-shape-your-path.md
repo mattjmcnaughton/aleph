@@ -6,6 +6,12 @@
 > Companion doc: the **[Phase 2B TDD](../tdds/phase-2b-shape-your-path.md)** owns the technical
 > design — the proposal payload and its transport, apply/undo transaction mechanics, revision
 > regeneration, storage schema, and model routing. This PRD stops at the product boundary.
+>
+> Implementation is tracked in GitHub issues labeled
+> [`tdd-shape-your-path`](https://github.com/mattjmcnaughton/aleph/issues?q=is%3Aissue+label%3Atdd-shape-your-path)
+> — the issues (parent epic [#114](https://github.com/mattjmcnaughton/aleph/issues/114) +
+> children) are the source of truth for ticket content and status (TDD §15); no ticket list
+> is duplicated here.
 
 ## 1. Summary
 
