@@ -49,6 +49,58 @@ and are as stateless as Phase 1's — no run counters, they always fire:
   assembled prompt, the reply corrects the lesson, attributes the difference,
   and says what the Quick check expects (CONTEXT.md *contradiction handling*).
 
+**Phase 2B — shaping (TDD §11, D12).** The shaping conversation runs the *same*
+streamed branch as the tutor (a second agent, one stream function), so four more
+question-text sentinels ride the same rules — stateless, stripped, always firing:
+
+- ``[force-proposal-add]``     — emits a ``propose_path_edit`` tool call carrying
+  :func:`build_stub_addition_proposal`'s deterministic 2-lesson **Addition** at
+  ``first_shapeable_position``.
+- ``[force-proposal-revise]``  — emits the same call carrying
+  :func:`build_stub_revision_proposal`'s deterministic **Revision** of the first
+  unengaged lesson, whose instruction is :data:`SHAPING_REVISION_INSTRUCTION`.
+- ``[force-shaping-decline]``  — streams :data:`SHAPING_DECLINED_EDIT_REPLY`
+  verbatim (the **declined edit**, W20's assertion target).
+- ``[force-shaping-failure]``  — raises after two deltas, mid-stream, with deltas
+  still owed (the discard-partial path, as ``[force-tutor-failure]``).
+
+The proposal call is emitted **by name** because ``agents/shaper.py`` (AL-310) is
+being built in parallel and does not exist yet — the same arrangement AL-202 used
+for ``pose_tutor_check``, and the same one to unwind (one definition, imported)
+once the agent lands.
+
+Contract with AL-310/AL-311 (the shaping prompt): the deps block states the
+engagement boundary **as data** (TDD §5.1), and the stub reads two markers out of
+it:
+
+- ``first_shapeable_position=<N>`` — §5.1's ``ShapingCaps.first_shapeable_position``,
+  which that section already precomputes "so the prompt states the boundary as data".
+- ``first_shapeable_lesson_id=<uuid>`` — the id of the lesson *at* that position.
+  This one **extends** §5.1: its ``ShapingDigestEntry`` lists unit/lesson title,
+  ``position_in_path``, unlock state, ``engaged`` and ``outcome``, but no id — yet a
+  ``revise_lesson`` operation names its target *by id*, so the digest has to carry
+  one for a Revision to be expressible at all. AL-310/AL-311 must add it.
+
+Both markers must be rendered as **plain text lines** — ``name=value`` or
+``name: value``, one per line — the shape :func:`_marker_re` builds and the same
+one ``position_in_path`` uses below. The regexes additionally tolerate the
+JSON-serialized form (``"name": "value"``) so a deps block rendered as JSON cannot
+trip a marker that would then fail *loudly* for a reason that looks like a stub
+bug; plain lines remain the contract, and are what the tests exercise.
+
+Presence is mandatory for the matching sentinel: a missing marker raises
+:class:`StubModelForcedError` rather than defaulting, exactly as for
+``position_in_path`` below — a silent default would propose an edit *before* the
+boundary and fail validation for reasons that look like agent error rather than a
+missing contract.
+
+Contract with AL-321 (revisions, D7): apply stores the proposal's instruction on
+the lesson as ``revision_instruction`` and the Phase 1 lesson prompt carries it
+in a revision block. When the stub's own :data:`SHAPING_REVISION_INSTRUCTION`
+appears in a lesson prompt, the regenerated passage embeds
+:data:`REVISED_PASSAGE_MARKER` — the structural link W18 asserts on (the
+instruction reached generation), with no Phase 1 orchestration change.
+
 Contract with AL-032 (``position_in_path``): the lesson agent's prompt **must**
 carry ``position_in_path=<N>`` (the total-order position, TDD §4) so the stub can
 read the position it is generating. Two properties AL-032 must preserve:
@@ -89,7 +141,7 @@ from aleph.agents.outline import LessonOutline, PathOutline, Refusal, UnitOutlin
 from aleph.agents.tutor import TUTOR_CHECK_TOOL_NAME as AGENT_TUTOR_CHECK_TOOL_NAME
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Sequence
+    from collections.abc import AsyncIterator, Iterator, Sequence
 
     from pydantic_ai.messages import ModelMessage
     from pydantic_ai.models.function import AgentInfo, DeltaToolCalls
@@ -107,8 +159,36 @@ FORCE_TUTOR_FAILURE = "[force-tutor-failure]"
 FORCE_TUTOR_REFUSAL = "[force-tutor-refusal]"
 FORCE_TUTOR_CHECK = "[force-tutor-check]"
 FORCE_LESSON_ERROR = "[force-lesson-error]"
-# `position_in_path=<N>` (also tolerates `:` / whitespace) — the AL-032 contract.
-_POSITION_RE = re.compile(r"position_in_path\s*[=:]?\s*(\d+)", re.IGNORECASE)
+# Phase 2B (TDD §11, D12) — question-text sentinels on the same streamed branch,
+# read on the shaping conversation.
+FORCE_PROPOSAL_ADD = "[force-proposal-add]"
+FORCE_PROPOSAL_REVISE = "[force-proposal-revise]"
+FORCE_SHAPING_DECLINE = "[force-shaping-decline]"
+FORCE_SHAPING_FAILURE = "[force-shaping-failure]"
+
+
+def _marker_re(name: str, value: str) -> re.Pattern[str]:
+    """A tolerant regex for a ``name=<value>`` prompt marker (see the docstring).
+
+    The contract every caller documents is a plain text line — ``name=value`` or
+    ``name: value``. The separator is optional and whitespace is free, and the
+    JSON-serialized form ``"name": "value"`` matches too, so a prompt author who
+    renders the deps block as JSON does not trip a mandatory marker. Matching is
+    unanchored, so **first match wins and the marker must be unique** in the
+    request (the AL-032 note below spells out why).
+    """
+    return re.compile(rf'{name}"?\s*[=:]?\s*"?({value})', re.IGNORECASE)
+
+
+# `position_in_path=<N>` — the AL-032 contract.
+_POSITION_RE = _marker_re("position_in_path", r"\d+")
+# The shaping prompt's statement of the engagement boundary — the AL-310/AL-311
+# contract (see the module docstring).
+_FIRST_SHAPEABLE_POSITION_RE = _marker_re("first_shapeable_position", r"\d+")
+_FIRST_SHAPEABLE_LESSON_ID_RE = _marker_re(
+    "first_shapeable_lesson_id",
+    r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",
+)
 # Every sentinel, stripped from the topic/question before it appears in
 # generated text. Alternatives are literal, so ordering is irrelevant.
 _SENTINEL_RE = re.compile(
@@ -119,6 +199,10 @@ _SENTINEL_RE = re.compile(
     r"|\[force-tutor-failure\]"
     r"|\[force-tutor-refusal\]"
     r"|\[force-tutor-check\]"
+    r"|\[force-proposal-add\]"
+    r"|\[force-proposal-revise\]"
+    r"|\[force-shaping-decline\]"
+    r"|\[force-shaping-failure\]"
 )
 
 
@@ -140,6 +224,45 @@ LESSON_ERROR_FALSE_VALUE = "50 degrees Celsius"
 _LESSON_ERROR_TRUE_VALUE = "100 degrees Celsius"
 LESSON_ERROR_FALSE_CLAIM = f"water boils at {LESSON_ERROR_FALSE_VALUE} at sea level"
 LESSON_ERROR_CORRECTION = f"water boils at {_LESSON_ERROR_TRUE_VALUE} at sea level"
+
+# The `propose_path_edit` tool's name (TDD §5.1, D4). A string literal, not an
+# import, because `agents/shaper.py` (AL-310) is being built in parallel and does
+# not exist yet — AL-202 shipped `pose_tutor_check` the same way and AL-220 later
+# swapped it for an import from the agent that registers it. Do the same here
+# once the shaper agent lands: one definition, imported, so a stub emitting a
+# call the agent does not register cannot go CI-green.
+PROPOSE_PATH_EDIT_TOOL_NAME = "propose_path_edit"
+
+# The instruction `[force-proposal-revise]` puts on its Revision, and the marker
+# the regenerated passage then carries (W18). The instruction rides proposal →
+# `revision_instruction` → the Phase 1 lesson prompt (D7); seeing *its own*
+# instruction in a lesson prompt is how the stub knows it is regenerating a
+# revised lesson, so the pair is a closed, exactly-checkable loop.
+#
+# What the loop *does* depend on: AL-321's revision block must carry these words
+# verbatim. Layout is free — :func:`_revision_requested` collapses whitespace on
+# both sides, so re-indenting or re-wrapping the block is safe — but paraphrasing,
+# truncating, or interpolating into the instruction breaks W18 silently.
+SHAPING_REVISION_INSTRUCTION = (
+    "Re-pitch this lesson for someone meeting the idea for the first time: keep "
+    "every factual commitment of the version it replaces, slow the explanation "
+    "down, and work one concrete example all the way through."
+)
+REVISED_PASSAGE_MARKER = "This passage was regenerated from a learner's revision."
+
+# The **declined edit** (CONTEXT.md; PRD §5.7): the graceful reply to an
+# out-of-vocabulary ask. It names what shaping *can* do, does not apologize
+# twice, and reads as neither a failure nor a safety refusal — W20 asserts this
+# exact wording, so it is exported rather than re-described in the suites.
+SHAPING_DECLINED_EDIT_REPLY = (
+    "That is not one of the changes I can make to a path. What shaping can do is "
+    "**add** lessons — on their own or grouped as a new unit — anywhere you have "
+    "not started yet, and **revise** a lesson you have not started yet so it "
+    "lands differently. What it cannot do is remove or reorder lessons, change "
+    "work you have already engaged with, or touch your progress. Your path is "
+    "exactly as it was. Tell me what you were hoping that change would get you "
+    "and there is a good chance an addition or a revision gets you there."
+)
 
 
 def force_lesson_failure(position: int) -> str:
@@ -184,6 +307,11 @@ def _user_text(messages: Sequence[ModelMessage]) -> str:
     return "\n".join(texts)
 
 
+def _collapse_ws(text: str) -> str:
+    """``text`` with every run of whitespace collapsed to a single space."""
+    return " ".join(text.split())
+
+
 def _clean_topic(text: str) -> str:
     """The user text with sentinels removed and whitespace collapsed.
 
@@ -191,7 +319,18 @@ def _clean_topic(text: str) -> str:
     stripping rule, so no sentinel of either era can reach generated prose. The
     name is Phase 1's and is kept — it is imported by the integration suite.
     """
-    return " ".join(_SENTINEL_RE.sub("", text).split())
+    return _collapse_ws(_SENTINEL_RE.sub("", text))
+
+
+def _revision_requested(prompt: str) -> bool:
+    """True when ``prompt`` carries the stub's own revision instruction (D7, W18).
+
+    Compared on whitespace-collapsed text at both ends: the instruction reaches
+    the lesson prompt inside AL-321's revision block, and a template that
+    re-indents or re-wraps its ~40 words must not silently break the W18 link.
+    Word-for-word identity is still required — only whitespace is normalized.
+    """
+    return _collapse_ws(SHAPING_REVISION_INSTRUCTION) in _collapse_ws(prompt)
 
 
 def _read_position(text: str) -> int | None:
@@ -281,9 +420,19 @@ _LESSON_ERROR_OPTIONS = (
     "120 degrees Celsius",
 )
 
+# The revision block (Phase 2B, D7). Fixed wording like the lesson-error block
+# above, and substituted for a body paragraph for the same reason: the §14 word
+# band has to hold with either marker on, or both.
+_REVISION_SECTION = (
+    "### What changed in this pass\n\n"
+    f"{REVISED_PASSAGE_MARKER} It keeps every factual commitment of the version "
+    "it replaces and changes only how the material is pitched, so the lessons "
+    "around it still line up."
+)
+
 
 def _build_read_passage(
-    topic: str, position: int, *, lesson_error: bool = False
+    topic: str, position: int, *, lesson_error: bool = False, revised: bool = False
 ) -> str:
     """A deterministic Markdown Read passage (~200-500 words, §14 band).
 
@@ -303,8 +452,10 @@ def _build_read_passage(
     budgeted with that included.
 
     ``lesson_error`` plants :data:`LESSON_ERROR_FALSE_CLAIM` in place of one body
-    paragraph (``[force-lesson-error]``, W16). Substituting rather than appending
-    keeps the word band intact for any topic length.
+    paragraph (``[force-lesson-error]``, W16); ``revised`` plants
+    :data:`REVISED_PASSAGE_MARKER` in place of another (Phase 2B, D7/W18).
+    Substituting rather than appending keeps the word band intact for any topic
+    length and for any combination of the two.
     """
     seed = _seed(f"{topic}|passage|{position}")
     topic = _passage_topic(topic)
@@ -314,15 +465,21 @@ def _build_read_passage(
         f"This is lesson {position} on **{topic}**. It builds directly on the "
         f"earlier lessons in the path, extending rather than repeating them."
     )
+    sections = [
+        section
+        for section, present in (
+            (_LESSON_ERROR_SECTION, lesson_error),
+            (_REVISION_SECTION, revised),
+        )
+        if present
+    ]
     paragraphs = [
         f"The {_pick(_ASPECTS, seed + i)} of {topic} reward careful, "
         f"{_pick(_ADJECTIVES, seed + i)} study, and this passage walks through "
         f"them one idea at a time so the reader can follow without prior context."
-        for i in range(5 if lesson_error else 6)
+        for i in range(6 - len(sections))
     ]
-    if lesson_error:
-        paragraphs.append(_LESSON_ERROR_SECTION)
-    body = "\n\n".join(paragraphs)
+    body = "\n\n".join(paragraphs + sections)
     bullets = "### What to hold on to\n\n" + "\n".join(
         f"- The {_pick(_ASPECTS, seed + i)} of {topic} stay "
         f"{_pick(_ADJECTIVES, seed + i)} once the earlier lessons have landed."
@@ -366,7 +523,7 @@ def _build_read_passage(
 
 
 def _build_lesson(
-    topic: str, position: int, *, lesson_error: bool = False
+    topic: str, position: int, *, lesson_error: bool = False, revised: bool = False
 ) -> LessonContent:
     """A deterministic, schema-valid lesson for ``topic`` at ``position``.
 
@@ -374,10 +531,17 @@ def _build_lesson(
     canonical false claim and the Quick check is **keyed to it** — the check's
     correct option is the one the (wrong) passage supports, so W16's tutor
     correction has something to be in tension with.
+
+    Under ``revised`` (the prompt carries :data:`SHAPING_REVISION_INSTRUCTION`,
+    D7) the passage carries :data:`REVISED_PASSAGE_MARKER`. Only the passage
+    changes: a Revision regenerates the lesson, and the Quick check is rebuilt
+    from the same deterministic seed as any other generation of this slot.
     """
     if lesson_error:
         return LessonContent(
-            read_passage=_build_read_passage(topic, position, lesson_error=True),
+            read_passage=_build_read_passage(
+                topic, position, lesson_error=True, revised=revised
+            ),
             quick_check=QuickCheck(
                 stem=(
                     "According to this lesson, at what temperature does water "
@@ -401,7 +565,7 @@ def _build_lesson(
     ]
     correct_index = seed % len(options)
     return LessonContent(
-        read_passage=_build_read_passage(topic, position),
+        read_passage=_build_read_passage(topic, position, revised=revised),
         quick_check=QuickCheck(
             stem=f"Which statement best captures lesson {position} on {topic}?",
             options=options,
@@ -465,7 +629,15 @@ def _stub_respond(messages: Sequence[ModelMessage], info: AgentInfo) -> ModelRes
             raise StubModelForcedError(
                 f"forced lesson failure at position_in_path={position}"
             )
-        lesson = _build_lesson(topic, position, lesson_error=FORCE_LESSON_ERROR in text)
+        # The revision block lands wherever AL-321's prompt puts it (system or
+        # user text), so the scan is over the whole request — D7's instruction is
+        # what tells the stub this is a Revision regenerating (W18).
+        lesson = _build_lesson(
+            topic,
+            position,
+            lesson_error=FORCE_LESSON_ERROR in text,
+            revised=_revision_requested(_prompt_text(messages, info)),
+        )
         return ModelResponse(
             parts=[ToolCallPart(tool_name=lesson_tool.name, args=lesson.model_dump())]
         )
@@ -598,6 +770,166 @@ def build_stub_tutor_check(question: str) -> TutorCheckPayload:
     )
 
 
+# --- the proposal payload (Phase 2B, TDD §4/§5.1) ------------------------------
+
+
+class ProposedLesson(TypedDict):
+    """One lesson an Addition inserts."""
+
+    title: str
+
+
+class ProposedUnit(TypedDict):
+    """The new unit an Addition may group its lessons under."""
+
+    title: str
+    summary: str
+
+
+class AddLessonsOperation(TypedDict):
+    """The ``add_lessons`` operation shape (TDD §4)."""
+
+    insert_at_position: int
+    new_unit: ProposedUnit | None
+    lessons: list[ProposedLesson]
+    rationale: str
+    estimated_minutes: int
+
+
+class ReviseLessonOperation(TypedDict):
+    """The ``revise_lesson`` operation shape (TDD §4)."""
+
+    lesson_id: str
+    instruction: str
+    new_title: str | None
+    rationale: str
+
+
+class PathProposalPayload(TypedDict):
+    """The ``propose_path_edit`` arguments the stub emits (AL-310's tool shape).
+
+    Exactly TDD §4's fixed payload — ``{operations, summary}`` over a closed
+    two-shape vocabulary (D1). The shapes are discriminated structurally (an
+    Addition carries ``lessons``, a Revision carries ``lesson_id``), which is how
+    the rest of this module dispatches too; if AL-310's schema ends up tagging
+    them, adding a tag here is additive.
+    """
+
+    operations: list[AddLessonsOperation | ReviseLessonOperation]
+    summary: str
+
+
+# The sentinel Addition's size: "a couple of lessons", well under
+# `MAX_LESSONS_PER_PROPOSAL` (5, TDD §13 — config's number, not the stub's; this
+# module reads no config).
+_ADDITION_LESSON_COUNT = 2
+# Its cost line, in the Proposal card's "adds 2 lessons ≈ 10 min" shape.
+_ADDITION_MINUTES_PER_LESSON = 5
+
+
+def build_stub_addition_proposal(
+    question: str, *, insert_at_position: int
+) -> PathProposalPayload:
+    """A deterministic, valid 2-lesson **Addition** at ``insert_at_position``.
+
+    Public so the unit, integration, and e2e suites can assert the exact payload
+    the ``[force-proposal-add]`` sentinel produces. Titles are distinct by
+    construction and shaped unlike :func:`_build_outline`'s, so an added lesson
+    is recognizable in a rail full of generated ones.
+    """
+    seed = _seed(f"{question}|proposal-add|{insert_at_position}")
+    lessons = [
+        ProposedLesson(
+            title=(
+                f"Added on request: the {_pick(_ASPECTS, seed + index)} "
+                f"({index + 1} of {_ADDITION_LESSON_COUNT})"
+            )
+        )
+        for index in range(_ADDITION_LESSON_COUNT)
+    ]
+    operations: list[AddLessonsOperation | ReviseLessonOperation] = [
+        AddLessonsOperation(
+            insert_at_position=insert_at_position,
+            new_unit=None,
+            lessons=lessons,
+            rationale=(
+                f"You asked for more on the {_pick(_ASPECTS, seed)} here, and the "
+                f"path does not cover them yet."
+            ),
+            estimated_minutes=_ADDITION_LESSON_COUNT * _ADDITION_MINUTES_PER_LESSON,
+        )
+    ]
+    return PathProposalPayload(
+        operations=operations,
+        summary=(
+            f"Adds {_ADDITION_LESSON_COUNT} lessons at position "
+            f"{insert_at_position}, about "
+            f"{_ADDITION_LESSON_COUNT * _ADDITION_MINUTES_PER_LESSON} minutes. "
+            "Nothing you have already worked through moves."
+        ),
+    )
+
+
+def build_stub_revision_proposal(
+    question: str, *, lesson_id: str
+) -> PathProposalPayload:
+    """A deterministic, valid **Revision** of the lesson ``lesson_id``.
+
+    The instruction is :data:`SHAPING_REVISION_INSTRUCTION` verbatim — that is
+    what makes the regenerated passage carry :data:`REVISED_PASSAGE_MARKER` once
+    apply has written it to ``revision_instruction`` (D7, W18).
+    """
+    seed = _seed(f"{question}|proposal-revise|{lesson_id}")
+    operations: list[AddLessonsOperation | ReviseLessonOperation] = [
+        ReviseLessonOperation(
+            lesson_id=lesson_id,
+            instruction=SHAPING_REVISION_INSTRUCTION,
+            new_title=f"Revised on request: the {_pick(_ASPECTS, seed)} of this lesson",
+            rationale=(
+                "You have not started this lesson yet, so it can be re-pitched "
+                "in place rather than added around."
+            ),
+        )
+    ]
+    return PathProposalPayload(
+        operations=operations,
+        summary=(
+            "Revises one lesson you have not started yet, keeping its place in "
+            "the path. Nothing is added, removed, or reordered."
+        ),
+    )
+
+
+def _read_first_shapeable_position(prompt: str) -> int:
+    """The engagement boundary the shaping prompt states (AL-310/AL-311 contract).
+
+    Mandatory, never defaulted: see the module docstring. Without it the stub
+    cannot say where an Addition may legally land.
+    """
+    match = _FIRST_SHAPEABLE_POSITION_RE.search(prompt)
+    if match is None:
+        raise StubModelForcedError(
+            "shaping prompt is missing a parseable 'first_shapeable_position=<N>' "
+            "(the AL-310/AL-311 contract); the stub cannot place a valid Addition "
+            "at the engagement boundary, so [force-proposal-add] could not be "
+            "honoured"
+        )
+    return int(match.group(1))
+
+
+def _read_first_shapeable_lesson_id(prompt: str) -> str:
+    """The id of the first unengaged lesson — the Revision target (same contract)."""
+    match = _FIRST_SHAPEABLE_LESSON_ID_RE.search(prompt)
+    if match is None:
+        raise StubModelForcedError(
+            "shaping prompt is missing a parseable "
+            "'first_shapeable_lesson_id=<uuid>' (the AL-310/AL-311 contract); the "
+            "stub cannot name an unengaged Revision target, so "
+            "[force-proposal-revise] could not be honoured"
+        )
+    return match.group(1)
+
+
 def _last_user_text(messages: Sequence[ModelMessage]) -> str:
     """The most recent user-prompt string — the learner's question this turn.
 
@@ -637,18 +969,18 @@ def _prompt_text(messages: Sequence[ModelMessage], info: AgentInfo) -> str:
     return "\n".join(texts)
 
 
-def _tutor_check_posed(messages: Sequence[ModelMessage]) -> bool:
-    """True when a ``pose_tutor_check`` call is already in this run's messages.
+def _tool_called_this_run(messages: Sequence[ModelMessage], tool_name: str) -> bool:
+    """True when ``tool_name`` was already called in this run's messages.
 
     Statelessness without a counter: the *conversation* records that the check
-    was posed, so the leg after the tool return streams the reply instead of
-    posing a second check.
+    was posed (or the proposal made), so the leg after the tool return streams
+    the reply instead of calling the tool a second time.
 
     Bounded to the parts *after* the last :class:`UserPromptPart` — literally
     this run's messages. A check posed on an *earlier* turn rides in
     ``message_history`` (TDD §5.2), and must neither suppress a later
     ``[force-tutor-check]`` nor inject the "check just above" line into a reply
-    that posed nothing.
+    that posed nothing. The same holds for ``propose_path_edit`` (Phase 2B).
     """
     parts = [part for message in messages for part in getattr(message, "parts", [])]
     asked = max(
@@ -656,8 +988,7 @@ def _tutor_check_posed(messages: Sequence[ModelMessage]) -> bool:
         default=-1,
     )
     return any(
-        isinstance(part, ToolCallPart | ToolReturnPart)
-        and part.tool_name == TUTOR_CHECK_TOOL_NAME
+        isinstance(part, ToolCallPart | ToolReturnPart) and part.tool_name == tool_name
         for part in parts[asked + 1 :]
     )
 
@@ -690,6 +1021,7 @@ def _build_tutor_reply(
     passage_slice: str | None,
     lesson_error: bool,
     check_posed: bool,
+    proposal_made: bool,
 ) -> str:
     """A deterministic Markdown reply to ``question`` (Phase 1's ``_seed`` trick).
 
@@ -719,54 +1051,110 @@ def _build_tutor_reply(
     )
     if check_posed:
         blocks.append("I have put a check to you just above — have a go at it.")
+    if proposal_made:
+        # The Proposal is a card, not prose: the reply points at it and stops
+        # short of claiming anything has changed. Only **Apply** changes a path.
+        blocks.append(
+            "I have put a proposal above. Nothing has changed on your path yet — "
+            "look it over and tap **Apply** if it is what you wanted."
+        )
     blocks.append("Ask a follow-up if any part of that is still unclear.")
     return "\n\n".join(blocks)
+
+
+def _forced_proposal(
+    asked: str, question: str, prompt: str
+) -> PathProposalPayload | None:
+    """The payload a shaping proposal sentinel in ``asked`` forces, if any.
+
+    ``question`` is the cleaned ask (the deterministic seed); ``prompt`` is the
+    whole request, where the shaping deps block states the engagement boundary.
+    Add wins over revise if both are present — an arbitrary but fixed order, so
+    the combination is deterministic rather than undefined.
+    """
+    if FORCE_PROPOSAL_ADD in asked:
+        return build_stub_addition_proposal(
+            question, insert_at_position=_read_first_shapeable_position(prompt)
+        )
+    if FORCE_PROPOSAL_REVISE in asked:
+        return build_stub_revision_proposal(
+            question, lesson_id=_read_first_shapeable_lesson_id(prompt)
+        )
+    return None
+
+
+def _tool_call_deltas(
+    name: str, payload: TutorCheckPayload | PathProposalPayload
+) -> Iterator[DeltaToolCalls]:
+    """``payload`` as a call to the tool ``name``, split across two deltas.
+
+    Two rather than one so the consumer's tool-argument accumulation is
+    exercised, not just a single whole-payload part.
+    """
+    args = json.dumps(payload)
+    split = len(args) // 2
+    yield {0: DeltaToolCall(name=name, json_args=args[:split])}
+    yield {0: DeltaToolCall(json_args=args[split:])}
 
 
 async def _stub_stream(
     messages: list[ModelMessage], info: AgentInfo
 ) -> AsyncIterator[str | DeltaToolCalls]:
-    """The deterministic streamed callback — the tutor branch (TDD §11, D10).
+    """The deterministic streamed callback — the tutor and shaping branches.
 
-    No output-schema dispatch: only the tutor streams, so the shape checks
-    :func:`_stub_respond` performs would have nothing to choose between.
+    Phase 2 TDD §11/D10 for the tutor; Phase 2B TDD §11/D12 for shaping. No
+    output-schema dispatch: only these two stream, and the sentinel in the
+    question is what tells them apart when it matters — a shaping turn with no
+    sentinel is answered like any other question, which is what keeps the
+    in-lesson tutor bit-identical (W21).
 
-    Sentinel precedence, in the order applied below: ``[force-tutor-check]``
-    takes the tool-call leg (nothing else can run on it — there is no text);
-    then ``[force-tutor-refusal]`` chooses the text; then
-    ``[force-tutor-failure]`` interrupts whichever text is being streamed. So
-    combining check + failure fails the leg *after* the check, which is the only
-    reading that keeps each sentinel's meaning intact.
+    Sentinel precedence, in the order applied below: ``[force-tutor-check]`` and
+    then ``[force-proposal-add]`` / ``[force-proposal-revise]`` take the tool-call
+    leg (nothing else can run on it — there is no text); then
+    ``[force-tutor-refusal]`` and ``[force-shaping-decline]`` choose the text;
+    then ``[force-tutor-failure]`` / ``[force-shaping-failure]`` interrupt
+    whichever text is being streamed. So combining a tool sentinel with a failure
+    fails the leg *after* the tool call, which is the only reading that keeps each
+    sentinel's meaning intact.
     """
     asked = _last_user_text(messages)
     question = _clean_topic(asked)
-    check_posed = _tutor_check_posed(messages)
+    prompt = _prompt_text(messages, info)
+    check_posed = _tool_called_this_run(messages, TUTOR_CHECK_TOOL_NAME)
+    proposal_made = _tool_called_this_run(messages, PROPOSE_PATH_EDIT_TOOL_NAME)
 
     if FORCE_TUTOR_CHECK in asked and not check_posed:
-        # Emitted as two deltas so the client's tool-argument accumulation is
-        # exercised, not just a single whole-payload part.
-        args = json.dumps(build_stub_tutor_check(question))
-        split = len(args) // 2
-        yield {0: DeltaToolCall(name=TUTOR_CHECK_TOOL_NAME, json_args=args[:split])}
-        yield {0: DeltaToolCall(json_args=args[split:])}
+        check = build_stub_tutor_check(question)
+        for delta in _tool_call_deltas(TUTOR_CHECK_TOOL_NAME, check):
+            yield delta
+        return
+
+    proposal = _forced_proposal(asked, question, prompt) if not proposal_made else None
+    if proposal is not None:
+        for delta in _tool_call_deltas(PROPOSE_PATH_EDIT_TOOL_NAME, proposal):
+            yield delta
         return
 
     if FORCE_TUTOR_REFUSAL in asked:
         reply = TUTOR_REFUSAL_REPLY
+    elif FORCE_SHAPING_DECLINE in asked:
+        reply = SHAPING_DECLINED_EDIT_REPLY
     else:
-        prompt = _prompt_text(messages, info)
         reply = _build_tutor_reply(
             question,
             passage_slice=stub_passage_slice(prompt),
             lesson_error=LESSON_ERROR_FALSE_CLAIM in prompt,
             check_posed=check_posed,
+            proposal_made=proposal_made,
         )
 
-    fail_after = _FAILURE_AFTER_DELTAS if FORCE_TUTOR_FAILURE in asked else None
+    forced_failure = FORCE_TUTOR_FAILURE in asked or FORCE_SHAPING_FAILURE in asked
+    fail_after = _FAILURE_AFTER_DELTAS if forced_failure else None
     for index, delta in enumerate(_split_deltas(reply)):
         if index == fail_after:
+            kind = "tutor" if FORCE_TUTOR_FAILURE in asked else "shaping"
             raise StubModelForcedError(
-                f"forced tutor failure after {index} deltas (mid-stream)"
+                f"forced {kind} failure after {index} deltas (mid-stream)"
             )
         yield delta
 
