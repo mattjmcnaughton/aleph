@@ -35,9 +35,10 @@ const backendCommand = [
     ` --factory --host 127.0.0.1 --port ${backendPort}`,
 ].join(" && ");
 
-// The W1-W8 user journeys (tests/e2e/journeys/, tagged @w1..@w8). They need the
-// harness's own stub backend — the sentinel topics that force the refusal (W7)
-// and failure (W8) branches only mean something to the stub model — and §12 puts
+// The user journeys (tests/e2e/journeys/): Phase 1's @w1..@w8 and the tutor's
+// @w9 + @w11..@w16. They need the harness's own stub backend — the sentinel
+// topics and prompts that force the refusal (W7/W15), failure (W8/W14) and
+// correction (W16) branches only mean something to the stub model — and §12 puts
 // them on the phone viewport, so they run in the mobile project alone and not at
 // all against a BASE_URL deployment (where only the @smoke specs make sense).
 const journeys = "journeys/**";
@@ -102,7 +103,7 @@ export default defineConfig({
     },
     {
       // The phone viewport §12 mandates (390x844) — the primary target surface,
-      // and the only one that runs the W1-W8 journeys.
+      // and the only one that runs the journeys.
       name: "mobile-390x844",
       testIgnore: bootsOwnServers ? undefined : journeys,
       dependencies: bootsOwnServers ? ["setup"] : [],

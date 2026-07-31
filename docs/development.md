@@ -119,6 +119,14 @@ just dev-fe   # Frontend dev server
 
 The API will be available at `http://localhost:8000`. Interactive docs at `http://localhost:8000/docs`.
 
+**Seeing the tutor locally.** Phase 2 ships behind the `tutor` feature flag, which
+defaults **off** for learners and **on for admins** ([`api.md`](api.md#feature-flags-admin-apiv1admin-al-203)).
+So sign in as the realm's `admin-dev` user (`admin@mattjmcnaughton.com`, an admin
+via `ADMIN_EMAIL_DOMAINS`) and the rail is there; sign in as `dev` and every tutor
+route answers `404` by design. To turn it on for everyone locally, set
+`FEATURE_FLAG_DEFAULTS=tutor:on` in `.env` — the same switch AL-270 flips in
+production.
+
 ## Common Tasks
 
 ```sh
@@ -159,7 +167,10 @@ Tests are organized by type (see [`ci.md`](ci.md) for the CI job that runs each)
   plus the dev frontend. Locally it creates an `aleph_e2e` database and uses the
   machine's preinstalled chromium via `PW_CHROMIUM_PATH`. **Needs compose
   Keycloak** (`just compose-keycloak-up`): `tests/e2e/journeys/` are the PRD §8
-  workflows (`@w1`..`@w8`) and they sign in for real. See [`ci.md`](ci.md).
+  workflows — Phase 1's `@w1`..`@w8` plus the tutor's `@w9` and `@w11`..`@w16`
+  (W10 is reserved for the deferred selection-to-quote) — and they sign in for
+  real. The journeys run in the `mobile-390x844` project only; the `desktop`
+  project runs the non-journey specs. See [`ci.md`](ci.md).
 - `tests/external/` — live-provider contract tests, opt-in via `just test-external`.
 
 Use `@pytest.mark.external` for tests that hit external services (they must skip cleanly

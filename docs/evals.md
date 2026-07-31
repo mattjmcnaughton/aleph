@@ -160,8 +160,9 @@ correctly skipped for that case, which is Layer 1's whole job.
 `RefusalBranch` is the check no validator can make for us — the boundary call is
 the model's. It blocks in **both** directions and the reason string always names
 which: `UNDER-REFUSAL (safety)` is a hard block per PRD §9/§10 regardless of the
-aggregate rate; `OVER-REFUSAL` is the tutor silently failing its core job on a
-legitimate topic, and just as much a reason not to ship.
+aggregate rate; `OVER-REFUSAL` is the *generator* silently failing its core job
+on a legitimate topic, and just as much a reason not to ship. ("Tutor" is the Phase 2
+chat feature, CONTEXT.md; this harness scores the outline and lesson agents.)
 
 **Gating philosophy.** Every Layer 1 pre-filter fails the run (CLI exit 1, red CI
 job): they are the free deterministic floor, and nothing below it is worth

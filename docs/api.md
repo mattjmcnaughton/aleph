@@ -137,7 +137,7 @@ dogfood it in production; launch is AL-270 flipping the default.
 
 | Method | Path | Body | Success | Notes |
 | ------ | ---- | ---- | ------- | ----- |
-| `POST` | `/api/v1/paths/{id}/conversation/messages` | `{lesson_id, content, source?, model?}` | `200 text/event-stream` | **Send a turn** and stream the reply (§5.4). `content` ≤ 2000 chars; `source` is `typed` (default) or `suggestion` — a suggestion sends as if typed. `model` is the **admin-only per-message model override**: `403 forbidden` for a non-admin (checked *before* the allowlist, so a non-admin never learns its shape), `422 validation_error` off the shared `MODEL_ALLOWLIST`, resolved per request and **persisted nowhere**. Pre-stream failures are ordinary JSON error envelopes: `401`, `404` (path not the caller's, or the lesson not on this path), `409 conflict` (the lesson has no generated content — lesson scope is empty until a Read passage exists; or a reply is already in flight on this conversation), `422`, `429 rate_limited`. **SSE starts only once the turn is admitted**, so a `200` means the turn is running, not that it succeeded. |
+| `POST` | `/api/v1/paths/{id}/conversation/messages` | `{lesson_id, content, source?, model?}` | `200 text/event-stream` | **Send a turn** and stream the reply (§5.4). `content` ≤ 2000 chars; `source` is `typed` (default) or `suggestion` — a suggestion sends as if typed. `model` is the **admin-only per-message model override**: `403 forbidden` for a non-admin (checked *before* the allowlist, so a non-admin never learns its shape), `422 validation_error` off the shared `MODEL_ALLOWLIST`, resolved per request and **persisted nowhere**. Pre-stream failures are ordinary JSON error envelopes: `401`, `404` (path not the caller's, or the lesson not on this path), `409 conflict` (the lesson has no generated content — lesson scope is empty until a Read passage exists; or a reply is already in flight on this conversation), `422`, `429 rate_limited` (the tutor daily cap, `RATE_LIMIT_TUTOR_MESSAGES_PER_DAY` — **disabled at its default of 0**, so `429` is unreachable on the default configuration; admins are exempt regardless). **SSE starts only once the turn is admitted**, so a `200` means the turn is running, not that it succeeded. |
 | `GET` | `/api/v1/paths/{id}/conversation` | — | `200 {messages: [...]}` | The path's whole thread, oldest first. Each message: `{id, role, content, lesson_id, lesson_title, tutor_check, created_at}`. **`200` with an empty list when no conversation exists** (the row is created lazily on the first completed turn) — never `404`. There is one conversation **per path**, not per lesson, so `lesson_id`/`lesson_title` (the lesson the message was asked in, PRD §5.8) vary down a single thread. **Unpaginated this phase** (accepted risk, TDD §14). |
 | `DELETE` | `/api/v1/paths/{id}/conversation` | — | `204` | **New conversation** (PRD §5.8): drops the conversation row; `ON DELETE CASCADE` removes its messages. **Idempotent** — clearing an already-empty thread is still `204`. Touches no Phase 1 state (the path and its lessons are untouched). Never refunds quota (D8 — the tutor cap is disabled at its default of 0, so there are no usage rows to refund). |
 | `POST` | `/api/v1/messages/{id}/tutor-check-answer` | `{selected_index}` | `204` | Records the learner's choice into the message's Tutor check as `answered_index`, so a revisit renders the revealed card. Ownership walks message → conversation → path → user (`404` otherwise). A message with **no** Tutor check is `409 conflict`; a `selected_index` outside the stored `options` is `422 validation_error`. Answering twice **overwrites** (a Tutor check is not graded, so there is no first-wins rule to protect). **Creates no Attempt** and changes no lesson, progression, or Attempt-derived metric (PRD §5.5 / W12). |
@@ -152,14 +152,23 @@ progressive rendering back into a blocking reply). Read it with `fetch` +
 | Event | Data | When |
 | ----- | ---- | ---- |
 | `delta` | `{text}` | Each streamed fragment of the reply's Markdown. Concatenated in order, the deltas *are* the reply. |
-| `tutor_check` | `{stem, options, correct_index, explanation, answered_index}` | The tutor posed a Tutor check (`answered_index` is always `null` here). Arrives **before** the reply text it accompanies, and only for a payload that passed validation. |
+| `tutor_check` | `{stem, options, correct_index, explanation, answered_index}` | The tutor posed a Tutor check (`answered_index` is always `null` here). Emitted mid-stream the moment the posed payload passes the agent's validator — a rejected call delivers nothing. At most one per turn, and it may land before, between or after `delta` frames (the tutor is told to keep writing around it), so a client should attach it to the message rather than to a position in the text. |
 | `done` | `{learner_message_id, tutor_message_id}` | Terminal **success**: the turn is persisted. Both ids, because a turn is a unit — the tutor id is what a Tutor-check answer is posted to. |
 | `error` | `{code, message}` | Terminal **failure**: nothing is persisted. `code` is `timeout`, `upstream_error` or `internal_error`; `message` is learner-facing copy that never blames the reader's connection. |
 | *(comment)* | `: ping` | Every `SSE_HEARTBEAT_SECONDS` (15s) of model silence, so a proxy idle-timeout never kills a healthy stream. Ignore it. |
 
-Exactly one terminal event ends every stream, and the whole stream is bounded by
-`TUTOR_REPLY_TIMEOUT` (90s) — a hung provider ends in `error`, never in a dead
-stream.
+Exactly one terminal event ends every stream the client is still reading — a
+hung provider ends in `error`, never in a dead stream. (A stream the learner
+stops is the client aborting the request; nothing terminal is sent, because
+there is nobody left to send it to.)
+
+`TUTOR_REPLY_TIMEOUT` (90s) bounds the **model run**, not the wall clock from
+`POST`: a reply first takes a permit from the tutor's own semaphore
+(`MAX_CONCURRENT_TUTOR_REPLIES`, default 8, deliberately separate from
+generation's), and that queue wait is not charged against the budget. Under a
+burst a send therefore waits rather than failing — the only pre-stream refusals
+are the ones tabulated above — and a slow reply's total time can exceed 90s.
+`: ping` comments cover the whole wait, queueing included.
 
 **A turn exists whole or not at all** (TDD D2). The learner message and the tutor
 reply are written in one transaction when the reply settles; a failed, timed-out,

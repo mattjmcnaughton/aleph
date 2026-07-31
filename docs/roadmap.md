@@ -50,20 +50,23 @@ not just a generated course: a context-aware chat that always knows where you
 are. Docked as a right rail on the web and a sheet over the lesson on mobile, the
 tutor carries the current lesson's context — its Read passage, its Quick check,
 and your answer to it — so "explain this simpler," "go deeper," and "quiz me on
-this" all resolve against exactly what you're looking at. Select a sentence and it
-rides into the composer as a quote. It can also reference what you've already
-covered ("you're on Generics, with Utility Types still ahead") from a thin digest
-of lesson names and progress, without reading another lesson's content. This phase
-is chat and comprehension only; it reads your path and speaks about it, but it does
-not change your path or your flashcards.
+this" all resolve against exactly what you're looking at, streamed back as they
+are written. It can ask a question back, too — a non-scoring **Tutor check** that
+sits outside your lesson progress entirely — and it can reference what you've
+already covered ("you're on Generics, with Utility Types still ahead") from a thin
+digest of lesson names and progress, without reading another lesson's content. This
+phase is chat and comprehension only; it reads your path and speaks about it, but it
+does not change your path or your flashcards.
 
 The phase ships the **in-lesson** tutor first, on its own. The whole-path tutor —
 the rail on the path view, scope switching, and answers that cite lessons as links
 — is a follow-on slice (2B) against the same PRD, gated on whether learners talk to
-the in-lesson tutor at all. Both are specified in the PRD; only the first is built
-before we look at the numbers. Path *editing*, which the Phase 2 mock also explores,
-stays in Phase 4 where it belongs — it depends on resolving a collision with Phase
-1's continuity and immutability rules, which the PRD records.
+the in-lesson tutor at all — and so is **selection-to-quote** (select a sentence of
+the Read passage and send it with your question), cut to keep the first slice simple.
+Both tutors are specified in the PRD; only the in-lesson one is built before we
+look at the numbers. Path *editing*, which the Phase 2 mock also explores, stays in Phase 4
+where it belongs — it depends on resolving a collision with Phase 1's continuity
+and immutability rules, which the PRD records.
 
 ## Phase 3 — Flashcards and spaced repetition
 

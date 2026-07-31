@@ -97,6 +97,15 @@ per-call tokens on every pydantic-ai model-call span, and
 `tutor_reply_completed` carries the per-reply token triple for the same reading
 from the events alone.
 
+Two more §7 items are deliberately not new queries. **Quick-check correctness**
+stays Phase 1's [`quick_check_correctness.sql`](../queries/logfire/quick_check_correctness.sql)
+unchanged — Phase 2 watches it as the answer-leak counter-metric (a sharp rise
+is a §10 leak to investigate, not a win), and it is not sliced by tutor use:
+`quick_check_attempted` carries no tutor dimension, so the split is an ad-hoc
+join against `tutor_message_sent` on `lesson_id` rather than a saved tile. And
+**eval pass rate** is not event-derived at all — it comes from the eval harness
+([`docs/evals.md`](evals.md)), not from Logfire records.
+
 ## Notes & known limits
 
 - **Retention bounds cohort history** (TDD §9, accepted risk): long-window metrics
@@ -178,7 +187,11 @@ Tutor-specific caveats (Phase 2):
   denominator for the failure guardrail and for adoption — D2 persists nothing,
   so the event seam is the only record it happened), but it starts no
   conversation. So `tutor_message_sent` can exceed the persisted thread length,
-  by exactly the failed and stopped replies.
+  by exactly the failed and stopped replies. `tutor_depth` inherits that: it
+  counts turns the learner *asked for*, which is the right denominator for "did
+  one question become a dialogue" but makes its p95 read slightly **high**
+  against `TUTOR_CONTEXT_TURNS` — the carried-context window only ever sees the
+  persisted turns.
 - **A refusal counts as a successful reply.** An over-the-boundary ask answered
   gracefully is a real, persisted turn and is deliberately not machine-tagged
   this phase (TDD D5, PRD §5.7b) — so `failure_rate` means "the tutor broke",
@@ -196,6 +209,23 @@ Tutor-specific caveats (Phase 2):
   arrives as the JSON text `null` — hence the `nullif(…, 'null')` in the query.
   `p95_duration_ms` is over successes only, or it would report
   `TUTOR_REPLY_TIMEOUT` rather than how long a working reply takes.
+- **`duration_ms` includes queue wait.** It is clocked from the moment the reply
+  starts being produced — *before* the tutor concurrency permit
+  (`MAX_CONCURRENT_TUTOR_REPLIES`) is acquired — so a saturated permit pool
+  shows up in `p95_duration_ms` rather than hiding. Two consequences: it can
+  exceed `TUTOR_REPLY_TIMEOUT`, which bounds only the model run, and
+  `duration_ms - ttft_ms` is **not** "streaming time" (TTFT is clocked from
+  inside the permit). This is deliberate — the guardrail measures learner-felt
+  latency (ask → settled reply), not the model's own span.
+- **The daily tutor cap is disabled, and clearing a thread would refund it
+  (D8).** `RATE_LIMIT_TUTOR_MESSAGES_PER_DAY` defaults to **0**, so the limiter
+  never counts and no §7 number is capped today. The count would be over *live*
+  learner-message rows, which **New conversation** deletes — so a thread clear
+  refunds quota. Recorded, not fixed: building the refund-proof append-only
+  usage table is the **precondition for ever raising the cap above 0** (PRD
+  §5.7, TDD D8), not work done while the cap is off. `tutor_message_sent` is
+  unaffected either way — it is emitted at admission and never deleted, so
+  adoption, depth and entry mix survive a thread clear.
 - **A Tutor check shown on a failed reply still counts as shown.**
   `tutor_check_shown` is emitted where the card reaches the rail, mid-stream, so
   a reply that then fails leaves a shown check that persisted nothing and can
