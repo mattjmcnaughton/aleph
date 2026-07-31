@@ -95,6 +95,7 @@ from aleph.dtos.tutor import (
     TutorCheckDTO,
     TutorErrorCode,
 )
+from aleph.models import ConversationKind
 from aleph.repositories import ConversationRepository, LessonRepository
 from aleph.services.generation import usage_tokens
 from aleph.services.lifecycle import (
@@ -601,7 +602,9 @@ class TutorTurnService:
         try:
             async with self._session_factory() as session:
                 repository = ConversationRepository(session)
-                conversation, created = await repository.upsert_for_path(turn.path_id)
+                conversation, created = await repository.upsert_for_path(
+                    turn.path_id, kind=ConversationKind.LESSON
+                )
                 learner, tutor = await repository.insert_turn(
                     conversation_id=conversation.id,
                     lesson_id=turn.lesson_id,

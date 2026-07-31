@@ -22,6 +22,7 @@ from sqlalchemy import update
 
 from aleph import db
 from aleph.models import (
+    ConversationKind,
     Lesson,
     LessonGenerationState,
     Level,
@@ -266,7 +267,9 @@ async def _make_turn(
 ) -> None:
     """Commit one whole turn (learner + tutor rows) onto ``path``'s thread."""
     repository = ConversationRepository(session)
-    conversation, _created = await repository.upsert_for_path(path.id)
+    conversation, _created = await repository.upsert_for_path(
+        path.id, kind=ConversationKind.LESSON
+    )
     learner, tutor = await repository.insert_turn(
         conversation_id=conversation.id,
         lesson_id=lesson.id,
@@ -361,7 +364,9 @@ async def test_clearing_the_thread_refunds_tutor_quota() -> None:
         with pytest.raises(HTTPException):
             await limiter.check_tutor_message(user_id=user.id, is_admin=False)
 
-        await ConversationRepository(session).delete_for_path(path.id)
+        await ConversationRepository(session).delete_for_path(
+            path.id, kind=ConversationKind.LESSON
+        )
         await session.flush()
 
         await limiter.check_tutor_message(user_id=user.id, is_admin=False)

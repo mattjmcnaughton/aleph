@@ -6,6 +6,19 @@ written as a pair at ``max + 1`` / ``max + 2``, so a turn exists whole or not at
 all (D2). There is no state machine and no stale recovery to support: a tutor
 reply is request-scoped, so a stream that dies persists nothing and there is
 nothing to reclaim.
+
+**Every conversation query names a kind** (Phase 2B TDD D3). A path carries two
+threads — its in-lesson thread and its **Shaping conversation** — and a query
+that did not say which would quietly serve one rail the other's turns, the one
+thing PRD §5.8 forbids. So ``kind`` is *required* and keyword-only on every
+thread query: a default would demote the rule to a docstring, letting a shaping
+caller that forgot it read or clear the lesson thread instead — silently, and
+with a clean type-check. Phase 2A's call sites pass
+:attr:`~aleph.models.ConversationKind.LESSON` explicitly and the in-lesson tutor
+stays bit-identical (W21).
+
+:meth:`ConversationRepository.insert_turn` takes no kind: it is handed a
+``conversation_id``, which already names one thread.
 """
 
 from __future__ import annotations
@@ -16,7 +29,14 @@ from typing import TYPE_CHECKING, Any
 from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert
 
-from aleph.models import Conversation, Lesson, Message, MessageRole, Path
+from aleph.models import (
+    Conversation,
+    ConversationKind,
+    Lesson,
+    Message,
+    MessageRole,
+    Path,
+)
 from aleph.repositories._generation import affected_rows
 
 if TYPE_CHECKING:
@@ -69,22 +89,39 @@ class ConversationRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    async def get_for_path(self, path_id: uuid.UUID) -> Conversation | None:
-        """The path's conversation, or ``None`` before the first turn."""
+    async def get_for_path(
+        self,
+        path_id: uuid.UUID,
+        *,
+        kind: ConversationKind,
+    ) -> Conversation | None:
+        """The path's conversation of ``kind``, or ``None`` before its first turn.
+
+        Scoped to one kind, never "whichever thread exists": the other thread's
+        presence must be invisible from here (D3).
+        """
         result = await self.session.execute(
-            select(Conversation).where(Conversation.path_id == path_id)
+            select(Conversation).where(
+                Conversation.path_id == path_id, Conversation.kind == kind
+            )
         )
         return result.scalar_one_or_none()
 
-    async def upsert_for_path(self, path_id: uuid.UUID) -> tuple[Conversation, bool]:
-        """Get the path's conversation, creating it if this is the first turn.
+    async def upsert_for_path(
+        self,
+        path_id: uuid.UUID,
+        *,
+        kind: ConversationKind,
+    ) -> tuple[Conversation, bool]:
+        """Get the path's conversation of ``kind``, creating it on the first turn.
 
         Returns ``(conversation, created)``. ``created`` is what lets the caller
-        emit ``tutor_conversation_started`` exactly once (§5.5) — including when
-        two sends race: the ``ON CONFLICT DO NOTHING`` means the loser inserts
-        nothing, reports ``created=False`` and still receives the winner's row,
-        so ``UNIQUE (path_id)`` is never violated by the normal path (it stays a
-        loud backstop for a genuinely duplicated insert).
+        emit ``tutor_conversation_started`` / ``shaping_conversation_started``
+        exactly once (§5.5) — including when two sends race: the ``ON CONFLICT
+        DO NOTHING`` means the loser inserts nothing, reports ``created=False``
+        and still receives the winner's row, so ``UNIQUE (path_id, kind)`` is
+        never violated by the normal path (it stays a loud backstop for a
+        genuinely duplicated insert).
 
         The loser seeing the winner's row assumes READ COMMITTED (the app's
         isolation level): under REPEATABLE READ the re-read would run against a
@@ -92,28 +129,36 @@ class ConversationRepository:
         """
         result = await self.session.execute(
             insert(Conversation)
-            .values(path_id=path_id)
-            .on_conflict_do_nothing(constraint="uq_conversations_path")
+            .values(path_id=path_id, kind=kind)
+            .on_conflict_do_nothing(constraint="uq_conversations_path_kind")
             .returning(Conversation.id)
         )
         created = result.scalar_one_or_none() is not None
 
-        conversation = await self.get_for_path(path_id)
+        conversation = await self.get_for_path(path_id, kind=kind)
         if conversation is None:  # pragma: no cover - unreachable under READ COMMITTED
-            raise RuntimeError(f"conversation for path {path_id} disappeared")
+            raise RuntimeError(
+                f"{kind.value} conversation for path {path_id} disappeared"
+            )
         return conversation, created
 
-    async def load_thread(self, path_id: uuid.UUID) -> list[ThreadMessage]:
-        """The path's messages in ``position`` order, each with its lesson title.
+    async def load_thread(
+        self,
+        path_id: uuid.UUID,
+        *,
+        kind: ConversationKind,
+    ) -> list[ThreadMessage]:
+        """The thread's messages in ``position`` order, each with its lesson title.
 
-        An empty list when the path has no conversation yet — the read endpoint
-        answers ``200`` with an empty thread rather than ``404`` (§6).
+        An empty list when the path has no conversation of this kind yet — the
+        read endpoint answers ``200`` with an empty thread rather than ``404``
+        (§6), for either rail.
         """
         result = await self.session.execute(
             select(Message, Lesson.title)
             .join(Conversation, Message.conversation_id == Conversation.id)
             .join(Lesson, Message.lesson_id == Lesson.id)
-            .where(Conversation.path_id == path_id)
+            .where(Conversation.path_id == path_id, Conversation.kind == kind)
             .order_by(Message.position)
         )
         return [
@@ -130,6 +175,7 @@ class ConversationRepository:
         source: MessageSource,
         tutor_content: str,
         tutor_check: dict[str, Any] | None = None,
+        proposal: dict[str, Any] | None = None,
     ) -> tuple[Message, Message]:
         """Append a whole turn: the learner message and the tutor reply.
 
@@ -143,6 +189,12 @@ class ConversationRepository:
         computing the same ``max``; if it is ever bypassed,
         ``uq_messages_conversation_position`` raises an ``IntegrityError`` here
         rather than silently interleaving two turns.
+
+        ``proposal`` rides on the tutor row exactly as ``tutor_check`` does
+        (Phase 2B TDD §4): it is the observed, already-validated payload of a
+        **Proposal**. Persisting it is not applying it — a stored proposal
+        changes no path structure until the learner taps **Apply** (D5), which
+        is what keeps consent structural.
         """
         highest = await self.session.scalar(
             select(func.max(Message.position)).where(
@@ -166,20 +218,34 @@ class ConversationRepository:
             role=MessageRole.TUTOR,
             content=tutor_content,
             tutor_check=tutor_check,
+            proposal=proposal,
         )
         self.session.add_all([learner_message, tutor_message])
         await self.session.flush()
         return learner_message, tutor_message
 
-    async def delete_for_path(self, path_id: uuid.UUID) -> bool:
-        """Drop the path's conversation ("new conversation", PRD §5.8).
+    async def delete_for_path(
+        self,
+        path_id: uuid.UUID,
+        *,
+        kind: ConversationKind,
+    ) -> bool:
+        """Drop one of the path's threads ("new conversation", PRD §5.8).
 
         The ``ON DELETE CASCADE`` removes the messages; nothing Phase 1 owns is
-        touched. Returns whether a row was removed, so the endpoint can stay
-        idempotent (``204`` either way) without a pre-read.
+        touched, and neither is the *other* rail's thread — clearing the shaping
+        conversation must not clear the in-lesson one, or vice versa. Returns
+        whether a row was removed, so the endpoint can stay idempotent (``204``
+        either way) without a pre-read.
+
+        The path's **Change history** survives this: ``path_changes`` hangs off
+        the path and its ``message_id`` is ``ON DELETE SET NULL`` (D3), so the
+        cascade nulls the reference and keeps every row.
         """
         result = await self.session.execute(
-            delete(Conversation).where(Conversation.path_id == path_id)
+            delete(Conversation).where(
+                Conversation.path_id == path_id, Conversation.kind == kind
+            )
         )
         return affected_rows(result) > 0
 

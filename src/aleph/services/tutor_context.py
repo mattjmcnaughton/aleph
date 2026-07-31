@@ -73,7 +73,7 @@ from aleph.config import settings
 from aleph.domains.grading import Attempt as GradingAttempt
 from aleph.domains.grading import grade
 from aleph.domains.progression import LessonProgress, derive_unlock_states
-from aleph.models import MessageRole
+from aleph.models import ConversationKind, MessageRole
 from aleph.repositories import (
     AttemptRepository,
     ConversationRepository,
@@ -246,7 +246,9 @@ async def assemble_lesson_context(
     attempt = await AttemptRepository(session).get(
         quick_check_id=quick_check.id, user_id=path.user_id
     )
-    thread = await ConversationRepository(session).load_thread(path.id)
+    thread = await ConversationRepository(session).load_thread(
+        path.id, kind=ConversationKind.LESSON
+    )
 
     deps = TutorDeps(
         topic=path.topic,

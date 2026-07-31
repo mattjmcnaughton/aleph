@@ -47,6 +47,7 @@ from aleph.config import settings
 from aleph.models import (
     Attempt,
     Conversation,
+    ConversationKind,
     Lesson,
     LessonGenerationState,
     Level,
@@ -159,7 +160,9 @@ async def _seed_turn(
     """Commit one whole turn; returns ``(learner_message_id, tutor_message_id)``."""
     async with db.async_session() as session:
         repository = ConversationRepository(session)
-        conversation, _created = await repository.upsert_for_path(path_id)
+        conversation, _created = await repository.upsert_for_path(
+            path_id, kind=ConversationKind.LESSON
+        )
         learner, tutor = await repository.insert_turn(
             conversation_id=conversation.id,
             lesson_id=lesson_id,

@@ -36,6 +36,7 @@ from aleph.auth import AuthIdentity
 from aleph.config import settings
 from aleph.dtos.tutor import SendMessageRequest
 from aleph.models import (
+    ConversationKind,
     Lesson,
     LessonGenerationState,
     Level,
@@ -217,7 +218,9 @@ async def _seed_turn(*, path_id: uuid.UUID, lesson_id: uuid.UUID) -> None:
     """Commit one pre-existing turn so the next one must land at ``max + 1``."""
     async with db.async_session() as session:
         repository = ConversationRepository(session)
-        conversation, _created = await repository.upsert_for_path(path_id)
+        conversation, _created = await repository.upsert_for_path(
+            path_id, kind=ConversationKind.LESSON
+        )
         await repository.insert_turn(
             conversation_id=conversation.id,
             lesson_id=lesson_id,
@@ -316,7 +319,9 @@ async def _thread(path_id: uuid.UUID) -> list[Message]:
     async with db.async_session() as session:
         return [
             entry.message
-            for entry in await ConversationRepository(session).load_thread(path_id)
+            for entry in await ConversationRepository(session).load_thread(
+                path_id, kind=ConversationKind.LESSON
+            )
         ]
 
 

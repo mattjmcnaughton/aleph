@@ -18,6 +18,7 @@ from aleph.models.enums import Level, PathStatus
 if TYPE_CHECKING:
     from aleph.models.conversation import Conversation
     from aleph.models.lesson import Lesson
+    from aleph.models.path_change import PathChange
     from aleph.models.unit import Unit
     from aleph.models.users import User
 
@@ -83,10 +84,22 @@ class Path(Base, UUIDAuditMixin):
         passive_deletes=True,
         order_by="Lesson.position_in_path",
     )
-    # The tutor's thread: at most one per path (Phase 2 TDD §4), deleted with it.
-    conversation: Mapped[Conversation | None] = relationship(
+    # The tutor's threads: at most one per kind (Phase 2B TDD D3 widened Phase
+    # 2's one-per-path), deleted with the path.
+    conversations: Mapped[list[Conversation]] = relationship(
         back_populates="path",
         cascade="all, delete-orphan",
         passive_deletes=True,
-        uselist=False,
+    )
+    # The path's Change history (CONTEXT.md: Change). Owned by the path, not by
+    # a conversation: clearing a thread must never erase it (Phase 2B D3).
+    # Deliberately unordered: the history's reading order is
+    # ``ChangeRepository.list_for_path``'s — ``applied_at DESC`` with ``id``
+    # breaking ties — and a second, tiebreak-less spelling of it here would be a
+    # silent near-miss. This relationship exists for the cascade; nothing reads
+    # it.
+    changes: Mapped[list[PathChange]] = relationship(
+        back_populates="path",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
     )

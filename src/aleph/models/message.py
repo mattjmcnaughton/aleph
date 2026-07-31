@@ -31,7 +31,8 @@ class Message(Base, UUIDAuditMixin):
 
     **Column applicability is by role and app-enforced — there are deliberately
     no CHECK constraints** (TDD §4): ``source`` belongs on learner rows,
-    ``tutor_check`` on tutor rows. ``tutor_check`` holds
+    ``tutor_check`` and ``proposal`` on tutor rows (``proposal`` additionally
+    only in a ``shaping`` conversation, Phase 2B TDD §4). ``tutor_check`` holds
     ``{stem, options, correct_index, explanation, answered_index}``; a Tutor
     check is non-scoring and outside progress — it creates no
     :class:`~aleph.models.Attempt` and touches no Phase 1 table, which is a
@@ -84,5 +85,16 @@ class Message(Base, UUIDAuditMixin):
     # Reassign, never mutate in place: plain JSONB has no ORM mutation tracking,
     # so an in-place dict edit is invisible to the session and never flushed.
     tutor_check: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    # The tutor's **Proposal** — its validated edit plan (CONTEXT.md) — carried
+    # exactly as ``tutor_check`` is, and under the same reassign-never-mutate
+    # rule. ``{operations: [...], summary}`` (Phase 2B TDD §4): data, not prose;
+    # the reply text explains, this payload is what applies.
+    #
+    # **The Proposal's resolution state is derived, never stored here** (D3): it
+    # is *applied* if a live ``path_changes`` row references this message,
+    # *undone* if that row is undone, *superseded* if a later proposal was
+    # applied first and re-validation now fails, else *pending*. No status
+    # column means no status to keep consistent.
+    proposal: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
 
     conversation: Mapped[Conversation] = relationship(back_populates="messages")

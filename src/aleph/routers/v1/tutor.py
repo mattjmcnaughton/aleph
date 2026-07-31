@@ -77,7 +77,10 @@ from aleph.dtos.tutor import (
     TutorCheckAnswerRequest,
     TutorCheckDTO,
 )
-from aleph.models import User  # noqa: TC001 - FastAPI resolves annotations.
+from aleph.models import (  # noqa: TC001 - FastAPI resolves annotations.
+    ConversationKind,
+    User,
+)
 from aleph.repositories import ConversationRepository
 from aleph.routers.v1.paths import (  # noqa: TC001 - FastAPI resolves annotations.
     OwnedPath,
@@ -287,7 +290,9 @@ async def get_conversation(path: OwnedPath, session: Session) -> ConversationRes
     the thread join rather than looking it up per message. Unpaginated this
     phase (an accepted risk, TDD §14).
     """
-    thread = await ConversationRepository(session).load_thread(path.id)
+    thread = await ConversationRepository(session).load_thread(
+        path.id, kind=ConversationKind.LESSON
+    )
     return ConversationResponse(messages=[_message_dto(entry) for entry in thread])
 
 
@@ -306,7 +311,9 @@ async def delete_conversation(path: OwnedPath, session: Session) -> Response:
     the cap were enabled is the recorded precondition for enabling it, not work
     to do here.
     """
-    await ConversationRepository(session).delete_for_path(path.id)
+    await ConversationRepository(session).delete_for_path(
+        path.id, kind=ConversationKind.LESSON
+    )
     await session.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
