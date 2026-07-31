@@ -308,6 +308,16 @@ export function quickCheckOptions(page: Page): Locator {
 }
 
 /**
+ * The open lesson's title, as the learner reads it — the page's one `h1`.
+ *
+ * Every caller wants it for the same reason (to say "this lesson, not that
+ * one"): the rail's scope chip names it, and W11 tells two lessons apart by it.
+ */
+export async function lessonTitle(page: Page): Promise<string> {
+  return (await page.getByRole("heading", { level: 1 }).innerText()).trim();
+}
+
+/**
  * The invariants a generated lesson must satisfy (§14, TDD §12): a non-empty
  * Read passage and a single-select Quick check of 3-4 options with a stem.
  * Returns the option count so the caller can pick an answer.
@@ -373,7 +383,18 @@ export async function revealedCorrectIndex(page: Page): Promise<number> {
 export async function answerQuickCheck(page: Page, index: number): Promise<Reveal> {
   await page.locator(`label[for="quick-check-option-${index}"]`).click();
   await page.getByTestId("quick-check-submit").click();
+  return readReveal(page);
+}
 
+/**
+ * Read the Outcome the Attempt just submitted revealed.
+ *
+ * Split out of `answerQuickCheck` because how the two taps are *made* is not
+ * always a plain click — the tutor journeys reach past an open bottom sheet with
+ * `tapAboveRail` — while what the reveal means is the same either way, and
+ * should be read in exactly one place.
+ */
+export async function readReveal(page: Page): Promise<Reveal> {
   const outcomeReveal = page.getByTestId("outcome-reveal");
   // A synchronous POST, but it is still a round trip on a loaded machine.
   await expect(outcomeReveal).toBeVisible({ timeout: ACTION_TIMEOUT });
