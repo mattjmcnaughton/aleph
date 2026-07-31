@@ -95,10 +95,10 @@ These are in the mock. They are not this phase. Naming them here is the point: t
 
 | Deferred | Mock | Goes to |
 | --- | --- | --- |
-| **In-path tutor** — the rail on the path view, whole-path scope, answers citing lessons as links, the "Shaky" badge on lessons with missed Quick checks | Turn 2 (2b) | **Phase 2B** — a follow-on slice against this PRD's §6 seams, no new PRD needed |
-| **Scope switching** — the context chip's one-tap "Ask about the whole path", the lesson-name dividers in a mixed-scope thread | Turn 2 | **Phase 2B** |
-| **Selection to quote** — select a span of the Read passage, "Ask the tutor about this", the quote riding into the composer and that turn's context | Turn 2 (2a) | **Phase 2B** — slick, but not load-bearing for activation, and touch-selection UI is the phase's fiddliest frontend work. The `messages` schema takes a quote column additively when it lands |
-| **Path editing** — proposals, ghost-row previews, apply, undo, change history, destructive-change semantics | Turn 3 | **Phase 4** (adaptive paths), where the roadmap already puts it |
+| **In-path tutor** — the rail on the path view, whole-path scope, answers citing lessons as links, the "Shaky" badge on lessons with missed Quick checks | Turn 2 (2b) | **A later Q&A slice, sequenced against usage** — no longer "2B" (that name now belongs to shaping; see the path-editing row). This PRD's §6 seams still hold for it when it comes |
+| **Scope switching** — the context chip's one-tap "Ask about the whole path", the lesson-name dividers in a mixed-scope thread | Turn 2 | The same later Q&A slice |
+| **Selection to quote** — select a span of the Read passage, "Ask the tutor about this", the quote riding into the composer and that turn's context | Turn 2 (2a) | Deferred with the Q&A slice — not load-bearing for activation, and touch-selection UI is the fiddliest frontend work here. The `messages` schema takes a quote column additively when it lands |
+| **Path editing** — proposals, ghost-row previews, apply, undo, change history | Turn 3 | **Phase 2B** for the learner-initiated slice, by owner re-scope — see the **[Phase 2B PRD — Shape your path](phase-2b-shape-your-path.md)**. Destructive shapes (remove/reorder) and *system-proposed* edits stay **Phase 4** |
 | **Flashcard drafting from conversation** | — | **Phase 3** |
 
 Also out: cross-path memory, voice, attachments, sharing a conversation, tutor-authored lesson
@@ -109,9 +109,11 @@ content, and any tutor write to progress or path structure.
 > the flashcard signal Phase 4 nominally waits for. It is blocked on something harder: Phase 1's
 > **continuity** invariant (lesson *N+1* is generated conditioned on lessons *1…N*) and its
 > **immutability** rule (content is fixed once generated). Inserting or removing a unit mid-path
-> breaks both. Whoever writes the Phase 4 PRD owns that collision; the mock's own "additive by
-> default" rule is the most promising way through, because appending after the learner's position is
-> the one edit shape that leaves continuity intact. Recorded here so it is not rediscovered late.
+> breaks both. ~~Whoever writes the Phase 4 PRD owns that collision~~ — **resolved: the
+> [Phase 2B PRD](phase-2b-shape-your-path.md) owns it**, and it takes exactly the route this note
+> predicted: additive-only edits (plus revision of not-yet-engaged lessons), with immutability
+> amended to *immutable once engaged*. Removal and reordering, which the additive rule cannot
+> save, remain Phase 4's to design.
 
 ## 5. Functional requirements
 
@@ -145,9 +147,10 @@ content, and any tutor write to progress or path structure.
 - Suggestions are shown in the empty state and after a reply settles. They are a starting vocabulary,
   not a menu the learner is confined to — the composer always accepts free text.
 
-**5.4 Selection to quote — deferred to Phase 2B**
+**5.4 Selection to quote — deferred**
 - Removed from this phase's scope (§4). The section number stays reserved so cross-references
-  hold; the requirement text lives with the mock (Turn 2a) and returns with Phase 2B.
+  hold; the requirement text lives with the mock (Turn 2a) and returns with the later Q&A slice
+  (it is no longer part of 2B — §4).
 
 **5.5 Tutor check**
 - "Quiz me on this" produces a **Tutor check**: a question the tutor asks, with selectable options
@@ -493,7 +496,7 @@ Phase 2 is shipped when:
 | "Explain this simpler," "go deeper," "quiz me on this" | §5.3, §5.5 |
 | References what you've already covered | §5.2 (path digest) |
 | Reads your path but does not change it | §4, §5.5, §10, §12 |
-| Whole-path context on the path view | **Deferred to Phase 2B** — §4 |
+| Whole-path context on the path view | **Deferred to a later Q&A slice** — §4 (2B now names the shaping slice, [Phase 2B PRD](phase-2b-shape-your-path.md)) |
 
 **To the mock**
 
@@ -502,6 +505,6 @@ Phase 2 is shipped when:
 | Turn 1 (1a) desktop rail, (1b) mobile entry points, (1c) empty / streaming / quiz / error states | Yes — §5.1, §5.6, §5.7 |
 | Turn 1 (1c) the daily-cap panel | No — no cap in this phase (§5.7); the panel is drawn and waiting |
 | Turn 2 (2a) in-lesson tutor, suggestions | Yes — §5.2, §5.3 |
-| Turn 2 (2a) selection-to-quote | No — Phase 2B (§4, §5.4) |
-| Turn 2 (2b) in-path tutor, scope switching, citations as links, "Shaky" badge | No — Phase 2B |
-| Turn 3 proposals, ghost rows, apply, undo, change history | No — Phase 4 |
+| Turn 2 (2a) selection-to-quote | No — deferred with the later Q&A slice (§4, §5.4) |
+| Turn 2 (2b) in-path tutor, scope switching, citations as links, "Shaky" badge | No — a later Q&A slice (§4) |
+| Turn 3 proposals, ghost rows, apply, undo, change history | No — **Phase 2B** (learner-initiated: [Phase 2B PRD](phase-2b-shape-your-path.md)); system-proposed edits and destructive shapes remain Phase 4 |

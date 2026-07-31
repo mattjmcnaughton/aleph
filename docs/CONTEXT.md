@@ -5,11 +5,12 @@ code — same word, same meaning, everywhere. When a term here has a precise nam
 synonym (say **path**, not "course"; **Quick check**, not "quiz question").
 
 > Status: **living document, started at the Phase 1 PRD, extended by the Phase 1 TDD** (states,
-> generation mechanics, model slots), **the Phase 2 PRD** (the tutor) **and the Phase 2 TDD**
-> (the tutor model slot, reply transport). References:
+> generation mechanics, model slots), **the Phase 2 PRD** (the tutor), **the Phase 2 TDD**
+> (the tutor model slot, reply transport) **and the Phase 2B PRD** (shaping). References:
 > [`README.md`](../README.md) · [`roadmap.md`](roadmap.md) ·
 > [Phase 1 PRD](prds/phase-1-path-generation.md) · [Phase 1 TDD](tdds/phase-1-path-generation.md) ·
-> [Phase 2 PRD](prds/phase-2-tutor.md) · [Phase 2 TDD](tdds/phase-2-tutor.md).
+> [Phase 2 PRD](prds/phase-2-tutor.md) · [Phase 2 TDD](tdds/phase-2-tutor.md) ·
+> [Phase 2B PRD](prds/phase-2b-shape-your-path.md) · [Phase 2B TDD](tdds/phase-2b-shape-your-path.md).
 
 ## Core domain
 
@@ -38,7 +39,7 @@ synonym (say **path**, not "course"; **Quick check**, not "quiz question").
 | **On-demand generation** | Generating a lesson's content when the learner reaches it, rather than all up front. |
 | **Prefetch (+N)** | Generating the next *N* lessons ahead of where the learner is, to hide generation latency. |
 | **Continuity** | The rule that lesson *N+1* is generated with awareness of the content of lessons *1…N*, so the path builds on itself and never re-teaches or contradicts earlier lessons. |
-| **Multi-model architecture** | More than one model is used across generation. Realized as configurable **model slots** — *outline*, *lesson*, *judge* (Phase 1 TDD §5.3), plus *tutor* (Phase 2 TDD §5.3) — each an OpenRouter model id. |
+| **Multi-model architecture** | More than one model is used across generation. Realized as configurable **model slots** — *outline*, *lesson*, *judge* (Phase 1 TDD §5.3), *tutor* (Phase 2 TDD §5.3), plus *shaper* (Phase 2B TDD §5.3) — each an OpenRouter model id. |
 | **Path status** | The lifecycle of a path's outline generation: *pending* → *generating* → *ready*, with *failed* (retryable) and *refused* (terminal, safety) branches (TDD §4). |
 | **Refused** | The path status when the outline agent declines an over-the-boundary topic via its structured refusal output. A first-class result with a graceful message — never conflated with *failed* (TDD D12). |
 | **Trigger + poll** | The delivery model for generated content: a POST triggers generation and returns immediately; the client polls a GET until the state resolves (TDD D5, §5.4). |
@@ -52,7 +53,7 @@ synonym (say **path**, not "course"; **Quick check**, not "quiz question").
 | **Progression** | Moving through a path's lessons linearly; the next lesson unlocks as the prior completes. |
 | **Mark complete** | The learner action that records a lesson as done. Completion, not correctness, is what counts (the Quick check is non-gating). |
 | **Unlock state** | Where a lesson sits on the learner's path: *locked* → *available* → *complete*. The learner-facing axis. (The mock's path rail labels this state "current" for the available lesson; *available* is the term, "current" is only a UI label.) |
-| **Generation state** | Whether a lesson's content exists yet: *ungenerated* → *generating* → *generated*, with *failed* as the retryable error branch (TDD §4). The system/AI axis, driven by on-demand generation. Orthogonal to Unlock state — a lesson can be *available but ungenerated* (generated the moment the learner reaches it). Content is immutable once *generated*. |
+| **Generation state** | Whether a lesson's content exists yet: *ungenerated* → *generating* → *generated*, with *failed* as the retryable error branch (TDD §4). The system/AI axis, driven by on-demand generation. Orthogonal to Unlock state — a lesson can be *available but ungenerated* (generated the moment the learner reaches it). Content is immutable once **engaged** (Phase 2B amendment — was "once generated"): between *generated* and *engaged* the one mutation path is a learner-applied **Revision**. |
 | **Progress** | The persisted record of which lessons/units are complete, per path, per account. |
 | **Switcher** | The "Your paths" UI for moving between a learner's multiple paths, each keeping its own progress. |
 | **Delete path** | Removing a path and its progress (confirmed, not undoable in MVP). Doubles as **reset**: with no regenerate, deleting and creating anew is how a learner discards an unsatisfying path. |
@@ -64,19 +65,41 @@ this document for what is deferred.
 
 | Term | Meaning |
 | --- | --- |
-| **Tutor** | The context-aware chat that knows where the learner is. It reads the path and speaks about it; in Phase 2 it changes nothing. ("Tutor" names the feature and the assistant's turn in a conversation — the product has no separate assistant persona name.) |
+| **Tutor** | The context-aware chat that knows where the learner is. In lesson scope it reads the path and speaks about it, changing nothing; in the **Shaping conversation** (Phase 2B) it may change path *structure*, and only through an applied **Proposal** — never progress, never silently. ("Tutor" names the feature and the assistant's turn in a conversation — the product has no separate assistant persona name.) |
 | **Rail** | The tutor's surface: a docked right column on desktop, a sheet over the lesson on a phone. One surface, two presentations — not two features. Unqualified, "the rail" means this. The path view's units-and-lessons list is the **path rail** and the desktop left column is the **Sidebar** — three surfaces, three names (the code keeps them apart as `tutor-rail`, `path-rail`, `Sidebar`). |
 | **Conversation** | The persisted thread of messages, **one per path** (not per lesson). Survives moving between lessons and between sessions; deleted with its path. |
 | **Message** | A single utterance in a conversation — learner or tutor — recording the **lesson it was asked in**, and optionally a **Tutor check**. |
 | **Turn** | One learner Message and the tutor Message it produced, as a unit. Turns persist atomically — a turn exists whole or not at all — and are what the tutor's carried-context window counts (Phase 2 TDD §5.2). Two Messages make one Turn; avoid "turn" for a single message. |
-| **Scope** | What the tutor can see for a turn. **Lesson scope** (Phase 2): the current lesson's Read passage, Quick check, the learner's Attempt, plus the Path digest. **Path scope** (deferred): every unit and lesson with progress, but never a lesson's body. |
+| **Scope** | What the tutor can see for a turn. **Lesson scope** (Phase 2): the current lesson's Read passage, Quick check, the learner's Attempt, plus the Path digest. **Path scope** (deferred with the Q&A slice): every unit and lesson with progress, but never a lesson's body. **Shaping scope** (Phase 2B) is defined in the Shaping table below. |
 | **Path digest** | The thin whole-path context available in lesson scope: topic, level, and the ordered unit/lesson **names with unlock state**. Names and state only — never another lesson's Read passage. It is how the tutor answers "have I covered this already?". |
 | **Context chip** | The line above the composer naming the current Scope (*Reading · Generic constraints*). The learner-facing statement of what the tutor can see. |
-| **Quote** | A span of the current Read passage the learner selected and sent with their question. Visible in the sent message and part of that turn's context. (**Phase 2B** — selection-to-quote was cut from Phase 2; see the phase boundaries below.) |
+| **Quote** | A span of the current Read passage the learner selected and sent with their question. Visible in the sent message and part of that turn's context. (Deferred — cut from Phase 2, and no longer part of 2B; see the phase boundaries below.) |
 | **Suggestion** | A one-tap ask offered by the rail — *Explain this simpler · Go deeper · Quiz me on this · Show me a real example*. Sent as if typed; never a constraint on free text. |
 | **Tutor check** | A question the **tutor** asks back inside a conversation, with options and immediate feedback. **Non-scoring and outside progress**: it is not a Quick check, creates no **Attempt**, and touches no progress or metric. It persists only as an artifact of its conversation, deleted with it. (Distinct entity, distinct name — do not call it a Quick check, and avoid "ephemeral": it *is* stored, with the learner's answer, for the life of the thread.) |
 | **Grounded** | The property that a tutor reply is anchored in the current lesson's Read passage and does not contradict it. The behavior ships now; as an eval rubric item it lands with the post-launch tutor evals. |
 | **Contradiction handling** | The tutor's behavior on a **checkable factual error** in a lesson: correct it, attribute the difference plainly, and say what the Quick check expects (Phase 2 PRD §5.7b). Nothing is regenerated or mutated. Incomplete is not wrong — a level-scoped simplification is never flagged. (A machine-readable *flag event* was cut from Phase 2; the behavior lives in reply text only.) |
+
+## Shaping (Phase 2B)
+
+Phase 2B vocabulary — the tutor that changes the path, on instruction only. Spec:
+[Phase 2B PRD](prds/phase-2b-shape-your-path.md).
+
+| Term | Meaning |
+| --- | --- |
+| **Shape your path** | The flow: a conversation on the path view that ends in learner-approved edits to the path's structure. (The roadmap's name for the Turn 3 mock; the learner-initiated half is Phase 2B, the system-proposed half stays Phase 4.) |
+| **Shaping rail** | The tutor's surface on the **path view** — same rail grammar (docked column / sheet), its own thread. Unqualified, "the rail" still means the in-lesson tutor surface. |
+| **Shaping conversation** | The second persisted thread per path (conversation kind `shaping`), separate from the in-lesson thread. The in-lesson rail never shows it, and vice versa. |
+| **Shaping scope** | What the tutor sees in a shaping conversation: topic, level, the Path digest, each attempted lesson's **Outcome**, and the Change history. Never a lesson's body. |
+| **Proposal** | The tutor's structured, validated edit plan, rendered as a card in the thread: one or more **Additions**/**Revisions**, each with rationale and cost ("adds 2 lessons ≈ 10 min"). Data, not prose — the payload is what applies. |
+| **Addition** | An edit that inserts new lessons (optionally as a new unit) **at or after the learner's first non-engaged position**. The only way a path grows. Added lessons are ordinary `ungenerated` lessons — Phase 1 machinery generates them. |
+| **Revision** | An edit that regenerates a **not-yet-engaged** lesson's content per the learner's instruction. Keeps the lesson's slot; the title may adjust. The one mutation between *generated* and *engaged*. |
+| **Engaged** | The immutability boundary: a lesson with a recorded **Attempt** or marked **complete**. Engaged content is never added before, revised, or removed by any shaping operation, and engaging with a Change's content ends its undo window. |
+| **Ghost row** | A proposed lesson/unit previewed in place in the path rail (iris, not teal) before the learner applies. The mock's drawing of "see it before you say yes". |
+| **Apply** | The explicit learner tap that turns a Proposal into a **Change**. The only write path into path structure — never inferred from conversation text. |
+| **Change** | An applied edit, the unit of history and undo: what it did, what it replaced, when, and its status (*applied* / *undone*). Owned by the path; survives a cleared thread. |
+| **Undo** | Reverting a Change exactly — until the learner engages with anything it created or revised. After that the Change is permanent history. Undo never touches progress. |
+| **Change history** | The read-only, plain-language record of every Change on a path, visible from the shaping rail. |
+| **Declined edit** | The tutor's graceful reply to an out-of-vocabulary ask (remove, reorder, revise engaged work, touch progress): names what shaping can do. Distinct wording from both failure and safety refusal. |
 
 ## Quality, safety & measurement
 
@@ -109,14 +132,19 @@ phase:
 - **Tutor** in **lesson scope** — the in-lesson rail, its **Suggestions**, its **Tutor check**, one
   **Conversation** per path, and streamed replies: **shipped (Phase 2)**. Everything in "The tutor"
   above is live except where a row says otherwise.
+- **Shape your path, learner-initiated** — the shaping rail, Proposals, Additions, Revisions,
+  Apply/Undo, Change history: **Phase 2B, in design** ([PRD](prds/phase-2b-shape-your-path.md)).
+  "2B" now names this slice, by owner re-scope — not the Q&A slice below.
 - **Path scope** / scope switching / lesson citations as links / the **Shaky** badge on a lesson with
-  missed Quick checks — the in-path tutor (**Phase 2B**, a follow-on slice against the Phase 2 PRD).
-- **Quote** / selection-to-quote — cut from Phase 2 to keep the first slice simple (**Phase 2B**).
+  missed Quick checks — the in-path *Q&A* tutor (**a later slice, sequenced against usage**;
+  formerly called 2B, still specified in the Phase 2 PRD).
+- **Quote** / selection-to-quote — cut from Phase 2 to keep the first slice simple; deferred with
+  the Q&A slice above.
 - **Summarized carried context** — Phase 2 carries a bounded window of the most recent turns and
   **drops** what falls out of it; summarizing older turns instead is a later upgrade behind the same
   context seam (Phase 2 TDD D6).
 - **Flashcard** / **spaced repetition** / grading (**Again/Hard/Good/Easy**) — retention loop (**Phase 3**).
-- **Shape your path** — adaptive, learner-approved path edits: proposals, ghost-row previews, apply,
-  undo, change history (**Phase 4**). Shown in the Phase 2 mock, but deferred — it collides with
-  Phase 1's **Continuity** and immutability rules (Phase 2 PRD §4).
+- **System-proposed path edits** — Aleph proposing changes unprompted from miss data, plus the
+  destructive edit shapes (remove, reorder, touching engaged work): **Phase 4**, building on 2B's
+  Proposal/Apply machinery.
 - **Streak / goal ring / daily minutes** — light gamification (**Phase 5**).
