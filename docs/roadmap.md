@@ -58,15 +58,19 @@ digest of lesson names and progress, without reading another lesson's content. T
 phase is chat and comprehension only; it reads your path and speaks about it, but it
 does not change your path or your flashcards.
 
-The phase ships the **in-lesson** tutor first, on its own. The whole-path tutor —
-the rail on the path view, scope switching, and answers that cite lessons as links
-— is a follow-on slice (2B) against the same PRD, gated on whether learners talk to
-the in-lesson tutor at all — and so is **selection-to-quote** (select a sentence of
-the Read passage and send it with your question), cut to keep the first slice simple.
-Both tutors are specified in the PRD; only the in-lesson one is built before we
-look at the numbers. Path *editing*, which the Phase 2 mock also explores, stays in Phase 4
-where it belongs — it depends on resolving a collision with Phase 1's continuity
-and immutability rules, which the PRD records.
+The phase ships the **in-lesson** tutor first, on its own (2A, shipped). The
+follow-on slice — **2B** — is not the whole-path Q&A tutor originally sketched
+here; it is **Shape your path, learner-initiated**: on the path view, the tutor
+can *change* the path on your instruction — add lessons where something is
+missing, revise an upcoming lesson to your pitch — always as a proposal you
+preview, apply, and can undo, never a silent rewrite. That slice was pulled
+forward from Phase 4 by owner decision, superseding the original plan to gate 2B
+on in-lesson adoption data (📄 [Phase 2B PRD — Shape your path](prds/phase-2b-shape-your-path.md)).
+It resolves the collision with Phase 1's continuity and immutability rules by
+shrinking the edit vocabulary: additions and revisions only, and content becomes
+**immutable once engaged** rather than once generated. The whole-path *Q&A* slice
+(path scope, scope switching, lesson citations as links) and **selection-to-quote**
+are re-deferred to a later slice, sequenced against real usage.
 
 ## Phase 3 — Flashcards and spaced repetition
 
@@ -93,14 +97,16 @@ silent rewrite, and each is small and legible ("one short lesson, then straight
 into Utility Types"). This phase depends on both the tutor and the quiz/flashcard
 signal already existing, which is why it comes fourth rather than first.
 
-Design work for this already exists: Turn 3 of the [Phase 2 mock](mocks/aleph-phase-2-tutor.html)
-draws the proposal card, the ghost-row preview in the path, apply-with-undo, the
-change history, and how a change that throws away finished work reads differently.
-It is drawn as conversational and learner-initiated ("add those two", "cut the
-decorators stuff"); Phase 4's own contribution is the *system* proposing edits
-unprompted from miss data. The hard part is not the UI — it is that inserting or
-removing a unit mid-path breaks Phase 1's continuity and immutability rules. See
-[Phase 2 PRD §4](prds/phase-2-tutor.md#4-scope).
+Much of this machinery now ships earlier: **Phase 2B builds the learner-initiated
+flow** — the proposal card, ghost-row preview, apply-with-undo, and change history
+that Turn 3 of the [Phase 2 mock](mocks/aleph-phase-2-tutor.html) draws — for
+additive edits and revisions of not-yet-engaged lessons
+([Phase 2B PRD](prds/phase-2b-shape-your-path.md)). Phase 4's own contribution is
+what was always its center: the **system** proposing edits unprompted from miss
+data, reusing 2B's proposal/apply machinery. Phase 4 also owns the edit shapes 2B
+deliberately declined — removing and reordering content ("cut the decorators
+stuff") — which genuinely break continuity and need their own design, along with
+any change that touches finished work.
 
 ## Phase 5 — Momentum
 
