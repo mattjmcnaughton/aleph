@@ -669,7 +669,8 @@ def _accepted_check(
     (``validate_tutor_check`` raised ``ModelRetry``) — the model posed nothing,
     so nothing is delivered and nothing is persisted. Observing the *result*
     rather than the call is what makes that distinction, and it is still
-    mid-stream: the check reaches the rail before the reply text it accompanies.
+    mid-stream: the frame may land before, between, or after the reply's own
+    deltas — the client attaches it to the message, not to a position.
     """
     part = event.part
     if not isinstance(part, ToolReturnPart) or part.tool_name != TUTOR_CHECK_TOOL_NAME:

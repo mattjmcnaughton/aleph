@@ -15,6 +15,8 @@ src/aleph/
   routers/             # HTTP endpoint definitions
     health.py          # /healthz, /readyz
   services/            # Business logic
+  agents/              # pydantic-ai agent definitions (bind no model, no app imports)
+  domains/             # Pure domain logic, no I/O (grading, progression)
   dtos/                # Pydantic request/response models
   web/                 # Frontend integration
     serve.py           # Static file serving for production
@@ -22,6 +24,8 @@ src/aleph/
   db.py                # Async engine/session factory
   models/              # SQLAlchemy async models
   repositories/        # Data access layer
+alembic/versions/      # Database migrations
+queries/logfire/       # Saved metric queries (docs/metrics.md)
 tests/
   unit/                # Fast, isolated unit tests
   integration/         # Tests with real dependencies (Postgres, Keycloak)
@@ -49,6 +53,38 @@ DTOs (Pydantic models) are used at the router and service level for API I/O. The
 
 `evals/` sits outside this stack entirely: it is development tooling that imports the `agents/` factories (which is what their no-model, no-config purity is *for*) and is excluded from the wheel — see [`docs/evals.md`](evals.md). It reaches into `services/` and `config` only to bind a model — `services/openrouter.resolve_model` plus `config.settings` for the key and slot ids (lazily, so `--smoke` needs no configuration), and `services/stub_model` for the offline stub. The direction is one-way: nothing under `src/aleph/` imports `evals/`.
 
+## Streaming and feature flags (Phase 2)
+
+The tutor is the one surface that streams. `services/sse.py` owns the wire
+framing (four named events plus a `: ping` comment, and the `Cache-Control:
+no-store` / `X-Accel-Buffering: no` response headers) and nothing else — it is
+pure string work over a Pydantic payload, so the protocol the frontend parses is
+pinned by unit tests. `services/tutor.py` owns the turn lifecycle and is the only
+module that speaks that protocol: **admit** (every failure that can still be an
+ordinary JSON envelope happens before a response object exists), **stream** (a
+producer task pushes pre-encoded frames into a queue while the response generator
+drains it, so the heartbeat and the timeout are clocks that run while the
+generator is suspended), then **settle** (one transaction, or nothing —
+`routers/v1/tutor.py` explains why the reservation is released by the response
+object rather than by the generator). Context assembly is its own seam,
+`services/tutor_context.py`, which does plain `SELECT`s only: asking a question
+must never trigger generation. The agent, `agents/tutor.py`, obeys the same
+no-model/no-config purity as the Phase 1 agents.
+
+Two things a streaming endpoint must not skip, both of which the tutor route
+does deliberately: it **closes the request's database session before returning
+the response** (a stream can hold a pooled connection for the whole reply
+otherwise), and it runs under its **own** semaphore
+(`MAX_CONCURRENT_TUTOR_REPLIES` in `services/lifecycle.py`), separate from
+generation's, because a waiting learner and a background generation should not
+compete for the same permits.
+
+`services/feature_flags.py` is the flag registry: flags are defined in code, the
+database stores only per-user exceptions, and the resolved map rides on the auth
+session probe (that module's docstring is the authoritative statement of the
+resolution order — see [`docs/api.md`](api.md)). Phase 2 shipped dark behind the
+`tutor` flag, which is why the whole tutor router hangs off one `404` gate.
+
 ## Frontend
 
 The frontend is scaffolded separately into `src/aleph/web/frontend/` using the `frontend-react` Copier template. In development, the frontend dev server runs independently with API proxying. In production, built static files are served by FastAPI via `web/serve.py`.
@@ -57,7 +93,9 @@ The frontend is scaffolded separately into `src/aleph/web/frontend/` using the `
 
 A ` ```mermaid ` fence routes to `src/components/mermaid.tsx` instead of a code block. Mermaid is ~635 kB, so it is behind a dynamic `import()` — Vite code-splits it and only a lesson that actually draws something pays for it. It renders at `securityLevel: "strict"` (mermaid's own DOMPurify pass over the SVG, HTML labels and `click` directives disabled); that sanitised SVG is the one `dangerouslySetInnerHTML` in the codebase, and only mermaid's output may ever reach it. An unparseable chart falls back to its source as a code block rather than an error, because model-written mermaid is often subtly invalid and a lesson must stay readable regardless.
 
-**The desktop shell is CSS-only, at Tailwind's `lg` breakpoint (1024px).** No `matchMedia`, no JS viewport state, no width-conditional rendering — every route ships the same markup at every width, and `lg:` utilities alone widen it. `src/components/workspace.tsx` owns the two-column layout (a `sidebar` beside a widened `main`) and each route's own content cap at `lg`; `src/components/sidebar.tsx` owns the sidebar's two sections — the "Your paths" Switcher and, on a lesson, the current path's condensed rail (the Outline). The phone surface is unchanged by construction: below `lg` every desktop-only element collapses to `hidden` or its ordinary single-column layout, so the existing mobile routes, tests, and Playwright journeys never had to move.
+**The desktop shell is CSS-only, at Tailwind's `lg` breakpoint (1024px).** No `matchMedia`, no JS viewport state, no width-conditional rendering — every route ships the same markup at every width, and `lg:` utilities alone widen it. `src/components/workspace.tsx` owns the column layout (a `sidebar` beside a widened `main`) and each route's own content cap at `lg`; `src/components/sidebar.tsx` owns the sidebar's two sections — the "Your paths" Switcher and, on a lesson, the current path's condensed lesson list (the path rail; the component keeps its `OutlineSection` name). The phone surface is unchanged by construction: below `lg` every desktop-only element collapses to `hidden` or its ordinary single-column layout, so the existing mobile routes, tests, and Playwright journeys never had to move.
+
+The tutor rail (`src/components/tutor/`) is the same idea taken one column further: `workspace.tsx` mounts it as a **third** column that is a bottom sheet over the lesson below `lg` and a docked right column at `lg`, from one tree — open/closed is the only JS state, and the presentation is decided entirely by `lg:` utilities. While the sheet is open, `main` carries bottom padding so the tail of the lesson can still be scrolled out from under it. Three surfaces, three names, kept apart on purpose: the tutor **rail**, the path view's **path rail**, and the desktop **Sidebar** ([`docs/CONTEXT.md`](CONTEXT.md)).
 
 ## Toolchain
 

@@ -76,7 +76,7 @@ export interface StreamTutorReplyOptions {
   input: SendTutorMessageInput;
   /** Fires for every `delta`; concatenated in order, the deltas are the reply. */
   onDelta?: (text: string) => void;
-  /** Fires when the tutor posed a Tutor check (arrives before its reply text). */
+  /** Fires when the tutor posed a Tutor check (mid-stream; may land between deltas). */
   onTutorCheck?: (check: TutorCheck) => void;
   /** The stop affordance: aborting rejects with the signal's `AbortError`. */
   signal?: AbortSignal;

@@ -51,7 +51,7 @@ synonym (say **path**, not "course"; **Quick check**, not "quiz question").
 | --- | --- |
 | **Progression** | Moving through a path's lessons linearly; the next lesson unlocks as the prior completes. |
 | **Mark complete** | The learner action that records a lesson as done. Completion, not correctness, is what counts (the Quick check is non-gating). |
-| **Unlock state** | Where a lesson sits on the learner's path: *locked* → *available* → *complete*. The learner-facing axis. (The mock's rail labels this state "current" for the available lesson; *available* is the term, "current" is only a UI label.) |
+| **Unlock state** | Where a lesson sits on the learner's path: *locked* → *available* → *complete*. The learner-facing axis. (The mock's path rail labels this state "current" for the available lesson; *available* is the term, "current" is only a UI label.) |
 | **Generation state** | Whether a lesson's content exists yet: *ungenerated* → *generating* → *generated*, with *failed* as the retryable error branch (TDD §4). The system/AI axis, driven by on-demand generation. Orthogonal to Unlock state — a lesson can be *available but ungenerated* (generated the moment the learner reaches it). Content is immutable once *generated*. |
 | **Progress** | The persisted record of which lessons/units are complete, per path, per account. |
 | **Switcher** | The "Your paths" UI for moving between a learner's multiple paths, each keeping its own progress. |
@@ -65,7 +65,7 @@ this document for what is deferred.
 | Term | Meaning |
 | --- | --- |
 | **Tutor** | The context-aware chat that knows where the learner is. It reads the path and speaks about it; in Phase 2 it changes nothing. ("Tutor" names the feature and the assistant's turn in a conversation — the product has no separate assistant persona name.) |
-| **Rail** | The tutor's surface: a docked right column on desktop, a sheet over the lesson on a phone. One surface, two presentations — not two features. |
+| **Rail** | The tutor's surface: a docked right column on desktop, a sheet over the lesson on a phone. One surface, two presentations — not two features. Unqualified, "the rail" means this. The path view's units-and-lessons list is the **path rail** and the desktop left column is the **Sidebar** — three surfaces, three names (the code keeps them apart as `tutor-rail`, `path-rail`, `Sidebar`). |
 | **Conversation** | The persisted thread of messages, **one per path** (not per lesson). Survives moving between lessons and between sessions; deleted with its path. |
 | **Message** | A single utterance in a conversation — learner or tutor — recording the **lesson it was asked in**, and optionally a **Tutor check**. |
 | **Turn** | One learner Message and the tutor Message it produced, as a unit. Turns persist atomically — a turn exists whole or not at all — and are what the tutor's carried-context window counts (Phase 2 TDD §5.2). Two Messages make one Turn; avoid "turn" for a single message. |
@@ -75,7 +75,7 @@ this document for what is deferred.
 | **Quote** | A span of the current Read passage the learner selected and sent with their question. Visible in the sent message and part of that turn's context. (**Phase 2B** — selection-to-quote was cut from Phase 2; see the phase boundaries below.) |
 | **Suggestion** | A one-tap ask offered by the rail — *Explain this simpler · Go deeper · Quiz me on this · Show me a real example*. Sent as if typed; never a constraint on free text. |
 | **Tutor check** | A question the **tutor** asks back inside a conversation, with options and immediate feedback. **Non-scoring and outside progress**: it is not a Quick check, creates no **Attempt**, and touches no progress or metric. It persists only as an artifact of its conversation, deleted with it. (Distinct entity, distinct name — do not call it a Quick check, and avoid "ephemeral": it *is* stored, with the learner's answer, for the life of the thread.) |
-| **Grounded** | The property that a tutor reply is anchored in the current lesson's Read passage and does not contradict it. The first eval rubric item for tutor replies. |
+| **Grounded** | The property that a tutor reply is anchored in the current lesson's Read passage and does not contradict it. The behavior ships now; as an eval rubric item it lands with the post-launch tutor evals. |
 | **Contradiction handling** | The tutor's behavior on a **checkable factual error** in a lesson: correct it, attribute the difference plainly, and say what the Quick check expects (Phase 2 PRD §5.7b). Nothing is regenerated or mutated. Incomplete is not wrong — a level-scoped simplification is never flagged. (A machine-readable *flag event* was cut from Phase 2; the behavior lives in reply text only.) |
 
 ## Quality, safety & measurement
@@ -97,18 +97,24 @@ this document for what is deferred.
 | --- | --- |
 | **Nocturne** | Aleph's visual system — dark, teal, mobile-first — established in the mocks. New surfaces extend it. |
 | **Mobile-first** | Every surface is designed for a phone first, desktop second. |
-| **Sidebar** | The desktop-only left column (≥1024px) holding the Switcher and, on a lesson, the current path's rail. Absent on a phone. |
+| **Sidebar** | The desktop-only left column (≥1024px) holding the Switcher and, on a lesson, the current path's condensed lesson list (the **path rail**). Absent on a phone, and never called "the rail" — that word is the tutor's surface. |
 
 ---
 
 ### Phase boundaries (so the vocabulary stays honest)
 
-Some terms name things that exist in the mocks but are **not** Phase 1. Use them, but know their phase:
+Some terms name things drawn in the mocks that are **not all built**. Use them, but know their
+phase:
 
-- **Tutor** in **lesson scope** — the in-lesson rail (**Phase 2**, above).
+- **Tutor** in **lesson scope** — the in-lesson rail, its **Suggestions**, its **Tutor check**, one
+  **Conversation** per path, and streamed replies: **shipped (Phase 2)**. Everything in "The tutor"
+  above is live except where a row says otherwise.
 - **Path scope** / scope switching / lesson citations as links / the **Shaky** badge on a lesson with
   missed Quick checks — the in-path tutor (**Phase 2B**, a follow-on slice against the Phase 2 PRD).
 - **Quote** / selection-to-quote — cut from Phase 2 to keep the first slice simple (**Phase 2B**).
+- **Summarized carried context** — Phase 2 carries a bounded window of the most recent turns and
+  **drops** what falls out of it; summarizing older turns instead is a later upgrade behind the same
+  context seam (Phase 2 TDD D6).
 - **Flashcard** / **spaced repetition** / grading (**Again/Hard/Good/Easy**) — retention loop (**Phase 3**).
 - **Shape your path** — adaptive, learner-approved path edits: proposals, ghost-row previews, apply,
   undo, change history (**Phase 4**). Shown in the Phase 2 mock, but deferred — it collides with
