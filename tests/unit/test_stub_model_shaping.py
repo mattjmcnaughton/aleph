@@ -13,13 +13,14 @@ import). One test runs a throwaway agent with a same-shaped ``propose_path_edit`
 tool registered, to prove the emitted deltas really do assemble into a tool call
 carrying a schema-valid payload.
 
-**Proposal validity is asserted structurally here** — the D1 predicates
-(``operations_within_caps``, ``insertions_after_first_shapeable``,
-``revision_targets_unengaged``, ``titles_nonempty_distinct``) land with AL-310
-and are meant to replace :func:`_assert_valid_proposal` below, never to be
-copied into it.
+**Proposal validity is asserted with AL-310's D1 predicates** — AL-302 shipped a
+structural stand-in and asked for exactly this swap once ``agents/shaper.py``
+landed: :func:`_assert_valid_proposal` now parses each operation into the real
+payload models and hands the result to ``validate_proposal``, so the stub's
+deterministic payloads are held to the same bar the agent, the evals and
+apply-time re-validation use. Nothing is re-expressed alongside them.
 
-New file (AL-302).
+New file (AL-302); predicate swap in AL-310.
 """
 
 from __future__ import annotations
@@ -44,9 +45,16 @@ from pydantic_ai.models.function import AgentInfo, DeltaToolCall
 
 from aleph.agents.lesson import (
     LessonContent,
-    is_non_empty,
     passage_within_word_band,
 )
+from aleph.agents.shaper import (
+    AddLessonsOperation,
+    ReviseLessonOperation,
+    ShapingCaps,
+    ShapingDigestEntry,
+    validate_proposal,
+)
+from aleph.domains.progression import UnlockState
 from aleph.services.stub_model import (
     FORCE_LESSON_ERROR,
     FORCE_PROPOSAL_ADD,
@@ -164,60 +172,66 @@ async def _proposal(question: str, *, context: str | None = None) -> dict[str, A
     return payload
 
 
-def _assert_valid_proposal(payload: dict[str, Any]) -> None:
-    """Structural validity of a proposal payload (TDD §4/§5.1's fixed shape).
+# A path state consistent with `_shaping_context()`'s stated boundary: six
+# lessons, the first three engaged, so position 4 is the first shapeable one and
+# `_FIRST_SHAPEABLE_LESSON_ID` is the lesson sitting there. Every payload this
+# module asserts on is drafted against that same boundary, so one fixture serves
+# them all. Titles are generic on purpose — the stub's own ("Added on request:
+# …") must not collide with them.
+_DIGEST = [
+    ShapingDigestEntry(
+        lesson_id=(
+            _FIRST_SHAPEABLE_LESSON_ID
+            if position == _FIRST_SHAPEABLE_POSITION
+            else f"{position:08d}-0000-4000-8000-000000000000"
+        ),
+        unit_title="Unit one",
+        lesson_title=f"Existing lesson {position}",
+        position_in_path=position,
+        unlock_state=(
+            UnlockState.COMPLETE
+            if position < _FIRST_SHAPEABLE_POSITION
+            else UnlockState.AVAILABLE
+        ),
+        engaged=position < _FIRST_SHAPEABLE_POSITION,
+    )
+    for position in range(1, 7)
+]
+_CAPS = ShapingCaps(
+    lessons_remaining=20,
+    max_lessons_per_proposal=_MAX_LESSONS_PER_PROPOSAL,
+    first_shapeable_position=_FIRST_SHAPEABLE_POSITION,
+)
 
-    Stands in for AL-310's exported D1 predicates until they exist; when they
-    land, this helper is deleted in favour of importing them, never re-expressed
-    alongside them.
+
+def _assert_valid_proposal(payload: dict[str, Any]) -> None:
+    """Validity of a proposal payload, through AL-310's exported D1 predicates.
+
+    The payload crosses the wire as JSON, so this parses it into the real
+    operation models first (schema validity — ``extra="forbid"`` catches a stray
+    or renamed field) and then runs ``validate_proposal``, which composes
+    ``operations_within_caps``, ``insertions_after_first_shapeable``,
+    ``revision_targets_unengaged`` and ``titles_nonempty_distinct``. Those are
+    imported, never restated: the stub's deterministic payloads are held to
+    exactly the bar the agent applies at draft time and apply re-applies (D5).
     """
     assert set(payload) == {"operations", "summary"}
-    assert is_non_empty(payload["summary"])
 
-    operations = payload["operations"]
-    assert isinstance(operations, list)
-    assert operations, "a proposal with no operations is not a proposal"
+    raw = payload["operations"]
+    assert isinstance(raw, list)
 
-    added = 0
-    for operation in operations:
-        assert isinstance(operation, dict)
-        # Shapes are exhaustive: an operation is an Addition or a Revision.
-        if "lessons" in operation:
-            assert set(operation) == {
-                "insert_at_position",
-                "new_unit",
-                "lessons",
-                "rationale",
-                "estimated_minutes",
-            }
-            lessons = operation["lessons"]
-            assert lessons
-            titles = [lesson["title"] for lesson in lessons]
-            assert all(is_non_empty(title) for title in titles)
-            assert len(set(titles)) == len(titles)
-            assert isinstance(operation["insert_at_position"], int)
-            assert operation["insert_at_position"] >= 1
-            new_unit = operation["new_unit"]
-            assert new_unit is None or set(new_unit) == {"title", "summary"}
-            assert is_non_empty(operation["rationale"])
-            assert isinstance(operation["estimated_minutes"], int)
-            assert operation["estimated_minutes"] > 0
-            added += len(lessons)
-        else:
-            assert set(operation) == {
-                "lesson_id",
-                "instruction",
-                "new_title",
-                "rationale",
-            }
-            assert is_non_empty(operation["lesson_id"])
-            assert is_non_empty(operation["instruction"])
-            assert operation["new_title"] is None or is_non_empty(
-                operation["new_title"]
-            )
-            assert is_non_empty(operation["rationale"])
+    # Shapes are exhaustive and discriminated structurally: an Addition carries
+    # `lessons`, a Revision carries `lesson_id`.
+    operations: list[AddLessonsOperation | ReviseLessonOperation] = [
+        AddLessonsOperation.model_validate(operation)
+        if "lessons" in operation
+        else ReviseLessonOperation.model_validate(operation)
+        for operation in raw
+    ]
 
-    assert added <= _MAX_LESSONS_PER_PROPOSAL
+    validate_proposal(
+        operations, summary=payload["summary"], digest=_DIGEST, caps=_CAPS
+    )
 
 
 # --- lesson-branch fixtures (the revision marker rides in via the prompt) -------

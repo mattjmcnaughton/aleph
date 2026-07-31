@@ -64,10 +64,10 @@ question-text sentinels ride the same rules — stateless, stripped, always firi
 - ``[force-shaping-failure]``  — raises after two deltas, mid-stream, with deltas
   still owed (the discard-partial path, as ``[force-tutor-failure]``).
 
-The proposal call is emitted **by name** because ``agents/shaper.py`` (AL-310) is
-being built in parallel and does not exist yet — the same arrangement AL-202 used
-for ``pose_tutor_check``, and the same one to unwind (one definition, imported)
-once the agent lands.
+The proposal call's name is now **imported** from ``agents/shaper.py`` (AL-310),
+which registers it — AL-302 emitted it by name while that module was being built
+in parallel, exactly as AL-202 did for ``pose_tutor_check`` before AL-220
+unwound it. One definition, imported.
 
 Contract with AL-310/AL-311 (the shaping prompt): the deps block states the
 engagement boundary **as data** (TDD §5.1), and the stub reads two markers out of
@@ -79,7 +79,9 @@ it:
   This one **extends** §5.1: its ``ShapingDigestEntry`` lists unit/lesson title,
   ``position_in_path``, unlock state, ``engaged`` and ``outcome``, but no id — yet a
   ``revise_lesson`` operation names its target *by id*, so the digest has to carry
-  one for a Revision to be expressible at all. AL-310/AL-311 must add it.
+  one for a Revision to be expressible at all. AL-310 added it
+  (``agents/shaper.py``'s ``ShapingDigestEntry.lesson_id``, rendered per lesson
+  and as this marker by ``render_shaping_context``).
 
 Both markers must be rendered as **plain text lines** — ``name=value`` or
 ``name: value``, one per line — the shape :func:`_marker_re` builds and the same
@@ -138,6 +140,9 @@ from pydantic_ai.models.function import DeltaToolCall, FunctionModel
 
 from aleph.agents.lesson import LessonContent, QuickCheck
 from aleph.agents.outline import LessonOutline, PathOutline, Refusal, UnitOutline
+from aleph.agents.shaper import (
+    PROPOSE_PATH_EDIT_TOOL_NAME as AGENT_PROPOSE_PATH_EDIT_TOOL_NAME,
+)
 from aleph.agents.tutor import TUTOR_CHECK_TOOL_NAME as AGENT_TUTOR_CHECK_TOOL_NAME
 
 if TYPE_CHECKING:
@@ -225,13 +230,15 @@ _LESSON_ERROR_TRUE_VALUE = "100 degrees Celsius"
 LESSON_ERROR_FALSE_CLAIM = f"water boils at {LESSON_ERROR_FALSE_VALUE} at sea level"
 LESSON_ERROR_CORRECTION = f"water boils at {_LESSON_ERROR_TRUE_VALUE} at sea level"
 
-# The `propose_path_edit` tool's name (TDD §5.1, D4). A string literal, not an
-# import, because `agents/shaper.py` (AL-310) is being built in parallel and does
-# not exist yet — AL-202 shipped `pose_tutor_check` the same way and AL-220 later
-# swapped it for an import from the agent that registers it. Do the same here
-# once the shaper agent lands: one definition, imported, so a stub emitting a
-# call the agent does not register cannot go CI-green.
-PROPOSE_PATH_EDIT_TOOL_NAME = "propose_path_edit"
+# The `propose_path_edit` tool's name (TDD §5.1, D4), **imported from the agent
+# that registers it** rather than restated here (AL-310). AL-302 shipped it as a
+# string literal because `agents/shaper.py` was being built in parallel and did
+# not exist yet, and asked for exactly this unwind once it landed: one
+# definition, imported — a service may import an agent, and a stub emitting a
+# tool call the agent does not register is a silent, CI-green way for the whole
+# proposal path to stop working. Re-exported under the same name because every
+# existing consumer (and the e2e suite) reaches for it here.
+PROPOSE_PATH_EDIT_TOOL_NAME = AGENT_PROPOSE_PATH_EDIT_TOOL_NAME
 
 # The instruction `[force-proposal-revise]` puts on its Revision, and the marker
 # the regenerated passage then carries (W18). The instruction rides proposal →
