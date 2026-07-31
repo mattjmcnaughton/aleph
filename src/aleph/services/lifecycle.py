@@ -115,7 +115,10 @@ class TutorReplyLimiter:
     learner wait mid-sentence, and the two workloads have opposite latency
     profiles. It bounds the model run only — not the whole request — so queue
     time is not charged against ``TUTOR_REPLY_TIMEOUT``, exactly as the
-    generation permit sits outside its per-call timeout.
+    generation permit sits outside its per-call timeout. Phase 2B's shaping
+    replies **share** that one semaphore through the ``semaphore`` constructor
+    argument (2B D11) while keeping their own reservations — same workload
+    class, same pool; different conversations, different locks.
 
     **The reservation** is one in-flight reply per conversation, keyed by
     ``path_id`` (a conversation is one-per-path and created lazily, so the path
@@ -144,10 +147,46 @@ class TutorReplyLimiter:
     deployment does not have.
     """
 
-    def __init__(self, *, max_concurrent: int) -> None:
-        # Constructing a Semaphore needs no running loop (3.10+ binds lazily on
-        # first use), so this is safe at app-assembly time.
-        self._semaphore = asyncio.Semaphore(max_concurrent)
+    def __init__(
+        self,
+        *,
+        max_concurrent: int | None = None,
+        semaphore: asyncio.Semaphore | None = None,
+    ) -> None:
+        """Bound this limiter by its own semaphore, or by one it **shares**.
+
+        ``max_concurrent`` sizes a fresh semaphore — the Phase 2A arrangement,
+        unchanged. ``semaphore`` adopts an existing one instead, which is Phase
+        2B D11: shaping replies and in-lesson replies are the same workload
+        class (a learner waiting mid-sentence), so they queue against *one*
+        bound rather than two pools that can starve each other. The
+        per-conversation reservations stay this limiter's own either way — that
+        is the whole point of a second object, since a shaping reply must not
+        make the in-lesson thread read as busy (W21).
+
+        **Exactly one** of the two, and both ends of that are enforced. Neither
+        is a silent unbounded fan-out at the one seam that exists to prevent it.
+        Both is worse than neither: one of the two would have to lose silently,
+        and a caller who passed ``max_concurrent=8`` alongside a shared semaphore
+        would believe it had a bound of 8 while queueing against somebody else's
+        pool — a misconfiguration that never raises and only ever shows up as a
+        load figure nobody can explain.
+        """
+        if max_concurrent is not None and semaphore is not None:
+            raise ValueError(
+                "a reply limiter takes max_concurrent (its own bound) or an "
+                "existing semaphore to share (D11) — not both."
+            )
+        if semaphore is None:
+            if max_concurrent is None:
+                raise ValueError(
+                    "a reply limiter needs either max_concurrent (its own bound) "
+                    "or an existing semaphore to share (D11)."
+                )
+            # Constructing a Semaphore needs no running loop (3.10+ binds lazily
+            # on first use), so this is safe at app-assembly time.
+            semaphore = asyncio.Semaphore(max_concurrent)
+        self._semaphore = semaphore
         self._in_flight: dict[uuid.UUID, ReplyReservation] = {}
 
     def slot(self) -> asyncio.Semaphore:

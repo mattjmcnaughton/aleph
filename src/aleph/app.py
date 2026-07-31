@@ -16,6 +16,7 @@ from aleph.routers import auth, health
 from aleph.routers.v1 import feature_flags as v1_feature_flags
 from aleph.routers.v1 import lessons as v1_lessons
 from aleph.routers.v1 import paths as v1_paths
+from aleph.routers.v1 import shaping as v1_shaping
 from aleph.routers.v1 import tutor as v1_tutor
 from aleph.services.generation import generation_orchestrator
 from aleph.services.lifecycle import GenerationLifecycle
@@ -82,6 +83,10 @@ def create_app() -> FastAPI:
     # (404 when it resolves off), so mounting it is safe in production while
     # Phase 2 is still being built (epic #82, owner amendment 1).
     app.include_router(v1_tutor.router)
+    # Likewise behind the ``shaping`` flag (epic #114, adopted convention 1) —
+    # a separate key, so Phase 2B can ship dark and be killed without
+    # disturbing the already-launched in-lesson tutor.
+    app.include_router(v1_shaping.router)
 
     # Mount frontend static files (only serves if dist/ exists)
     mount_frontend(app)

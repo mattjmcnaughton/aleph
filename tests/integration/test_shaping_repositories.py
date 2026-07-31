@@ -591,3 +591,77 @@ async def test_a_message_row_carries_no_proposal_by_default() -> None:
     async with db.async_session() as session:
         proposals = list((await session.execute(select(Message.proposal))).scalars())
     assert proposals == [None, None]
+
+
+# --------------------------------------------------------------------------- #
+# Path-level shaping messages (AL-320, migration 0006)
+#
+# A shaping turn is about the path as a whole, so its rows carry no lesson. The
+# thread query's lesson join is therefore **outer**: an inner one would return
+# an empty shaping thread — a silently lost conversation rather than an error.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.anyio
+async def test_a_shaping_turn_stores_no_lesson_and_still_loads() -> None:
+    """``lesson_id=None`` round-trips, and the entry carries no lesson title."""
+    path_id, _lesson_id = await _arrange_path()
+
+    async with db.async_session() as session:
+        repository = ConversationRepository(session)
+        conversation, _created = await repository.upsert_for_path(
+            path_id, kind=ConversationKind.SHAPING
+        )
+        await repository.insert_turn(
+            conversation_id=conversation.id,
+            lesson_id=None,
+            learner_content="Add something on lifetimes.",
+            source=MessageSource.TYPED,
+            tutor_content="Here is what I would add.",
+            proposal=PROPOSAL,
+        )
+        await session.commit()
+
+    async with db.async_session() as session:
+        thread = await ConversationRepository(session).load_thread(
+            path_id, kind=ConversationKind.SHAPING
+        )
+
+    assert [entry.message.content for entry in thread] == [
+        "Add something on lifetimes.",
+        "Here is what I would add.",
+    ]
+    assert [entry.message.lesson_id for entry in thread] == [None, None]
+    assert [entry.lesson_title for entry in thread] == [None, None]
+    assert [entry.message.proposal for entry in thread] == [None, PROPOSAL]
+
+
+@pytest.mark.anyio
+async def test_an_in_lesson_turn_still_resolves_its_lesson_title() -> None:
+    """The outer join changes nothing for a 2A row: same rows, same titles (W21)."""
+    path_id, lesson_id = await _arrange_path()
+
+    async with db.async_session() as session:
+        repository = ConversationRepository(session)
+        conversation, _created = await repository.upsert_for_path(
+            path_id, kind=ConversationKind.LESSON
+        )
+        await repository.insert_turn(
+            conversation_id=conversation.id,
+            lesson_id=lesson_id,
+            learner_content="Why does a move invalidate the source?",
+            source=MessageSource.TYPED,
+            tutor_content="Because ownership is unique.",
+        )
+        await session.commit()
+
+    async with db.async_session() as session:
+        thread = await ConversationRepository(session).load_thread(
+            path_id, kind=ConversationKind.LESSON
+        )
+
+    assert [entry.lesson_title for entry in thread] == [
+        "What ownership is",
+        "What ownership is",
+    ]
+    assert [entry.message.lesson_id for entry in thread] == [lesson_id, lesson_id]

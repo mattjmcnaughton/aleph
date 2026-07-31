@@ -54,10 +54,16 @@ class ThreadMessage:
     The conversation response (§6) reports a lesson title alongside every
     message; resolving it in the thread query keeps that a single join rather
     than a per-message lookup at the service layer.
+
+    ``lesson_title`` is ``None`` for a **shaping** message and only for one: a
+    shaping turn is about the path as a whole (PRD §5.1), so its row carries no
+    ``lesson_id`` and there is no title to resolve. Every message in a
+    ``lesson`` thread still has both, which is what keeps the 2A wire contract
+    (``MessageDTO``'s non-null ``lesson_id``/``lesson_title``) intact (W21).
     """
 
     message: Message
-    lesson_title: str
+    lesson_title: str | None
 
 
 @dataclass(frozen=True)
@@ -153,11 +159,18 @@ class ConversationRepository:
         An empty list when the path has no conversation of this kind yet — the
         read endpoint answers ``200`` with an empty thread rather than ``404``
         (§6), for either rail.
+
+        **The lesson join is outer** (migration ``0006``): a shaping message has
+        no ``lesson_id``, so an inner join would silently return an *empty*
+        shaping thread — the query would look correct and the rail would render
+        a learner's conversation as if it had never happened. A ``lesson``
+        thread's rows all have a lesson, so this returns exactly what the inner
+        join returned for them, row for row and title for title (W21).
         """
         result = await self.session.execute(
             select(Message, Lesson.title)
             .join(Conversation, Message.conversation_id == Conversation.id)
-            .join(Lesson, Message.lesson_id == Lesson.id)
+            .outerjoin(Lesson, Message.lesson_id == Lesson.id)
             .where(Conversation.path_id == path_id, Conversation.kind == kind)
             .order_by(Message.position)
         )
@@ -170,7 +183,7 @@ class ConversationRepository:
         self,
         *,
         conversation_id: uuid.UUID,
-        lesson_id: uuid.UUID,
+        lesson_id: uuid.UUID | None,
         learner_content: str,
         source: MessageSource,
         tutor_content: str,
@@ -189,6 +202,12 @@ class ConversationRepository:
         computing the same ``max``; if it is ever bypassed,
         ``uq_messages_conversation_position`` raises an ``IntegrityError`` here
         rather than silently interleaving two turns.
+
+        ``lesson_id`` is **required and may be ``None``**: an in-lesson turn
+        names the lesson it was asked in, a shaping turn is about the path as a
+        whole and stores ``NULL`` (migration ``0006``). Keyword-only with no
+        default for the reason ``kind`` is — a default would let a caller
+        silently record the wrong thing about where a turn happened.
 
         ``proposal`` rides on the tutor row exactly as ``tutor_check`` does
         (Phase 2B TDD §4): it is the observed, already-validated payload of a
@@ -285,9 +304,17 @@ class ConversationRepository:
         walk already visits the conversation for its path, and one more join to
         the lesson yields the position, so the caller has everything the product
         event is stamped with from the single query that proved ownership. The
-        lesson join is inner on purpose — a message cannot exist without one —
-        which is also why there is no "the locator went missing" branch to
+        lesson join is inner on purpose — an *in-lesson* message always has one
+        — which is also why there is no "the locator went missing" branch to
         handle.
+
+        That inner join is also what scopes this to the in-lesson thread: a
+        shaping message has no ``lesson_id`` (migration ``0006``) and is never
+        returned here. Its only caller is the Tutor-check answer route, which is
+        exactly right — a shaping message has no check to answer. Apply-proposal
+        (AL-321) addresses a *shaping* message and so needs its own ownership
+        walk, one that resolves the path without a lesson; widening this join
+        would instead hand the 2A route a locator with no position.
         """
         result = await self.session.execute(
             select(Message, Conversation.path_id, Lesson.position_in_path)

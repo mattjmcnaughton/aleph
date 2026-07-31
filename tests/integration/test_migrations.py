@@ -27,6 +27,9 @@ PHASE_2_HEAD = "0003_tutor_conversations"
 FLAGS_HEAD = "0004_user_feature_overrides"
 # AL-300's step: the Phase 2B shaping branch.
 SHAPING_HEAD = "0005_shaping"
+# AL-320's step: shaping messages are path-level, so ``messages.lesson_id``
+# becomes nullable.
+MESSAGE_LESSON_HEAD = "0006_shaping_message_lesson"
 
 PHASE_1_TABLES = ("users", "paths", "units", "lessons", "quick_checks", "attempts")
 PHASE_2_TABLES = ("conversations", "messages")
@@ -452,3 +455,142 @@ def test_earlier_tables_keep_their_columns_through_the_shaping_reversal(
     assert {
         table: columns - added.get(table, set()) for table, columns in before.items()
     } == after
+
+
+# --------------------------------------------------------------------------- #
+# AL-320: shaping messages are path-level (migration 0006)
+#
+# The one schema gap TDD §4 did not spell out. ``messages.lesson_id`` is 2A's
+# ``NOT NULL`` — right for a turn asked *in* a lesson, impossible for a shaping
+# turn, which is about the path as a whole. The step is a single dropped
+# ``NOT NULL``; what is worth asserting is that it really is only that, and that
+# the reversal restores the constraint cleanly by removing the rows that could
+# not have existed before it.
+# --------------------------------------------------------------------------- #
+
+
+async def _is_nullable(database_url: str, table: str, column: str) -> bool:
+    connection = await connect(database_url)
+    try:
+        value = await connection.fetchval(
+            "SELECT is_nullable FROM information_schema.columns "
+            "WHERE table_schema = 'public' AND table_name = $1 AND column_name = $2",
+            table,
+            column,
+        )
+    finally:
+        await connection.close()
+    return value == "YES"
+
+
+async def _seed_both_threads(database_url: str) -> None:
+    """A path with an in-lesson turn *and* a shaping turn (the 0006 shape).
+
+    The lesson message names its lesson; the shaping message names none, which
+    is only expressible at ``0006`` — and is exactly the row the downgrade has
+    to clear before ``NOT NULL`` can come back.
+    """
+    connection = await connect(database_url)
+    try:
+        await connection.execute(
+            """
+            WITH u AS (
+                INSERT INTO users (id, issuer, subject, username, display_name)
+                VALUES (gen_random_uuid(), 'iss', 'sub-320', 'shaping-msg', 'S')
+                RETURNING id
+            ), p AS (
+                INSERT INTO paths (id, user_id, topic, level, status)
+                SELECT gen_random_uuid(), u.id, 'Rust ownership',
+                       'some_experience', 'ready'
+                FROM u
+                RETURNING id
+            ), un AS (
+                INSERT INTO units (id, path_id, position, title, summary)
+                SELECT gen_random_uuid(), p.id, 1, 'Foundations', 's' FROM p
+                RETURNING id, path_id
+            ), l AS (
+                INSERT INTO lessons (
+                    id, path_id, unit_id, position_in_path, position_in_unit,
+                    title, generation_state
+                )
+                SELECT gen_random_uuid(), un.path_id, un.id, 1, 1,
+                       'What ownership is', 'generated'
+                FROM un
+                RETURNING id, path_id
+            ), lc AS (
+                INSERT INTO conversations (id, path_id, kind)
+                SELECT gen_random_uuid(), l.path_id, 'lesson' FROM l
+                RETURNING id
+            ), sc AS (
+                INSERT INTO conversations (id, path_id, kind)
+                SELECT gen_random_uuid(), l.path_id, 'shaping' FROM l
+                RETURNING id
+            ), lm AS (
+                INSERT INTO messages (
+                    id, conversation_id, lesson_id, position, role, content
+                )
+                SELECT gen_random_uuid(), lc.id, l.id, 1, 'learner', 'in a lesson'
+                FROM lc, l
+                RETURNING id
+            )
+            INSERT INTO messages (
+                id, conversation_id, lesson_id, position, role, content
+            )
+            SELECT gen_random_uuid(), sc.id, NULL, 1, 'learner', 'about the path'
+            FROM sc
+            """
+        )
+    finally:
+        await connection.close()
+
+
+async def _message_contents(database_url: str) -> set[str]:
+    connection = await connect(database_url)
+    try:
+        rows = await connection.fetch("SELECT content FROM messages")
+    finally:
+        await connection.close()
+    return {row["content"] for row in rows}
+
+
+def test_the_message_lesson_step_only_drops_a_not_null(
+    isolated_database: str,
+) -> None:
+    """At ``head`` the column is nullable; at ``0005`` it is not. Nothing else moves."""
+    database_url = isolated_database
+
+    assert asyncio.run(_is_nullable(database_url, "messages", "lesson_id"))
+    at_head = asyncio.run(_columns(database_url, "messages"))
+
+    run_alembic(database_url, SHAPING_HEAD, downgrade=True)
+
+    assert not asyncio.run(_is_nullable(database_url, "messages", "lesson_id"))
+    assert asyncio.run(_columns(database_url, "messages")) == at_head, (
+        "the step adds and removes no column — it is one constraint"
+    )
+
+
+def test_the_message_lesson_step_reverses_by_dropping_shaping_messages(
+    isolated_database: str,
+) -> None:
+    """The reversal clears exactly the rows ``NOT NULL`` cannot hold.
+
+    A shaping message is *defined* by having no lesson, so restoring the
+    constraint means dropping those rows — data-loss-on-downgrade, the standard
+    posture, and the same one ``0005`` takes for shaping conversations. The
+    in-lesson turn is untouched, which is the half that matters: a downgrade
+    must not cost a learner their 2A thread.
+    """
+    database_url = isolated_database
+
+    asyncio.run(_seed_both_threads(database_url))
+    assert asyncio.run(_count(database_url, "messages")) == 2
+
+    run_alembic(database_url, SHAPING_HEAD, downgrade=True)
+
+    assert asyncio.run(_message_contents(database_url)) == {"in a lesson"}
+
+    run_alembic(database_url, MESSAGE_LESSON_HEAD)
+
+    assert asyncio.run(_is_nullable(database_url, "messages", "lesson_id"))
+    assert asyncio.run(_message_contents(database_url)) == {"in a lesson"}

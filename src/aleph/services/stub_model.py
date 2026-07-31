@@ -319,12 +319,17 @@ def _collapse_ws(text: str) -> str:
     return " ".join(text.split())
 
 
-def _clean_topic(text: str) -> str:
+def clean_topic(text: str) -> str:
     """The user text with sentinels removed and whitespace collapsed.
 
     Serves the tutor question as well as the generation topic (Phase 2): one
-    stripping rule, so no sentinel of either era can reach generated prose. The
-    name is Phase 1's and is kept — it is imported by the integration suite.
+    stripping rule, so no sentinel of either era can reach generated prose.
+
+    **Public**, because it is part of this module's test-facing surface: three
+    integration suites build their expected payloads with it, and a suite
+    reaching for an underscored name is the module telling you the name is
+    wrong. Spelled ``_clean_topic`` through Phase 2A; renamed, not aliased, so
+    there is one spelling rather than two.
     """
     return _collapse_ws(_SENTINEL_RE.sub("", text))
 
@@ -604,7 +609,7 @@ def _tool_with(
 def _stub_respond(messages: Sequence[ModelMessage], info: AgentInfo) -> ModelResponse:
     """The deterministic FunctionModel callback (dispatches outline vs lesson)."""
     text = _user_text(messages)
-    topic = _clean_topic(text) or "the topic"
+    topic = clean_topic(text) or "the topic"
 
     lesson_tool = _tool_with(info.output_tools, "read_passage")
     outline_tool = _tool_with(info.output_tools, "units")
@@ -1125,7 +1130,7 @@ async def _stub_stream(
     sentinel's meaning intact.
     """
     asked = _last_user_text(messages)
-    question = _clean_topic(asked)
+    question = clean_topic(asked)
     prompt = _prompt_text(messages, info)
     check_posed = _tool_called_this_run(messages, TUTOR_CHECK_TOOL_NAME)
     proposal_made = _tool_called_this_run(messages, PROPOSE_PATH_EDIT_TOOL_NAME)

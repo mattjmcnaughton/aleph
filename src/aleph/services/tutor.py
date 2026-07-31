@@ -264,6 +264,18 @@ class TutorTurnService:
             max_concurrent=config.max_concurrent_tutor_replies
         )
 
+    @property
+    def replies(self) -> TutorReplyLimiter:
+        """This service's bounds — its semaphore and its reservations (D9).
+
+        Public so ``services/shaping.py`` can build its own limiter **around
+        this one's semaphore** (Phase 2B D11: one pool for both interactive
+        reply kinds, a separate lock per conversation). Read-only: nothing
+        outside this module reserves or releases through it, and the tutor's
+        behaviour is untouched by the sharing (W21).
+        """
+        return self._replies
+
     # -- 1. admission (everything that can still be an ordinary error) ------- #
 
     async def admit(
