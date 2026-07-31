@@ -1,3 +1,10 @@
+## [1.11.1](https://github.com/mattjmcnaughton/aleph/compare/v1.11.0...v1.11.1) (2026-07-31)
+
+
+### Bug Fixes
+
+* **tutor:** clear the lesson's tail from under the open rail sheet ([38e860c](https://github.com/mattjmcnaughton/aleph/commit/38e860c0c802a1e4b33b46f76cb13fd262d081f9))
+
 # [1.11.0](https://github.com/mattjmcnaughton/aleph/compare/v1.10.0...v1.11.0) (2026-07-30)
 
 
