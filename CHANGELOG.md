@@ -1,3 +1,10 @@
+# [1.13.0](https://github.com/mattjmcnaughton/aleph/compare/v1.12.0...v1.13.0) (2026-07-31)
+
+
+### Features
+
+* **agents:** shaper agent, Proposal tool + shared predicates (AL-310) ([6f6829c](https://github.com/mattjmcnaughton/aleph/commit/6f6829c489438b65e7addd15b50386a53a9c3f3e)), closes [#118](https://github.com/mattjmcnaughton/aleph/issues/118)
+
 # [1.12.0](https://github.com/mattjmcnaughton/aleph/compare/v1.11.1...v1.12.0) (2026-07-31)
 
 
