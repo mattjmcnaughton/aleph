@@ -1,3 +1,10 @@
+# [1.16.0](https://github.com/mattjmcnaughton/aleph/compare/v1.15.0...v1.16.0) (2026-08-01)
+
+
+### Features
+
+* **api:** shaping turn service, proposal SSE + conversation endpoints (AL-320) ([fe48671](https://github.com/mattjmcnaughton/aleph/commit/fe486711116d68a8cabbde0b202a3227b72e498e)), closes [#120](https://github.com/mattjmcnaughton/aleph/issues/120)
+
 # [1.15.0](https://github.com/mattjmcnaughton/aleph/compare/v1.14.0...v1.15.0) (2026-07-31)
 
 
