@@ -21,7 +21,9 @@
 import { AlephGlyph } from "../aleph-logo";
 import { Markdown } from "../markdown";
 import { TutorModelPicker } from "../model-picker";
-import type { MessageProposal, ShapingMessage } from "../../lib/shaping";
+import type { ShapingMessage } from "../../lib/shaping";
+import { ChangeHistorySheet } from "./change-history-sheet";
+import { ProposalCard } from "./proposal-card";
 import {
   SHAPING_MESSAGE_MAX_LENGTH,
   SHAPING_SUGGESTIONS,
@@ -64,15 +66,32 @@ export function ShapingMark({ shaping }: { shaping: ShapingRailState }) {
  * where they sit.
  */
 export function ShapingRail({ shaping }: { shaping: ShapingRailState }) {
-  const streaming = shaping.status === "streaming";
-  const empty = shaping.messages.length === 0 && !streaming && shaping.status !== "failed";
-
   return (
     <section
       data-testid="shaping-rail"
       aria-label="Shape your path"
       className="flex h-full min-h-0 flex-col"
     >
+      {/* The **Change history** takes the whole rail while it is open (AL-331).
+          One surface at a time on a phone-first rail: the sheet is a record of
+          the path, and reading it is not something a learner does *while* also
+          composing an ask. The thread is untouched behind it — closing the sheet
+          returns to exactly the conversation that was there. */}
+      {shaping.historyOpen ? (
+        <ChangeHistorySheet shaping={shaping} />
+      ) : (
+        <RailThread shaping={shaping} />
+      )}
+    </section>
+  );
+}
+
+function RailThread({ shaping }: { shaping: ShapingRailState }) {
+  const streaming = shaping.status === "streaming";
+  const empty = shaping.messages.length === 0 && !streaming && shaping.status !== "failed";
+
+  return (
+    <>
       <RailHeader shaping={shaping} />
 
       <div
@@ -96,7 +115,7 @@ export function ShapingRail({ shaping }: { shaping: ShapingRailState }) {
         {empty ? <EmptyState /> : null}
 
         {shaping.messages.map((message) => (
-          <MessageBubble key={message.id} message={message} />
+          <MessageBubble key={message.id} message={message} shaping={shaping} />
         ))}
 
         {streaming ? (
@@ -134,7 +153,7 @@ export function ShapingRail({ shaping }: { shaping: ShapingRailState }) {
       </div>
 
       <Composer shaping={shaping} />
-    </section>
+    </>
   );
 }
 
@@ -167,6 +186,7 @@ function RailHeader({ shaping }: { shaping: ShapingRailState }) {
       <button
         type="button"
         data-testid="shaping-rail-change-history"
+        onClick={shaping.openHistory}
         title="Change history"
         className="rounded-md border border-divider px-2.5 py-1.5 text-xs text-mist transition-colors hover:border-iris/50 hover:text-porcelain"
       >
@@ -225,7 +245,13 @@ function RailHeader({ shaping }: { shaping: ShapingRailState }) {
 
 // --- Messages ----------------------------------------------------------------
 
-function MessageBubble({ message }: { message: ShapingMessage }) {
+function MessageBubble({
+  message,
+  shaping,
+}: {
+  message: ShapingMessage;
+  shaping: ShapingRailState;
+}) {
   const isTutor = message.role === "tutor";
   return (
     <div
@@ -242,42 +268,23 @@ function MessageBubble({ message }: { message: ShapingMessage }) {
           {/* Generated prose goes through the one renderer, always (the security
               boundary — no second pipeline, no `dangerouslySetInnerHTML`). */}
           <Markdown className="text-sm [&_p]:text-sm [&_p]:leading-6">{message.content}</Markdown>
-          {message.proposal ? <ProposalSlot proposal={message.proposal} /> : null}
+          {message.proposal ? (
+            <ProposalCard
+              messageId={message.id}
+              proposal={message.proposal}
+              status={shaping.proposalStatus(message.id)}
+              onApply={shaping.applyProposal}
+              onDismiss={shaping.dismissProposal}
+              onAskAgain={shaping.askAgain}
+              onViewInPath={shaping.viewInPath}
+            />
+          ) : null}
         </div>
       ) : (
         <p className="max-w-[85%] whitespace-pre-wrap rounded-lg border border-divider bg-surface px-3 py-2 text-sm leading-6 text-porcelain">
           {message.content}
         </p>
       )}
-    </div>
-  );
-}
-
-/**
- * **The proposal card's mount point — deliberately not the card.** AL-331 owns
- * the interior (operations grouped with rationale and cost, the pending /
- * applying / applied / stale / undone states, Apply and Not now, ghost rows,
- * undo). What AL-330 owes it is this: the payload arrives on the stream, lands
- * on the message, and has a place to render — so the seam is proven end to end
- * before the card exists.
- *
- * It shows the payload's own `summary` and nothing computed: the summary is the
- * agent's plain-language statement of what the operations do (TDD §5.1), so
- * showing it is honest even without the card, and there is no second, derived
- * description here for AL-331 to have to reconcile with.
- */
-function ProposalSlot({ proposal }: { proposal: MessageProposal }) {
-  return (
-    <div
-      data-testid="shaping-rail-proposal"
-      data-resolution={proposal.resolution}
-      data-operations={proposal.operations.length}
-      className="mt-3 rounded-lg border border-iris/50 bg-iris/5 px-4 py-3"
-    >
-      <p className="font-mono text-[11px] font-medium uppercase tracking-kicker text-iris-300">
-        Proposal
-      </p>
-      <p className="mt-1.5 text-sm leading-6 text-porcelain">{proposal.summary}</p>
     </div>
   );
 }

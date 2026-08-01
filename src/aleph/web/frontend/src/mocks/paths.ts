@@ -259,6 +259,7 @@ export function resetPaths(): void {
   store.clear();
   config = { ...defaultConfig };
   idCounter = 0;
+  appliedCounter = 0;
   deleted.length = 0;
   createBodies.length = 0;
   listRequests = 0;
@@ -329,7 +330,11 @@ export function seedPath(path: {
     level: path.level,
     resolution: path.resolution ?? "ready",
     pollsRemaining: path.pollsRemaining ?? 0,
-    units: path.units,
+    // **Copied, never referenced.** The fixtures above are module constants
+    // shared by every test in the run, and AL-331's Apply/Undo mutate a stored
+    // path's outline in place — a reference here would let one test's applied
+    // lessons leak into the next test's fixture.
+    units: path.units?.map((unit) => ({ ...unit, lessons: unit.lessons.map((l) => ({ ...l })) })),
   });
 }
 
@@ -353,6 +358,172 @@ const READY_UNITS: PathUnit[] = [
     ],
   },
 ];
+
+// --- Structural edits: what Apply and Undo do to a stored path (AL-331) -----
+//
+// The shaping fake (`mocks/shaping.ts`) reaches for these rather than owning a
+// second copy of the outline, because Apply's whole contract is that its `path`
+// is byte-for-byte `GET /paths/{id}` — a fake that answered from a private copy
+// could not prove the rail's ghost rows really become the outline's real rows.
+// They are deliberately *structural only*, exactly like the server's transaction
+// (TDD §5.6): rows land `ungenerated` and Phase 1's pipeline owns the rest.
+
+/** The rows one applied Addition created — what Undo has to take back. */
+export interface AppliedRows {
+  lessonIds: string[];
+  /** Set only when the Addition grouped its lessons into a new unit. */
+  unitId: string | null;
+}
+
+let appliedCounter = 0;
+
+/** A stored path's units, made mutable (the fixtures are shared constants). */
+function mutableUnits(path: StoredPath): PathUnit[] {
+  if (path.units === undefined) {
+    path.units = READY_UNITS.map((unit) => ({ ...unit, lessons: [...unit.lessons] }));
+  }
+  return path.units;
+}
+
+/**
+ * `position_in_path` is a path's single total order — restate it after a shift,
+ * and re-derive `unlock_state` from it.
+ *
+ * **Unlock state is derived, never stored** (`domains/progression.py`: complete
+ * iff completed, "available iff it is the first incomplete lesson in
+ * `position_in_path` order", locked otherwise). So a shift is not only a
+ * renumber: a row that lands ahead of the learner's place *becomes* the
+ * available lesson and the row it displaced locks behind it. A fake that left
+ * every inserted row `locked` would show a path with no next lesson at all —
+ * and the rail's whole continue affordance reads off exactly that state.
+ */
+function renumber(units: PathUnit[]): void {
+  let position = 0;
+  let availableTaken = false;
+  for (const unit of units) {
+    unit.lessons = unit.lessons.map((lesson) => {
+      const complete = lesson.unlock_state === "complete";
+      const available = !complete && !availableTaken;
+      if (available) availableTaken = true;
+      return {
+        ...lesson,
+        position_in_path: position++,
+        unlock_state: complete ? "complete" : available ? "available" : "locked",
+      };
+    });
+  }
+}
+
+/**
+ * Insert an Addition's lessons, the way the apply transaction does: new rows are
+ * ordinary `ungenerated` lessons at the named slot, and everything below them
+ * shifts down. Their unlock state is not chosen here — `renumber` derives it for
+ * the whole path, because that is where it comes from.
+ */
+export function addLessonsToPath(
+  pathId: string,
+  operation: {
+    insert_at_position: number;
+    lessons: { title: string }[];
+    new_unit: { title: string; summary: string } | null;
+  },
+): AppliedRows {
+  const path = store.get(pathId);
+  if (!path) return { lessonIds: [], unitId: null };
+  const units = mutableUnits(path);
+
+  const created = operation.lessons.map((lesson) => {
+    appliedCounter += 1;
+    return {
+      id: `a0000000-0000-4000-8000-${String(appliedCounter).padStart(12, "0")}`,
+      title: lesson.title,
+      // Both placeholders: `renumber` below restates the position and derives
+      // the unlock state for every row on the path, this one included.
+      position_in_path: 0,
+      generation_state: "ungenerated" as const,
+      unlock_state: "locked" as const,
+    };
+  });
+
+  let unitIndex = units.findIndex((unit) =>
+    unit.lessons.some((lesson) => lesson.position_in_path === operation.insert_at_position),
+  );
+  let rowIndex =
+    unitIndex === -1
+      ? -1
+      : units[unitIndex].lessons.findIndex(
+          (lesson) => lesson.position_in_path === operation.insert_at_position,
+        );
+
+  if (operation.new_unit) {
+    appliedCounter += 1;
+    const unitId = `a1000000-0000-4000-8000-${String(appliedCounter).padStart(12, "0")}`;
+    units.splice(unitIndex === -1 ? units.length : unitIndex, 0, {
+      id: unitId,
+      title: operation.new_unit.title,
+      lessons: created,
+    });
+    renumber(units);
+    return { lessonIds: created.map((lesson) => lesson.id), unitId };
+  }
+
+  if (unitIndex === -1) {
+    unitIndex = Math.max(units.length - 1, 0);
+    rowIndex = units[unitIndex]?.lessons.length ?? 0;
+  }
+  units[unitIndex].lessons.splice(rowIndex, 0, ...created);
+  renumber(units);
+  return { lessonIds: created.map((lesson) => lesson.id), unitId: null };
+}
+
+/**
+ * Clear a Revision's target: content gone, state back to `ungenerated`, title
+ * adjusted if the operation named a new one. The lesson keeps its slot — that is
+ * what makes a Revision a Revision and not an Addition (CONTEXT.md).
+ */
+export function reviseLessonInPath(
+  pathId: string,
+  lessonId: string,
+  newTitle: string | null,
+): { title: string } | null {
+  const path = store.get(pathId);
+  if (!path) return null;
+  for (const unit of mutableUnits(path)) {
+    const index = unit.lessons.findIndex((lesson) => lesson.id === lessonId);
+    if (index === -1) continue;
+    const before = unit.lessons[index];
+    unit.lessons = [...unit.lessons];
+    unit.lessons[index] = {
+      ...before,
+      title: newTitle ?? before.title,
+      generation_state: "ungenerated",
+    };
+    return { title: before.title };
+  }
+  return null;
+}
+
+/** Undo's half of the Addition: the rows go, the positions unshift. */
+export function removeLessonsFromPath(pathId: string, rows: AppliedRows): void {
+  const path = store.get(pathId);
+  if (!path) return;
+  const units = mutableUnits(path);
+  const removing = new Set(rows.lessonIds);
+  for (const unit of units) {
+    unit.lessons = unit.lessons.filter((lesson) => !removing.has(lesson.id));
+  }
+  if (rows.unitId !== null) {
+    const index = units.findIndex((unit) => unit.id === rows.unitId);
+    if (index !== -1) units.splice(index, 1);
+  }
+  renumber(units);
+}
+
+/** A stored path exactly as `GET /paths/{id}` serves it — Apply's `path` field. */
+export function pathDetailFor(pathId: string): PathDetail | undefined {
+  const path = store.get(pathId);
+  return path ? detailFor(path) : undefined;
+}
 
 function detailFor(path: StoredPath): PathDetail {
   const generating = path.pollsRemaining > 0;
