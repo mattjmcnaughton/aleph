@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     ColumnElement,
+    delete,
     func,
     select,
     update,
@@ -275,6 +276,15 @@ class LessonRepository:
             read_passage=read_passage,
             generated_at=func.now(),
             generation_error=None,
+            # A learner-applied **Revision**'s instruction is spent the moment
+            # the revised content lands (Phase 2B D7): the column exists to tell
+            # the *next* generation of this row how to teach, and a row that has
+            # reached ``generated`` has had that generation. Clearing it here —
+            # inside the same fenced write that stores the passage — is what
+            # makes "cleared on generated" true atomically rather than as a
+            # follow-up nobody runs when the process dies mid-way. Harmless for
+            # every ordinary lesson, whose column is already ``NULL``.
+            revision_instruction=None,
         )
 
     async def mark_failed(
@@ -369,6 +379,128 @@ class LessonRepository:
         )
         path_now_complete = newly_completed and remaining == 0
         return newly_completed, path_now_complete, int(lesson_count or 0)
+
+    # -- shaping: apply / undo writes (Phase 2B §5.6/§5.7) ------------------ #
+    #
+    # The only writes into ``lessons`` outside Phase 1's generation pipeline
+    # (TDD §3), and reachable from exactly one caller: ``services/shaping.py``'s
+    # ``apply_change``/``undo_change``. They are single-row, unguarded and
+    # unfenced on purpose — the per-path apply lock (D11) plus the enclosing
+    # transaction is the concurrency control here, not a claim, and there is no
+    # state machine to respect: a shift moves a row's *position*, which is
+    # orthogonal to its generation state.
+
+    async def move_to_position(
+        self, *, lesson_id: uuid.UUID, position_in_path: int
+    ) -> None:
+        """Move one lesson to ``position_in_path`` (one row, one statement).
+
+        Row-at-a-time by design (D6): ``UNIQUE (path_id, position_in_path)`` is
+        non-deferrable and Postgres checks it per updated row, so a set-based
+        ``position_in_path + n`` can collide with a row the same statement has
+        not moved yet. The caller runs the plan
+        (:func:`~aleph.domains.changes.plan_insertion_shifts`, descending on
+        apply; :func:`~aleph.domains.changes.reverse_shifts`, ascending on undo)
+        so every one of these lands on a slot that is already free.
+        """
+        await self.session.execute(
+            update(Lesson)
+            .where(Lesson.id == lesson_id)
+            .values(position_in_path=position_in_path, updated_at=func.now())
+        )
+
+    async def move_within_unit(
+        self, *, lesson_id: uuid.UUID, position_in_unit: int
+    ) -> None:
+        """Set one lesson's display position inside its unit.
+
+        Unconstrained (there is no unique index on ``position_in_unit``), so
+        unlike :meth:`move_to_position` these need no ordering at all.
+        """
+        await self.session.execute(
+            update(Lesson)
+            .where(Lesson.id == lesson_id)
+            .values(position_in_unit=position_in_unit, updated_at=func.now())
+        )
+
+    async def start_revision(
+        self, *, lesson_id: uuid.UUID, instruction: str, title: str | None
+    ) -> None:
+        """Reset a lesson to ``ungenerated`` under a Revision (D7).
+
+        The one ``generated -> ungenerated`` transition in the app, and the whole
+        of the Phase 1 state-machine amendment: content is immutable once
+        **engaged**, not once generated (CONTEXT.md), so this is legal exactly
+        while the D2 guard the caller ran still holds. Content is cleared rather
+        than left in place — the old passage lives on in the Change's payload,
+        which is both what undo restores from and what the next generation's
+        revision block reads.
+
+        ``generation_started_at``/``generation_error`` are cleared too so the row
+        is indistinguishable from a never-generated one to every Phase 1 reader:
+        a leftover start stamp would make the stale-recovery predicate reason
+        about a claim that no longer exists.
+        """
+        values: dict[str, object] = {
+            "generation_state": LessonGenerationState.UNGENERATED,
+            "generation_started_at": None,
+            "generation_error": None,
+            "read_passage": None,
+            "generated_at": None,
+            "revision_instruction": instruction,
+            "updated_at": func.now(),
+        }
+        if title is not None:
+            values["title"] = title
+        await self.session.execute(
+            update(Lesson).where(Lesson.id == lesson_id).values(**values)
+        )
+
+    async def restore_revision(
+        self,
+        *,
+        lesson_id: uuid.UUID,
+        title: str,
+        read_passage: str | None,
+        generated_at: datetime.datetime | None,
+    ) -> None:
+        """Put a revised lesson back exactly as it was (D8).
+
+        The inverse of :meth:`start_revision`, restoring from the Change's
+        snapshot rather than from anything derived: title, passage,
+        ``generated_at``, and the generation state implied by the snapshot — a
+        lesson that had content goes back to ``generated``, one that never had
+        any goes back to ``ungenerated``. ``revision_instruction`` clears,
+        because after an undo there is no Revision outstanding.
+        """
+        await self.session.execute(
+            update(Lesson)
+            .where(Lesson.id == lesson_id)
+            .values(
+                title=title,
+                read_passage=read_passage,
+                generated_at=generated_at,
+                generation_state=(
+                    LessonGenerationState.GENERATED
+                    if read_passage is not None
+                    else LessonGenerationState.UNGENERATED
+                ),
+                generation_started_at=None,
+                generation_error=None,
+                revision_instruction=None,
+                updated_at=func.now(),
+            )
+        )
+
+    async def delete(self, lesson_id: uuid.UUID) -> None:
+        """Remove one lesson (undo of an **Addition**; cascades its Quick check).
+
+        An in-flight generation of this row is not coordinated with and does not
+        need to be: every write Phase 1 makes is a guarded ``UPDATE ... WHERE
+        id = ...``, so a worker that finishes after the delete matches zero rows
+        and is dropped (TDD §5.7).
+        """
+        await self.session.execute(delete(Lesson).where(Lesson.id == lesson_id))
 
     # -- stale-aware reads (§5.4/§6) --------------------------------------- #
 

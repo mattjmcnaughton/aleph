@@ -34,17 +34,25 @@ the long-form reasoning for both; :class:`ReservedStream` is imported from there
 rather than reimplemented, because a second copy of "release the claim in the one
 frame ASGI guarantees will run" is a second place for that to go subtly wrong.
 
-**Shaping writes no path structure here** (TDD §3). This module's routes reach
-conversation rows and nothing else: no unit, no lesson, no attempt, no progress.
-Apply and Undo — the only writes into path structure outside Phase 1's generation
-pipeline — are AL-321's, land on this same router behind this same gate, and take
-a per-path lock of their own (D11). That the conversation surface cannot mutate a
-path is a property of what it imports, not a convention.
+**The conversation routes write no path structure** (TDD §3): they reach
+conversation rows and nothing else — no unit, no lesson, no attempt, no progress.
+**Apply** and **Undo** (AL-321) are the exception this whole phase is about, and
+they are still not writers *here*: they resolve ownership, hand ids to
+``services/shaping.py``, and translate the result. Every mutation happens in that
+service, under its own per-path lock (D11) and in one transaction, so "the only
+write path into path structure is Apply on a validated Proposal" stays a property
+of module topology rather than of this file's good behaviour.
+
+**Progress is never touched by anything here** (W21's structural guarantee, as in
+2A): no route in this module reaches a lesson's ``completed_at`` or an Attempt,
+in either direction. Undo can only remove what a Change created, and the
+engagement boundary means it cannot even reach that once the learner has met it.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Annotated
+from uuid import UUID  # noqa: TC003 - FastAPI resolves route-param annotations.
 
 from fastapi import APIRouter, Depends, status
 from fastapi.responses import Response, StreamingResponse
@@ -57,6 +65,9 @@ from aleph.config import settings
 from aleph.db import get_session
 from aleph.dependencies import get_current_user
 from aleph.dtos.shaping import (
+    ApplyProposalResponse,
+    ChangeDTO,
+    ChangeHistoryResponse,
     ProposalDTO,
     SendShapingMessageRequest,
     ShapingConversationResponse,
@@ -75,6 +86,7 @@ from aleph.repositories import (
 )
 from aleph.routers.v1.paths import (  # noqa: TC001 - FastAPI resolves annotations.
     OwnedPath,
+    path_detail_response,
     validate_model_override,
 )
 
@@ -85,11 +97,18 @@ from aleph.routers.v1.paths import (  # noqa: TC001 - FastAPI resolves annotatio
 # the latter to a public name is a mechanical follow-up, not a reason to fork it.
 from aleph.routers.v1.tutor import ReservedStream, _not_found
 from aleph.services.feature_flags import FeatureFlag, FeatureFlagService
-from aleph.services.shaping import shaping_turn_service
+from aleph.services.generation import generation_orchestrator
+from aleph.services.paths_read import load_path_detail
+from aleph.services.shaping import (
+    change_kinds,
+    shaping_change_service,
+    shaping_turn_service,
+)
 from aleph.services.sse import SSE_HEADERS, SSE_MEDIA_TYPE
 from aleph.services.tutor_context import (
     build_shaping_caps,
     build_shaping_digest,
+    change_summary_text,
     derive_proposal_resolutions,
 )
 
@@ -102,7 +121,7 @@ if TYPE_CHECKING:
         ShapingCaps,
         ShapingDigestEntry,
     )
-    from aleph.models import Message, Path
+    from aleph.models import Message, Path, PathChange
 
 CurrentUser = Annotated[User, Depends(get_current_user)]
 Session = Annotated[AsyncSession, Depends(get_session)]
@@ -275,6 +294,123 @@ async def delete_shaping_conversation(path: OwnedPath, session: Session) -> Resp
     )
     await session.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/messages/{message_id}/apply-proposal")
+async def apply_proposal(
+    message_id: UUID, user: CurrentUser, session: Session
+) -> ApplyProposalResponse:
+    """**Apply** the Proposal on a shaping message → the Change + the fresh path.
+
+    The learner's tap, and the only write path into path structure (§5.6). It
+    addresses the *message* rather than the path because the Proposal is what is
+    being consented to — a payload validated when it was made, re-validated here
+    against live state, and applied whole or not at all.
+
+    Ownership is its **own** walk (message → conversation → path → account), not
+    ``OwnedPath``'s and not the Tutor-check route's: a shaping message carries no
+    ``lesson_id``, so ``get_message_for_user``'s inner join cannot return one
+    (its docstring says so). A message that is not the caller's, is not a shaping
+    message, or carries no Proposal is a plain ``404`` — three different facts,
+    one answer, because distinguishing them would disclose the first.
+
+    Everything after that is ``services/shaping.py``'s, under the per-path apply
+    lock (D11), and every refusal is a ``409`` whose ``details.reason`` is a
+    :class:`~aleph.dtos.shaping.ShapingConflictReason` the card renders: already
+    applied, stale (with which rule broke), positions shifted, or a target being
+    generated right now. §5.8 makes that path first-class UX rather than an error
+    corner — a Proposal going stale is *normal* (the learner chats, walks away,
+    attempts the target, comes back and taps).
+
+    The response carries the **refreshed path** because the rail is holding ghost
+    rows it now has to swap for real ones, and loading it through the same read
+    seam ``GET /paths/{id}`` uses is also what kicks Phase 1's prefetch driver —
+    §5.6's "so new work starts without waiting for a poll". One round trip,
+    no new orchestration (D7).
+    """
+    owned = await ConversationRepository(session).get_shaping_message_for_user(
+        message_id=message_id, user_id=user.id
+    )
+    if owned is None or not owned.message.proposal:
+        raise _not_found()
+    path = owned.path
+    change_id = await shaping_change_service.apply_change(
+        path_id=path.id, message_id=message_id
+    )
+    view = await load_path_detail(session, generation_orchestrator, path.id)
+    change = await ChangeRepository(session).get(change_id)
+    if view is None or change is None:  # pragma: no cover - a raced path delete
+        raise _not_found()
+    return ApplyProposalResponse(
+        change=_change_dto(change), path=path_detail_response(path, view)
+    )
+
+
+@router.post("/changes/{change_id}/undo", status_code=status.HTTP_204_NO_CONTENT)
+async def undo_change(change_id: UUID, user: CurrentUser, session: Session) -> Response:
+    """**Undo** a Change, restoring the path exactly → ``204`` (§5.7).
+
+    Ownership walks change → path → account (``404`` otherwise). The engagement
+    re-check (D2) happens in the service, inside the lock and against live state,
+    because that is the rule — the history sheet's disabled button is a
+    convenience, and a learner can start a lesson between the sheet rendering and
+    the tap. A Change whose content has been met answers ``409`` with reason
+    ``engaged``, and the sheet says plainly that it is now permanent history
+    rather than hiding the affordance (PRD §5.5).
+
+    ``204`` and not the restored path: undo is reached from the history sheet,
+    which is a read-only record, and the rail refetches the outline it already
+    polls. Apply returns a path because it has ghosts to swap; undo has none.
+    """
+    owned = await ChangeRepository(session).get_for_user(
+        change_id=change_id, user_id=user.id
+    )
+    if owned is None:
+        raise _not_found()
+    await shaping_change_service.undo_change(path_id=owned.path.id, change_id=change_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/paths/{path_id}/changes")
+async def get_change_history(
+    path: OwnedPath, session: Session
+) -> ChangeHistoryResponse:
+    """The path's **Change history**, newest first (§6).
+
+    Ownership via ``OwnedPath`` (``404`` otherwise). Read-only: it is a record,
+    not a second edit surface (PRD §5.5), so undone Changes are listed too —
+    undo is a status, and the history is what happened.
+
+    It is scoped by **path**, never by conversation, which is why it answers
+    identically before and after "new conversation": the rows outlive the thread
+    that produced them (D3), and an applied Change is real path structure that
+    clearing a conversation could not take back even if it wanted to.
+
+    ``200`` with an empty list on a path nothing has ever shaped — and on a
+    non-``ready`` path, for the conversation read's reason: the ``ready`` rule
+    bounds sending, not reading.
+    """
+    changes = await ChangeRepository(session).list_for_path(path.id)
+    return ChangeHistoryResponse(changes=[_change_dto(change) for change in changes])
+
+
+def _change_dto(change: PathChange) -> ChangeDTO:
+    """Translate one stored Change to the wire (§6).
+
+    The summary is :func:`~aleph.services.tutor_context.change_summary_text` —
+    the *same* line the shaper reads in its carried Change history, so a learner
+    comparing the sheet with what the tutor says about their path is comparing
+    one sentence rather than two accounts of it. ``kinds`` is derived from the
+    payload by the service, for the reason its docstring gives.
+    """
+    return ChangeDTO(
+        id=change.id,
+        summary=change_summary_text(change),
+        kinds=change_kinds(change),
+        status=change.status,
+        applied_at=change.applied_at,
+        undone_at=change.undone_at,
+    )
 
 
 def _message_dto(

@@ -246,8 +246,15 @@ async def list_paths(user: CurrentUser, session: Session) -> PathListResponse:
     )
 
 
-def _detail_response(path: Path, view: PathDetailView) -> PathDetailResponse:
-    """Translate the composed read-seam view + owned row to the wire DTO."""
+def path_detail_response(path: Path, view: PathDetailView) -> PathDetailResponse:
+    """Translate the composed read-seam view + owned row to the wire DTO.
+
+    Public because Phase 2B's **Apply** answers with the refreshed path in the
+    same shape ``GET /paths/{id}`` does (TDD §5.6/§8: the client swaps its ghost
+    rows for real rows by dropping the body into the outline query it already
+    polls). One translation, so the two can never disagree about what a path
+    looks like on the wire.
+    """
     return PathDetailResponse(
         id=path.id,
         topic=path.topic,
@@ -293,7 +300,7 @@ async def get_path(path: OwnedPath, session: Session) -> PathDetailResponse:
     view = await load_path_detail(session, generation_orchestrator, path.id)
     if view is None:
         raise _path_not_found()
-    return _detail_response(path, view)
+    return path_detail_response(path, view)
 
 
 @router.post("/paths/{path_id}/retry", status_code=status.HTTP_202_ACCEPTED)

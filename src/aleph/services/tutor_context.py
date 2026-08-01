@@ -678,15 +678,21 @@ def summarize_changes(changes: Sequence[PathChange]) -> tuple[ChangeSummary, ...
     """
     return tuple(
         ChangeSummary(
-            summary=_change_summary_text(change),
+            summary=change_summary_text(change),
             status=_STATUS_TO_CHANGE_STATUS[change.status],
         )
         for change in changes[:MAX_CHANGE_HISTORY]
     )
 
 
-def _change_summary_text(change: PathChange) -> str:
-    """One Change's plain-language line: the stored summary, or a derived one."""
+def change_summary_text(change: PathChange) -> str:
+    """One Change's plain-language line: the stored summary, or a derived one.
+
+    Public because the **Change history** endpoint (AL-321, §6) renders the same
+    line the shaper reads, and "plain-language summary" must mean one thing:
+    a learner comparing the history sheet with what the tutor says about their
+    path is comparing the same sentence, not two generated accounts of it.
+    """
     stored = (change.payload or {}).get(CHANGE_SUMMARY_KEY)
     if isinstance(stored, str) and stored.strip():
         return stored.strip()
@@ -774,6 +780,30 @@ def derive_proposal_resolutions(
     return resolutions
 
 
+def parse_proposal_operations(
+    payload: Mapping[str, Any],
+) -> list[ShapingOperation] | None:
+    """A stored Proposal's operations as the agent's own models, or ``None``.
+
+    The one place a persisted payload is turned back into something the shared
+    D1 predicates can read. Exported because **apply** (AL-321) must do exactly
+    this before re-validating against live state (D5), and re-declaring the
+    parse there is how apply and the *superseded* derivation would start
+    disagreeing about which payloads are even legible.
+
+    ``None`` — not an exception, and not an empty list — for a payload that will
+    not parse: an operation shape this app no longer understands cannot be
+    re-validated, so every caller must fail **closed**, and a ``None`` is what
+    stops that being confused with "a proposal that proposes nothing".
+    """
+    try:
+        return _OPERATIONS_ADAPTER.validate_python(
+            payload.get(CHANGE_OPERATIONS_KEY) or []
+        )
+    except ValidationError:
+        return None
+
+
 def _revalidates(
     payload: dict[str, Any],
     *,
@@ -795,11 +825,8 @@ def _revalidates(
     :func:`~aleph.agents.shaper.revision_targets_unengaged`'s posture on an
     unknown lesson.
     """
-    try:
-        operations = _OPERATIONS_ADAPTER.validate_python(
-            payload.get(CHANGE_OPERATIONS_KEY) or []
-        )
-    except ValidationError:
+    operations = parse_proposal_operations(payload)
+    if operations is None:
         return False
     if not operations:
         return False

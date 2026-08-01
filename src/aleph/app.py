@@ -1,6 +1,7 @@
 """FastAPI application factory."""
 
 import uuid
+from collections.abc import Mapping
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, status
@@ -116,13 +117,13 @@ def _install_error_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(StarletteHTTPException)
     async def http_exception_handler(request: Request, exc: StarletteHTTPException):
-        message = exc.detail if isinstance(exc.detail, str) else "request failed"
+        message, details = _detail_parts(exc.detail)
         return error_response(
             request,
             status_code=exc.status_code,
             code=_http_error_code(exc.status_code),
             message=message,
-            details=None if isinstance(exc.detail, str) else exc.detail,
+            details=details,
         )
 
     @app.exception_handler(RequestValidationError)
@@ -145,6 +146,31 @@ def _install_error_handlers(app: FastAPI) -> None:
             code="internal_error",
             message="internal server error",
         )
+
+
+def _detail_parts(detail: object) -> tuple[str, object | None]:
+    """Split an ``HTTPException`` detail into the envelope's message + details.
+
+    A plain string detail is the message and carries no details — every Phase 1
+    and Phase 2 route, unchanged.
+
+    A **mapping** detail may name its own ``message``, and then it is used
+    verbatim while the rest of the mapping becomes ``details``. Phase 2B's
+    apply/undo conflicts need exactly that shape: the envelope's ``code`` is
+    ``conflict`` for every ``409``, but the proposal card has to render *which*
+    conflict ("this lesson has been started since") and offer the matching
+    affordance, so the coded ``reason`` rides in ``details`` alongside a message
+    written for a human. Without this, such a route would answer the useless
+    "request failed" and hide its own sentence inside ``details``.
+    """
+    if isinstance(detail, str):
+        return detail, None
+    if isinstance(detail, Mapping):
+        message = detail.get("message")
+        if isinstance(message, str):
+            rest = {key: value for key, value in detail.items() if key != "message"}
+            return message, rest or None
+    return "request failed", detail
 
 
 def _http_error_code(status_code: int) -> str:

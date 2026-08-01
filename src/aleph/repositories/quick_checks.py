@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from aleph.models import QuickCheck
 
@@ -45,3 +45,17 @@ class QuickCheckRepository:
             select(QuickCheck).where(QuickCheck.lesson_id == lesson_id)
         )
         return result.scalar_one_or_none()
+
+    async def delete_for_lesson(self, lesson_id: uuid.UUID) -> None:
+        """Drop a lesson's Quick check (a **Revision**'s reset, Phase 2B D7).
+
+        Safe by the engagement boundary rather than by a guard: a lesson may
+        only be revised while it is unengaged (D2), and an unengaged lesson has
+        no **Attempt** — so this can never cascade away recorded work. The caller
+        (``services/shaping.py``) proves that immediately before, inside the same
+        transaction and under the per-path apply lock; the check is re-created
+        from the Change's snapshot on undo.
+        """
+        await self.session.execute(
+            delete(QuickCheck).where(QuickCheck.lesson_id == lesson_id)
+        )

@@ -19,6 +19,9 @@ from __future__ import annotations
 
 import asyncio
 
+import asyncpg
+import pytest
+
 from .conftest import connect, run_alembic
 
 PHASE_1_HEAD = "0002_path_model_overrides"
@@ -30,6 +33,9 @@ SHAPING_HEAD = "0005_shaping"
 # AL-320's step: shaping messages are path-level, so ``messages.lesson_id``
 # becomes nullable.
 MESSAGE_LESSON_HEAD = "0006_shaping_message_lesson"
+# AL-321's step: one **applied** Change per proposal message, in the database.
+APPLIED_CHANGE_HEAD = "0007_applied_change_uniqueness"
+APPLIED_CHANGE_INDEX = "uq_path_changes_applied_message"
 
 PHASE_1_TABLES = ("users", "paths", "units", "lessons", "quick_checks", "attempts")
 PHASE_2_TABLES = ("conversations", "messages")
@@ -594,3 +600,159 @@ def test_the_message_lesson_step_reverses_by_dropping_shaping_messages(
 
     assert asyncio.run(_is_nullable(database_url, "messages", "lesson_id"))
     assert asyncio.run(_message_contents(database_url)) == {"in a lesson"}
+
+
+# --------------------------------------------------------------------------- #
+# AL-321: one applied Change per proposal (migration 0007)
+#
+# The consent rule — "a Proposal is applied at most once" — moved out of one
+# process's lock and into the schema, because a rolling deploy briefly runs two
+# machines and neither one's lock excludes the other's. What is worth asserting
+# is that the index really is *partial* in both directions: it must reject a
+# second **applied** row for one message, and must not stand in the way of the
+# two shapes that are legal — an undone row, and the NULL ``message_id`` a
+# cleared thread leaves behind (D3).
+# --------------------------------------------------------------------------- #
+
+
+async def _indexes(database_url: str, table: str) -> dict[str, str]:
+    """``{index name: its definition}`` for ``table``."""
+    connection = await connect(database_url)
+    try:
+        rows = await connection.fetch(
+            "SELECT indexname, indexdef FROM pg_indexes "
+            "WHERE schemaname = 'public' AND tablename = $1",
+            table,
+        )
+    finally:
+        await connection.close()
+    return {row["indexname"]: row["indexdef"] for row in rows}
+
+
+async def _seed_proposal_message(database_url: str) -> tuple[str, str]:
+    """A path with a shaping message on it; returns ``(path_id, message_id)``."""
+    connection = await connect(database_url)
+    try:
+        row = await connection.fetchrow(
+            """
+            WITH u AS (
+                INSERT INTO users (id, issuer, subject, username, display_name)
+                VALUES (gen_random_uuid(), 'iss', 'sub-321', 'apply-once', 'A')
+                RETURNING id
+            ), p AS (
+                INSERT INTO paths (id, user_id, topic, level, status)
+                SELECT gen_random_uuid(), u.id, 'Rust ownership',
+                       'some_experience', 'ready'
+                FROM u
+                RETURNING id
+            ), c AS (
+                INSERT INTO conversations (id, path_id, kind)
+                SELECT gen_random_uuid(), p.id, 'shaping' FROM p
+                RETURNING id, path_id
+            )
+            INSERT INTO messages (
+                id, conversation_id, lesson_id, position, role, content
+            )
+            SELECT gen_random_uuid(), c.id, NULL, 1, 'tutor', 'a proposal'
+            FROM c
+            RETURNING id AS message_id,
+                      (SELECT path_id FROM c) AS path_id
+            """
+        )
+    finally:
+        await connection.close()
+    return str(row["path_id"]), str(row["message_id"])
+
+
+async def _insert_change(
+    database_url: str, *, path_id: str, message_id: str | None, status: str
+) -> None:
+    connection = await connect(database_url)
+    try:
+        await connection.execute(
+            "INSERT INTO path_changes (id, path_id, message_id, kind, payload, status) "
+            "VALUES (gen_random_uuid(), $1::uuid, $2::uuid, 'add_lessons', "
+            "'{}'::jsonb, $3::path_change_status)",
+            path_id,
+            message_id,
+            status,
+        )
+    finally:
+        await connection.close()
+
+
+def test_the_applied_change_index_downgrades_and_reapplies_cleanly(
+    isolated_database: str,
+) -> None:
+    """Index-only, both ways: nothing else about ``path_changes`` moves."""
+    database_url = isolated_database
+
+    at_head = asyncio.run(_indexes(database_url, CHANGES_TABLE))
+    assert APPLIED_CHANGE_INDEX in at_head
+    assert "UNIQUE" in at_head[APPLIED_CHANGE_INDEX]
+    assert "status = 'applied'" in at_head[APPLIED_CHANGE_INDEX]
+    columns = asyncio.run(_columns(database_url, CHANGES_TABLE))
+
+    run_alembic(database_url, MESSAGE_LESSON_HEAD, downgrade=True)
+
+    after_downgrade = asyncio.run(_indexes(database_url, CHANGES_TABLE))
+    assert APPLIED_CHANGE_INDEX not in after_downgrade
+    assert after_downgrade.keys() | {APPLIED_CHANGE_INDEX} == at_head.keys()
+    assert asyncio.run(_columns(database_url, CHANGES_TABLE)) == columns
+
+    run_alembic(database_url, APPLIED_CHANGE_HEAD)
+
+    assert asyncio.run(_indexes(database_url, CHANGES_TABLE)).keys() == at_head.keys()
+
+
+def test_a_proposal_cannot_be_applied_twice(isolated_database: str) -> None:
+    """The rule the index exists for, asserted at the SQL level."""
+    database_url = isolated_database
+    path_id, message_id = asyncio.run(_seed_proposal_message(database_url))
+
+    asyncio.run(
+        _insert_change(
+            database_url, path_id=path_id, message_id=message_id, status="applied"
+        )
+    )
+
+    with pytest.raises(asyncpg.UniqueViolationError):
+        asyncio.run(
+            _insert_change(
+                database_url, path_id=path_id, message_id=message_id, status="applied"
+            )
+        )
+
+
+def test_the_index_leaves_undone_rows_and_cleared_threads_alone(
+    isolated_database: str,
+) -> None:
+    """Partial and NULL-tolerant: the two legal shapes still fit.
+
+    ``apply → undo → apply`` is a real sequence (the service refuses the second
+    tap for its own product reason, which is not this index's business), and a
+    Change whose proposal message a "new conversation" cleared carries a NULL
+    ``message_id`` — many of those must coexist, which they do because NULLs are
+    never equal to one another.
+    """
+    database_url = isolated_database
+    path_id, message_id = asyncio.run(_seed_proposal_message(database_url))
+
+    asyncio.run(
+        _insert_change(
+            database_url, path_id=path_id, message_id=message_id, status="undone"
+        )
+    )
+    asyncio.run(
+        _insert_change(
+            database_url, path_id=path_id, message_id=message_id, status="applied"
+        )
+    )
+    asyncio.run(
+        _insert_change(database_url, path_id=path_id, message_id=None, status="applied")
+    )
+    asyncio.run(
+        _insert_change(database_url, path_id=path_id, message_id=None, status="applied")
+    )
+
+    assert asyncio.run(_count(database_url, CHANGES_TABLE)) == 4
