@@ -1,3 +1,11 @@
+# [1.19.0](https://github.com/mattjmcnaughton/aleph/compare/v1.18.0...v1.19.0) (2026-08-01)
+
+
+### Features
+
+* **paths:** rename paths, guide their generation, and lift the size cap ([#141](https://github.com/mattjmcnaughton/aleph/issues/141)) ([541a55e](https://github.com/mattjmcnaughton/aleph/commit/541a55efc318c21c6d65fd2879761d76a710782e))
+* **telemetry:** shaping product events + saved metric queries (AL-340) ([7b45372](https://github.com/mattjmcnaughton/aleph/commit/7b453729e24c54e066993de77da38f78fc96c4ad)), closes [#124](https://github.com/mattjmcnaughton/aleph/issues/124)
+
 # [1.18.0](https://github.com/mattjmcnaughton/aleph/compare/v1.17.0...v1.18.0) (2026-08-01)
 
 
