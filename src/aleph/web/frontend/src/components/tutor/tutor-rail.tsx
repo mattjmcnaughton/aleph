@@ -16,6 +16,7 @@
 // every tutor-owned affordance here.
 
 import { AlephGlyph } from "../aleph-logo";
+import { handleComposerKeyDown } from "../../lib/composer-keys";
 import { Markdown } from "../markdown";
 import { TutorModelPicker } from "../model-picker";
 import type { ConversationMessage } from "../../lib/tutor";
@@ -63,7 +64,7 @@ export function TutorRail({ tutor }: { tutor: TutorRailState }) {
   const empty = tutor.messages.length === 0 && !streaming && tutor.status !== "failed";
 
   return (
-    <section data-testid="tutor-rail" aria-label="Tutor" className="flex h-full min-h-0 flex-col">
+    <section data-testid="tutor-rail" aria-label="Tutor" className="flex min-h-0 flex-1 flex-col">
       <RailHeader tutor={tutor} />
 
       <div
@@ -308,6 +309,9 @@ function Composer({ tutor }: { tutor: TutorRailState }) {
           aria-label="Ask about this lesson"
           value={tutor.draft}
           onChange={(event) => tutor.setDraft(event.target.value)}
+          onKeyDown={(event) =>
+            handleComposerKeyDown(event, () => tutor.send(tutor.draft, "typed"))
+          }
           disabled={streaming}
           rows={2}
           maxLength={TUTOR_MESSAGE_MAX_LENGTH}

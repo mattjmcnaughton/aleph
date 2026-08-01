@@ -9,6 +9,13 @@
 // `hidden lg:…`) is present in the DOM at every width — jsdom has no CSS, so
 // this is deliberate: it is what lets unit tests exercise the desktop layout
 // directly instead of needing a real browser viewport.
+//
+// The rail `<aside>` (below) is the one exception to "widen and add a
+// sidebar": at `lg` it is `lg:sticky` to the viewport rather than a plain flex
+// sibling, so its own `main` (a whole lesson, easily taller than one screen)
+// cannot stretch it and push its composer off the bottom. Still CSS only —
+// the offset it sticks under is `--app-header-h` (`index.css`), not a value
+// read from the DOM.
 
 import type { ReactNode } from "react";
 
@@ -56,9 +63,11 @@ export function Workspace({
    * `<aside>` is always in the DOM and hidden by CSS below `lg`, while this
    * slot is passed only while the rail is **open**, because open/closed is real
    * shared state the learner drives at every width. What is *not* JS is the
-   * presentation — the one `<aside>` below is a bottom sheet over the lesson,
-   * and at `lg` a docked 400px column beside the lesson's 680px. Same tree, two
-   * CSS presentations: no `matchMedia`, no width-conditional rendering.
+   * presentation — the one `<aside>` below is a bottom sheet over the lesson
+   * below `lg`, and at `lg` a docked 400px column, `lg:sticky` beneath the app
+   * header and viewport-tall in its own right, beside the lesson's 680px. Same
+   * tree, two CSS presentations: no `matchMedia`, no width-conditional
+   * rendering.
    *
    * Occupying this slot also gives `main` its bottom clearance below `lg`
    * (`RAIL_CLEARANCE`), so the sheet never strands the tail of the page.
@@ -79,7 +88,7 @@ export function Workspace({
   children: ReactNode;
 }) {
   return (
-    <div className="lg:flex lg:items-stretch">
+    <div className="lg:flex lg:items-stretch lg:min-h-[calc(100dvh-var(--app-header-h))]">
       {sidebar ? (
         <aside
           data-testid="desktop-sidebar"
@@ -103,8 +112,25 @@ export function Workspace({
           data-testid={railTestid}
           // Below `lg`: a sheet anchored to the bottom of the viewport, capped
           // so the lesson stays visible behind it (the PRD's chosen entry).
-          // At `lg`: an ordinary flex sibling — the docked right column.
-          className="fixed inset-x-0 bottom-0 z-40 flex max-h-[75vh] flex-col rounded-t-lg border-t border-divider bg-night shadow-lg lg:static lg:z-auto lg:max-h-none lg:w-[400px] lg:shrink-0 lg:rounded-none lg:border-l lg:border-t-0 lg:shadow-none"
+          //
+          // At `lg`: sticky beneath the app header, one viewport tall minus the
+          // header — rather than a plain flex sibling stretched to `main`'s full
+          // height. A lesson runs to thousands of pixels, and stretching the
+          // column to match it is what used to strand the composer off the
+          // bottom of the screen.
+          //
+          // Three of those `lg:` utilities look redundant and are not.
+          // `self-start`: the explicit height already defeats the row's
+          // `items-stretch`, but a stretched item has no travel range to stick
+          // through, so this says the requirement out loud. `bottom-auto`:
+          // un-does the sheet's `bottom-0`, which sticky would otherwise honour
+          // as a second constraint — it resolves to the same place only while
+          // the box exactly fills its constraint rect, and that coincidence
+          // should not be load-bearing. `overflow-hidden`: never reached on a
+          // real screen (the thread scrolls inside itself), it just keeps a
+          // viewport too short to hold the header and composer from spilling
+          // the rail's chrome across the lesson.
+          className="fixed inset-x-0 bottom-0 z-40 flex max-h-[75vh] flex-col rounded-t-lg border-t border-divider bg-night shadow-lg lg:sticky lg:top-[var(--app-header-h)] lg:bottom-auto lg:z-auto lg:h-[calc(100dvh-var(--app-header-h))] lg:max-h-none lg:w-[400px] lg:shrink-0 lg:self-start lg:overflow-hidden lg:rounded-none lg:border-l lg:border-t-0 lg:shadow-none"
         >
           {tutorRail}
         </aside>

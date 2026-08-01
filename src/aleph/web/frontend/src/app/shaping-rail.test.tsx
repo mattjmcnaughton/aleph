@@ -225,8 +225,13 @@ describe("Shaping rail — one tree, two CSS presentations (D14)", () => {
     // Below `lg`: a bottom sheet over the path, capped so the path shows behind.
     expect(column.className).toMatch(/fixed/);
     expect(column.className).toMatch(/bottom-0/);
-    // At `lg`: an ordinary flex sibling — the docked right column.
-    expect(column.className).toMatch(/lg:static/);
+    // At `lg`: `lg:sticky` beneath the app header, not a plain flex sibling
+    // stretched to the path view's full height (which is what used to strand
+    // this composer off the bottom of the screen too).
+    expect(column.className).toMatch(/\blg:sticky\b/);
+    expect(column.className).not.toMatch(/\blg:static\b/);
+    expect(column.className).toMatch(/lg:top-\[var\(--app-header-h\)\]/);
+    expect(column.className).toMatch(/lg:h-\[calc\(100dvh-var\(--app-header-h\)\)\]/);
     expect(column.className).toMatch(/lg:w-\[400px\]/);
     // Exactly one rail in the tree at any width — never a second mount.
     expect(screen.getAllByTestId("shaping-rail")).toHaveLength(1);
@@ -416,6 +421,57 @@ describe("Shaping rail — composer state machine (PRD §5.6)", () => {
     fireEvent.change(composer(), { target: { value: "   " } });
     expect((screen.getByTestId("shaping-rail-send") as HTMLButtonElement).disabled).toBe(true);
     expect(shapingSendBodies()).toHaveLength(0);
+  });
+});
+
+describe("Shaping rail — Shift+Enter sends", () => {
+  it("[AL-330] Shift+Enter sends the draft as typed content", async () => {
+    await openShapingRail();
+
+    fireEvent.change(composer(), { target: { value: "Add practice on narrowing" } });
+    fireEvent.keyDown(composer(), { key: "Enter", shiftKey: true });
+
+    await waitFor(() => expect(shapingSendBodies()).toHaveLength(1));
+    expect(shapingSendBodies()[0]).toEqual({
+      content: "Add practice on narrowing",
+      source: "typed",
+    });
+  });
+
+  // A regression guard, not the red half of a red-green pair: with the gesture
+  // deleted outright this would still pass. It is here to fail the day someone
+  // "corrects" the binding to the conventional Enter-sends.
+  it("[AL-330] plain Enter does not send — it is left to insert a newline", async () => {
+    await openShapingRail();
+
+    fireEvent.change(composer(), { target: { value: "Still writing this" } });
+    fireEvent.keyDown(composer(), { key: "Enter" });
+
+    // A send is async, so asserting "nothing went out" on the next line would
+    // pass even with a request in flight. The negative is proved instead by
+    // sending a *different* ask afterwards and finding exactly one body: the
+    // second one.
+    fireEvent.change(composer(), { target: { value: "Sent on purpose" } });
+    fireEvent.keyDown(composer(), { key: "Enter", shiftKey: true });
+
+    await waitFor(() => expect(shapingSendBodies()).toHaveLength(1));
+    expect(shapingSendBodies()[0].content).toBe("Sent on purpose");
+  });
+
+  it("[AL-330] Shift+Enter mid-IME-composition does not send", async () => {
+    await openShapingRail();
+
+    // Mid-composition the characters are still in the IME's buffer, not in the
+    // controlled value — sending here would post the stale prefix and eat the
+    // commit chord. Same shape of proof as above.
+    fireEvent.change(composer(), { target: { value: "制約" } });
+    fireEvent.keyDown(composer(), { key: "Enter", shiftKey: true, isComposing: true });
+
+    fireEvent.change(composer(), { target: { value: "制約の練習を追加して" } });
+    fireEvent.keyDown(composer(), { key: "Enter", shiftKey: true });
+
+    await waitFor(() => expect(shapingSendBodies()).toHaveLength(1));
+    expect(shapingSendBodies()[0].content).toBe("制約の練習を追加して");
   });
 });
 

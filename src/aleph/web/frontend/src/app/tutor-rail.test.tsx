@@ -145,7 +145,13 @@ describe("Tutor rail — one tree, two CSS presentations (D12)", () => {
     expect(column.className).toMatch(/\bfixed\b/);
     expect(column.className).toMatch(/\binset-x-0\b/);
     expect(column.className).toMatch(/\bbottom-0\b/);
-    expect(column.className).toMatch(/lg:static/);
+    // At `lg`: `lg:sticky` beneath the app header, not `lg:static` — a plain
+    // flex sibling would stretch to the whole lesson's height (easily several
+    // thousand pixels) and strand the composer off the bottom of the screen.
+    expect(column.className).toMatch(/\blg:sticky\b/);
+    expect(column.className).not.toMatch(/\blg:static\b/);
+    expect(column.className).toMatch(/lg:top-\[var\(--app-header-h\)\]/);
+    expect(column.className).toMatch(/lg:h-\[calc\(100dvh-var\(--app-header-h\)\)\]/);
     expect(column.className).toMatch(/lg:w-\[400px\]/);
     // One tree, not one per presentation.
     expect(screen.getAllByTestId("tutor-rail")).toHaveLength(1);
@@ -349,6 +355,70 @@ describe("Tutor rail — composer state machine", () => {
     expect(failure.textContent).toMatch(/already in flight/i);
     expect(composer().disabled).toBe(false);
     expect(screen.getByTestId("tutor-rail-retry")).toBeTruthy();
+  });
+});
+
+describe("Tutor rail — Shift+Enter sends", () => {
+  it("[AL-260] Shift+Enter sends the draft as typed content", async () => {
+    useSession(flagOnSession);
+    seedReadyLesson();
+    await gotoLesson();
+    await openRail();
+
+    fireEvent.change(composer(), { target: { value: "What breaks without the constraint?" } });
+    fireEvent.keyDown(composer(), { key: "Enter", shiftKey: true });
+
+    await waitFor(() => expect(tutorSendBodies()).toHaveLength(1));
+    expect(tutorSendBodies()[0]).toEqual({
+      lesson_id: LESSON_ID,
+      content: "What breaks without the constraint?",
+      source: "typed",
+    });
+  });
+
+  // A regression guard, not the red half of a red-green pair: with the gesture
+  // deleted outright this would still pass. It is here to fail the day someone
+  // "corrects" the binding to the conventional Enter-sends, which would take a
+  // line break away from every learner mid-question.
+  it("[AL-260] plain Enter does not send — it is left to insert a newline", async () => {
+    useSession(flagOnSession);
+    seedReadyLesson();
+    await gotoLesson();
+    await openRail();
+
+    fireEvent.change(composer(), { target: { value: "Still writing this" } });
+    fireEvent.keyDown(composer(), { key: "Enter" });
+
+    // A send is async, so asserting "nothing went out" on the next line would
+    // pass even with a request in flight. The negative is proved instead by
+    // sending a *different* question afterwards and finding exactly one body:
+    // the second one. (jsdom does not perform the textarea's own newline
+    // insertion, so the newline itself is not what this owns.)
+    fireEvent.change(composer(), { target: { value: "Sent on purpose" } });
+    fireEvent.keyDown(composer(), { key: "Enter", shiftKey: true });
+
+    await waitFor(() => expect(tutorSendBodies()).toHaveLength(1));
+    expect(tutorSendBodies()[0].content).toBe("Sent on purpose");
+  });
+
+  it("[AL-260] Shift+Enter mid-IME-composition does not send", async () => {
+    useSession(flagOnSession);
+    seedReadyLesson();
+    await gotoLesson();
+    await openRail();
+
+    // Mid-composition the characters are still in the IME's buffer, so the
+    // controlled value holds only what was committed before it — sending here
+    // would post that stale prefix *and* eat the commit chord. Same shape of
+    // proof as above: the composition must not be the question that arrives.
+    fireEvent.change(composer(), { target: { value: "制約" } });
+    fireEvent.keyDown(composer(), { key: "Enter", shiftKey: true, isComposing: true });
+
+    fireEvent.change(composer(), { target: { value: "制約とは何ですか" } });
+    fireEvent.keyDown(composer(), { key: "Enter", shiftKey: true });
+
+    await waitFor(() => expect(tutorSendBodies()).toHaveLength(1));
+    expect(tutorSendBodies()[0].content).toBe("制約とは何ですか");
   });
 });
 

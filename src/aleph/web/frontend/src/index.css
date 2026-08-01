@@ -3,6 +3,22 @@
 @tailwind utilities;
 
 @layer base {
+  :root {
+    /* The app header's total outer height, border included: a 36px brand
+       lockup (`AlephGlyph size="sm"`) centred in a 60px content box, plus the
+       1px bottom border. The one number both the header (`app-header.tsx`) and
+       the docked rail (`components/workspace.tsx`) build from, so the rail's
+       `lg:sticky` top offset can never drift out of step with what it is
+       docking beneath.
+
+       Note which way that dependency runs: the header *imposes* this height
+       rather than reporting it, so header content taller than 60px would
+       overflow the border instead of growing the bar. Nothing comes close
+       today (the tallest thing in it is the 34px sign-out button) — but this
+       number is load-bearing for the rail, so raise it here if that changes. */
+    --app-header-h: 3.8125rem;
+  }
+
   html {
     color-scheme: dark;
   }
