@@ -1,3 +1,10 @@
+## [1.19.1](https://github.com/mattjmcnaughton/aleph/compare/v1.19.0...v1.19.1) (2026-08-01)
+
+
+### Bug Fixes
+
+* **tutor:** anchor the rail composer to the viewport, send on Shift+Enter ([#139](https://github.com/mattjmcnaughton/aleph/issues/139)) ([44173eb](https://github.com/mattjmcnaughton/aleph/commit/44173ebfa690975c15baa9bd82d6542036c101d6))
+
 # [1.19.0](https://github.com/mattjmcnaughton/aleph/compare/v1.18.0...v1.19.0) (2026-08-01)
 
 
