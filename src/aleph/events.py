@@ -21,21 +21,23 @@ anchors it to real emission (the emitters cannot drift from it), and
 ``tests/unit/test_metrics_queries`` checks every attribute referenced by a saved
 SQL query against it — so a query can never reference a field no event provides.
 
-Ported from habagou's ``events.py`` seam, specialised to Aleph's fourteen
-product events (Phase 1's nine, plus the five tutor events of TDD §9). If
-Logfire's retention window ever bounds cohort history (TDD §9 accepted risk), the
-fallback is a Postgres events table behind this same seam — the swap is additive,
-callers are unchanged.
+Ported from habagou's ``events.py`` seam, specialised to Aleph's twenty product
+events (Phase 1's nine, Phase 2A's five tutor events, and Phase 2B's six shaping
+events — each phase's TDD §9). If Logfire's retention window ever bounds cohort
+history (TDD §9 accepted risk), the fallback is a Postgres events table behind
+this same seam — the swap is additive, callers are unchanged.
 """
 
 from __future__ import annotations
 
+import contextlib
 from typing import TYPE_CHECKING
 
 import structlog
 
 if TYPE_CHECKING:
     import uuid
+    from collections.abc import Sequence
 
 # --- event names (the record ``span_name`` the SQL queries filter on) --------- #
 
@@ -56,6 +58,16 @@ TUTOR_REPLY_COMPLETED = "tutor_reply_completed"
 TUTOR_CHECK_SHOWN = "tutor_check_shown"
 TUTOR_CHECK_ANSWERED = "tutor_check_answered"
 
+# Phase 2B — shaping (TDD §9). Path-level: no ``lesson_id``, no
+# ``position_in_path``. The lesson ids an edit touched ride ``change_applied``
+# as a payload-derived field instead, which is what the primary metric joins on.
+SHAPING_CONVERSATION_STARTED = "shaping_conversation_started"
+SHAPING_MESSAGE_SENT = "shaping_message_sent"
+SHAPING_REPLY_COMPLETED = "shaping_reply_completed"
+PROPOSAL_SHOWN = "proposal_shown"
+CHANGE_APPLIED = "change_applied"
+CHANGE_UNDONE = "change_undone"
+
 # --- workflow tags (§12 shared vocabulary: PRD workflow → test → trace) ------- #
 
 _W_FIRST_PATH = "W1"  # new learner, first path, first lesson (the magic moment)
@@ -67,6 +79,17 @@ _W_FAILURE = "W8"  # generation failure is recoverable
 _W_TUTOR_TURN = "W9"  # ask about the lesson you're reading (the Phase 2 moment)
 _W_TUTOR_CHECK = "W12"  # a Tutor check, which never touches progress
 _W_TUTOR_FAILURE = "W14"  # a failed reply is recoverable
+_W_SHAPE_ADD = "W17"  # shape by adding (the Phase 2B moment)
+_W_SHAPE_REVISE = "W18"  # shape by revising
+_W_SHAPE_UNDO = "W19"  # undo restores exactly
+#
+# Two 2B workflows deliberately tag no event. **W20** (an out-of-vocabulary edit
+# is declined, not improvised) is an ordinary reply — the decline is not
+# machine-tagged this phase (D5's posture, PRD §5.7b), so it is a
+# ``shaping_reply_completed`` with ``outcome='success'`` and no proposal, exactly
+# like a 2A refusal. **W21** (shaping is never on the critical path) is a
+# property of what does *not* happen, so it tags the guardrail *queries*
+# (TDD §9) rather than any record.
 
 # The manifest: the exact attribute set every event emits. Load-bearing — the
 # metric-coverage test checks each saved query's attribute references against it,
@@ -158,6 +181,54 @@ EVENT_FIELDS: dict[str, frozenset[str]] = {
             "workflow",
         }
     ),
+    SHAPING_CONVERSATION_STARTED: frozenset({"account_id", "path_id", "workflow"}),
+    SHAPING_MESSAGE_SENT: frozenset({"account_id", "path_id", "source", "workflow"}),
+    SHAPING_REPLY_COMPLETED: frozenset(
+        {
+            "account_id",
+            "path_id",
+            "outcome",
+            "success",
+            "ttft_ms",
+            "duration_ms",
+            "prompt_tokens",
+            "completion_tokens",
+            "total_tokens",
+            "has_proposal",
+            "workflow",
+        }
+    ),
+    PROPOSAL_SHOWN: frozenset(
+        {
+            "account_id",
+            "path_id",
+            "n_add_lessons",
+            "n_revisions",
+            "new_unit",
+            "workflow",
+        }
+    ),
+    CHANGE_APPLIED: frozenset(
+        {
+            "account_id",
+            "path_id",
+            "change_id",
+            "n_add_lessons",
+            "n_revisions",
+            "new_unit",
+            "lesson_ids",
+            "workflow",
+        }
+    ),
+    CHANGE_UNDONE: frozenset(
+        {
+            "account_id",
+            "path_id",
+            "change_id",
+            "minutes_since_apply",
+            "workflow",
+        }
+    ),
 }
 
 
@@ -170,6 +241,40 @@ def _emit(event: str, **fields: object) -> None:
     tests).
     """
     structlog.get_logger("aleph.events").info(event, **fields)
+
+
+def _emit_guarded(event: str, **fields: object) -> None:
+    """:func:`_emit`, but a failing sink never propagates into the request path.
+
+    **Phase 2B's emitters only**, and the asymmetry is deliberate. 2B's stamps
+    sit where a raised exception would do real damage: ``change_applied`` and
+    ``change_undone`` fire *after* their transaction has committed, so a raising
+    sink would report a landed change to the learner as a ``500``;
+    ``shaping_message_sent`` fires while the turn holds its one-in-flight
+    reservation, so it would wedge the conversation until the process restarted;
+    ``shaping_reply_completed`` fires from a ``finally`` and would replace the
+    real outcome. None of those can be paid for with a telemetry failure — "the
+    apply worked" is the truth the learner is owed.
+
+    2A's emitters are **not** routed through here, though the same argument
+    partly applies to them, because changing them is a behaviour change on the
+    frozen in-lesson surface (W21). Unifying the two — one guarded ``_emit`` for
+    every event — is the post-2B follow-up, and it is additive when it happens.
+
+    Swallowing is right rather than re-raising: the alternative to a lost metric
+    record is a lost learner action. The loss is still reported — as a
+    traceback on this module's own logger — and that report is itself
+    suppressed, because the failure mode being guarded against is "the logging
+    pipeline is broken", and a guard that needs the broken thing to work is not
+    a guard.
+    """
+    try:
+        _emit(event, **fields)
+    except Exception:
+        with contextlib.suppress(Exception):
+            structlog.get_logger(__name__).exception(
+                "product_event_emission_failed", product_event=event
+            )
 
 
 # --- account -----------------------------------------------------------------  #
@@ -577,4 +682,236 @@ def emit_tutor_check_answered(
         is_correct=outcome == "correct",
         first_answer=first_answer,
         workflow=_W_TUTOR_CHECK,
+    )
+
+
+# --- shaping (Phase 2B, TDD §9) ----------------------------------------------- #
+#
+# Six events, none of them carrying a lesson locator: a shaping turn is about the
+# path as a whole (PRD §5.1), which is the whole reason it is a second thread.
+# What the *operations* touched rides ``change_applied``'s payload-derived
+# ``lesson_ids`` — the join key the primary metric (shaping yield) needs to ask
+# "did the learner then engage with what they asked for".
+#
+# The workflow tag on the two payload-shaped events is derived from the edit
+# shape rather than fixed (TDD §9: "W17 on apply-path events, W18 revision
+# fields"), and it uses the same dominance rule as the Change row's own ``kind``
+# column (``services/shaping.py`` ``_change_kind``): a payload that adds anything
+# is W17 even when it also revises, because growth is the part the learner came
+# for. One rule, two spellings would be one too many.
+
+
+def _shape_workflow(*, n_add_lessons: int) -> str:
+    """W17 for a payload that adds, W18 for a revision-only one.
+
+    Agrees with ``_change_kind``'s dominance rule by the
+    ``AddLessonsOperation.lessons`` ``min_length=1`` invariant: any
+    Addition operation contributes at least one lesson, so
+    "lesson count > 0" and "an Addition is present" are the same test.
+    """
+    return _W_SHAPE_ADD if n_add_lessons else _W_SHAPE_REVISE
+
+
+def emit_shaping_conversation_started(
+    *, account_id: uuid.UUID, path_id: uuid.UUID
+) -> None:
+    """A path's **shaping** conversation row was created (W17, TDD §9).
+
+    The 2A twin's rule exactly, on the second thread: one shaping conversation
+    per path, created lazily on the first turn that settles (D2), so this fires
+    once per path and only for a turn that actually persisted. It is emitted
+    after the settle commit, off the upsert's own ``created`` flag, so it can
+    never claim a thread a rolled-back transaction did not leave behind.
+    """
+    _emit_guarded(
+        SHAPING_CONVERSATION_STARTED,
+        account_id=str(account_id),
+        path_id=str(path_id),
+        workflow=_W_SHAPE_ADD,
+    )
+
+
+def emit_shaping_message_sent(
+    *, account_id: uuid.UUID, path_id: uuid.UUID, source: str
+) -> None:
+    """A shaping turn was **admitted** — every pre-stream gate passed (W17).
+
+    Admission, not persistence, for 2A's reason: a reply that then fails is our
+    failure, not an un-asked question, and D2 persists nothing on failure — so
+    waiting for a settled turn would silently drop from shaping adoption exactly
+    the learners the surface failed. A send refused before admission (409 not
+    ready, 409 in-flight, 429 cap) emits nothing: it never became a turn.
+
+    ``source`` is ``typed`` or ``suggestion`` (:class:`~aleph.models.MessageSource`)
+    — the shaping rail's four §5.3 suggestions send as ``suggestion``.
+    """
+    _emit_guarded(
+        SHAPING_MESSAGE_SENT,
+        account_id=str(account_id),
+        path_id=str(path_id),
+        source=source,
+        workflow=_W_SHAPE_ADD,
+    )
+
+
+def emit_shaping_reply_completed(
+    *,
+    account_id: uuid.UUID,
+    path_id: uuid.UUID,
+    outcome: str,
+    duration_ms: int,
+    has_proposal: bool,
+    ttft_ms: int | None = None,
+    prompt_tokens: int = 0,
+    completion_tokens: int = 0,
+    total_tokens: int = 0,
+) -> None:
+    """A shaping reply resolved, **however it resolved** (TDD §9).
+
+    ``outcome`` is ``success`` / ``failure`` / ``stopped``, and every rule 2A's
+    twin documents holds unchanged on this rail: ``stopped`` is the learner
+    ending their own turn and is not a fault; ``ttft_ms`` is ``None`` (never
+    ``0``) when no delta ever reached the wire; ``duration_ms`` is clocked from
+    before the shared concurrency permit, so it includes queue wait and can
+    exceed ``TUTOR_REPLY_TIMEOUT``.
+
+    **A declined edit is a ``success``** (W20). An out-of-vocabulary ask —
+    remove a unit, reorder lessons, revise a lesson the learner has finished —
+    is answered gracefully as a real, persisted turn, and is deliberately not
+    machine-tagged this phase (D5, PRD §5.7b). It reads here as a success with
+    ``has_proposal=False``, which is the only trace of it in the events; the
+    distinction lives in the reply text and in the evals.
+
+    ``has_proposal`` therefore does two jobs: it is the denominator half of
+    proposal acceptance (of the replies that offered an edit, how many were
+    applied), and it is what makes a decline distinguishable from a
+    conversational turn that was never about an edit at all — which it is not,
+    and that limit is documented in docs/metrics.md rather than papered over.
+
+    Unlike 2A's, this event is **not** the only shaping latency signal that
+    matters, but it is the only one PRD §7's "2A's budgets apply to this surface
+    unchanged" guardrail can be computed from.
+    """
+    _emit_guarded(
+        SHAPING_REPLY_COMPLETED,
+        account_id=str(account_id),
+        path_id=str(path_id),
+        outcome=outcome,
+        success=outcome == "success",
+        ttft_ms=ttft_ms,
+        duration_ms=duration_ms,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        total_tokens=total_tokens,
+        has_proposal=has_proposal,
+        workflow=_W_SHAPE_ADD,
+    )
+
+
+def emit_proposal_shown(
+    *,
+    account_id: uuid.UUID,
+    path_id: uuid.UUID,
+    n_add_lessons: int,
+    n_revisions: int,
+    new_unit: bool,
+) -> None:
+    """A **Proposal** card reached the rail (W17/W18, TDD §9).
+
+    Emitted where the validated payload becomes the ``proposal`` SSE frame,
+    mid-stream, which is what "shown" means — 2A's ``tutor_check_shown`` rule
+    verbatim, including its consequence: a card shown on a reply that then fails
+    still counts as shown, though D2 persisted nothing and it can never be
+    applied. That inflates the denominator of proposal acceptance slightly, and
+    docs/metrics.md says so.
+
+    The three counts are the §7 edit-shape mix, read straight off the payload:
+
+    * ``n_add_lessons`` counts **lessons**, not operations — an Addition of
+      three lessons is three, because the mix question is how much path the
+      learner asked for, and one operation carrying three lessons is not the
+      same ask as one carrying one.
+    * ``n_revisions`` counts **operations**, because a Revision is exactly one
+      lesson by construction (D1) — so the two counts are commensurable.
+    * ``new_unit`` is whether any Addition brought a new unit with it: the
+      "this is a new topic, not more of the same" signal.
+    """
+    _emit_guarded(
+        PROPOSAL_SHOWN,
+        account_id=str(account_id),
+        path_id=str(path_id),
+        n_add_lessons=n_add_lessons,
+        n_revisions=n_revisions,
+        new_unit=new_unit,
+        workflow=_shape_workflow(n_add_lessons=n_add_lessons),
+    )
+
+
+def emit_change_applied(
+    *,
+    account_id: uuid.UUID,
+    path_id: uuid.UUID,
+    change_id: uuid.UUID,
+    n_add_lessons: int,
+    n_revisions: int,
+    new_unit: bool,
+    lesson_ids: Sequence[str],
+) -> None:
+    """The learner tapped **Apply** and the Change committed (W17/W18, TDD §9).
+
+    Emitted after the commit, so the event never claims structure a rolled-back
+    transaction did not leave behind. The counts are :func:`emit_proposal_shown`'s,
+    re-derived from the *stored* payload rather than carried from the card: what
+    landed is what the apply re-validated against live state (D5), which is not
+    necessarily what was proposed minutes earlier.
+
+    ``lesson_ids`` is this phase's answer to "shaping is path-level, so there is
+    no ``lesson_id``": the ids of every lesson this Change **created or
+    revised**, which is precisely the set the primary metric (shaping yield)
+    joins later ``quick_check_attempted`` / ``lesson_completed`` records against
+    to ask whether the learner actually engaged with what they asked for. Created
+    ids come from the Change's own inverse (the rows it inserted); revised ids
+    from its operations. Logfire carries a list attribute as JSON text, so the
+    saved queries read it as ``(attributes ->> 'lesson_ids')::jsonb`` and unnest
+    — see docs/metrics.md.
+    """
+    _emit_guarded(
+        CHANGE_APPLIED,
+        account_id=str(account_id),
+        path_id=str(path_id),
+        change_id=str(change_id),
+        n_add_lessons=n_add_lessons,
+        n_revisions=n_revisions,
+        new_unit=new_unit,
+        lesson_ids=list(lesson_ids),
+        workflow=_shape_workflow(n_add_lessons=n_add_lessons),
+    )
+
+
+def emit_change_undone(
+    *,
+    account_id: uuid.UUID,
+    path_id: uuid.UUID,
+    change_id: uuid.UUID,
+    minutes_since_apply: float,
+) -> None:
+    """A Change was **undone** and the path restored exactly (W19, TDD §9).
+
+    Emitted after the undo commit, for :func:`emit_change_applied`'s reason. The
+    §7 undo rate is this count over ``change_applied``'s, and it is a guardrail
+    on *proposal quality*: regret is the signal that consent did not work.
+
+    ``minutes_since_apply`` is the time-to-undo half of that metric, measured
+    from the Change row's own ``applied_at``. It is **fractional minutes**, not
+    whole ones: the most interesting undo is the immediate "oh, not that" a few
+    seconds after the tap, and rounding would file every one of those as zero
+    and flatten the distribution the metric exists to read.
+    """
+    _emit_guarded(
+        CHANGE_UNDONE,
+        account_id=str(account_id),
+        path_id=str(path_id),
+        change_id=str(change_id),
+        minutes_since_apply=minutes_since_apply,
+        workflow=_W_SHAPE_UNDO,
     )

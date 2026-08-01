@@ -397,6 +397,224 @@ def test_tutor_check_answered(
 
 
 # --------------------------------------------------------------------------- #
+# Shaping (Phase 2B, AL-340 / TDD §9)
+#
+# No ``lesson_id`` and no ``position_in_path`` anywhere below: shaping is
+# path-level (PRD §5.1), and the operations' lesson ids ride payload-derived
+# fields on ``change_applied`` instead.
+# --------------------------------------------------------------------------- #
+
+CHANGE = uuid.UUID("44444444-4444-4444-8444-444444444444")
+
+
+def test_shaping_conversation_started(recorder: _Recorder) -> None:
+    events.emit_shaping_conversation_started(account_id=ACCOUNT, path_id=PATH)
+    assert recorder.records == [
+        (
+            "shaping_conversation_started",
+            {"account_id": str(ACCOUNT), "path_id": str(PATH), "workflow": "W17"},
+        )
+    ]
+
+
+@pytest.mark.parametrize("source", ["typed", "suggestion"])
+def test_shaping_message_sent(recorder: _Recorder, source: str) -> None:
+    """``source`` is 2A's entry-mix datum on the shaping rail's four suggestions."""
+    events.emit_shaping_message_sent(account_id=ACCOUNT, path_id=PATH, source=source)
+    name, fields = recorder.records[0]
+    assert name == "shaping_message_sent"
+    assert fields == {
+        "account_id": str(ACCOUNT),
+        "path_id": str(PATH),
+        "source": source,
+        "workflow": "W17",
+    }
+
+
+@pytest.mark.parametrize(
+    ("outcome", "success"),
+    [("success", True), ("failure", False), ("stopped", False)],
+)
+def test_shaping_reply_completed_outcomes(
+    recorder: _Recorder, outcome: str, success: bool
+) -> None:
+    """Every resolution emits, and a declined edit is a ``success`` like a refusal.
+
+    Phase 2B has no failure workflow of its own (2A's W14 has no 2B twin — TDD
+    §9 puts W21 on the guardrail *queries*), so the tag stays W17 on all three
+    and ``outcome``/``success`` are what the failure guardrail slices on.
+    """
+    events.emit_shaping_reply_completed(
+        account_id=ACCOUNT,
+        path_id=PATH,
+        outcome=outcome,
+        ttft_ms=180,
+        duration_ms=2200,
+        prompt_tokens=900,
+        completion_tokens=250,
+        total_tokens=1150,
+        has_proposal=True,
+    )
+    name, fields = recorder.records[0]
+    assert name == "shaping_reply_completed"
+    assert fields == {
+        "account_id": str(ACCOUNT),
+        "path_id": str(PATH),
+        "outcome": outcome,
+        "success": success,
+        "ttft_ms": 180,
+        "duration_ms": 2200,
+        "prompt_tokens": 900,
+        "completion_tokens": 250,
+        "total_tokens": 1150,
+        "has_proposal": True,
+        "workflow": "W17",
+    }
+
+
+def test_shaping_reply_completed_carries_a_null_ttft_when_no_delta_arrived(
+    recorder: _Recorder,
+) -> None:
+    """2A's TTFT rule verbatim: ``None``, never ``0``, and usage defaults to 0."""
+    events.emit_shaping_reply_completed(
+        account_id=ACCOUNT,
+        path_id=PATH,
+        outcome="failure",
+        ttft_ms=None,
+        duration_ms=30000,
+        has_proposal=False,
+    )
+    _name, fields = recorder.records[0]
+    assert fields["ttft_ms"] is None
+    assert fields["duration_ms"] == 30000
+    assert fields["has_proposal"] is False
+    assert fields["prompt_tokens"] == 0
+    assert fields["total_tokens"] == 0
+
+
+def test_proposal_shown_counts_the_edit_shapes(recorder: _Recorder) -> None:
+    """``n_add_lessons`` counts **lessons**, ``n_revisions`` counts operations."""
+    events.emit_proposal_shown(
+        account_id=ACCOUNT,
+        path_id=PATH,
+        n_add_lessons=3,
+        n_revisions=1,
+        new_unit=True,
+    )
+    assert recorder.records == [
+        (
+            "proposal_shown",
+            {
+                "account_id": str(ACCOUNT),
+                "path_id": str(PATH),
+                "n_add_lessons": 3,
+                "n_revisions": 1,
+                "new_unit": True,
+                # A payload that adds anything is W17 (the magic moment), even
+                # when it also revises — the same dominance rule the Change
+                # row's own ``kind`` column follows.
+                "workflow": "W17",
+            },
+        )
+    ]
+
+
+def test_a_revision_only_proposal_is_tagged_w18(recorder: _Recorder) -> None:
+    """TDD §9's "W18 revision fields": the shape decides the tag, not the event."""
+    events.emit_proposal_shown(
+        account_id=ACCOUNT, path_id=PATH, n_add_lessons=0, n_revisions=2, new_unit=False
+    )
+    _name, fields = recorder.records[0]
+    assert fields["workflow"] == "W18"
+
+
+def test_change_applied(recorder: _Recorder) -> None:
+    """The primary metric's join key: the lesson ids the Change created/revised."""
+    events.emit_change_applied(
+        account_id=ACCOUNT,
+        path_id=PATH,
+        change_id=CHANGE,
+        n_add_lessons=2,
+        n_revisions=0,
+        new_unit=False,
+        lesson_ids=[str(LESSON)],
+    )
+    assert recorder.records == [
+        (
+            "change_applied",
+            {
+                "account_id": str(ACCOUNT),
+                "path_id": str(PATH),
+                "change_id": str(CHANGE),
+                "n_add_lessons": 2,
+                "n_revisions": 0,
+                "new_unit": False,
+                "lesson_ids": [str(LESSON)],
+                "workflow": "W17",
+            },
+        )
+    ]
+
+
+def test_a_revision_only_change_is_tagged_w18(recorder: _Recorder) -> None:
+    events.emit_change_applied(
+        account_id=ACCOUNT,
+        path_id=PATH,
+        change_id=CHANGE,
+        n_add_lessons=0,
+        n_revisions=1,
+        new_unit=False,
+        lesson_ids=[str(LESSON)],
+    )
+    _name, fields = recorder.records[0]
+    assert fields["workflow"] == "W18"
+
+
+def test_change_undone(recorder: _Recorder) -> None:
+    """``minutes_since_apply`` is the regret latency — fractional, never rounded
+    to a whole minute, or every fast "oh no, undo" would read as zero."""
+    events.emit_change_undone(
+        account_id=ACCOUNT, path_id=PATH, change_id=CHANGE, minutes_since_apply=0.75
+    )
+    assert recorder.records == [
+        (
+            "change_undone",
+            {
+                "account_id": str(ACCOUNT),
+                "path_id": str(PATH),
+                "change_id": str(CHANGE),
+                "minutes_since_apply": 0.75,
+                "workflow": "W19",
+            },
+        )
+    ]
+
+
+def test_a_failing_shaping_emitter_never_breaks_the_request_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Telemetry cannot fail an apply that has already committed (TDD §9).
+
+    The shaping stamps sit *after* their commit (``change_applied``,
+    ``change_undone``, ``shaping_conversation_started``) or beside a held
+    reservation (``shaping_message_sent``), so a raising sink would turn a
+    landed change into a 500 or wedge a conversation. The guard is on this
+    phase's emitters only: retro-fitting it to 2A's would be a behaviour change
+    W21 forbids (see ``events._emit_guarded``).
+    """
+
+    def _explode(_name: str) -> object:
+        raise RuntimeError("logfire sink is down")
+
+    monkeypatch.setattr(events.structlog, "get_logger", _explode)
+
+    events.emit_shaping_conversation_started(account_id=ACCOUNT, path_id=PATH)
+    events.emit_change_undone(
+        account_id=ACCOUNT, path_id=PATH, change_id=CHANGE, minutes_since_apply=1.0
+    )
+
+
+# --------------------------------------------------------------------------- #
 # Manifest anchoring: every emitter's real field set == EVENT_FIELDS[event].
 # This is what makes the metric-coverage check (test_metrics_queries) honest —
 # the manifest cannot claim a field the emitter does not actually log.
@@ -461,6 +679,31 @@ def _drive_every_emitter() -> None:
         position_in_path=1,
         outcome="correct",
         first_answer=True,
+    )
+    events.emit_shaping_conversation_started(account_id=ACCOUNT, path_id=PATH)
+    events.emit_shaping_message_sent(account_id=ACCOUNT, path_id=PATH, source="typed")
+    events.emit_shaping_reply_completed(
+        account_id=ACCOUNT,
+        path_id=PATH,
+        outcome="success",
+        ttft_ms=1,
+        duration_ms=1,
+        has_proposal=True,
+    )
+    events.emit_proposal_shown(
+        account_id=ACCOUNT, path_id=PATH, n_add_lessons=1, n_revisions=0, new_unit=False
+    )
+    events.emit_change_applied(
+        account_id=ACCOUNT,
+        path_id=PATH,
+        change_id=CHANGE,
+        n_add_lessons=1,
+        n_revisions=0,
+        new_unit=False,
+        lesson_ids=[str(LESSON)],
+    )
+    events.emit_change_undone(
+        account_id=ACCOUNT, path_id=PATH, change_id=CHANGE, minutes_since_apply=1.0
     )
 
 

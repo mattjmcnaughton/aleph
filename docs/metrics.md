@@ -35,6 +35,12 @@ tag (§12), plus the ids that apply. The record's own timestamp is the event tim
 | `tutor_reply_completed` | `services/tutor.py` — every reply resolution | `path_id`, `lesson_id`, `position_in_path`, `outcome` (success/failure/stopped), `success`, `ttft_ms`, `duration_ms`, `prompt_tokens`, `completion_tokens`, `total_tokens` | W9 / W14 |
 | `tutor_check_shown` | `services/tutor.py` — `pose_tutor_check` observed mid-stream | `path_id`, `lesson_id`, `position_in_path` | W12 |
 | `tutor_check_answered` | `routers/v1/tutor.py` `answer_tutor_check` | `path_id`, `lesson_id`, `position_in_path`, `outcome` (correct/incorrect), `is_correct`, `first_answer` | W12 |
+| `shaping_conversation_started` | `services/shaping.py` — settle transaction, on the lazy `created` flag | `path_id` | W17 |
+| `shaping_message_sent` | `services/shaping.py` `admit` — turn admitted | `path_id`, `source` (typed/suggestion) | W17 |
+| `shaping_reply_completed` | `services/shaping.py` — every reply resolution | `path_id`, `outcome` (success/failure/stopped), `success`, `ttft_ms`, `duration_ms`, `prompt_tokens`, `completion_tokens`, `total_tokens`, `has_proposal` | W17 |
+| `proposal_shown` | `services/shaping.py` — `propose_path_edit` observed mid-stream | `path_id`, `n_add_lessons`, `n_revisions`, `new_unit` | W17 / W18 |
+| `change_applied` | `services/shaping.py` `apply_change` — after the commit | `path_id`, `change_id`, `n_add_lessons`, `n_revisions`, `new_unit`, `lesson_ids` | W17 / W18 |
+| `change_undone` | `services/shaping.py` `undo_change` — after the commit | `path_id`, `change_id`, `minutes_since_apply` | W19 |
 
 `outline_generated` / `lesson_generated` are emitted **only on a fenced-win mark**
 (a lost claim's mark is a silent no-op), so each generation resolves the metric
@@ -48,6 +54,23 @@ that later fails is our failure, not an un-asked question — and D2 persists
 nothing on failure), while `tutor_conversation_started` fires **after the settle
 commit**, off the lazy upsert's own `created` flag, so it is exactly one per
 path.
+
+Shaping's six (Phase 2B TDD §9) carry **no lesson locator at all** — a shaping
+turn is about the path as a whole (PRD §5.1), which is the whole reason it is a
+second conversation. What an *edit* touched rides `change_applied.lesson_ids`
+instead: the ids of every lesson the Change created or revised, which is the
+join key the primary metric needs. The three timing rules are 2A's, applied to
+this surface: `shaping_message_sent` at **admission**; `shaping_conversation_started`
+**after the settle commit** off the `created` flag; `change_applied` /
+`change_undone` **after their own commit** (and outside the per-path apply lock),
+so no event can claim structure a rolled-back transaction did not leave behind.
+
+Two workflow tags are **derived from the payload**, not fixed: `proposal_shown`
+and `change_applied` are `W17` when the edit adds anything and `W18` when it only
+revises — the same dominance rule the `path_changes.kind` column uses, so one
+Apply carrying both shapes is tagged the same way in the events and in the row.
+W20 (a declined edit) deliberately tags nothing: a decline is an ordinary
+successful reply, and W21 tags the guardrail *queries* rather than any record.
 
 ## Metric → query
 
@@ -96,6 +119,39 @@ Phase 2 adds **no cost metric of its own** (PRD §7): Logfire already records
 per-call tokens on every pydantic-ai model-call span, and
 `tutor_reply_completed` carries the per-reply token triple for the same reading
 from the events alone.
+
+### Phase 2B — shaping (PRD §7)
+
+Phase 2B gets no north star of its own either: Phase 1's activation rate stays
+it. The primary metric is this phase's compounding claim — that learners who can
+bend their path stick with it — stated so it can fail.
+
+| Metric (Phase 2B PRD §7) | Query | Events consumed |
+| --- | --- | --- |
+| **Shaping yield** (primary) — of applied Changes, the share whose created/revised lessons the learner engages with within 7 days | [`shaping_yield.sql`](../queries/logfire/shaping_yield.sql) | `change_applied`, `quick_check_attempted`, `lesson_completed` |
+| **Shaping adoption** — % of learners with a ready path who apply ≥1 Change | [`shaping_adoption.sql`](../queries/logfire/shaping_adoption.sql) | `outline_generated`, `change_applied` |
+| **Proposal acceptance** — applied / proposed | [`proposal_acceptance.sql`](../queries/logfire/proposal_acceptance.sql) | `proposal_shown`, `change_applied` |
+| **Edit-shape mix** — additions vs revisions, proposed and applied | [`edit_shape_mix.sql`](../queries/logfire/edit_shape_mix.sql) | `proposal_shown`, `change_applied` |
+| **Undo rate + time to undo** (guardrail) | [`undo_rate.sql`](../queries/logfire/undo_rate.sql) | `change_applied`, `change_undone` |
+| **Depth to proposal** — median messages before the first Proposal | [`depth_to_proposal.sql`](../queries/logfire/depth_to_proposal.sql) | `shaping_message_sent`, `proposal_shown` |
+| **Not hoarding** (guardrail, W21) — lesson completion on shaped vs unshaped paths | [`shaped_path_completion_guardrail.sql`](../queries/logfire/shaped_path_completion_guardrail.sql) | `lesson_viewed`, `lesson_completed`, `change_applied` |
+| **Shaping reply failure rate + TTFT/duration p95** (guardrail, W21) | [`shaping_reply_failure_latency.sql`](../queries/logfire/shaping_reply_failure_latency.sql) | `shaping_reply_completed` |
+
+Three §7 items are deliberately **not** new queries here.
+
+**Generation spend per path** stays the existing reading: additions and revisions
+buy real Phase 1 generations, so they already land on
+[`cost_per_path.sql`](../queries/logfire/cost_per_path.sql) and on the
+per-call pydantic-ai model-call spans, bounded by the existing caps. The shaper's
+own token use rides `shaping_reply_completed`'s triple for the same
+event-only reading `tutor_reply_completed` gives 2A. **Quick-check correctness on
+revised lessons** stays Phase 1's
+[`quick_check_correctness.sql`](../queries/logfire/quick_check_correctness.sql),
+sliced ad hoc by the revised lesson ids in `change_applied.lesson_ids` — a
+revision that makes checks trivially easy would inflate a Phase 1 guardrail, and
+the ids to slice on are already on the event. **Eval pass rate** is not
+event-derived at all (see [`docs/evals.md`](evals.md)), and this phase's evals
+run post-launch.
 
 Two more §7 items are deliberately not new queries. **Quick-check correctness**
 stays Phase 1's [`quick_check_correctness.sql`](../queries/logfire/quick_check_correctness.sql)
@@ -247,3 +303,67 @@ Tutor-specific caveats (Phase 2):
 - **A Tutor check is outside progress.** It creates no Attempt and appears in no
   Phase 1 metric — activation, `quick_check_correctness` and the north star are
   untouched by anything in this section (PRD §5.5, TDD §3).
+
+Shaping-specific caveats (Phase 2B):
+
+- **`lesson_ids` is JSON text, not a JSON array column.** Logfire cannot carry a
+  structured OTEL attribute, so a list is serialised on the way in and arrives as
+  the *string* `["…","…"]`. Every query that unnests it therefore reads
+  `(attributes ->> 'lesson_ids')::jsonb` and not `attributes -> 'lesson_ids'` —
+  one spelling that works in Logfire and in the executed replay test alike.
+- **Shaping yield clamps to closed windows.** `shaping_yield.sql` counts only
+  Changes applied more than 7 days ago, because a Change applied an hour ago
+  cannot have been engaged with yet and would dilute the primary metric downward
+  exactly while adoption climbs (the same call `activation_rate.sql` makes). The
+  cost is a panel that is empty for the first week after launch; removing the one
+  clamp line is the deliberate way to read that week.
+- **An undone Change stays in the yield denominator.** The learner did apply it,
+  and an undone addition can no longer be engaged with — so it reads as
+  unyielded. `undo_rate.sql` is what separates "regretted it" from "ignored it";
+  folding the two together in the primary metric would hide the difference.
+- **Proposal acceptance's denominator over-counts twice.** A Proposal shown on a
+  reply that then *failed* still counts as shown (it is emitted mid-stream where
+  the card reaches the rail — 2A's `tutor_check_shown` rule verbatim), and a
+  Proposal that went *stale* counts as un-accepted. Both are deliberate; the
+  coded `409` reasons that would tell them apart (§5.8) are not events this phase
+  emits.
+- **A declined edit is indistinguishable from an ordinary turn** in the events.
+  W20's decline is not machine-tagged this phase (TDD D5, PRD §5.7b), so it reads
+  as `shaping_reply_completed` with `outcome='success'` and `has_proposal=false`
+  — which is also what a turn that was never about an edit looks like. Decline
+  *quality* is eval-policed, not event-derived. The additive path back is a
+  payload flag, exactly as it is for a 2A refusal.
+- **Adoption's denominator is "has a ready path", not "activated".** There is
+  nothing to shape until the outline exists (a 409 until then), so an account
+  that never got one could not have adopted shaping; counting it would measure
+  Phase 1's generation funnel. It reads *higher* than an activated-cohort
+  denominator would, and it is not comparable with `tutor_adoption.sql`, whose
+  denominator is the activated set.
+- **Depth to proposal counts the ask that produced the card**, so a first-message
+  proposal is 1 and never 0, and conversations that never produced a proposal are
+  absent rather than infinite. Like `tutor_depth.sql` it counts at admission, so
+  it runs slightly above the persisted thread length by exactly the failed and
+  stopped replies.
+- **The shaped/unshaped completion split is self-selected on both sides.**
+  Learners who shape are plausibly the more engaged learners, and a path is only
+  shapeable once it is ready and has progress on it — both bias the shaped side
+  up. A shaped rate merely *equal* to the unshaped one is already a mild warning;
+  the number to act on is a clear fall.
+- **A path stays "shaped" after an undo.** The hoarding behaviour under test is
+  the applying, and an undo does not retroactively make the learner someone who
+  never curated.
+- **The two rails share a permit pool (D11), so their latency panels must be
+  read together.** `shaping_reply_failure_latency.sql` is
+  `tutor_reply_failure_latency.sql` column for column on purpose: a rise in both
+  is the shared `MAX_CONCURRENT_TUTOR_REPLIES` pool, a rise in one is that rail.
+  Every 2A caveat about `ttft_ms` (null, never zero), `duration_ms` (includes
+  queue wait, can exceed `TUTOR_REPLY_TIMEOUT`) and `stopped` (learner
+  behaviour, not a fault) applies here unchanged.
+- **The daily shaping cap is disabled**, exactly as 2A's is:
+  `RATE_LIMIT_SHAPING_MESSAGES_PER_DAY` defaults to **0**, so no §7 number here
+  is capped today.
+- **Shaping never writes progress**, in either direction. Apply and undo touch
+  `units`/`lessons` only, and the engagement boundary (D2) means a Change whose
+  content the learner has met cannot be undone at all — so no Attempt and no
+  completion is ever in reach of this phase's code. Activation, the north star
+  and `quick_check_correctness` move only through Phase 1's own events.
