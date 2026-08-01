@@ -84,6 +84,21 @@ class LocatedMessage:
     position_in_path: int
 
 
+@dataclass(frozen=True)
+class OwnedShapingMessage:
+    """A shaping message plus the path it was sent about (AL-321).
+
+    What :meth:`ConversationRepository.get_shaping_message_for_user` proves and
+    returns in one query: this message is a **shaping** message, and the path it
+    hangs off belongs to the caller. There is no lesson and no position — a
+    shaping turn is about the path as a whole (PRD §5.1), which is exactly why
+    :class:`LocatedMessage` cannot serve this route.
+    """
+
+    message: Message
+    path: Path
+
+
 class ConversationRepository:
     """Data access for :class:`~aleph.models.Conversation` / ``Message`` rows.
 
@@ -330,3 +345,37 @@ class ConversationRepository:
         return LocatedMessage(
             message=message, path_id=path_id, position_in_path=position_in_path
         )
+
+    async def get_shaping_message_for_user(
+        self, *, message_id: uuid.UUID, user_id: uuid.UUID
+    ) -> OwnedShapingMessage | None:
+        """A **shaping** message and its path, only if the path is ``user_id``'s.
+
+        Apply-proposal's ownership walk (Phase 2B §5.6 step 1), and its own
+        query rather than a widening of :meth:`get_message_for_user`: that one
+        inner-joins ``lessons`` to return a *locator*, which a shaping message
+        has no way to satisfy (its ``lesson_id`` is ``NULL``, migration
+        ``0006``) — widening it would hand the 2A Tutor-check route a row with no
+        position. Two questions, two queries.
+
+        The walk is message → conversation → path → account, and it is scoped to
+        ``kind = 'shaping'``: an in-lesson message is not a Proposal and must be
+        as invisible here as another learner's is, which is what makes both a
+        plain ``404``. The path row rides back because everything after this —
+        the live digest, the caps, the writes — is scoped to it.
+        """
+        result = await self.session.execute(
+            select(Message, Path)
+            .join(Conversation, Message.conversation_id == Conversation.id)
+            .join(Path, Conversation.path_id == Path.id)
+            .where(
+                Message.id == message_id,
+                Path.user_id == user_id,
+                Conversation.kind == ConversationKind.SHAPING,
+            )
+        )
+        row = result.one_or_none()
+        if row is None:
+            return None
+        message, path = row
+        return OwnedShapingMessage(message=message, path=path)

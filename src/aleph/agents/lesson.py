@@ -38,6 +38,13 @@ the AL-030 stub's first-match ``position_in_path`` read
 contains ``position_in_path=`` text (c-3). The level/caps guidance is a dynamic
 *system* prompt (mirroring the outline agent); everything the stub must parse
 (topic, sentinels, position) is in the user prompt it reads.
+
+**Phase 2B adds exactly one section** (2B D7): when the lesson row carries a
+learner-applied ``revision_instruction``, the user prompt gains a final revision
+block — the instruction verbatim, the Read passage it replaces, and the
+preserve-the-factual-commitments rule (:func:`_revision_block`). Nothing else in
+the generation pipeline changes: a revised lesson is an ordinary ``ungenerated``
+row riding the same claims, retries and prefetch chain.
 """
 
 from __future__ import annotations
@@ -218,6 +225,30 @@ class PriorPassage:
 
 
 @dataclass(frozen=True)
+class LessonRevision:
+    """A learner-applied **Revision**, as the lesson prompt sees it (2B D7).
+
+    Phase 2B's one prompt-level change to Phase 1's generation machinery, and
+    the whole of it: a revised lesson is an ordinary ``ungenerated`` row that
+    happens to carry an ``instruction`` (and, when it had one, the passage that
+    instruction is re-pitching). The orchestrator, the claims, the retries and
+    the prefetch chain are untouched — which is the entire argument of D7.
+
+    ``previous_passage`` is what makes a Revision *re-pitch* rather than
+    re-invent: without it the model would write a fresh lesson for the same
+    title and could contradict the already-generated neighbours around it (PRD
+    §6/§11). It is ``None`` when the lesson had never been generated — legal,
+    since the boundary a Revision respects is **engagement**, not generation
+    (D2) — and the block then simply omits it. It is *not* read off the lesson
+    row: apply clears the row's content (D7), so the snapshot in the Change's
+    payload is the only copy.
+    """
+
+    instruction: str
+    previous_passage: str | None = None
+
+
+@dataclass(frozen=True)
 class LessonDeps:
     """Everything one lesson generation needs (TDD §5.1 input list).
 
@@ -253,6 +284,10 @@ class LessonDeps:
     prior_passages: Sequence[PriorPassage] = ()
     # A frozen default instance is safe to share (LessonCaps is itself frozen).
     caps: LessonCaps = LessonCaps()
+    # ``None`` for every ordinary generation — which is why Phase 1's pipeline
+    # needs no change to carry it (2B D7). Set only when the lesson row holds a
+    # ``revision_instruction``, i.e. only after a learner applied a Revision.
+    revision: LessonRevision | None = None
 
     def __post_init__(self) -> None:
         """Reject an unknown ``level`` or non-positive position at construction.
@@ -494,7 +529,61 @@ def build_lesson_prompt(deps: LessonDeps) -> str:
             "to build on."
         )
 
+    if deps.revision is not None:
+        sections.append(_revision_block(deps.revision))
+
     return "\n\n".join(sections)
+
+
+# The consistency posture D7 promises, written for the model. It is a
+# *prompt-level* promise and the TDD says so plainly (§14): the mechanism is the
+# old passage plus this rule, and the check is rubric 3 plus the content
+# follow-through evals — there is nothing structural holding a revised lesson to
+# its neighbours, and pretending otherwise here would be the wrong kind of
+# comment.
+_REVISION_RULES = (
+    "This lesson already exists on the learner's path and THEY asked for it to "
+    "be re-taught. Rewrite it to follow the instruction above. Keep every "
+    "factual commitment of the version it replaces — the same claims, the same "
+    "definitions, the same worked results — because the lessons around it were "
+    "written against those and must stay coherent. Change how it teaches, not "
+    "what is true. Do not mention the revision, the earlier version, or that "
+    "anything changed: the learner reads a lesson, not a diff."
+)
+
+_NEW_REVISION_RULES = (
+    "This lesson has not been written yet, and the learner has asked for it to "
+    "be taught a particular way. Follow the instruction above. Do not mention "
+    "the instruction or that anything was requested: the learner reads a "
+    "lesson."
+)
+
+
+def _revision_block(revision: LessonRevision) -> str:
+    """The revision section of the user prompt (D7): instruction, old, rule.
+
+    Appended **last**, after the prior passages, for the recency reason every
+    other prompt in this codebase places its operative rules last: it is the
+    thing this particular generation must obey, and it must not be read as one
+    more piece of continuity material.
+
+    The instruction is interpolated **verbatim and alone on its own lines**. That
+    is a contract, not a style: ``services/stub_model.py`` closes the W18 loop by
+    finding its own ``SHAPING_REVISION_INSTRUCTION`` in the assembled prompt
+    (whitespace-collapsed at both ends), so re-wrapping this block is safe while
+    paraphrasing or truncating the instruction would break the link silently.
+    """
+    lines = [
+        "The learner has asked for this lesson to be revised. Their instruction:",
+        revision.instruction,
+    ]
+    if revision.previous_passage is None:
+        lines.append(_NEW_REVISION_RULES)
+        return "\n\n".join(lines)
+    lines.append("The Read passage this replaces, in full:")
+    lines.append(revision.previous_passage)
+    lines.append(_REVISION_RULES)
+    return "\n\n".join(lines)
 
 
 # --- assembly ------------------------------------------------------------------

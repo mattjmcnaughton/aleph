@@ -255,8 +255,8 @@ unengaged lesson on this path, titles are non-empty and distinct, and the whole
 proposal stays inside `MAX_LESSONS_PER_PROPOSAL` and `MAX_LESSONS_PER_PATH`.
 
 **Persisting a Proposal is not applying one.** A stored proposal changes no path
-structure — no unit, no lesson, no progress — until the learner applies it. The
-apply/undo endpoints and `GET /paths/{id}/changes` land with AL-321.
+structure — no unit, no lesson, no progress — until the learner taps **Apply**
+below.
 
 **`resolution` is derived, never stored** (TDD D3). On the conversation read
 each proposal reports one of:
@@ -273,6 +273,68 @@ each proposal reports one of:
 what shaping can do — no `proposal` event, no payload, and **no machine-readable
 marker of any kind**. The same is true of a safety refusal. The whole record of
 either is the text the learner read.
+
+### Apply, Undo & the Change history (AL-321, TDD §5.6–§5.8)
+
+The write half of the shaping surface, on the same router and behind the same
+`shaping` flag. **Apply is the only write path into path structure outside
+Phase 1's generation pipeline**, and only from a stored, re-validated Proposal on
+an explicit learner tap — never inferred from conversation text.
+
+| Method | Path | Body | Success | Notes |
+| ------ | ---- | ---- | ------- | ----- |
+| `POST` | `/api/v1/messages/{id}/apply-proposal` | — | `200 {change, path}` | **Apply** the Proposal on a shaping message. Ownership walks message → conversation → path → account; a message that is not the caller's, is not a **shaping** message, or carries no proposal is a plain `404`. The whole payload is **re-validated against live path state** first (below), then applied in **one transaction** under a per-path lock — the path is never half-changed. Added lessons are inserted `ungenerated` and generate through Phase 1's untouched pipeline; a revised lesson is snapshotted, cleared and reset to `ungenerated` with its instruction. `path` is exactly what `GET /paths/{id}` returns, so the rail swaps its ghost rows for real rows in one round trip; requesting it also kicks the prefetch driver. Every refusal is a coded `409` (below). |
+| `POST` | `/api/v1/changes/{id}/undo` | — | `204` | **Undo** a Change, restoring the path exactly: added rows deleted, positions unshifted, revised lessons restored byte-identical (passage, Quick check, title, `generated_at`, state `generated`, instruction cleared). `status` becomes `undone` — undo is never a delete. Ownership walks change → path → account (`404` otherwise). **Undo is last-in-first-out**: only the newest *live* Change on a path may be undone, and an older one is `409 not_latest` until the Changes above it are undone first (below). The **engagement re-check is server-side and is the rule**: a Change whose content the learner has met is `409 engaged` and is permanent history. Undo never touches progress. |
+| `GET` | `/api/v1/paths/{id}/changes` | — | `200 {changes: [...]}` | The **Change history**, newest first: `{id, summary, kinds, status, applied_at, undone_at}`. Read-only — a record, not a second edit surface — and **undone Changes are included**. `200` with an empty list when nothing has shaped the path, and readable on a non-`ready` path. Scoped by *path*, so it survives **new conversation** (the rows outlive the thread that produced them). |
+
+**A Change is applied when the structure lands, not when generation finishes.**
+Added and revised lessons then ride Phase 1's `ungenerated → generating →
+generated` states, its retries and its caps, exactly like path creation.
+
+**One Apply is one Change** — the unit of history *and* of undo. A Proposal that
+mixes an Addition with a Revision lands as a single row whose `kinds` lists both,
+because undoing half of what the learner consented to as one edit would leave the
+path in a shape nobody proposed.
+
+**Coded conflicts.** Every refusal is an ordinary `409 conflict` in the shared
+envelope, carrying `details.reason` beside a learner-facing `message` so the
+proposal card can render the right state and the right affordance. A Proposal
+going stale is normal (the learner chats, walks away, starts the target lesson,
+comes back and taps), so this is a first-class path, not an error corner.
+
+| `details.reason` | Applies to | Meaning / what the card offers |
+| ---------------- | ---------- | ------------------------------ |
+| `already_applied` | apply | A live change row already references this proposal. Nothing to do. |
+| `already_undone` | apply | This proposal was applied and then undone; ask again to redo it. |
+| `not_applied` | undo | The Change is already undone. Idempotent-friendly. |
+| `not_latest` | undo | A later live Change was applied on top of this one. **Undo the newest one first** — nothing is wrong with this Change, it is simply not on top of the stack. |
+| `path_cap_reached` | apply | The path no longer has room under `MAX_LESSONS_PER_PATH`. Ask again. |
+| `insert_position_taken` | apply | The insertion point is now before the learner's first non-engaged position, or past the end of the path. Ask again. |
+| `revision_target_engaged` | apply | The revision target has been started since — or is no longer on this path. Ask again. |
+| `title_conflict` | apply | A proposed title now collides with one already on the path. Ask again. |
+| `positions_shifted` | apply | A Change applied *after* this proposal moved the slot its positions named. The payload is still well formed; it just no longer means what the learner was shown. Ask again. |
+| `invalid_proposal` | apply | The payload no longer satisfies the shared predicates for some other reason. Ask again. |
+| `target_generating` | apply, undo | A revision target is being written right now (a prefetch holds the claim). **Retryable** — the same tap works in a moment. |
+| `engaged` | undo | The learner has started something this Change created or revised, so undo is closed and the Change is permanent history. |
+
+The stale reasons are labels on the **shared** rulebook, never a second one: the
+predicates that drafted the proposal decide *whether* it is still valid, and the
+reason only names which rule fired. `positions_shifted` is the one apply-time
+check that is not a predicate — it asks whether the recorded `insert_at_position`
+still names the slot the learner saw, which a payload can fail while remaining
+perfectly in bounds. It fires on any structural shift **since the proposal was
+made**, at or below the last position the payload names: an Apply *and* an Undo
+both move positions, and both count.
+
+**Why undo is LIFO.** A Change stores its inverse as *absolute* positions,
+recorded against the path as it stood when that Change was applied. Replaying
+them against a path a later Change has since moved is wrong in two ways — it can
+collide with the later Change's slot, and (worse, because it is silent) it can
+reorder the later Change's lessons around a lesson the learner placed them
+against. Nothing in the payload relates the two Changes' coordinate frames, so
+the restriction is the correctness boundary rather than a simplification. It
+costs nothing PRD §5.5 promises: a Change stays undoable until it is engaged, by
+undoing the ones above it in turn.
 
 ## Feature flags (admin) (`/api/v1/admin`, AL-203)
 

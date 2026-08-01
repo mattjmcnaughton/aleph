@@ -8,7 +8,7 @@ from datetime import (
 )
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Index, Uuid, func
+from sqlalchemy import DateTime, Enum, ForeignKey, Index, Uuid, func, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -58,6 +58,17 @@ class PathChange(Base, UUIDAuditMixin):
         Index("ix_path_changes_path_id", "path_id"),
         # Scanned by the ``SET NULL`` when a thread is cleared.
         Index("ix_path_changes_message_id", "message_id"),
+        # **A Proposal is applied at most once**, in the database rather than in
+        # one process's lock (migration ``0007``). Partial, so the legal
+        # ``apply → undo → apply`` sequence is untouched and the NULL
+        # ``message_id`` of a Change whose thread was cleared (D3) never
+        # collides — NULLs are not equal to one another.
+        Index(
+            "uq_path_changes_applied_message",
+            "message_id",
+            unique=True,
+            postgresql_where=text("status = 'applied'"),
+        ),
     )
 
     path_id: Mapped[uuid.UUID] = mapped_column(

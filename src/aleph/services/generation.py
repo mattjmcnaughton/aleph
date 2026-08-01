@@ -59,6 +59,7 @@ from aleph import events
 from aleph.agents.lesson import (
     LessonCaps,
     LessonDeps,
+    LessonRevision,
     PriorPassage,
     build_lesson_agent,
     build_lesson_prompt,
@@ -76,6 +77,7 @@ from aleph.config import settings as global_settings
 from aleph.db import new_session
 from aleph.models import LessonGenerationState, Level
 from aleph.repositories import (
+    ChangeRepository,
     LessonRepository,
     PathGenerationProgress,
     PathRepository,
@@ -97,7 +99,7 @@ if TYPE_CHECKING:
     from aleph.agents.lesson import LessonContent
     from aleph.agents.outline import Level as AgentLevel
     from aleph.config import Settings
-    from aleph.models import Path, PathStatus
+    from aleph.models import Lesson, Path, PathStatus
 
     SessionFactory = Callable[[], AbstractAsyncContextManager[AsyncSession]]
     Spawn = Callable[[Coroutine[Any, Any, Any]], Any]
@@ -206,6 +208,12 @@ class _LessonContext:
     # falls back to the configured ``MODEL_LESSON`` slot. On the context so it
     # travels with every DB-driven (re)generation, not just the request.
     model_lesson: str | None
+    # A learner-applied **Revision** (Phase 2B D7), or ``None`` — which is every
+    # ordinary lesson, and why this pipeline needed no other change to carry it.
+    # Loaded from the row's ``revision_instruction`` plus the Change payload's
+    # snapshot of the passage it replaces; the *only* effect is one extra
+    # section in the user prompt.
+    revision: LessonRevision | None = None
 
 
 @dataclass(frozen=True)
@@ -759,6 +767,7 @@ class GenerationOrchestrator:
             lesson_title=context.lesson_title,
             prior_passages=context.prior,
             caps=self._lesson_caps,
+            revision=context.revision,
         )
         model = self._resolve_model(
             context.model_lesson
@@ -913,6 +922,7 @@ class GenerationOrchestrator:
         prior = await self.build_prior_context(
             session, path_id, lesson.position_in_path
         )
+        revision = await self._load_revision(session, path_id, lesson)
         return _LessonContext(
             account_id=path.user_id,
             topic=path.topic,
@@ -923,6 +933,36 @@ class GenerationOrchestrator:
             lesson_title=lesson.title,
             prior=prior,
             model_lesson=path.model_lesson,
+            revision=revision,
+        )
+
+    async def _load_revision(
+        self, session: AsyncSession, path_id: uuid.UUID, lesson: Lesson
+    ) -> LessonRevision | None:
+        """The learner's outstanding **Revision** of this lesson, if any (2B D7).
+
+        Gated on the row's own ``revision_instruction``, so an ordinary lesson —
+        every lesson on every path that was never shaped — costs **zero** extra
+        queries here and this whole branch is invisible to Phase 1.
+
+        When the column is set, the passage the revision re-pitches is fetched
+        from the Change that wrote it: apply clears the row's content (D7), so
+        the snapshot in ``path_changes`` is the only copy. A missing snapshot (a
+        hand-written row, a Change since undone-and-re-applied by some future
+        path) degrades to instruction-only rather than failing the generation:
+        the revision then re-teaches from the title alone, which is worse
+        continuity but a real lesson, and the alternative would be a ``failed``
+        row the learner cannot retry out of.
+        """
+        instruction = lesson.revision_instruction
+        if instruction is None:
+            return None
+        snapshot = await ChangeRepository(session).revision_snapshot(
+            path_id=path_id, lesson_id=lesson.id
+        )
+        return LessonRevision(
+            instruction=instruction,
+            previous_passage=None if snapshot is None else snapshot.read_passage,
         )
 
     async def _load_outline(
