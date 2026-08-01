@@ -19,6 +19,7 @@
 // against the path rail's teal *real* ones.
 
 import { AlephGlyph } from "../aleph-logo";
+import { handleComposerKeyDown } from "../../lib/composer-keys";
 import { Markdown } from "../markdown";
 import { TutorModelPicker } from "../model-picker";
 import type { MessageProposal, ShapingMessage } from "../../lib/shaping";
@@ -71,7 +72,7 @@ export function ShapingRail({ shaping }: { shaping: ShapingRailState }) {
     <section
       data-testid="shaping-rail"
       aria-label="Shape your path"
-      className="flex h-full min-h-0 flex-col"
+      className="flex min-h-0 flex-1 flex-col"
     >
       <RailHeader shaping={shaping} />
 
@@ -354,6 +355,9 @@ function Composer({ shaping }: { shaping: ShapingRailState }) {
           aria-label="Ask to change this path"
           value={shaping.draft}
           onChange={(event) => shaping.setDraft(event.target.value)}
+          onKeyDown={(event) =>
+            handleComposerKeyDown(event, () => shaping.send(shaping.draft, "typed"))
+          }
           disabled={streaming}
           rows={2}
           maxLength={SHAPING_MESSAGE_MAX_LENGTH}
