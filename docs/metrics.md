@@ -120,6 +120,15 @@ per-call tokens on every pydantic-ai model-call span, and
 `tutor_reply_completed` carries the per-reply token triple for the same reading
 from the events alone.
 
+Two more §7 items are deliberately not new queries. **Quick-check correctness**
+stays Phase 1's [`quick_check_correctness.sql`](../queries/logfire/quick_check_correctness.sql)
+unchanged — Phase 2 watches it as the answer-leak counter-metric (a sharp rise
+is a §10 leak to investigate, not a win), and it is not sliced by tutor use:
+`quick_check_attempted` carries no tutor dimension, so the split is an ad-hoc
+join against `tutor_message_sent` on `lesson_id` rather than a saved tile. And
+**eval pass rate** is not event-derived at all — it comes from the eval harness
+([`docs/evals.md`](evals.md)), not from Logfire records.
+
 ### Phase 2B — shaping (PRD §7)
 
 Phase 2B gets no north star of its own either: Phase 1's activation rate stays
@@ -153,14 +162,13 @@ the ids to slice on are already on the event. **Eval pass rate** is not
 event-derived at all (see [`docs/evals.md`](evals.md)), and this phase's evals
 run post-launch.
 
-Two more §7 items are deliberately not new queries. **Quick-check correctness**
-stays Phase 1's [`quick_check_correctness.sql`](../queries/logfire/quick_check_correctness.sql)
-unchanged — Phase 2 watches it as the answer-leak counter-metric (a sharp rise
-is a §10 leak to investigate, not a win), and it is not sliced by tutor use:
-`quick_check_attempted` carries no tutor dimension, so the split is an ad-hoc
-join against `tutor_message_sent` on `lesson_id` rather than a saved tile. And
-**eval pass rate** is not event-derived at all — it comes from the eval harness
-([`docs/evals.md`](evals.md)), not from Logfire records.
+## Importing the queries into Logfire
+
+Every file in [`queries/logfire/`](../queries/logfire/) is a saved query / tile
+to import by hand — there is no API-driven sync, so the import list is the
+checklist in [deploy.md § Logfire saved queries](deploy.md#logfire-saved-queries-import-checklist),
+which also records what to import at each phase launch and the one panel that
+reads empty for its first week.
 
 ## Notes & known limits
 

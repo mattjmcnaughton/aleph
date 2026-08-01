@@ -89,17 +89,17 @@ Phase 2B vocabulary — the tutor that changes the path, on instruction only. Sp
 | Term | Meaning |
 | --- | --- |
 | **Shape your path** | The flow: a conversation on the path view that ends in learner-approved edits to the path's structure. (The roadmap's name for the Turn 3 mock; the learner-initiated half is Phase 2B, the system-proposed half stays Phase 4.) |
-| **Shaping rail** | The tutor's surface on the **path view** — same rail grammar (docked column / sheet), its own thread. Unqualified, "the rail" still means the in-lesson tutor surface. |
+| **Shaping rail** | The tutor's surface on the **path view** — same rail grammar (docked column / sheet), its own thread (the code keeps it apart as `shaping-rail`, beside `tutor-rail` and `path-rail`). Unqualified, "the rail" still means the in-lesson tutor surface. |
 | **Shaping conversation** | The second persisted thread per path (conversation kind `shaping`), separate from the in-lesson thread. The in-lesson rail never shows it, and vice versa. |
 | **Shaping scope** | What the tutor sees in a shaping conversation: topic, level, the Path digest, each attempted lesson's **Outcome**, and the Change history. Never a lesson's body. |
-| **Proposal** | The tutor's structured, validated edit plan, rendered as a card in the thread: one or more **Additions**/**Revisions**, each with rationale and cost ("adds 2 lessons ≈ 10 min"). Data, not prose — the payload is what applies. |
+| **Proposal** | The tutor's structured, validated edit plan, rendered as a card in the thread: one or more **Additions**/**Revisions**, each with rationale and cost ("adds 2 lessons ≈ 10 min"). Data, not prose — the payload is what applies. Where it stands (*pending* / *applied* / *undone* / *superseded*) is derived from the Changes, never stored; "Not now" only dismisses the card in the client, and a reload brings a pending Proposal back. |
 | **Addition** | An edit that inserts new lessons (optionally as a new unit) **at or after the learner's first non-engaged position**. The only way a path grows. Added lessons are ordinary `ungenerated` lessons — Phase 1 machinery generates them. |
 | **Revision** | An edit that regenerates a **not-yet-engaged** lesson's content per the learner's instruction. Keeps the lesson's slot; the title may adjust. The one mutation between *generated* and *engaged*. |
 | **Engaged** | The immutability boundary: a lesson with a recorded **Attempt** or marked **complete**. Engaged content is never added before, revised, or removed by any shaping operation, and engaging with a Change's content ends its undo window. |
-| **Ghost row** | A proposed lesson/unit previewed in place in the path rail (iris, not teal) before the learner applies. The mock's drawing of "see it before you say yes". |
-| **Apply** | The explicit learner tap that turns a Proposal into a **Change**. The only write path into path structure — never inferred from conversation text. |
-| **Change** | An applied edit, the unit of history and undo: what it did, what it replaced, when, and its status (*applied* / *undone*). Owned by the path; survives a cleared thread. |
-| **Undo** | Reverting a Change exactly — until the learner engages with anything it created or revised. After that the Change is permanent history. Undo never touches progress. |
+| **Ghost row** | A proposed lesson/unit previewed in place in the path rail (iris, not teal) before the learner applies. The mock's drawing of "see it before you say yes". (Rendered client-side from the pending payload — `path-rail-ghost` — so ghosts exist only while that Proposal is pending in the open thread.) |
+| **Apply** | The explicit learner tap that turns a Proposal into a **Change**. The only write path into path structure — never inferred from conversation text. **One Apply is one Change**, even when the Proposal mixes Additions and Revisions. |
+| **Change** | An applied edit, the unit of history and undo: what it did, what it replaced, when, and its status (*applied* / *undone*). Owned by the path; survives a cleared thread. Its shape(s) are derived from the payload — a mixed edit reports both. |
+| **Undo** | Reverting a Change exactly — until the learner engages with anything it created or revised. After that the Change is permanent history. Undo never touches progress, and it is **last-in-first-out**: the newest live Change on a path is the one that can be undone (an older one waits for the ones above it — `409 not_latest`), because a Change's recorded inverse is only true against the path it was applied to. |
 | **Change history** | The read-only, plain-language record of every Change on a path, visible from the shaping rail. |
 | **Declined edit** | The tutor's graceful reply to an out-of-vocabulary ask (remove, reorder, revise engaged work, touch progress): names what shaping can do. Distinct wording from both failure and safety refusal. |
 
@@ -132,11 +132,16 @@ Some terms name things drawn in the mocks that are **not all built**. Use them, 
 phase:
 
 - **Tutor** in **lesson scope** — the in-lesson rail, its **Suggestions**, its **Tutor check**, one
-  **Conversation** per path, and streamed replies: **shipped (Phase 2)**. Everything in "The tutor"
-  above is live except where a row says otherwise.
+  **Conversation** per path, and streamed replies: **shipped (Phase 2)**, behind the `tutor`
+  flag until AL-270 flips its global default. Everything in "The tutor" above is built except
+  where a row says otherwise.
 - **Shape your path, learner-initiated** — the shaping rail, Proposals, Additions, Revisions,
-  Apply/Undo, Change history: **Phase 2B, in design** ([PRD](prds/phase-2b-shape-your-path.md)).
-  "2B" now names this slice, by owner re-scope — not the Q&A slice below.
+  Apply/Undo, Change history: **built and shipped dark** behind the `shaping` feature flag
+  ([PRD](prds/phase-2b-shape-your-path.md) · [TDD](tdds/phase-2b-shape-your-path.md)). Every
+  term in the Shaping table above is implemented; admins see it in production, learners do
+  not, and **launch is AL-370 flipping the flag's global default**
+  ([deploy.md](deploy.md#launching-a-flagged-phase-al-270--al-370)). "2B" names this slice, by
+  owner re-scope — not the Q&A slice below.
 - **Path scope** / scope switching / lesson citations as links / the **Shaky** badge on a lesson with
   missed Quick checks — the in-path *Q&A* tutor (**a later slice, sequenced against usage**;
   formerly called 2B, still specified in the Phase 2 PRD).
