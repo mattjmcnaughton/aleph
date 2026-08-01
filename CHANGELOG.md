@@ -1,3 +1,10 @@
+# [1.17.0](https://github.com/mattjmcnaughton/aleph/compare/v1.16.0...v1.17.0) (2026-08-01)
+
+
+### Features
+
+* **web:** shaping rail — conversation UI, proposal cards, SSE consumption (AL-330) ([a658cac](https://github.com/mattjmcnaughton/aleph/commit/a658cace98246c4a19095bf8d5cb7f24a90f832e)), closes [#122](https://github.com/mattjmcnaughton/aleph/issues/122)
+
 # [1.16.0](https://github.com/mattjmcnaughton/aleph/compare/v1.15.0...v1.16.0) (2026-08-01)
 
 
