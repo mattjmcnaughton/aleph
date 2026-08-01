@@ -32,14 +32,26 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { PATHS_LIST_QUERY_KEY, pathQueryKey } from "../../lib/api";
 import { sessionQueryOptions } from "../../lib/auth";
 import { useFeatureFlag } from "../../lib/feature-flags";
 import {
+  type Change,
+  type ProposalCardState,
   type ShapingConversation,
+  type ShapingConflictReason,
   type ShapingMessage,
+  applyProposal,
+  changeHistoryQueryKey,
+  changeHistoryQueryOptions,
   clearShapingConversation,
+  conflictGroup,
+  conflictReasonOf,
+  proposalCardState,
   shapingConversationQueryKey,
   shapingConversationQueryOptions,
+  undoChange,
+  undoableChangeId,
 } from "../../lib/shaping";
 import {
   CLEAR_FAILURE_COPY,
@@ -87,6 +99,24 @@ export const SHAPING_MESSAGE_MAX_LENGTH = TUTOR_MESSAGE_MAX_LENGTH;
 
 export type ShapingRailStatus = "idle" | "streaming" | "failed";
 
+/**
+ * Everything the card for one message needs, already decided (AL-331, TDD §8).
+ *
+ * The card is handed a *state*, never the five facts behind it: `lib/shaping.ts`
+ * owns that table as a pure function, so the component renders and the state
+ * machine is asserted directly. `message` is the server's own learner-facing
+ * wording for the last refusal (docs/api.md — the `409`'s `message` is written
+ * for a learner, never provider text), and `reason` is what the affordance is
+ * chosen from.
+ */
+export interface ProposalCardStatus {
+  state: ProposalCardState;
+  /** The last refusal's coded reason, or null. */
+  reason: ShapingConflictReason | null;
+  /** Learner-facing copy for the last refusal, or null. */
+  message: string | null;
+}
+
 export interface ShapingRailState {
   /** The rail is mounted (docked column at `lg`, sheet below it). */
   open: boolean;
@@ -132,6 +162,53 @@ export interface ShapingRailState {
   isAdmin: boolean;
   /** `session.user.model_allowlist` — the picker's only source of options. */
   modelAllowlist: readonly string[];
+
+  // --- Apply / Not now (AL-331, TDD §8) --------------------------------------
+
+  /** This message's card state, plus the wording for its last refusal. */
+  proposalStatus: (messageId: string) => ProposalCardStatus;
+  /** **Apply** — the explicit tap, and the only write path into the path. */
+  applyProposal: (messageId: string) => void;
+  /** **Not now** — pure UI dismissal. No request, nothing persisted. */
+  dismissProposal: (messageId: string) => void;
+  /**
+   * "Ask again" on a stale (or undone) card: puts the learner's own question for
+   * that turn back in the composer, and nothing else. The card keeps saying what
+   * happened to the Proposal — that explanation is what the learner re-asks
+   * *from*, and §8 has no state that retires it.
+   */
+  askAgain: (messageId: string) => void;
+  /** "View in path": stand out of the way of the path this just changed. */
+  viewInPath: () => void;
+
+  /**
+   * The Proposal the path rail previews as **ghost rows** — the newest one still
+   * pending in the *open* thread, or null. Ghosts exist only while a proposal is
+   * pending and the rail is open (TDD §8).
+   */
+  ghostProposal: Proposal | null;
+
+  // --- Change history sheet --------------------------------------------------
+
+  /** The read-only history sheet is open over the thread. */
+  historyOpen: boolean;
+  openHistory: () => void;
+  closeHistory: () => void;
+  /** The path's Changes, newest first. Empty until the sheet has been opened. */
+  changes: Change[];
+  changesLoading: boolean;
+  /** `GET /changes` failed — the sheet says so rather than showing an empty record. */
+  changesError: boolean;
+  /**
+   * The only Change this client offers **Undo** for: the newest live one (LIFO).
+   * A convenience in front of the server's `409 not_latest`, never the rule.
+   */
+  undoableChangeId: string | null;
+  /** The Change whose undo is in flight, or null. */
+  undoingChangeId: string | null;
+  undoChange: (changeId: string) => void;
+  /** The last undo refusal: which Change, why, and the server's own wording. */
+  undoError: { changeId: string; reason: ShapingConflictReason | null; message: string } | null;
 }
 
 export interface UseShapingRailOptions {
@@ -160,6 +237,25 @@ interface PendingQuestion {
  */
 type EndStreamMode = "restore" | "discard";
 
+/**
+ * What one proposal card's **Apply** has done so far. Per message id, because a
+ * thread can hold several cards and each one is applied on its own tap.
+ *
+ * `applied` is a boolean rather than the returned `ChangeDTO`: nothing on the
+ * card needs the Change's id (Undo lives on the history sheet, which carries
+ * every id by definition — `ProposalDTO`'s docstring), so holding it would be
+ * a second copy of state the sheet already reads from the server.
+ */
+interface ApplyState {
+  applying: boolean;
+  applied: boolean;
+  reason: ShapingConflictReason | null;
+  /** The server's learner-facing message for the refusal, or the failure copy. */
+  message: string | null;
+}
+
+const IDLE_APPLY: ApplyState = { applying: false, applied: false, reason: null, message: null };
+
 export function useShapingRail({
   pathId,
   title,
@@ -180,6 +276,13 @@ export function useShapingRail({
   const [clearError, setClearError] = useState<string | null>(null);
   const [model, setModel] = useState("");
 
+  // AL-331's own state: per-card apply, per-card dismissal, and the sheet.
+  const [applyStates, setApplyStates] = useState<Record<string, ApplyState>>({});
+  const [dismissed, setDismissed] = useState<readonly string[]>([]);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [undoingChangeId, setUndoingChangeId] = useState<string | null>(null);
+  const [undoError, setUndoError] = useState<ShapingRailState["undoError"]>(null);
+
   // Refs, not state, for everything the stream callbacks touch: deltas land
   // faster than React re-renders, and the settle path needs the *final* text and
   // proposal payload, not whatever a closure captured when the send started.
@@ -193,6 +296,11 @@ export function useShapingRail({
   // no request at all, which is what makes shipping dark actually dark.
   const conversationQuery = useQuery(shapingConversationQueryOptions(enabled ? pathId : null));
   const messages = conversationQuery.data?.messages ?? [];
+
+  // The Change history costs a request exactly when a learner asks to read it:
+  // idle on `skipToken` until the sheet is open (and never at all when dark).
+  const historyQuery = useQuery(changeHistoryQueryOptions(enabled && historyOpen ? pathId : null));
+  const changes = historyQuery.data?.changes ?? [];
 
   const appendTurn = useCallback(
     async (
@@ -326,6 +434,144 @@ export function useShapingRail({
     [run, status],
   );
 
+  // --- Apply, Not now, Undo (AL-331, TDD §5.6–§5.8) --------------------------
+  //
+  // Two guards live in refs rather than in state, for the reason `abortRef`
+  // does: a double tap must not start a second write, and reading "is this one
+  // already in flight" off state would read whatever the render that owned the
+  // handler captured.
+  const applyingRef = useRef<Set<string>>(new Set());
+  const undoingRef = useRef<string | null>(null);
+
+  const setApplyState = useCallback((messageId: string, next: ApplyState) => {
+    setApplyStates((old) => ({ ...old, [messageId]: next }));
+  }, []);
+
+  const apply = useCallback(
+    async (messageId: string) => {
+      if (applyingRef.current.has(messageId)) return;
+      applyingRef.current.add(messageId);
+      setApplyState(messageId, { ...IDLE_APPLY, applying: true });
+      try {
+        const result = await applyProposal(messageId);
+        // **Ghosts become real rows in one round trip.** The response's `path`
+        // is byte-for-byte `GET /paths/{id}`, so it goes straight into the cache
+        // the path rail already renders from: no second fetch, and no frame in
+        // which the iris ghosts and the teal rows they became are both on
+        // screen. (Requesting it is also what kicks the prefetch, §5.6.)
+        //
+        // Cancel first, for `appendTurn`'s reason and then some: the path route
+        // polls `GET /paths/{id}` the whole time any lesson is generating, so a
+        // poll started before this apply can resolve after it — and it carries
+        // the *pre-apply* outline, which would land on top of the rows that were
+        // just applied. The card would read "applied" over a rail the new rows
+        // had vanished from, until the next tick put them back.
+        await queryClient.cancelQueries({ queryKey: pathQueryKey(pathId) });
+        queryClient.setQueryData(pathQueryKey(pathId), result.path);
+        setApplyState(messageId, { ...IDLE_APPLY, applied: true });
+        setDismissed((old) => old.filter((id) => id !== messageId));
+        await Promise.all([
+          // The history moved, and so did the switcher's lesson counts. The
+          // detail was just written above, so it is deliberately *not* in the
+          // invalidation — that would refetch what we already hold.
+          queryClient.invalidateQueries({ queryKey: changeHistoryQueryKey(pathId) }),
+          queryClient.invalidateQueries({ queryKey: PATHS_LIST_QUERY_KEY }),
+          // Other cards in this thread may now be `superseded`; resolution is
+          // derived server-side and this is the only way to learn it.
+          queryClient.invalidateQueries({ queryKey: shapingConversationQueryKey(pathId) }),
+        ]);
+      } catch (error) {
+        const reason = conflictReasonOf(error);
+        setApplyState(messageId, {
+          applying: false,
+          applied: false,
+          reason,
+          // The server words its own refusals for a learner (docs/api.md), so
+          // its message is used verbatim; only a transport failure gets ours.
+          message: failureCopy(error),
+        });
+        // A nothing-to-do refusal says the server knows something this thread
+        // read does not. Take its word for it rather than leaving the card's
+        // state resting on the refusal alone.
+        if (reason !== null && conflictGroup(reason) === "nothing_to_do") {
+          await queryClient.invalidateQueries({
+            queryKey: shapingConversationQueryKey(pathId),
+          });
+        }
+      } finally {
+        applyingRef.current.delete(messageId);
+      }
+    },
+    [pathId, queryClient, setApplyState],
+  );
+
+  const undo = useCallback(
+    async (changeId: string) => {
+      if (undoingRef.current !== null) return;
+      undoingRef.current = changeId;
+      setUndoingChangeId(changeId);
+      setUndoError(null);
+      try {
+        await undoChange(changeId);
+        // Undo answers `204` and restores the path exactly, so everything it
+        // touched is re-read rather than guessed at: the outline whose rows it
+        // deleted or restored, the history whose row it moved, and the thread
+        // whose proposal resolutions are derived from that row.
+        setApplyStates({});
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: pathQueryKey(pathId) }),
+          queryClient.invalidateQueries({ queryKey: changeHistoryQueryKey(pathId) }),
+          queryClient.invalidateQueries({ queryKey: PATHS_LIST_QUERY_KEY }),
+          queryClient.invalidateQueries({ queryKey: shapingConversationQueryKey(pathId) }),
+        ]);
+      } catch (error) {
+        setUndoError({
+          changeId,
+          reason: conflictReasonOf(error),
+          message: failureCopy(error),
+        });
+      } finally {
+        undoingRef.current = null;
+        setUndoingChangeId(null);
+      }
+    },
+    [pathId, queryClient],
+  );
+
+  /** One card's state, decided by the pure table in `lib/shaping.ts`. */
+  const proposalStatus = (messageId: string): ProposalCardStatus => {
+    const message = messages.find((candidate) => candidate.id === messageId);
+    const applyState = applyStates[messageId] ?? IDLE_APPLY;
+    return {
+      state: proposalCardState({
+        resolution: message?.proposal?.resolution ?? "pending",
+        applying: applyState.applying,
+        applied: applyState.applied,
+        dismissed: dismissed.includes(messageId),
+        conflict: applyState.reason,
+      }),
+      reason: applyState.reason,
+      message: applyState.message,
+    };
+  };
+
+  /**
+   * The Proposal the path rail previews (TDD §8: "ghosts exist only while a
+   * proposal is pending in the open thread"). The **newest** such card wins:
+   * two pending proposals are two competing futures, and drawing both would
+   * preview a path neither of them describes.
+   */
+  const ghostProposal = ((): Proposal | null => {
+    if (!enabled || !openState) return null;
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const message = messages[index];
+      if (message.proposal === null) continue;
+      const { state } = proposalStatus(message.id);
+      if (state === "pending" || state === "applying") return message.proposal;
+    }
+    return null;
+  })();
+
   // Unmount discards the turn, matching what the server does with it: the
   // learner navigated away, the socket drops, and a reply nobody is watching is
   // persisted by neither side.
@@ -368,6 +614,15 @@ export function useShapingRail({
     setConfirmingNew(false);
     setClearError(null);
     setModel("");
+    // AL-331's state is per-message and per-path too: a card applied on path A
+    // has nothing to say about B's thread, and B's history is not A's.
+    applyingRef.current.clear();
+    undoingRef.current = null;
+    setApplyStates({});
+    setDismissed([]);
+    setHistoryOpen(false);
+    setUndoingChangeId(null);
+    setUndoError(null);
   }, [pathId, endStream]);
 
   const clearMutation = useMutation({
@@ -426,6 +681,10 @@ export function useShapingRail({
       setErrorMessage(null);
       setClearError(null);
       pendingRef.current = null;
+      // The thread is going, and every card in it with it. The **Change
+      // history** is untouched by design (D3) — history belongs to the path.
+      setApplyStates({});
+      setDismissed([]);
       clearMutation.mutate(pathId);
     },
     clearError,
@@ -434,5 +693,52 @@ export function useShapingRail({
     setModel,
     isAdmin: session.data?.user?.is_admin ?? false,
     modelAllowlist: session.data?.user?.model_allowlist ?? [],
+
+    proposalStatus,
+    applyProposal: (messageId) => void apply(messageId),
+    // Pure UI dismissal: no request, nothing persisted (PRD §5.4). It is not
+    // even remembered across a reload, which is right — the Proposal is still
+    // `pending` server-side, so declining must not quietly spend it.
+    dismissProposal: (messageId) =>
+      setDismissed((old) => (old.includes(messageId) ? old : [...old, messageId])),
+    askAgain: (messageId) => {
+      // The learner's own words for that turn, back in the composer: "ask again"
+      // means ask the same thing of a path that has since moved, and retyping it
+      // is the only part of that a client can save them.
+      //
+      // It deliberately does *not* dismiss the card. `dismissed` is **Not now**
+      // and only Not now (PRD §5.4), and it ranks below stale/undone in
+      // `proposalCardState` anyway — so marking it here would be a no-op that
+      // read like a state change. The card goes on saying why this offer died,
+      // which is what the learner is re-asking from.
+      const index = messages.findIndex((message) => message.id === messageId);
+      for (let before = index - 1; before >= 0; before -= 1) {
+        if (messages[before].role === "learner") {
+          setDraft(messages[before].content);
+          break;
+        }
+      }
+    },
+    viewInPath: () => {
+      // Stand out of the way of the thing that just changed. Below `lg` the rail
+      // is a sheet over the path, so closing it *is* "view in path"; at `lg` the
+      // path was never covered and closing costs a tap to reopen — one behavior
+      // at both widths, because open/closed is shared state and never a branch
+      // on viewport width (D12/D14).
+      setOpenState(false);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    },
+    ghostProposal,
+
+    historyOpen,
+    openHistory: () => setHistoryOpen(true),
+    closeHistory: () => setHistoryOpen(false),
+    changes,
+    changesLoading: historyQuery.isPending && historyQuery.fetchStatus !== "idle",
+    changesError: historyQuery.isError,
+    undoableChangeId: undoableChangeId(changes),
+    undoingChangeId,
+    undoChange: (changeId) => void undo(changeId),
+    undoError,
   };
 }

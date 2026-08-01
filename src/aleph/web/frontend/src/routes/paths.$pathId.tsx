@@ -18,6 +18,8 @@ import { Breadcrumbs } from "../components/breadcrumbs";
 import { LessonMarker, UNLOCK_STATE_LABEL } from "../components/lesson-marker";
 import { ShapingMark, ShapingRail } from "../components/shaping/shaping-rail";
 import { useShapingRail } from "../components/shaping/use-shaping-rail";
+import { type OutlineUnitView, mergeProposalIntoOutline } from "../lib/shaping";
+import type { Proposal } from "../lib/tutor-stream";
 import { Sidebar, SwitcherSection } from "../components/sidebar";
 import { Workspace } from "../components/workspace";
 import { PATH_TITLE_MAX_LENGTH } from "../lib/onboarding";
@@ -108,7 +110,11 @@ function PathView() {
       ) : detail.status !== "ready" ? (
         <GeneratingState />
       ) : (
-        <ReadyPath detail={detail} onOpenLesson={openLesson} />
+        <ReadyPath
+          detail={detail}
+          onOpenLesson={openLesson}
+          ghostProposal={shaping.ghostProposal}
+        />
       )}
 
       {/* The way in, and the way back from the header's collapse. It renders
@@ -123,9 +129,18 @@ function PathView() {
 function ReadyPath({
   detail,
   onOpenLesson,
+  ghostProposal,
 }: {
   detail: PathDetail;
   onOpenLesson: (lessonId: string) => void;
+  /**
+   * The pending Proposal previewed as **ghost rows** (Phase 2B AL-331, D14), or
+   * null. Merged client-side into the rail below — and *only* into the rail:
+   * every count on this page (the progress readout, the continue card, the
+   * complete banner) is computed from `detail.units`, because a ghost is a
+   * proposal and progress is a fact. Applying is what turns one into the other.
+   */
+  ghostProposal: Proposal | null;
 }) {
   const lessons = detail.units.flatMap((unit) => unit.lessons);
   const total = lessons.length;
@@ -199,9 +214,11 @@ function ReadyPath({
         data-testid="path-rail"
         className="mt-8 space-y-8 lg:grid lg:grid-cols-2 lg:gap-x-8 lg:gap-y-7 lg:space-y-0"
       >
-        {detail.units.map((unit, index) => (
-          <UnitBlock key={unit.id} unit={unit} index={index} onOpenLesson={onOpenLesson} />
-        ))}
+        {numberUnits(mergeProposalIntoOutline(detail.units, ghostProposal)).map(
+          ({ unit, number }) => (
+            <UnitBlock key={unit.id} unit={unit} number={number} onOpenLesson={onOpenLesson} />
+          ),
+        )}
       </ol>
     </>
   );
@@ -358,6 +375,33 @@ function PencilIcon() {
 }
 
 /**
+ * Pair each unit with the number the rail prints on it — **counted over the real
+ * units only**.
+ *
+ * A ghost unit is a proposal, so it takes no number (it has no place in the
+ * path's ordering until Apply gives it one) and, just as importantly, it must
+ * not consume one: numbering off the merged array's index would renumber every
+ * real unit below a ghost — the second unit of a two-unit path reading "Unit 03"
+ * because a proposal is sitting above it. Consent has to come first for the
+ * numbering as much as for the rows.
+ *
+ * With no proposal every unit is real, so this is exactly `index + 1` and the
+ * rendered rail is unchanged (W21).
+ */
+function numberUnits(units: OutlineUnitView[]): Array<{
+  unit: OutlineUnitView;
+  /** Null for a ghost unit — it is labelled "Proposed unit" instead. */
+  number: number | null;
+}> {
+  let real = 0;
+  return units.map((unit) => {
+    if (unit.ghost) return { unit, number: null };
+    real += 1;
+    return { unit, number: real };
+  });
+}
+
+/**
  * The mock #2b continue panel — desktop-only, one obvious next action instead
  * of scanning the two-up rail for the available lesson. `started` picks the
  * kicker: the mock's "Pick up where you left off" is a claim about the past, so
@@ -405,21 +449,28 @@ function ContinueCard({
 
 function UnitBlock({
   unit,
-  index,
+  number,
   onOpenLesson,
 }: {
-  unit: PathUnit;
-  index: number;
+  unit: OutlineUnitView;
+  /** Its place among the *real* units, or null for a ghost (`numberUnits`). */
+  number: number | null;
   onOpenLesson: (lessonId: string) => void;
 }) {
+  const real = unit.lessons.filter((row) => row.kind === "real").map((row) => row.lesson);
   const unitComplete =
-    unit.lessons.length > 0 && unit.lessons.every((lesson) => lesson.unlock_state === "complete");
-  const inProgress = unit.lessons.some((lesson) => lesson.unlock_state === "available");
+    real.length > 0 && real.every((lesson) => lesson.unlock_state === "complete");
+  const inProgress = real.some((lesson) => lesson.unlock_state === "available");
 
   return (
-    <li>
+    <li data-testid={unit.ghost ? "path-rail-ghost-unit" : undefined}>
       <div className="flex items-baseline justify-between">
-        <p className="kicker">Unit {String(index + 1).padStart(2, "0")}</p>
+        {/* A ghost unit has no number: it has no place in the path's ordering
+            until Apply gives it one, and taking one would renumber every real
+            unit after it for something the learner has not consented to. */}
+        <p className={unit.ghost ? "kicker text-iris-400" : "kicker"}>
+          {number === null ? "Proposed unit" : `Unit ${String(number).padStart(2, "0")}`}
+        </p>
         {inProgress ? (
           <span className="font-mono text-[11px] uppercase tracking-kicker text-teal">
             In progress
@@ -430,16 +481,56 @@ function UnitBlock({
           </span>
         ) : null}
       </div>
-      <h2 className="mt-1 text-lg font-semibold leading-snug">{unit.title}</h2>
+      <h2
+        className={`mt-1 text-lg font-semibold leading-snug${unit.ghost ? " text-iris-300" : ""}`}
+      >
+        {unit.title}
+      </h2>
 
       <ul className="mt-3 space-y-2">
-        {unit.lessons.map((lesson) => (
-          <li key={lesson.id}>
-            <LessonRow lesson={lesson} onOpen={onOpenLesson} />
-          </li>
-        ))}
+        {unit.lessons.map((row) =>
+          row.kind === "ghost" ? (
+            <li key={row.key}>
+              <GhostRow title={row.title} />
+            </li>
+          ) : (
+            <li key={row.lesson.id}>
+              <LessonRow lesson={row.lesson} revising={row.revising} onOpen={onOpenLesson} />
+            </li>
+          ),
+        )}
       </ul>
     </li>
+  );
+}
+
+/**
+ * A **ghost row** (CONTEXT.md): a proposed lesson previewed in place, iris and
+ * dashed against the rail's teal real rows (PRD §5.10 — teal is the path's
+ * colour, iris is the tutor's, and the difference is the whole message).
+ *
+ * Deliberately not a `<button>`: there is nothing to open. A lesson exists when
+ * a Change creates it, and until the learner taps **Apply** this row is a
+ * drawing of an offer — "see it before you say yes", not a thing you can enter.
+ */
+function GhostRow({ title }: { title: string }) {
+  return (
+    <div
+      data-testid="path-rail-ghost"
+      className="flex w-full items-center gap-3 rounded-md border border-dashed border-iris/60 bg-iris/[0.07] px-4 py-3 text-left text-sm text-porcelain"
+    >
+      <span
+        aria-hidden="true"
+        className="grid h-6 w-6 shrink-0 place-items-center rounded-full border border-dashed border-iris text-iris"
+      >
+        <span className="text-xs leading-none">+</span>
+      </span>
+      <span className="sr-only">Proposed: </span>
+      <span className="min-w-0 flex-1 truncate font-medium">{title}</span>
+      <span className="shrink-0 font-mono text-[10px] uppercase tracking-kicker text-iris-300">
+        Proposed
+      </span>
+    </div>
   );
 }
 
@@ -454,9 +545,12 @@ const LESSON_ROW_STATE: Record<PathLesson["unlock_state"], string> = {
 
 function LessonRow({
   lesson,
+  revising,
   onOpen,
 }: {
   lesson: PathLesson;
+  /** A pending **Revision** names this lesson — the "will be revised" marker. */
+  revising: boolean;
   onOpen: (lessonId: string) => void;
 }) {
   const locked = lesson.unlock_state === "locked";
@@ -475,14 +569,29 @@ function LessonRow({
       data-testid={`lesson-${lesson.id}`}
       data-unlock-state={lesson.unlock_state}
       data-generation-state={lesson.generation_state}
+      data-revising={revising ? "true" : undefined}
       onClick={() => onOpen(lesson.id)}
       disabled={locked}
-      className={`${LESSON_ROW_BASE} ${LESSON_ROW_STATE[lesson.unlock_state]}`}
+      // The marker is iris while a Revision is pending on this row: the lesson
+      // is still real and still openable (a proposal changes nothing), but the
+      // path rail says an offer is standing on it.
+      className={`${LESSON_ROW_BASE} ${
+        revising
+          ? "border-iris/60 bg-iris/[0.07] text-porcelain"
+          : LESSON_ROW_STATE[lesson.unlock_state]
+      }`}
     >
       <LessonMarker state={lesson.unlock_state} />
       <span className="sr-only">{UNLOCK_STATE_LABEL[lesson.unlock_state]}: </span>
       <span className="min-w-0 flex-1 truncate font-medium">{lesson.title}</span>
-      {generating ? (
+      {revising ? (
+        <span
+          data-testid="path-rail-revising"
+          className="shrink-0 font-mono text-[10px] uppercase tracking-kicker text-iris-300"
+        >
+          Will be revised
+        </span>
+      ) : generating ? (
         <span className="shrink-0 font-mono text-[10px] uppercase tracking-kicker text-slate">
           Preparing
         </span>

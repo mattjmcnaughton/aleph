@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { PathUnit } from "../lib/api";
 import {
@@ -72,6 +72,26 @@ describe("Path view — /paths/$pathId", () => {
     expect(unlockStateOf(flat[2].id)).toBe("available");
     expect(unlockStateOf(flat[3].id)).toBe("locked");
     expect(screen.queryByTestId("path-complete")).toBeNull();
+  });
+
+  it("[AL-062] numbers the units in order, from one", async () => {
+    // The rail with nothing pending on it: units are numbered by their place in
+    // the path. This is the numbering AL-331's ghost units must leave untouched
+    // (W21 — with no proposal, this page renders exactly as it always did).
+    seedPath({
+      id: "p-numbers",
+      topic: "TypeScript",
+      level: "some_experience",
+      units: MID_PATH_UNITS,
+    });
+    await gotoPath("p-numbers");
+
+    const rail = await screen.findByTestId("path-rail");
+    expect(
+      within(rail)
+        .getAllByText(/^Unit \d\d$/)
+        .map((kicker) => kicker.textContent),
+    ).toEqual(["Unit 01", "Unit 02"]);
   });
 
   it("[AL-062] renders a complete path: every lesson complete + completion treatment", async () => {

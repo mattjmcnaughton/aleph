@@ -15,10 +15,18 @@
 // One shaping conversation **per path**, created lazily: a path nobody has
 // shaped answers `200 {messages: []}`, never `404`.
 
-import { HttpResponse, http } from "msw";
+import { HttpResponse, delay, http } from "msw";
 import { API_V1_BASE } from "../lib/api";
-import type { ShapingMessage } from "../lib/shaping";
+import type { Change, ShapingConflictReason, ShapingMessage } from "../lib/shaping";
+import { isAddLessons } from "../lib/shaping";
 import type { Proposal, SendShapingMessageInput } from "../lib/tutor-stream";
+import {
+  type AppliedRows,
+  addLessonsToPath,
+  pathDetailFor,
+  removeLessonsFromPath,
+  reviseLessonInPath,
+} from "./paths";
 import { frame } from "./tutor";
 
 interface ShapingConfig {
@@ -41,6 +49,23 @@ interface ShapingConfig {
    * and for a reply already in flight on this conversation.
    */
   preStreamError: { status: number; code: string; message: string } | null;
+  /**
+   * When set, `POST /messages/{id}/apply-proposal` answers the coded `409`
+   * (AL-331) instead of applying — the first-class stale path, not an error
+   * corner (TDD §5.8).
+   */
+  applyConflict: ShapingConflictConfig | null;
+  /** When set, `POST /changes/{id}/undo` answers the coded `409` instead. */
+  undoConflict: ShapingConflictConfig | null;
+  /** When true, apply answers a plain `500` — the transaction-failure branch. */
+  applyFails: boolean;
+  /** When true, `GET /paths/{id}/changes` answers a plain `500`. */
+  changesFail: boolean;
+  /**
+   * Milliseconds apply waits before answering. Gives a test a real in-flight
+   * window — the only way to observe the card's `applying` state.
+   */
+  applyDelayMs: number;
 }
 
 const defaultConfig: ShapingConfig = {
@@ -49,12 +74,36 @@ const defaultConfig: ShapingConfig = {
   failWith: null,
   hang: false,
   preStreamError: null,
+  applyConflict: null,
+  undoConflict: null,
+  applyFails: false,
+  changesFail: false,
+  applyDelayMs: 0,
 };
 
 let config: ShapingConfig = { ...defaultConfig };
 
 /** path id -> the shaping thread, oldest first. Absent = no conversation row. */
 const store = new Map<string, ShapingMessage[]>();
+
+/** path id -> its Change history, **newest first** (`GET /changes`, AL-331). */
+const changeStore = new Map<string, Change[]>();
+
+/** change id -> the rows its Apply created, so Undo can take exactly them back. */
+const appliedRows = new Map<string, AppliedRows>();
+
+/**
+ * change id -> the shaping message whose Proposal made it (`path_changes`' FK).
+ *
+ * The link the *resolution* is derived from (TDD §4): undoing a Change makes
+ * exactly that one message read back `undone`, and says nothing about any other
+ * applied Proposal on the thread.
+ */
+const changeMessage = new Map<string, string>();
+
+let applyCallCount = 0;
+let undoCallCount = 0;
+let changeReadCount = 0;
 
 /** Every send body the fake received, in order — asserted on directly. */
 let sentBodies: SendShapingMessageInput[] = [];
@@ -78,6 +127,12 @@ export function resetShaping(): void {
   readCount = 0;
   abortedSendCount = 0;
   heldStreams = [];
+  changeStore.clear();
+  appliedRows.clear();
+  changeMessage.clear();
+  applyCallCount = 0;
+  undoCallCount = 0;
+  changeReadCount = 0;
   config = { ...defaultConfig };
 }
 
@@ -166,7 +221,188 @@ function persistTurn(
   store.set(pathId, thread);
 }
 
+// --- Apply, Undo & the Change history (AL-321's wire, AL-331's caller) -------
+//
+// Verified field by field against `dtos/shaping.py` and `routers/v1/shaping.py`.
+// Two things this fake insists on, because the card and the sheet are built
+// against them:
+//
+//  1. **Apply really applies.** It mutates the *paths* fake (`mocks/paths.ts`)
+//     and answers `{change, path}` where `path` is that store's own
+//     `GET /paths/{id}` body — so "ghost rows swap for real rows in one round
+//     trip" is proven against the same payload the rail already renders, not
+//     against a hand-written echo of it. Undo takes the same rows back.
+//  2. **Every refusal is the shared envelope with `details.reason`** — including
+//     `request_id`, which the real one always carries. A client that quietly
+//     depended on a bare `409` would only find out in production.
+
+/** A `409 conflict` the fake is configured to answer with, on apply or undo. */
+export interface ShapingConflictConfig {
+  reason: ShapingConflictReason;
+  /** The server's own learner-facing wording — the card renders it verbatim. */
+  message: string;
+}
+
+export function shapingApplyCount(): number {
+  return applyCallCount;
+}
+
+export function shapingUndoCount(): number {
+  return undoCallCount;
+}
+
+/** How many `GET /changes` reads landed — 0 proves an unopened sheet is free. */
+export function shapingChangeReadCount(): number {
+  return changeReadCount;
+}
+
+/** A path's Change history as the fake currently holds it. */
+export function shapingChanges(pathId: string): Change[] {
+  return changeStore.get(pathId) ?? [];
+}
+
+/** Pre-populate a path's Change history (a path shaped in an earlier session). */
+export function seedChanges(pathId: string, changes: Change[]): void {
+  changeStore.set(pathId, [...changes]);
+}
+
+function conflictEnvelope(status: number, conflict: ShapingConflictConfig) {
+  return HttpResponse.json(
+    {
+      error: {
+        code: "conflict",
+        message: conflict.message,
+        request_id: "req-shaping-conflict",
+        details: { reason: conflict.reason },
+      },
+    },
+    { status },
+  );
+}
+
+function notFoundEnvelope() {
+  return HttpResponse.json(
+    { error: { code: "not_found", message: "Not found.", request_id: "req-shaping-404" } },
+    { status: 404 },
+  );
+}
+
+/** Which path holds this message — the ownership walk, in one line of fake. */
+function pathOfMessage(messageId: string): { pathId: string; message: ShapingMessage } | null {
+  for (const [pathId, thread] of store.entries()) {
+    const message = thread.find((candidate) => candidate.id === messageId);
+    if (message) return { pathId, message };
+  }
+  return null;
+}
+
 export const shapingHandlers = [
+  http.post(`${API_V1_BASE}/messages/:messageId/apply-proposal`, async ({ params }) => {
+    applyCallCount += 1;
+    if (config.applyDelayMs > 0) await delay(config.applyDelayMs);
+    if (config.applyConflict) return conflictEnvelope(409, config.applyConflict);
+    if (config.applyFails) {
+      return HttpResponse.json(
+        {
+          error: {
+            code: "internal_error",
+            message: "Something went wrong.",
+            request_id: "req-shaping-500",
+          },
+        },
+        { status: 500 },
+      );
+    }
+
+    const owned = pathOfMessage(params.messageId as string);
+    if (owned === null || owned.message.proposal === null) return notFoundEnvelope();
+    const { pathId, message } = owned;
+    const proposal = message.proposal;
+    if (proposal === null) return notFoundEnvelope();
+
+    // The apply transaction, structurally (§5.6 step 3): rows land, positions
+    // shift, a revised lesson goes back to `ungenerated` keeping its slot.
+    const rows: AppliedRows = { lessonIds: [], unitId: null };
+    const kinds = new Set<Change["kinds"][number]>();
+    for (const operation of proposal.operations) {
+      if (isAddLessons(operation)) {
+        const created = addLessonsToPath(pathId, operation);
+        rows.lessonIds.push(...created.lessonIds);
+        rows.unitId = created.unitId ?? rows.unitId;
+        kinds.add("add_lessons");
+      } else {
+        reviseLessonInPath(pathId, operation.lesson_id, operation.new_title);
+        kinds.add("revise_lesson");
+      }
+    }
+
+    const change: Change = {
+      id: `c0000000-0000-4000-8000-${String(applyCallCount).padStart(12, "0")}`,
+      summary: proposal.summary,
+      kinds: [...kinds],
+      status: "applied",
+      applied_at: new Date().toISOString(),
+      undone_at: null,
+    };
+    appliedRows.set(change.id, rows);
+    changeMessage.set(change.id, message.id);
+    changeStore.set(pathId, [change, ...(changeStore.get(pathId) ?? [])]);
+    // Resolution is derived server-side (TDD §4) — a live change row references
+    // this message now, so the next thread read reports `applied`.
+    message.proposal = { ...proposal, resolution: "applied" };
+
+    const path = pathDetailFor(pathId);
+    if (path === undefined) return notFoundEnvelope();
+    return HttpResponse.json({ change, path });
+  }),
+
+  http.post(`${API_V1_BASE}/changes/:changeId/undo`, ({ params }) => {
+    undoCallCount += 1;
+    if (config.undoConflict) return conflictEnvelope(409, config.undoConflict);
+
+    const changeId = params.changeId as string;
+    for (const [pathId, changes] of changeStore.entries()) {
+      const index = changes.findIndex((candidate) => candidate.id === changeId);
+      if (index === -1) continue;
+      const rows = appliedRows.get(changeId);
+      if (rows) removeLessonsFromPath(pathId, rows);
+      changes[index] = {
+        ...changes[index],
+        status: "undone",
+        undone_at: new Date().toISOString(),
+      };
+      // Undo is a status, never a delete — and the proposal that made *this*
+      // Change reads back as `undone` on the next thread read. Only that one:
+      // resolution follows the `path_changes` row's own message FK, so another
+      // applied Proposal on the same thread is untouched.
+      const messageId = changeMessage.get(changeId);
+      for (const message of store.get(pathId) ?? []) {
+        if (message.id === messageId && message.proposal !== null) {
+          message.proposal = { ...message.proposal, resolution: "undone" };
+        }
+      }
+      return new HttpResponse(null, { status: 204 });
+    }
+    return notFoundEnvelope();
+  }),
+
+  http.get(`${API_V1_BASE}/paths/:pathId/changes`, ({ params }) => {
+    changeReadCount += 1;
+    if (config.changesFail) {
+      return HttpResponse.json(
+        {
+          error: {
+            code: "internal_error",
+            message: "Something went wrong.",
+            request_id: "req-shaping-500",
+          },
+        },
+        { status: 500 },
+      );
+    }
+    return HttpResponse.json({ changes: changeStore.get(params.pathId as string) ?? [] });
+  }),
+
   http.get(`${API_V1_BASE}/paths/:pathId/shaping/conversation`, ({ params }) => {
     readCount += 1;
     return HttpResponse.json({ messages: store.get(params.pathId as string) ?? [] });
