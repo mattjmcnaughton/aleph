@@ -258,7 +258,7 @@ function PathRow({ path, deletion }: { path: PathSummary; deletion: DeletePath }
       >
         <div className="min-w-0 lg:flex-1">
           <p data-testid="path-item-topic" className="text-base font-semibold leading-snug">
-            {path.topic}
+            {path.title}
           </p>
           <p
             data-testid="path-item-level"
@@ -293,7 +293,7 @@ function PathRow({ path, deletion }: { path: PathSummary; deletion: DeletePath }
 
       {deletion.confirmingId === path.id ? (
         <DeleteConfirm
-          topic={path.topic}
+          title={path.title}
           onCancel={deletion.cancel}
           onConfirm={() => deletion.confirm(path.id)}
           deleting={deletion.isDeleting(path.id)}
@@ -304,7 +304,7 @@ function PathRow({ path, deletion }: { path: PathSummary; deletion: DeletePath }
           type="button"
           id={deleteButtonId(path.id)}
           data-testid="path-delete-button"
-          aria-label={`Delete ${path.topic}`}
+          aria-label={`Delete ${path.title}`}
           onClick={() => deletion.ask(path.id)}
           className="mt-3 rounded-md border border-divider px-3 py-1.5 text-sm text-mist transition-colors hover:border-danger-border hover:text-danger lg:mt-0 lg:shrink-0"
         >
@@ -327,13 +327,13 @@ function PathRow({ path, deletion }: { path: PathSummary; deletion: DeletePath }
  * — a native dialog isn't part of Nocturne and behaves badly on a phone.
  */
 function DeleteConfirm({
-  topic,
+  title,
   onCancel,
   onConfirm,
   deleting,
   errored,
 }: {
-  topic: string;
+  title: string;
   onCancel: () => void;
   onConfirm: () => void;
   deleting: boolean;
@@ -370,7 +370,7 @@ function DeleteConfirm({
         <button
           type="button"
           data-testid="path-delete-confirm"
-          aria-label={`Confirm deleting ${topic}`}
+          aria-label={`Confirm deleting ${title}`}
           onClick={onConfirm}
           disabled={deleting}
           className="flex-1 rounded-md bg-danger px-3 py-2 text-sm font-semibold text-night transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"

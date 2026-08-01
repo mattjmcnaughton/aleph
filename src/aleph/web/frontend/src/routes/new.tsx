@@ -18,6 +18,7 @@ import { Breadcrumbs } from "../components/breadcrumbs";
 import { PRIMARY_CTA, RetryNotices, Spinner, StateCard } from "../components/state-card";
 import { sessionQueryOptions } from "../lib/auth";
 import {
+  GUIDANCE_MAX_LENGTH,
   LEVELS,
   MODEL_SLOT_DEFAULT,
   TOPIC_MAX_LENGTH,
@@ -49,6 +50,10 @@ function NewPath() {
 
   const [topic, setTopic] = useState("");
   const [level, setLevel] = useState<Level>("new_to_it");
+  // Optional creation input alongside topic (§5.1, docs/api.md): free text the
+  // learner pastes to shape the outline. Preserved across the failed→editing
+  // round trip exactly like topic/level, below.
+  const [guidance, setGuidance] = useState("");
   const [pathId, setPathId] = useState<string | null>(null);
   // Admin model slots (§5.3/D14). `MODEL_SLOT_DEFAULT` means "no override" —
   // `buildCreatePathInput` drops the key rather than sending an empty id.
@@ -119,7 +124,9 @@ function NewPath() {
   function onSubmit(event: React.FormEvent) {
     event.preventDefault();
     if (!canSubmitTopic(topic)) return;
-    createMutation.mutate(buildCreatePathInput({ topic, level, modelOutline, modelLesson }));
+    createMutation.mutate(
+      buildCreatePathInput({ topic, level, guidance, modelOutline, modelLesson }),
+    );
   }
 
   const rateLimited = createMutation.isError && isRateLimited(createMutation.error);
@@ -156,8 +163,10 @@ function NewPath() {
         <OnboardingForm
           topic={topic}
           level={level}
+          guidance={guidance}
           onTopicChange={setTopic}
           onLevelChange={setLevel}
+          onGuidanceChange={setGuidance}
           onSubmit={onSubmit}
           submitting={createMutation.isPending}
           rateLimited={rateLimited}
@@ -209,8 +218,10 @@ function NewPath() {
 interface FormProps {
   topic: string;
   level: Level;
+  guidance: string;
   onTopicChange: (value: string) => void;
   onLevelChange: (value: Level) => void;
+  onGuidanceChange: (value: string) => void;
   onSubmit: (event: React.FormEvent) => void;
   submitting: boolean;
   rateLimited: boolean;
@@ -225,8 +236,10 @@ interface FormProps {
 function OnboardingForm({
   topic,
   level,
+  guidance,
   onTopicChange,
   onLevelChange,
+  onGuidanceChange,
   onSubmit,
   submitting,
   rateLimited,
@@ -270,6 +283,28 @@ function OnboardingForm({
         maxLength={TOPIC_MAX_LENGTH}
         className="w-full rounded-md border border-divider bg-surface px-4 py-3 text-base text-porcelain placeholder:text-slate focus:border-teal focus:outline-none"
       />
+
+      <div className="mt-6">
+        <label htmlFor="onboarding-guidance" className="text-sm font-medium text-porcelain">
+          Additional guidance
+        </label>
+        <p className="mt-1 text-sm leading-6 text-mist">
+          Optional. Anything about how you want the path shaped — the stages to cover, what to
+          emphasise or skip, how deep to go.
+        </p>
+        <textarea
+          id="onboarding-guidance"
+          name="guidance"
+          value={guidance}
+          onChange={(event) => onGuidanceChange(event.target.value)}
+          placeholder="e.g. Cover X before Y, skip the history, go deep on the tooling…"
+          rows={6}
+          // Mirrors `GuidanceStr` (`dtos/paths.py`) the way the topic input mirrors
+          // `TopicStr` above — same reasoning, same cap-at-the-keyboard rule.
+          maxLength={GUIDANCE_MAX_LENGTH}
+          className="mt-3 w-full resize-y rounded-md border border-divider bg-surface px-4 py-3 text-base text-porcelain placeholder:text-slate focus:border-teal focus:outline-none"
+        />
+      </div>
 
       <fieldset className="mt-6">
         <legend className="kicker">How much do you know already?</legend>

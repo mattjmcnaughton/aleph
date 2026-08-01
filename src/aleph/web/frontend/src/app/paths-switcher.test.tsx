@@ -71,6 +71,21 @@ describe("Your paths switcher — /", () => {
     expect(screen.queryByTestId("paths-empty")).toBeNull();
   });
 
+  it("shows the learner-editable title, not the frozen topic, when they differ", async () => {
+    seedPath({
+      id: "p-renamed",
+      topic: "TypeScript",
+      title: "TS, deep dive",
+      level: "some_experience",
+      units: MID_PATH_UNITS,
+    });
+    await gotoHome();
+
+    const row = within(await findItem("p-renamed"));
+    expect(row.getByTestId("path-item-topic").textContent).toBe("TS, deep dive");
+    expect(screen.queryByTestId("paths-empty")).toBeNull();
+  });
+
   it("[AL-064/W7/W8] renders refused and failed paths in their own states", async () => {
     seedPath({
       id: "p-refused",

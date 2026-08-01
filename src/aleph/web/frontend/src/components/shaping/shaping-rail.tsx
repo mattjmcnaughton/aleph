@@ -340,7 +340,7 @@ function Composer({ shaping }: { shaping: ShapingRailState }) {
         className="mb-2 inline-flex items-center gap-2 rounded-full border border-divider px-3 py-1 text-xs text-mist"
       >
         <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-iris" />
-        Shaping · <span className="text-porcelain">{shaping.topic}</span>
+        Shaping · <span className="text-porcelain">{shaping.title}</span>
       </p>
 
       <form

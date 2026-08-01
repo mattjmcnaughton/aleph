@@ -120,4 +120,19 @@ describe("buildCreatePathInput", () => {
 
     expect(Object.keys(input).sort()).toEqual(["level", "topic"]);
   });
+
+  it("includes trimmed guidance when the textarea carries text", () => {
+    const input = buildCreatePathInput({
+      ...base,
+      guidance: "  Cover generics before decorators  ",
+    });
+
+    expect(input.guidance).toBe("Cover generics before decorators");
+  });
+
+  it("omits guidance entirely when blank or whitespace-only", () => {
+    expect("guidance" in buildCreatePathInput(base)).toBe(false);
+    expect("guidance" in buildCreatePathInput({ ...base, guidance: "" })).toBe(false);
+    expect("guidance" in buildCreatePathInput({ ...base, guidance: "   " })).toBe(false);
+  });
 });

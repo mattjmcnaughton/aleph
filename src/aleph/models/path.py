@@ -38,7 +38,32 @@ class Path(Base, UUIDAuditMixin):
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
     )
+    # The generation input (CONTEXT.md: *Topic*), frozen once the path exists:
+    # the outline (units/lessons) and every lesson/tutor prompt were generated
+    # from this exact string, so changing it after the fact would silently
+    # orphan the structure from the value that produced it. Enforced by never
+    # exposing a way to write it after ``create`` — there is no ``set_topic`` on
+    # the repository and ``UpdatePathRequest`` (dtos/paths.py) carries only
+    # ``title``, so "topic is immutable" is a fact about the code, not a review
+    # habit. ``title`` below is the display-only counterpart: it is
+    # deliberately absent from every ``*Deps`` dataclass (``OutlineDeps``,
+    # ``LessonDeps``, ``TutorDeps``, ``ShaperDeps``), so no agent prompt can
+    # reach it even by accident — a display label physically cannot become a
+    # generation input.
     topic: Mapped[str] = mapped_column(Text, nullable=False)
+    # The learner-editable display label (CONTEXT.md: *Path title*), added in
+    # 0008. ``NULL`` means "never renamed" — ``display_title`` below applies the
+    # topic fallback, and the API always resolves it before the value reaches
+    # the wire (``routers/v1/paths.py``), so a reader never sees ``NULL``
+    # itself. Renaming is safe at any path status: it never touches ``topic``
+    # and triggers no regeneration.
+    title: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # The learner's optional free text captured once at creation (CONTEXT.md:
+    # *Guidance*), steering the outline's shape alongside topic/level (added in
+    # 0008). A generation input like ``topic`` — read by the outline prompt
+    # (``agents/outline.py``'s ``build_outline_prompt``) — and frozen the same
+    # way: no route ever writes it after create.
+    guidance: Mapped[str | None] = mapped_column(Text, nullable=True)
     level: Mapped[Level] = mapped_column(
         Enum(
             Level,
@@ -70,6 +95,17 @@ class Path(Base, UUIDAuditMixin):
     # at the create route; this column trusts an already-validated id.
     model_outline: Mapped[str | None] = mapped_column(Text, nullable=True)
     model_lesson: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    @property
+    def display_title(self) -> str:
+        """The label to show a learner: the Path title, or the Topic (CONTEXT.md).
+
+        The one fallback rule, applied here so every caller (the paths router's
+        list/detail DTOs) gets it for free rather than respelling ``title or
+        topic`` at each read site. Never itself a generation input — see the
+        comment on ``topic`` above.
+        """
+        return self.title or self.topic
 
     user: Mapped[User] = relationship(back_populates="paths")
     units: Mapped[list[Unit]] = relationship(

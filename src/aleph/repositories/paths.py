@@ -66,10 +66,18 @@ class PathRepository:
         user_id: uuid.UUID,
         topic: str,
         level: Level,
+        guidance: str | None = None,
         model_outline: str | None = None,
         model_lesson: str | None = None,
     ) -> Path:
         """Insert a ``pending`` path.
+
+        ``guidance`` is the learner's optional free text (CONTEXT.md:
+        *Guidance*), stored so the DB-driven resume/reconcile re-runs the
+        outline with it (mirrors ``model_outline``/``model_lesson`` below —
+        same "persist it on the row" rationale). ``title`` is never a
+        ``create`` parameter: every path starts unset, falling back to
+        ``topic`` via ``Path.display_title`` until :meth:`set_title` renames it.
 
         ``model_outline``/``model_lesson`` carry an admin's picker overrides
         (AL-052, §5.3): already validated (admin-only, allowlist-bound) at the
@@ -80,12 +88,42 @@ class PathRepository:
             user_id=user_id,
             topic=topic,
             level=level,
+            guidance=guidance,
             model_outline=model_outline,
             model_lesson=model_lesson,
         )
         self.session.add(path)
         await self.session.flush()
         return path
+
+    async def set_title(self, path_id: uuid.UUID, *, title: str) -> None:
+        """Rename a path's display label (``PATCH /paths/{id}``).
+
+        A plain, unconditional ``UPDATE`` — renaming is safe at every path
+        status (unlike the claim-guarded writes above, there is no fence to
+        respect: nothing else ever writes ``title``, so there is no concurrent
+        writer to race). ``updated_at`` is bumped explicitly (as every Core
+        ``UPDATE`` in this class does): it bypasses the ORM ``onupdate`` hook
+        (AL-010 landmine). Like every method here, this does **not** commit;
+        the caller (the route) owns the unit of work and must commit it.
+
+        Note for callers holding an ORM instance from before this write: with
+        SQLAlchemy's default ``synchronize_session="evaluate"``, an
+        ORM-enabled Core ``UPDATE`` like this one *does* patch matching
+        objects already in the session's identity map when its ``WHERE``
+        criteria are Python-evaluatable (they are here — a literal ``id``
+        equality) — so ``path.title`` would already read the new value after
+        commit, no refresh needed, in the *current* implementation. The route
+        still calls ``session.refresh(path)`` anyway: relying on that
+        synchronization detail is fragile (a future non-evaluatable criterion
+        silently falls back to no synchronization) and refresh is also how the
+        route picks up the DB-side ``updated_at``.
+        """
+        await self.session.execute(
+            update(Path)
+            .where(Path.id == path_id)
+            .values(title=title, updated_at=func.now())
+        )
 
     async def get(self, path_id: uuid.UUID) -> Path | None:
         return await self.session.get(Path, path_id)

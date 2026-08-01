@@ -381,8 +381,8 @@ def _passage_topic(topic: str) -> str:
 def _build_outline(topic: str) -> PathOutline:
     """A deterministic, cap-respecting outline for ``topic`` (TDD §14).
 
-    2-4 units of 3-4 lessons each (well inside ``MAX_UNITS``=6 /
-    ``MAX_LESSONS_PER_PATH``=30); every lesson title is globally unique.
+    2-4 units of 3-4 lessons each (well inside ``MAX_UNITS``=25 /
+    ``MAX_LESSONS_PER_PATH``=200); every lesson title is globally unique.
     """
     base = _seed(topic)
     unit_count = 2 + base % 3  # 2..4

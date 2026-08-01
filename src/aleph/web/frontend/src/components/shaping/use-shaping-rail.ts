@@ -95,8 +95,13 @@ export interface ShapingRailState {
   openRail: () => void;
   closeRail: () => void;
 
-  /** The path's topic — the context chip's subject (*Shaping · {topic}*). */
-  topic: string;
+  /**
+   * The path's display title — the context chip's subject (*Shaping ·
+   * {title}*). Learner-facing copy, so it is the title, never the topic: the
+   * shaper's own prompt reads the frozen topic server-side, independent of
+   * whatever the learner has renamed the path to.
+   */
+  title: string;
   messages: ShapingMessage[];
   status: ShapingRailStatus;
   /** The live reply, mid-stream. Empty once the turn settles, stops, or fails. */
@@ -131,8 +136,8 @@ export interface ShapingRailState {
 
 export interface UseShapingRailOptions {
   pathId: string;
-  /** The path's topic; "" until the detail query lands. */
-  topic: string;
+  /** The path's display title; "" until the detail query lands. */
+  title: string;
   /**
    * Whether the outline is `ready`. There is no structure to shape before it is
    * (PRD §5.1), so the entry point is absent — not disabled. The server says the
@@ -157,7 +162,7 @@ type EndStreamMode = "restore" | "discard";
 
 export function useShapingRail({
   pathId,
-  topic,
+  title,
   pathReady,
 }: UseShapingRailOptions): ShapingRailState {
   const queryClient = useQueryClient();
@@ -386,7 +391,7 @@ export function useShapingRail({
     openRail: () => setOpenState(true),
     closeRail: () => setOpenState(false),
 
-    topic,
+    title,
     messages,
     status,
     streamingText,

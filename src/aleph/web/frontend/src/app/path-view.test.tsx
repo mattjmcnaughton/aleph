@@ -6,6 +6,7 @@ import {
   FRESH_PATH_UNITS,
   MID_PATH_UNITS,
   configurePaths,
+  pathRenameRequestCount,
   seedPath,
 } from "../mocks/paths";
 import { App } from "./app";
@@ -224,5 +225,152 @@ describe("Path view — /paths/$pathId", () => {
     const row = await screen.findByTestId(`lesson-${units[0].lessons[0].id}`);
     expect(row.getAttribute("data-generation-state")).toBe("generating");
     expect(row.textContent).toMatch(/preparing/i);
+  });
+
+  it("renders the path's title, not the topic, in the h1", async () => {
+    seedPath({
+      id: "p-title",
+      topic: "TypeScript",
+      title: "TS from the ground up",
+      level: "new_to_it",
+      units: FRESH_PATH_UNITS,
+    });
+    await gotoPath("p-title");
+
+    const heading = await screen.findByRole("heading", { name: /ts from the ground up/i });
+    expect(heading.textContent).toBe("TS from the ground up");
+    // The frozen generation input never leaks onto the h1.
+    expect(screen.queryByText("TypeScript")).toBeNull();
+  });
+
+  it("renaming round-trips through the PATCH and updates the h1 + switcher row", async () => {
+    seedPath({ id: "p-rename", topic: "TypeScript", level: "new_to_it", units: FRESH_PATH_UNITS });
+    await gotoPath("p-rename");
+
+    await screen.findByRole("heading", { name: "TypeScript" });
+    fireEvent.click(screen.getByRole("button", { name: /rename path/i }));
+
+    const input = screen.getByRole("textbox", { name: /path title/i }) as HTMLInputElement;
+    expect(input.value).toBe("TypeScript");
+    fireEvent.change(input, { target: { value: "TypeScript from scratch" } });
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
+
+    // The heading follows the rename.
+    await screen.findByRole("heading", { name: "TypeScript from scratch" });
+    expect(screen.queryByRole("textbox", { name: /path title/i })).toBeNull();
+
+    // The sidebar switcher row (a different query, invalidated on success) follows.
+    await screen.findByTestId("sidebar-path-item");
+    expect(screen.getByTestId("sidebar-path-item").textContent).toContain(
+      "TypeScript from scratch",
+    );
+  });
+
+  it("Enter saves the rename", async () => {
+    seedPath({ id: "p-enter", topic: "TypeScript", level: "new_to_it", units: FRESH_PATH_UNITS });
+    await gotoPath("p-enter");
+
+    fireEvent.click(await screen.findByRole("button", { name: /rename path/i }));
+    const input = screen.getByRole("textbox", { name: /path title/i });
+    fireEvent.change(input, { target: { value: "Renamed via Enter" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await screen.findByRole("heading", { name: "Renamed via Enter" });
+  });
+
+  it("Escape cancels the rename without sending a request", async () => {
+    seedPath({ id: "p-escape", topic: "TypeScript", level: "new_to_it", units: FRESH_PATH_UNITS });
+    await gotoPath("p-escape");
+
+    fireEvent.click(await screen.findByRole("button", { name: /rename path/i }));
+    const input = screen.getByRole("textbox", { name: /path title/i });
+    fireEvent.change(input, { target: { value: "Abandoned edit" } });
+    fireEvent.keyDown(input, { key: "Escape" });
+
+    // Back to the plain heading, unchanged — and no PATCH was ever sent.
+    await screen.findByRole("heading", { name: "TypeScript" });
+    expect(screen.queryByRole("textbox", { name: /path title/i })).toBeNull();
+    expect(pathRenameRequestCount()).toBe(0);
+  });
+
+  it("Cancel button discards the edit the same way Escape does", async () => {
+    seedPath({ id: "p-cancel", topic: "TypeScript", level: "new_to_it", units: FRESH_PATH_UNITS });
+    await gotoPath("p-cancel");
+
+    fireEvent.click(await screen.findByRole("button", { name: /rename path/i }));
+    fireEvent.change(screen.getByRole("textbox", { name: /path title/i }), {
+      target: { value: "Abandoned edit" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }));
+
+    await screen.findByRole("heading", { name: "TypeScript" });
+    expect(pathRenameRequestCount()).toBe(0);
+  });
+
+  it("Save is disabled while the trimmed value is empty", async () => {
+    seedPath({ id: "p-blank", topic: "TypeScript", level: "new_to_it", units: FRESH_PATH_UNITS });
+    await gotoPath("p-blank");
+
+    fireEvent.click(await screen.findByRole("button", { name: /rename path/i }));
+    fireEvent.change(screen.getByRole("textbox", { name: /path title/i }), {
+      target: { value: "   " },
+    });
+
+    expect((screen.getByRole("button", { name: /^save$/i }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+  });
+
+  it("F3: switching paths mid-rename does not carry the draft onto the new path", async () => {
+    // `/paths/A` -> `/paths/B` via the sidebar switcher re-renders this route
+    // rather than remounting it (the same hazard `use-shaping-rail.ts`'s
+    // `currentPathRef` comment documents for the shaping rail) — so without
+    // `key={detail.id}` on `PathTitle`, its `editing`/`draft` state would
+    // survive the switch: the rename form would still be open, still holding
+    // path A's typed draft, now sitting over path B.
+    seedPath({ id: "p-key-a", topic: "Path A", level: "new_to_it", units: FRESH_PATH_UNITS });
+    seedPath({ id: "p-key-b", topic: "Path B", level: "new_to_it", units: FRESH_PATH_UNITS });
+    await gotoPath("p-key-a");
+
+    await screen.findByRole("heading", { name: "Path A" });
+    fireEvent.click(screen.getByRole("button", { name: /rename path/i }));
+    fireEvent.change(screen.getByRole("textbox", { name: /path title/i }), {
+      target: { value: "Renamed for A" },
+    });
+
+    const items = await screen.findAllByTestId("sidebar-path-item");
+    const toB = items.find((el) => el.getAttribute("data-path-id") === "p-key-b");
+    if (!toB) throw new Error("no sidebar-path-item for p-key-b");
+    fireEvent.click(toB);
+
+    // Path B's own heading renders plainly — the rename form did NOT follow.
+    await screen.findByRole("heading", { name: "Path B" });
+    expect(screen.queryByRole("textbox", { name: /path title/i })).toBeNull();
+    expect(screen.queryByText("Renamed for A")).toBeNull();
+    // And nothing was ever sent — there was no way left to press Save on it.
+    expect(pathRenameRequestCount()).toBe(0);
+  });
+
+  it("a failed rename keeps the typed value open and surfaces an inline error", async () => {
+    seedPath({
+      id: "p-rename-fail",
+      topic: "TypeScript",
+      level: "new_to_it",
+      units: FRESH_PATH_UNITS,
+    });
+    configurePaths({ renameFails: true });
+    await gotoPath("p-rename-fail");
+
+    fireEvent.click(await screen.findByRole("button", { name: /rename path/i }));
+    const input = screen.getByRole("textbox", { name: /path title/i }) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "Won't stick" } });
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
+
+    await screen.findByRole("alert");
+    // The input is still open, still carrying exactly what was typed — nothing lost.
+    const stillOpen = screen.getByRole("textbox", { name: /path title/i }) as HTMLInputElement;
+    expect(stillOpen.value).toBe("Won't stick");
+    // The h1 never changed to the failed attempt.
+    expect(screen.queryByRole("heading", { name: "Won't stick" })).toBeNull();
   });
 });

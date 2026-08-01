@@ -18,9 +18,10 @@ synonym (say **path**, not "course"; **Quick check**, not "quiz question").
 | --- | --- |
 | **Learner** | A self-directed adult user studying a topic of their choosing. The human. |
 | **Account** | The authenticated identity a learner signs in as; owns their paths and progress. Present from day one. |
-| **Topic** | The free-text subject a learner wants to learn (e.g. "Rust ownership", "how US healthcare is paid for"). |
+| **Topic** | The free-text subject a learner wants to learn (e.g. "Rust ownership", "how US healthcare is paid for"). A generation input: every agent prompt reads it, and it is frozen once the path exists (the outline and lessons since were generated from that exact string). Distinct from the **Path title**, the display label a learner may change afterwards. |
 | **Level** | The learner's self-assessed starting point for a path, chosen at onboarding — one of *new to it · some experience · I work in it*. Scopes generation. |
 | **Path** | A structured learning journey for one topic at one level: an ordered set of units. The top-level thing a learner works through. A learner can have several. (Not "course".) |
+| **Path title** | The learner-editable display label for a path, shown in the switcher and the path view. Defaults to (falls back to) the Topic until renamed. Display only — **never** a generation input; no agent prompt reads it (enforced by construction: it is absent from every `*Deps` dataclass). Renaming touches nothing else — not the Topic, and no regeneration. |
 | **Unit** | An ordered grouping of lessons within a path (e.g. "Foundations & types"). |
 | **Lesson** | The atomic unit of learning: one **Read passage** followed by one **Quick check**. Taken linearly; can be marked complete. |
 | **Read passage** | The short teaching passage at the start of a lesson — the content the learner reads. Authored and stored as **Markdown** (GitHub-Flavored, a bounded subset — see `docs/api.md` — including a ` ```mermaid ` diagram where one earns its place), rendered for the learner; the source, not the rendering, is what generation produces and the API serves. ("Read" is the UI label; **Read passage** is the term we use in prose and schema.) |
@@ -36,6 +37,7 @@ synonym (say **path**, not "course"; **Quick check**, not "quiz question").
 | --- | --- |
 | **Generation** | The AI producing content. Two kinds: **outline generation** (path structure) and **lesson generation** (a lesson's Read + Quick check). |
 | **Outline** | The units-and-lessons skeleton of a path, generated once at path creation, before lesson content exists. |
+| **Guidance** | The learner's optional free text, captured once at path creation, steering the Outline's shape — which stages, what order, what to emphasise or skip, how big. A generation input alongside Topic and Level: read into the outline prompt, and fixed once the path exists (no route changes it after creation). |
 | **On-demand generation** | Generating a lesson's content when the learner reaches it, rather than all up front. |
 | **Prefetch (+N)** | Generating the next *N* lessons ahead of where the learner is, to hide generation latency. |
 | **Continuity** | The rule that lesson *N+1* is generated with awareness of the content of lessons *1…N*, so the path builds on itself and never re-teaches or contradicts earlier lessons. |

@@ -36,6 +36,8 @@ MESSAGE_LESSON_HEAD = "0006_shaping_message_lesson"
 # AL-321's step: one **applied** Change per proposal message, in the database.
 APPLIED_CHANGE_HEAD = "0007_applied_change_uniqueness"
 APPLIED_CHANGE_INDEX = "uq_path_changes_applied_message"
+# Path title + Guidance's step: two additive, nullable columns on ``paths``.
+TITLE_GUIDANCE_HEAD = "0008_path_title_and_guidance"
 
 PHASE_1_TABLES = ("users", "paths", "units", "lessons", "quick_checks", "attempts")
 PHASE_2_TABLES = ("conversations", "messages")
@@ -453,10 +455,17 @@ def test_earlier_tables_keep_their_columns_through_the_shaping_reversal(
     run_alembic(database_url, FLAGS_HEAD, downgrade=True)
     after = {table: asyncio.run(_columns(database_url, table)) for table in tracked}
 
+    # Every column added *after* ``FLAGS_HEAD`` — the downgrade above unwinds the
+    # whole span, not just 2B, so this map grows with each later migration even
+    # though the test is named for the shaping reversal. ``paths.title`` /
+    # ``paths.guidance`` arrive in 0008; leaving them out would read as "the
+    # downgrade dropped a column it should have kept", which is exactly the
+    # regression this test exists to catch.
     added = {
         "conversations": {"kind"},
         "messages": {"proposal"},
         "lessons": {"revision_instruction"},
+        "paths": {"title", "guidance"},
     }
     assert {
         table: columns - added.get(table, set()) for table, columns in before.items()
@@ -756,3 +765,132 @@ def test_the_index_leaves_undone_rows_and_cleared_threads_alone(
     )
 
     assert asyncio.run(_count(database_url, CHANGES_TABLE)) == 4
+
+
+# --------------------------------------------------------------------------- #
+# Path title and Guidance: two additive, nullable columns (migration 0008)
+#
+# The simplest shape a migration can take — two ``add_column``/``drop_column``
+# pairs, no new table, no constraint, no backfill (the migration's own
+# docstring: every pre-existing row predates both concepts, so ``NULL`` is the
+# honest state, not a placeholder). What is worth asserting is exactly that
+# minimalism: only ``paths`` gains columns, only these two, no other table or
+# column moves, and a downgrade/reapply round-trip is clean (data-loss in the
+# two dropped columns themselves is the documented, expected cost).
+# --------------------------------------------------------------------------- #
+
+
+async def _seed_path_row(database_url: str) -> str:
+    """Insert a bare ``paths`` row (with its FK user); returns the path id."""
+    connection = await connect(database_url)
+    try:
+        return str(
+            await connection.fetchval(
+                """
+                WITH u AS (
+                    INSERT INTO users (
+                        id, issuer, subject, username, display_name
+                    )
+                    VALUES (
+                        gen_random_uuid(), 'iss', 'sub-title', 'title-guidance', 'T'
+                    )
+                    RETURNING id
+                )
+                INSERT INTO paths (id, user_id, topic, level, status)
+                SELECT gen_random_uuid(), u.id, 'Rust ownership',
+                       'some_experience', 'ready'
+                FROM u
+                RETURNING id
+                """
+            )
+        )
+    finally:
+        await connection.close()
+
+
+async def _set_title_and_guidance(
+    database_url: str, path_id: str, *, title: str, guidance: str
+) -> None:
+    connection = await connect(database_url)
+    try:
+        await connection.execute(
+            "UPDATE paths SET title = $2, guidance = $3 WHERE id = $1::uuid",
+            path_id,
+            title,
+            guidance,
+        )
+    finally:
+        await connection.close()
+
+
+async def _title_and_guidance(
+    database_url: str, path_id: str
+) -> tuple[str | None, str | None]:
+    connection = await connect(database_url)
+    try:
+        row = await connection.fetchrow(
+            "SELECT title, guidance FROM paths WHERE id = $1::uuid", path_id
+        )
+    finally:
+        await connection.close()
+    assert row is not None
+    return row["title"], row["guidance"]
+
+
+def test_the_title_and_guidance_step_only_adds_two_columns(
+    isolated_database: str,
+) -> None:
+    """At ``0007`` neither column exists; at head both do. Nothing else moves."""
+    database_url = isolated_database
+
+    at_head = asyncio.run(_columns(database_url, "paths"))
+    assert {"title", "guidance"} <= at_head
+
+    run_alembic(database_url, APPLIED_CHANGE_HEAD, downgrade=True)
+
+    after_downgrade = asyncio.run(_columns(database_url, "paths"))
+    assert after_downgrade == at_head - {"title", "guidance"}
+
+    run_alembic(database_url, TITLE_GUIDANCE_HEAD)
+
+    assert asyncio.run(_columns(database_url, "paths")) == at_head
+
+
+def test_the_title_and_guidance_step_downgrades_and_reapplies_cleanly(
+    isolated_database: str,
+) -> None:
+    """Applies and reverses (CLAUDE.md pattern): the path row itself survives.
+
+    A downgrade drops the two columns — their contents are lost with them, as
+    the migration's own docstring documents — but the ``paths`` row and every
+    other column on it are untouched, and reapplying brings the columns back
+    (``NULL``, the same "no historical value" state a pre-migration row got).
+    """
+    database_url = isolated_database
+    path_id = asyncio.run(_seed_path_row(database_url))
+    asyncio.run(
+        _set_title_and_guidance(
+            database_url,
+            path_id,
+            title="Rust ownership, the practical parts",
+            guidance="Focus on hands-on examples, skip the history.",
+        )
+    )
+    assert asyncio.run(_title_and_guidance(database_url, path_id)) == (
+        "Rust ownership, the practical parts",
+        "Focus on hands-on examples, skip the history.",
+    )
+
+    run_alembic(database_url, APPLIED_CHANGE_HEAD, downgrade=True)
+
+    after_downgrade = asyncio.run(_columns(database_url, "paths"))
+    assert "title" not in after_downgrade
+    assert "guidance" not in after_downgrade
+    # The row itself, and its other columns, survive the reversal.
+    assert asyncio.run(_count(database_url, "paths")) == 1
+
+    run_alembic(database_url, TITLE_GUIDANCE_HEAD)
+
+    # Reapplying is schema-only (no backfill): the columns are back, but empty —
+    # the same honest "nothing to compute" state a pre-migration row gets.
+    assert asyncio.run(_title_and_guidance(database_url, path_id)) == (None, None)

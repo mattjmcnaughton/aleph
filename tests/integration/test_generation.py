@@ -33,6 +33,7 @@ from pydantic_ai.models.function import FunctionModel
 from sqlalchemy import func, select
 
 from aleph import db
+from aleph.config import Settings
 from aleph.models import (
     Lesson,
     LessonGenerationState,
@@ -144,6 +145,39 @@ def controllable_resolver(control: ModelControl) -> Callable[[str], Model]:
     return lambda _model_id: model
 
 
+def capturing_outline_resolver(captured: list[str]) -> Callable[[str], Model]:
+    """A resolver whose model records the outline call's *user prompt* verbatim.
+
+    Sibling to :func:`capturing_resolver` (which captures the lesson prompt);
+    this one captures the outline's, so a test can assert exactly what
+    :func:`~aleph.agents.outline.build_outline_prompt` produced actually
+    reached the model call — not just that ``paths.guidance`` persisted.
+    """
+
+    async def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        text = stub_user_text(messages)
+        outline_tool = stub_tool_with(info.output_tools, "units")
+        if outline_tool is not None:
+            captured.append(text)
+            topic = stub_clean_topic(text) or "the topic"
+            outline = stub_build_outline(topic)
+            return ModelResponse(
+                parts=[
+                    ToolCallPart(tool_name=outline_tool.name, args=outline.model_dump())
+                ]
+            )
+        lesson_tool = stub_tool_with(info.output_tools, "read_passage")
+        assert lesson_tool is not None
+        topic = stub_clean_topic(text) or "the topic"
+        content = stub_build_lesson(topic, stub_read_position(text) or 1)
+        return ModelResponse(
+            parts=[ToolCallPart(tool_name=lesson_tool.name, args=content.model_dump())]
+        )
+
+    model = FunctionModel(respond)
+    return lambda _model_id: model
+
+
 def capturing_resolver(captured: list[str]) -> Callable[[str], Model]:
     """A resolver whose model records every *user prompt* it is asked to run.
 
@@ -181,12 +215,18 @@ def make_orchestrator(
     generation_timeout_seconds: float = 30.0,
     outline_timeout_seconds: float = 30.0,
     prefetch_n: int = 2,
+    config: Settings | None = None,
 ) -> tuple[GenerationOrchestrator, CollectingSpawn]:
+    # ``build_prior_context`` (D7) reads caps like ``continuity_passages_max``
+    # straight off ``self._config`` rather than through a dedicated constructor
+    # kwarg (there is no per-cap override here, unlike ``prefetch_n``) — so a
+    # test that needs a non-default cap passes a whole ``Settings`` instance.
     spawn = spawn or CollectingSpawn()
     orch = GenerationOrchestrator(
         session_factory=lambda: db.async_session(),
         spawn=spawn,
         resolve_model_fn=resolve_model_fn,
+        config=config if config is not None else Settings(),
         generation_timeout_seconds=generation_timeout_seconds,
         # The outline keeps a generous, separate budget so tightening the lesson
         # timeout (to force a lesson timeout) never also governs the outline run
@@ -316,6 +356,62 @@ async def test_create_path_generates_outline_and_prefetch_window() -> None:
     assert [lesson.position_in_path for lesson in generated] == list(
         range(1, len(generated) + 1)
     )
+
+
+# --------------------------------------------------------------------------- #
+# Guidance (CONTEXT.md): persisted on the row, reaches the outline prompt
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.anyio
+async def test_create_path_with_guidance_persists_and_reaches_outline_prompt() -> None:
+    captured: list[str] = []
+    orch, spawn = make_orchestrator(
+        resolve_model_fn=capturing_outline_resolver(captured)
+    )
+    async with db.async_session() as session:
+        user = await create_user(session)
+        await session.commit()
+        user_id = user.id
+
+    guidance = "Focus on hands-on examples; skip the theoretical history."
+    path = await orch.create_path(
+        user_id=user_id,
+        topic="Rust ownership",
+        level=Level.SOME_EXPERIENCE,
+        guidance=guidance,
+    )
+    await spawn.drain()
+
+    # Persisted on the row (not just carried into the one spawned task) — the
+    # same DB-driven-resume rationale as the admin model overrides (§5.4/D6).
+    reloaded = await _reload_path(path.id)
+    assert reloaded.guidance == guidance
+
+    # The outline call's actual user prompt carries the labelled, delimited
+    # guidance block build_outline_prompt produces — not just the bare topic.
+    assert captured, "the outline call should have run and been captured"
+    outline_prompt = captured[0]
+    assert "Topic: Rust ownership" in outline_prompt
+    assert "<guidance>" in outline_prompt
+    assert guidance in outline_prompt
+
+
+@pytest.mark.anyio
+async def test_create_path_without_guidance_persists_none() -> None:
+    orch, spawn = make_orchestrator(resolve_model_fn=stub_resolver())
+    async with db.async_session() as session:
+        user = await create_user(session)
+        await session.commit()
+        user_id = user.id
+
+    path = await orch.create_path(
+        user_id=user_id, topic="Rust ownership", level=Level.SOME_EXPERIENCE
+    )
+    await spawn.drain()
+
+    reloaded = await _reload_path(path.id)
+    assert reloaded.guidance is None
 
 
 # --------------------------------------------------------------------------- #
@@ -770,3 +866,51 @@ async def test_lesson_prompt_carries_prior_passages_with_real_unit_titles() -> N
     # And the prior passages themselves travel (continuity payload).
     assert "passage 1" in prompt
     assert "passage 2" in prompt
+
+
+@pytest.mark.anyio
+async def test_prior_context_windows_to_the_most_recent_passages() -> None:
+    # F2/D7: a path longer than ``continuity_passages_max`` must not carry every
+    # prior passage verbatim — only the most recent window, oldest-to-newest.
+    # Window = 2 over 3 generated priors (lessons 1-3) generating lesson 4: only
+    # lessons 2-3 (the two most recent) should appear, lesson 1 should not.
+    orch, _ = make_orchestrator(
+        resolve_model_fn=capturing_resolver([]),
+        config=Settings(continuity_passages_max=2),
+    )
+    path_id, _ids = await _seed_path_with_lessons(
+        [
+            (1, LessonGenerationState.GENERATED),
+            (2, LessonGenerationState.GENERATED),
+            (3, LessonGenerationState.GENERATED),
+            (4, LessonGenerationState.UNGENERATED),
+        ]
+    )
+
+    async with db.async_session() as session:
+        prior = await orch.build_prior_context(session, path_id, position_in_path=4)
+
+    assert [p.lesson_title for p in prior] == ["Lesson 2", "Lesson 3"]
+    assert [p.read_passage for p in prior] == ["passage 2", "passage 3"]
+
+
+@pytest.mark.anyio
+async def test_prior_context_unchanged_when_shorter_than_the_window() -> None:
+    # A path with fewer generated priors than the window is untouched — the
+    # window only ever truncates, never pads.
+    orch, _ = make_orchestrator(
+        resolve_model_fn=capturing_resolver([]),
+        config=Settings(continuity_passages_max=30),
+    )
+    path_id, _ids = await _seed_path_with_lessons(
+        [
+            (1, LessonGenerationState.GENERATED),
+            (2, LessonGenerationState.GENERATED),
+            (3, LessonGenerationState.UNGENERATED),
+        ]
+    )
+
+    async with db.async_session() as session:
+        prior = await orch.build_prior_context(session, path_id, position_in_path=3)
+
+    assert [p.lesson_title for p in prior] == ["Lesson 1", "Lesson 2"]

@@ -48,6 +48,7 @@ from aleph.dtos.paths import (
     PathProgressDTO,
     PathSummaryDTO,
     UnitDTO,
+    UpdatePathRequest,
 )
 from aleph.models import (  # noqa: TC001 - FastAPI resolves annotations.
     Path,
@@ -194,6 +195,13 @@ async def create_path(
     the validated choices travel on the persisted row so the DB-driven
     resume/reconcile routes the chosen model (§5.4/D6), not just the first task.
 
+    ``guidance`` (CONTEXT.md: *Guidance*) is the learner's optional free text
+    steering the outline's shape — a second generation input alongside
+    ``topic``/``level``, passed straight through to the orchestrator, which
+    persists it on the row so the outline (and any DB-driven re-run of it)
+    reads it. There is no picker-style enforcement on it: unlike the model
+    overrides it is available to every learner, not admin-gated.
+
     The daily per-account cap is then checked *before* the billed work (admins
     exempt, TDD §10); a breach raises ``429`` with the ``rate_limited`` envelope.
     On pass the orchestrator inserts the ``pending`` row, spawns the outline task,
@@ -210,6 +218,7 @@ async def create_path(
         user_id=user.id,
         topic=body.topic,
         level=body.level,
+        guidance=body.guidance,
         model_outline=overrides.model_outline,
         model_lesson=overrides.model_lesson,
     )
@@ -237,6 +246,7 @@ async def list_paths(user: CurrentUser, session: Session) -> PathListResponse:
             PathSummaryDTO(
                 id=path.id,
                 topic=path.topic,
+                title=path.display_title,
                 level=path.level,
                 status=effective_status,
                 progress=_progress_dto(summaries[path.id]),
@@ -258,6 +268,8 @@ def path_detail_response(path: Path, view: PathDetailView) -> PathDetailResponse
     return PathDetailResponse(
         id=path.id,
         topic=path.topic,
+        title=path.display_title,
+        guidance=path.guidance,
         level=path.level,
         status=view.status,
         refusal_message=view.refusal_message,
@@ -297,6 +309,54 @@ async def get_path(path: OwnedPath, session: Session) -> PathDetailResponse:
     view means the path was deleted between the ownership read and the poll (a
     raced delete) → ``404``.
     """
+    view = await load_path_detail(session, generation_orchestrator, path.id)
+    if view is None:
+        raise _path_not_found()
+    return path_detail_response(path, view)
+
+
+@router.patch("/paths/{path_id}")
+async def update_path(
+    body: UpdatePathRequest, path: OwnedPath, session: Session
+) -> PathDetailResponse:
+    """Rename a path's display label (CONTEXT.md: *Path title*).
+
+    Display only: ``topic`` — the generation input — is never touched, and the
+    rename itself writes only ``title``, nothing more (there is no other field
+    to write, so there is nothing else this route could accidentally do —
+    ``UpdatePathRequest``'s docstring). Ownership via ``OwnedPath`` (``404``
+    for a path the caller does not own or that does not exist; ``401`` first
+    for anonymous, same as every other route). Safe at **any** path status —
+    ``pending``/``generating``/``ready``/``failed``/``refused`` all rename the
+    same way, since renaming never touches the generation state machine.
+
+    **Why the refresh.** ``path`` is the ORM instance ``OwnedPath`` loaded
+    *before* this write. With SQLAlchemy's default ``synchronize_session``,
+    the ORM-enabled Core ``UPDATE`` in
+    :meth:`~aleph.repositories.paths.PathRepository.set_title` would in fact
+    already patch ``path.title`` on commit — its ``WHERE`` is a
+    Python-evaluatable literal-id equality, so the response would be correct
+    even without this call. The explicit ``session.refresh(path)`` is kept
+    anyway: it does not make this route depend on that ``synchronize_session``
+    implementation detail (a future non-evaluatable criterion on ``set_title``
+    would silently fall back to no synchronization), and it also picks up the
+    DB-side ``updated_at`` the ``UPDATE`` just wrote.
+
+    **The response is not just the rename.** It is built through the same
+    read seam ``GET /paths/{id}`` uses (``load_path_detail`` below) — which is
+    the poll-as-trigger (§5.4/D5): a rename spawns the same idempotent resume
+    a ``GET`` would, including billable lesson generation to fill the prefetch
+    window, if the path's generation state has work to resume. That is
+    intentional (it matches ``GET``, which is also unlimited) and is why this
+    route returns the same ``PathDetailResponse`` shape ``GET /paths/{id}``
+    does (via the same ``load_path_detail`` + :func:`path_detail_response` the
+    poll route uses) — the client drops the body straight into the query it
+    already polls, exactly as Phase 2B's Apply does
+    (``path_detail_response``'s docstring).
+    """
+    await PathRepository(session).set_title(path.id, title=body.title)
+    await session.commit()
+    await session.refresh(path)
     view = await load_path_detail(session, generation_orchestrator, path.id)
     if view is None:
         raise _path_not_found()

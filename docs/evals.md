@@ -99,12 +99,14 @@ invariant, and it is the only thing that makes the rubric's *continuity* item
 falsifiable — the generator sees what it must build on, and the judge sees the
 same text to check it against. A probe-lesson-only harness can assert neither.
 
-Not the whole path, though: at the §14 cap a path is 30 lessons, so full-path-ing
-three cases end to end would be 90 sequential lesson calls with quadratically
-growing context — a run nobody would dispatch, and an eval nobody runs measures
-nothing. Three consecutive lessons is the smallest depth at which continuity is
-genuinely testable (lesson 3 must build on *both* 1 and 2 without re-teaching
-either).
+Not the whole path, though: at the §14 cap a path can run up to 200 lessons, so
+full-path-ing three cases end to end would be hundreds of sequential lesson calls
+— a run nobody would dispatch, and an eval nobody runs measures nothing. (Per-lesson
+continuity cost itself is now flat past `CONTINUITY_PASSAGES_MAX`, not quadratic in
+path length, §5.2 of the phase-1 TDD — but the call count alone still rules out
+full-path-ing a maximal path.) Three consecutive lessons is the smallest depth at
+which continuity is genuinely testable (lesson 3 must build on *both* 1 and 2
+without re-teaching either).
 
 A full live run of the current seed set is therefore **42 generation calls** (20
 outlines + 13 probe lessons + 3 × 3 full-path lessons) per model binding, plus

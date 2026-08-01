@@ -1,6 +1,8 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
+import { useEffect, useRef, useState } from "react";
 import {
+  PATHS_LIST_QUERY_KEY,
   type PathDetail,
   type PathLesson,
   type PathUnit,
@@ -9,6 +11,7 @@ import {
   pathQueryKey,
   pathQueryOptions,
   retryPath,
+  updatePathTitle,
 } from "../lib/api";
 import { PRIMARY_CTA, PlayIcon, RetryNotices, Spinner, StateCard } from "../components/state-card";
 import { Breadcrumbs } from "../components/breadcrumbs";
@@ -17,6 +20,7 @@ import { ShapingMark, ShapingRail } from "../components/shaping/shaping-rail";
 import { useShapingRail } from "../components/shaping/use-shaping-rail";
 import { Sidebar, SwitcherSection } from "../components/sidebar";
 import { Workspace } from "../components/workspace";
+import { PATH_TITLE_MAX_LENGTH } from "../lib/onboarding";
 import { makePollingRefetchInterval } from "../lib/polling";
 import { useRetryGeneration } from "../lib/use-retry-generation";
 
@@ -64,7 +68,7 @@ function PathView() {
 
   const shaping = useShapingRail({
     pathId,
-    topic: detail?.topic ?? "",
+    title: detail?.title ?? "",
     pathReady: detail?.status === "ready",
   });
 
@@ -84,7 +88,7 @@ function PathView() {
       tutorRail={shaping.open ? <ShapingRail shaping={shaping} /> : null}
       railTestid="shaping-rail-column"
     >
-      {detail ? <Breadcrumbs current={detail.topic} /> : null}
+      {detail ? <Breadcrumbs current={detail.title} /> : null}
 
       {detail === undefined ? (
         pathQuery.isError ? (
@@ -145,9 +149,15 @@ function ReadyPath({
       <div className="lg:flex lg:items-end lg:justify-between lg:gap-8">
         <div className="min-w-0">
           <p className="kicker">Path</p>
-          <h1 className="mt-2 text-3xl font-semibold leading-tight tracking-tight">
-            {detail.topic}
-          </h1>
+          {/* `key={detail.id}`: `/paths/A` -> `/paths/B` via the sidebar switcher
+              re-renders this route rather than remounting it (same hazard
+              `use-shaping-rail.ts`'s `currentPathRef` comment documents), so
+              without a key `PathTitle`'s in-progress `draft`/`editing` state
+              would survive the switch — open a rename on A, switch to B while
+              still editing, press Save, and it PATCHes B with A's typed title.
+              The key forces React to remount (and reset that state) on every
+              path change instead of hand-rolling a reset effect. */}
+          <PathTitle key={detail.id} pathId={detail.id} title={detail.title} />
         </div>
         {/* The percentage alone, and only at `lg` (mock #2b). Deliberately not
             the "n of m complete" sentence too: `path-progress` below already
@@ -194,6 +204,156 @@ function ReadyPath({
         ))}
       </ol>
     </>
+  );
+}
+
+/**
+ * The h1: the learner-editable title, inline-editable in place (§5.5-adjacent —
+ * the h1 itself, not a separate settings surface). Never the topic: `title` is
+ * display-only and always populated (the server applies the fallback), so this
+ * is the one place on the path view that writes back to the server.
+ *
+ * Non-optimistic, matching `use-delete-path`'s house rule: the h1 keeps showing
+ * the last-known title (the `title` prop, straight from the cached query) until
+ * the PATCH actually succeeds — nothing is guessed at.
+ */
+function PathTitle({ pathId, title }: { pathId: string; title: string }) {
+  const queryClient = useQueryClient();
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(title);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const mutation = useMutation({
+    mutationFn: updatePathTitle,
+    onSuccess: (updated) => {
+      // Write the full detail straight into the poll cache — same shape as the
+      // `GET` it replaces — then reach the switcher row too, exactly the way a
+      // completion reaches both surfaces off one server round trip.
+      queryClient.setQueryData(pathQueryKey(pathId), updated);
+      queryClient.invalidateQueries({ queryKey: PATHS_LIST_QUERY_KEY });
+      setEditing(false);
+    },
+    // Deliberately no onError handling beyond `mutation.isError`: the input
+    // stays open with whatever the learner typed (never lost), and the inline
+    // error below is driven straight off mutation state.
+  });
+
+  useEffect(() => {
+    if (editing) inputRef.current?.focus();
+  }, [editing]);
+
+  function startEditing() {
+    mutation.reset();
+    setDraft(title);
+    setEditing(true);
+  }
+
+  function cancel() {
+    mutation.reset();
+    setEditing(false);
+  }
+
+  function save() {
+    const trimmed = draft.trim();
+    if (!trimmed || mutation.isPending) return;
+    mutation.mutate({ pathId, title: trimmed });
+  }
+
+  if (!editing) {
+    return (
+      <div className="flex items-start gap-1.5">
+        <h1 className="mt-2 min-w-0 text-3xl font-semibold leading-tight tracking-tight">
+          {title}
+        </h1>
+        <button
+          type="button"
+          onClick={startEditing}
+          aria-label="Rename path"
+          data-testid="path-title-edit"
+          className="mt-2 shrink-0 rounded-md p-1.5 text-slate transition-colors hover:text-porcelain focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal"
+        >
+          <PencilIcon />
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <form
+      className="mt-2 max-w-[28rem]"
+      onSubmit={(event) => {
+        event.preventDefault();
+        save();
+      }}
+    >
+      <label htmlFor="path-title-input" className="sr-only">
+        Path title
+      </label>
+      <input
+        id="path-title-input"
+        ref={inputRef}
+        type="text"
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+        onKeyDown={(event) => {
+          // Handled explicitly rather than relying on the form's native submit-
+          // on-Enter: jsdom does not implement implicit form submission, and an
+          // explicit handler is also the one place Escape's cancel can live.
+          if (event.key === "Escape") {
+            event.preventDefault();
+            cancel();
+          } else if (event.key === "Enter") {
+            event.preventDefault();
+            save();
+          }
+        }}
+        maxLength={PATH_TITLE_MAX_LENGTH}
+        autoComplete="off"
+        data-testid="path-title-input"
+        className="w-full rounded-md border border-teal bg-surface px-3 py-1.5 text-2xl font-semibold leading-tight tracking-tight text-porcelain focus:outline-none"
+      />
+      <div className="mt-2 flex gap-2">
+        <button
+          type="submit"
+          disabled={mutation.isPending || draft.trim().length === 0}
+          data-testid="path-title-save"
+          className="rounded-md bg-teal px-4 py-1.5 text-sm font-semibold text-night transition-colors hover:bg-teal-bright disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {mutation.isPending ? "Saving…" : "Save"}
+        </button>
+        <button
+          type="button"
+          onClick={cancel}
+          data-testid="path-title-cancel"
+          className="rounded-md border border-divider px-4 py-1.5 text-sm font-semibold text-mist transition-colors hover:text-porcelain"
+        >
+          Cancel
+        </button>
+      </div>
+      {mutation.isError ? (
+        <p
+          role="alert"
+          data-testid="path-title-error"
+          className="mt-2 text-sm leading-6 text-danger"
+        >
+          Couldn't save that name. Check your connection and try again.
+        </p>
+      ) : null}
+    </form>
+  );
+}
+
+function PencilIcon() {
+  return (
+    <svg viewBox="0 0 16 16" width="13" height="13" fill="none" aria-hidden="true">
+      <path
+        d="M11.4 2.4l2.2 2.2-7.7 7.7H3.5v-2.4l7.9-7.5z"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
   );
 }
 

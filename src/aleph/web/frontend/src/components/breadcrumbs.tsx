@@ -2,7 +2,8 @@ import { Link } from "@tanstack/react-router";
 
 interface PathCrumb {
   id: string;
-  topic: string;
+  /** The learner-editable display label — the topic is never shown here. */
+  title: string;
 }
 
 interface BreadcrumbsProps {
@@ -39,10 +40,10 @@ export function Breadcrumbs({ current, path }: BreadcrumbsProps) {
               <Link
                 to="/paths/$pathId"
                 params={{ pathId: path.id }}
-                title={path.topic}
+                title={path.title}
                 className="block truncate rounded-sm text-slate transition-colors hover:text-teal focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal"
               >
-                {path.topic}
+                {path.title}
               </Link>
             </li>
             <Separator />

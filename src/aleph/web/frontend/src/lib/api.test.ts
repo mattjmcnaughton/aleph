@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { configurePaths, seedPath } from "../mocks/paths";
 import {
   ApiError,
   PATHS_LIST_QUERY_KEY,
@@ -15,6 +16,7 @@ import {
   isPathViewTerminal,
   isValidationError,
   pathQueryKey,
+  updatePathTitle,
 } from "./api";
 
 // Terminal-state predicates for the path-view poll (TDD §5.4/§14). These decide
@@ -28,6 +30,8 @@ function detail(
   return {
     id: "p1",
     topic: "TypeScript",
+    title: "TypeScript",
+    guidance: null,
     level: "new_to_it",
     status,
     refusal_message: null,
@@ -149,6 +153,7 @@ describe("isPathListTerminal", () => {
     return {
       id: `p-${status}`,
       topic: "TypeScript",
+      title: "TypeScript",
       level: "new_to_it",
       status,
       progress: { total_lessons: 0, generated_lessons: 0, completed_lessons: 0 },
@@ -216,5 +221,56 @@ describe("isValidationError", () => {
     expect(isValidationError(new ApiError("capped", 429, "rate_limited"))).toBe(false);
     expect(isValidationError(new Error("plain"))).toBe(false);
     expect(isValidationError(undefined)).toBe(false);
+  });
+});
+
+describe("updatePathTitle", () => {
+  it("PATCHes the path and returns the full detail (the poll target's shape)", async () => {
+    seedPath({ id: "p-rename", topic: "TypeScript", level: "new_to_it" });
+
+    const updated = await updatePathTitle({ pathId: "p-rename", title: "TS from scratch" });
+
+    expect(updated.id).toBe("p-rename");
+    expect(updated.title).toBe("TS from scratch");
+    // The topic never moves — it is frozen, and this endpoint cannot touch it.
+    expect(updated.topic).toBe("TypeScript");
+  });
+
+  it("raises the shared ApiError on a server failure", async () => {
+    seedPath({ id: "p-rename-fail", topic: "TypeScript", level: "new_to_it" });
+    configurePaths({ renameFails: true });
+
+    await expect(updatePathTitle({ pathId: "p-rename-fail", title: "New name" })).rejects.toThrow(
+      ApiError,
+    );
+  });
+
+  // F10: the fake must not silently 200/no-op a blank or over-long title (the
+  // real server 422s, `PathTitleStr`, docs/api.md) — a client that ever stops
+  // trimming/capping before sending needs the fake to catch it, not paper over
+  // it with the OLD title.
+  it("raises a validation_error ApiError for a blank title, and does not rename", async () => {
+    seedPath({ id: "p-rename-blank", topic: "TypeScript", level: "new_to_it" });
+
+    const error = await updatePathTitle({ pathId: "p-rename-blank", title: "   " }).catch(
+      (e: unknown) => e,
+    );
+
+    expect(error).toBeInstanceOf(ApiError);
+    expect(isValidationError(error)).toBe(true);
+    const detail = await updatePathTitle({ pathId: "p-rename-blank", title: "still there" });
+    expect(detail.title).toBe("still there"); // untouched by the rejected attempt
+  });
+
+  it("raises a validation_error ApiError for an over-long title", async () => {
+    seedPath({ id: "p-rename-long", topic: "TypeScript", level: "new_to_it" });
+
+    const error = await updatePathTitle({
+      pathId: "p-rename-long",
+      title: "x".repeat(201),
+    }).catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(ApiError);
+    expect(isValidationError(error)).toBe(true);
   });
 });
