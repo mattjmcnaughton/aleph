@@ -21,12 +21,13 @@ on that engine rather than reached for across a module boundary.
 
 **FOLLOW-UP (post-2B): split this module.** With Apply/Undo (AL-321) it is past
 the 1000-line rubric line, and the seam is already visible — the turn lifecycle
-above the Apply/Undo banner, the structural writers below it, sharing only the
-conflict helpers. It is deliberately *not* split inside this phase: the TDD §3
-names this single module as the one write path into path structure, and moving
-the code mid-phase would churn the four AL-340 stamp points marked below for no
-behavioural gain. Once the phase closes, ``services/shaping_changes.py`` (or
-similar) should take everything under that banner.
+above the Apply/Undo banner, the structural writers below it, sharing the
+conflict helpers and :func:`_edit_shape` (the one place an edit's counts are
+derived, for both the card's event and the Change's). It is deliberately *not*
+split inside this phase: the TDD §3 names this single module as the one write
+path into path structure. Once the phase closes,
+``services/shaping_changes.py`` (or similar) should take everything under that
+banner.
 
 These two are the pieces of this module that are known-wrong-on-purpose; nothing
 else here is waiting on a follow-up.
@@ -65,10 +66,14 @@ Layering: ``routers -> services -> (agents, repositories)``. This module binds
 the model (agents never do), reads config, and owns the unit of work; the router
 above it does auth, ownership, the picker gate and the response object.
 
-Product events (TDD §9 — ``shaping_conversation_started``,
-``shaping_message_sent``, ``shaping_reply_completed``, ``proposal_shown``) are
-**AL-340's**, and the four points they are stamped from are marked below so that
-ticket adds emitters rather than re-deriving a lifecycle.
+Product events (TDD §9): all six of this phase's are stamped from this module —
+``shaping_conversation_started`` / ``shaping_message_sent`` /
+``shaping_reply_completed`` / ``proposal_shown`` from the turn lifecycle, and
+``change_applied`` / ``change_undone`` from the writers below the banner, each
+one *after* the commit it reports. ``account_id`` is not re-read for any of them:
+the router already walked ownership to get here, so it is threaded in (on
+:class:`AdmittedShapingTurn` for a turn, as an argument for apply and undo) and
+this module never asks the database who the learner is.
 """
 
 from __future__ import annotations
@@ -76,9 +81,10 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import time
 import uuid
 from dataclasses import dataclass, replace
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 import structlog
@@ -92,6 +98,7 @@ from pydantic_ai.messages import (
 from pydantic_ai.run import AgentRunResultEvent
 from sqlalchemy.exc import IntegrityError
 
+from aleph import events
 from aleph.agents.shaper import (
     PROPOSE_PATH_EDIT_TOOL_NAME,
     AddLessonsOperation,
@@ -138,6 +145,7 @@ from aleph.repositories import (
     QuickCheckRepository,
     UnitRepository,
 )
+from aleph.services.generation import usage_tokens
 from aleph.services.lifecycle import ConversationBusyError, TutorReplyLimiter
 from aleph.services.openrouter import resolve_model
 from aleph.services.rate_limit import build_daily_rate_limiter
@@ -217,15 +225,15 @@ class AdmittedShapingTurn:
     about the path as a whole (PRD §5.1), which is the whole reason it is a
     second thread.
 
-    2A's twin also carries ``account_id`` for its product events; this one does
-    **not**, because AL-340 has not landed and a field with no reader is the same
-    dead bookkeeping :meth:`ShapingTurnService._produce` refuses to plumb ahead
-    of that ticket. AL-340 adds it back here and at the single construction site
-    in :meth:`ShapingTurnService.admit`, where ``path.user_id`` is already in
-    hand — one field and one line, and until then nothing claims to be carried
-    for a reader that does not exist.
+    ``account_id`` is here for 2A's reason: the three product events this turn
+    resolves into are stamped from the producer task, which runs *after* the
+    request's session is gone and holds no ``Path`` row to read it off. It is
+    the owned path's ``user_id``, captured once at admission where the router
+    has already proved ownership — the alternative being a second read of a
+    fact the request has already established, on every turn.
     """
 
+    account_id: uuid.UUID
     path_id: uuid.UUID
     content: str
     source: MessageSource
@@ -240,6 +248,31 @@ class _ReplyResult:
 
     text: str
     proposal: dict[str, Any] | None
+
+
+@dataclass
+class _ReplyMeasurement:
+    """What ``shaping_reply_completed`` reports, filled in *as the reply runs*.
+
+    2A's ``_ReplyMeasurement`` verbatim in shape and in reason — a mutable
+    out-parameter rather than a return value, because the event fires on **every**
+    resolution (TDD §9) and the failing resolutions never return anything: a
+    reply that streamed for two seconds and then died still has a time to first
+    token, and reporting it as null would make a slow failure indistinguishable
+    from an instant one on the guardrail panel.
+
+    ``has_proposal`` is this rail's addition, and it is set where the card
+    reaches the wire rather than read off :class:`_ReplyResult` for exactly the
+    same reason: a Proposal that was *shown* on a reply that then failed is a
+    real thing that happened to the learner, and ``_ReplyResult`` will never
+    exist to say so.
+    """
+
+    ttft_ms: int | None = None
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    has_proposal: bool = False
 
 
 class ShapingTurnService:
@@ -325,13 +358,15 @@ class ShapingTurnService:
                 self._replies.release(reservation)
                 raise
 
-        # AL-340: ``shaping_message_sent`` is stamped here — admission, not
-        # persistence, is when the learner's ask exists (2A's argument: a reply
-        # that later fails is our failure, not an un-asked question, and D2
-        # would otherwise erase it from the adoption metric entirely). It is also
-        # where ``account_id=path.user_id`` joins the turn — see
-        # :class:`AdmittedShapingTurn` for why it is not carried yet.
+        # Admission, not persistence, is when the learner's ask exists (2A's
+        # argument: a reply that later fails is our failure, not an un-asked
+        # question, and D2 would otherwise erase it from the adoption metric
+        # entirely). A send refused above emits nothing; it never became a turn.
+        events.emit_shaping_message_sent(
+            account_id=path.user_id, path_id=path.id, source=source.value
+        )
         return AdmittedShapingTurn(
+            account_id=path.user_id,
             path_id=path.id,
             content=content,
             source=source,
@@ -405,13 +440,19 @@ class ShapingTurnService:
         so the ``Exception`` clause below cannot swallow it, and cancellation is
         not ours to swallow anyway. It is deliberately **not** a failure: filing
         learner behaviour as one would put it in the reply-failure guardrail,
-        which is the distinction AL-340's ``outcome`` field has to preserve.
+        which is the distinction the event's ``outcome`` field preserves — hence
+        the otherwise-pointless-looking ``except asyncio.CancelledError`` below,
+        which changes nothing about control flow (it re-raises) and exists only
+        so the stamp knows which of the three things happened.
         """
+        outcome = "failure"
+        measured = _ReplyMeasurement()
+        started = time.perf_counter()
         try:
             async with self._replies.slot():
                 # The permit bounds the model run only; the timeout is inside it
                 # so queue time is not charged against the reply's budget.
-                reply = await self._run_reply(turn, queue)
+                reply = await self._run_reply(turn, queue, measured)
             learner_id, tutor_id = await self._settle(turn, reply)
             await queue.put(
                 sse_event(
@@ -421,24 +462,38 @@ class ShapingTurnService:
                     ),
                 )
             )
+            outcome = "success"
         except TutorReplyError as exc:
             await queue.put(exc.frame)
+        except asyncio.CancelledError:
+            outcome = "stopped"
+            raise
         except Exception:
             logger.exception("shaping_reply_unhandled_error", path_id=str(turn.path_id))
             await queue.put(TutorReplyError(TutorErrorCode.INTERNAL_ERROR).frame)
         finally:
-            # AL-340: ``shaping_reply_completed`` is stamped here, on every
-            # resolution — which clause was taken *is* its ``outcome``
-            # (success / failure / stopped), and the latency and token figures
-            # §9 asks for are measured around this block. Deliberately not
-            # plumbed ahead of that ticket: bookkeeping with no reader is how a
-            # measurement quietly stops being measured.
+            # Every resolution, and which clause was taken *is* the outcome. The
+            # duration is clocked from here — outside the permit — so a saturated
+            # pool shows up as learner-felt latency rather than hiding (2A's rule,
+            # and the reason the two rails' latency panels are comparable at all).
+            events.emit_shaping_reply_completed(
+                account_id=turn.account_id,
+                path_id=turn.path_id,
+                outcome=outcome,
+                ttft_ms=measured.ttft_ms,
+                duration_ms=round((time.perf_counter() - started) * 1000),
+                prompt_tokens=measured.prompt_tokens,
+                completion_tokens=measured.completion_tokens,
+                total_tokens=measured.total_tokens,
+                has_proposal=measured.has_proposal,
+            )
             await queue.put(None)
 
     async def _run_reply(
         self,
         turn: AdmittedShapingTurn,
         queue: asyncio.Queue[str | None],
+        measured: _ReplyMeasurement,
     ) -> _ReplyResult:
         """Stream one shaper run, translating its events to SSE frames.
 
@@ -462,6 +517,7 @@ class ShapingTurnService:
         # only delivered once its arguments have passed the agent's validator —
         # a ``ModelRetry``'d call proposed nothing.
         proposed: dict[str, dict[str, Any]] = {}
+        started = time.perf_counter()
 
         try:
             # Resolving the model is inside the ``try`` deliberately: a provider
@@ -482,6 +538,10 @@ class ShapingTurnService:
                     try:
                         delta = _text_of(event)
                         if delta:
+                            if measured.ttft_ms is None:
+                                measured.ttft_ms = round(
+                                    (time.perf_counter() - started) * 1000
+                                )
                             await queue.put(
                                 sse_event("delta", MessageDeltaDTO(text=delta))
                             )
@@ -497,12 +557,27 @@ class ShapingTurnService:
                                 card = ProposalPayloadDTO.model_validate(payload)
                                 proposal = card.model_dump(mode="json")
                                 await queue.put(sse_event(PROPOSAL_EVENT, card))
-                                # AL-340: ``proposal_shown`` is stamped here —
-                                # where the card reaches the rail, which is what
-                                # "shown" means. A call the validator rejected
-                                # never gets here.
+                                # Stamped where the card reaches the rail, which
+                                # is what "shown" means (TDD §9). A call the
+                                # validator rejected never gets here — and a card
+                                # shown on a reply that then fails still counts,
+                                # exactly as 2A's ``tutor_check_shown`` does.
+                                measured.has_proposal = True
+                                shape = _edit_shape(card.operations)
+                                events.emit_proposal_shown(
+                                    account_id=turn.account_id,
+                                    path_id=turn.path_id,
+                                    n_add_lessons=shape.n_add_lessons,
+                                    n_revisions=shape.n_revisions,
+                                    new_unit=shape.new_unit,
+                                )
                         elif isinstance(event, AgentRunResultEvent):
                             text = str(event.result.output)
+                            (
+                                measured.prompt_tokens,
+                                measured.completion_tokens,
+                                measured.total_tokens,
+                            ) = usage_tokens(event.result)
                     except Exception as exc:
                         # Ours, not the model's — see the method docstring.
                         raise _EventTranslationError from exc
@@ -553,12 +628,14 @@ class ShapingTurnService:
                 )
                 ids = (learner.id, tutor.id)
                 await session.commit()
-            # AL-340: ``shaping_conversation_started`` is stamped here when the
-            # upsert reports ``created`` — after the commit, so the event never
-            # claims a thread a rolled-back transaction did not leave behind,
-            # and exactly once per path rather than once per first-turn-shaped
-            # request (which is the whole reason the upsert returns the flag).
-            _ = created
+            # After the commit, so the event never claims a thread a rolled-back
+            # transaction did not leave behind, and off the lazy upsert's own
+            # ``created`` flag, which is what makes it fire exactly once per path
+            # rather than once per first-turn-shaped request.
+            if created:
+                events.emit_shaping_conversation_started(
+                    account_id=turn.account_id, path_id=turn.path_id
+                )
             return ids
         except IntegrityError as exc:
             logger.warning("shaping_turn_insert_conflicted", error=repr(exc))
@@ -790,9 +867,16 @@ class ShapingChangeService:
     # -- apply -------------------------------------------------------------- #
 
     async def apply_change(
-        self, *, path_id: uuid.UUID, message_id: uuid.UUID
+        self, *, account_id: uuid.UUID, path_id: uuid.UUID, message_id: uuid.UUID
     ) -> uuid.UUID:
         """Turn the Proposal on ``message_id`` into a Change; return its id.
+
+        ``account_id`` is the owner the router's ownership walk already resolved
+        (message → conversation → path → account), passed in rather than read
+        again: it is needed only to stamp ``change_applied``, and a service that
+        re-derived it would be asking the database a question the request has
+        already answered — and answering it *differently* would be a bug the
+        ownership check has to catch, not this method.
 
         §5.6 end to end, under the per-path lock and in one transaction:
         re-validate against live state, insert the ``path_changes`` row with its
@@ -820,7 +904,7 @@ class ShapingChangeService:
             self._session_factory() as session,
         ):
             try:
-                change_id = await self._apply(
+                applied = await self._apply(
                     session, path_id=path_id, message_id=message_id
                 )
                 await session.commit()
@@ -828,16 +912,25 @@ class ShapingChangeService:
                 if _APPLIED_MESSAGE_INDEX not in str(error.orig):
                     raise
                 raise _proposal_already_resolved(PathChangeStatus.APPLIED) from error
-        # AL-340: ``change_applied`` is stamped here — after the commit, so the
-        # event never claims structure a rolled-back transaction did not leave
-        # behind. Its ``change_id`` is the return value; its kinds/counts come
-        # off the stored payload, which is why they are not carried out of the
-        # transaction ahead of a reader for them.
-        return change_id
+        # After the commit, so the event never claims structure a rolled-back
+        # transaction did not leave behind — and outside the lock, so a slow sink
+        # cannot serialise the next learner's apply behind this one's telemetry.
+        # A refusal (any of the coded ``409``s) raised before here and emits
+        # nothing: it changed nothing, so it is not an applied Change.
+        events.emit_change_applied(
+            account_id=account_id,
+            path_id=path_id,
+            change_id=applied.change_id,
+            n_add_lessons=applied.shape.n_add_lessons,
+            n_revisions=applied.shape.n_revisions,
+            new_unit=applied.shape.new_unit,
+            lesson_ids=applied.lesson_ids,
+        )
+        return applied.change_id
 
     async def _apply(
         self, session: AsyncSession, *, path_id: uuid.UUID, message_id: uuid.UUID
-    ) -> uuid.UUID:
+    ) -> _AppliedChange:
         """The apply transaction's body (the caller owns the commit)."""
         message = await session.get(Message, message_id)
         payload = None if message is None else message.proposal
@@ -893,12 +986,33 @@ class ShapingChangeService:
                 inverse=inverse,
             ),
         )
-        return change.id
+        # The event's facts are gathered *here*, inside the transaction, because
+        # after the commit the session is gone and every attribute on ``change``
+        # is expired — reading them would be a query on a closed session. Which
+        # is also why they are a plain value object rather than the row.
+        return _AppliedChange(
+            change_id=change.id,
+            shape=_edit_shape(operations),
+            # Created ids come from the inverse (they only exist once the insert
+            # has happened); revised ids from the operations, which name the
+            # lesson they re-teach. Together they are exactly the lessons this
+            # Change put in front of the learner — the primary metric's join key.
+            lesson_ids=[
+                *inverse.added_lesson_ids,
+                *(revision.lesson_id for revision in _revisions(operations)),
+            ],
+        )
 
     # -- undo --------------------------------------------------------------- #
 
-    async def undo_change(self, *, path_id: uuid.UUID, change_id: uuid.UUID) -> None:
+    async def undo_change(
+        self, *, account_id: uuid.UUID, path_id: uuid.UUID, change_id: uuid.UUID
+    ) -> None:
         """Reverse a Change exactly, or refuse with a coded ``409`` (§5.7).
+
+        ``account_id`` is the owner the router's change → path → account walk
+        already resolved, passed in for :meth:`apply_change`'s reason: it stamps
+        the event and nothing else.
 
         The same lock and the same all-or-nothing transaction as apply. What is
         restored is exactly what the Change's payload records it did: added rows
@@ -917,15 +1031,30 @@ class ShapingChangeService:
             self._locks.hold(path_id),
             self._session_factory() as session,
         ):
-            await self._undo(session, path_id=path_id, change_id=change_id)
+            applied_at = await self._undo(session, path_id=path_id, change_id=change_id)
             await session.commit()
-        # AL-340: ``change_undone`` is stamped here, after the commit, with
-        # ``minutes_since_apply`` from the row's ``applied_at``.
+        # After the commit and outside the lock, exactly as apply's is. The
+        # regret latency is measured against the row's own ``applied_at`` rather
+        # than against anything this request knows: the apply may have been days
+        # ago, in another process.
+        events.emit_change_undone(
+            account_id=account_id,
+            path_id=path_id,
+            change_id=change_id,
+            minutes_since_apply=max(
+                0.0, (datetime.now(UTC) - applied_at).total_seconds() / 60
+            ),
+        )
 
     async def _undo(
         self, session: AsyncSession, *, path_id: uuid.UUID, change_id: uuid.UUID
-    ) -> None:
-        """The undo transaction's body (the caller owns the commit)."""
+    ) -> datetime:
+        """The undo transaction's body; returns when the Change was applied.
+
+        The caller owns the commit — and the ``applied_at`` it returns is read
+        here, before it, for :meth:`_apply`'s reason: the row's attributes are
+        expired once the session closes.
+        """
         changes = ChangeRepository(session)
         change = await changes.get(change_id)
         if change is None:
@@ -991,6 +1120,7 @@ class ShapingChangeService:
                 ShapingConflictReason.NOT_APPLIED,
                 "this change has already been undone",
             )
+        return change.applied_at
 
 
 # The module-level singleton the router uses, for ``shaping_turn_service``'s
@@ -1060,6 +1190,56 @@ def _revisions(
         for operation in operations
         if isinstance(operation, ReviseLessonOperation)
     ]
+
+
+@dataclass(frozen=True)
+class _EditShape:
+    """One payload's §7 **edit-shape mix**, for ``proposal_shown``/``change_applied``.
+
+    Derived once, here, and read by both stamps, so the card's event and the
+    Change's event can never disagree about what the same operations were. The
+    two counts are deliberately *not* symmetric:
+
+    * ``n_add_lessons`` counts **lessons**, because the mix question is how much
+      path the learner asked for and one Addition carrying three lessons is not
+      the same ask as one carrying one.
+    * ``n_revisions`` counts **operations**, which is the same thing as lessons:
+      a Revision targets exactly one lesson by construction (D1). Counting
+      operations on both sides would make an Addition's number meaningless;
+      counting lessons on both sides is what this does.
+
+    ``new_unit`` is true when *any* Addition brought a unit with it — the "this
+    is a new topic, not more of the same" signal, and the reason it is a boolean
+    rather than a count is that the §7 question is qualitative.
+    """
+
+    n_add_lessons: int
+    n_revisions: int
+    new_unit: bool
+
+
+def _edit_shape(operations: Sequence[ShapingOperation]) -> _EditShape:
+    """The :class:`_EditShape` of a validated (or stored) operations list."""
+    additions = _additions(operations)
+    return _EditShape(
+        n_add_lessons=sum(len(addition.lessons) for addition in additions),
+        n_revisions=len(_revisions(operations)),
+        new_unit=any(addition.new_unit is not None for addition in additions),
+    )
+
+
+@dataclass(frozen=True)
+class _AppliedChange:
+    """What one committed apply has to say for itself (the ``change_applied`` stamp).
+
+    Read inside the transaction and carried out of it as plain values: after the
+    commit the session is closed and the row's attributes are expired, so the
+    alternative is a second read of what has just been written.
+    """
+
+    change_id: uuid.UUID
+    shape: _EditShape
+    lesson_ids: list[str]
 
 
 def _change_kind(operations: Sequence[ShapingOperation]) -> PathChangeKind:

@@ -61,6 +61,15 @@ _REQUIRED_QUERIES = {
     "tutor_check_uptake.sql",
     "tutor_completion_guardrail.sql",
     "tutor_reply_failure_latency.sql",
+    # Phase 2B — shaping (AL-340, Phase 2B PRD §7 / TDD §9).
+    "shaping_yield.sql",
+    "shaping_adoption.sql",
+    "proposal_acceptance.sql",
+    "edit_shape_mix.sql",
+    "undo_rate.sql",
+    "depth_to_proposal.sql",
+    "shaped_path_completion_guardrail.sql",
+    "shaping_reply_failure_latency.sql",
 }
 
 

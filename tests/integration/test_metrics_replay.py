@@ -13,9 +13,19 @@ claims to reuse that definition (activation_rate, breadth, return_rate). Phase 2
 adds a second: the **primary tutor metric**'s two-row with/without split, which
 is only meaningfully executed if the fixture slice actually contains tutor
 events — a tutor-free fixture runs all eight tutor queries to NULL and proves
-nothing about their math (AL-240). A final pass smoke-executes every remaining
-query so the whole set is proven to parse and run on the real dialect (the risk
-AL-103 inherits when importing these to Logfire).
+nothing about their math (AL-240). Phase 2B adds a third: **shaping yield**,
+whose join runs through a JSON-encoded list of lesson ids and would silently
+return zero rather than raise if that decoding were wrong (AL-340). A final pass
+smoke-executes every remaining query so the whole set is proven to parse and run
+on the real dialect (the risk AL-103 inherits when importing these to Logfire).
+
+**The shaping fixture deliberately hangs off account B, not A.** B never
+activated (its qualifying work falls outside its 7-day window), and every
+asserted Phase 1/2A query is either scoped to the activated set or to
+`account_created`, so B's shaping traffic — including the lesson views and
+completions the hoarding guardrail needs — cannot move a single number those
+tests pin. Hanging it off A would have changed the primary tutor metric's
+denominators, which would mean editing 2A's assertions to land a 2B ticket.
 """
 
 from __future__ import annotations
@@ -46,6 +56,20 @@ _ACCOUNT_B = str(uuid.uuid4())
 # lessons without, so the split is only real if both sides are identifiable.
 _A_LESSONS = [str(uuid.uuid4()) for _ in range(4)]
 _TUTOR_LESSON = _A_LESSONS[1]  # position 2 — the one lesson A asked about
+
+# B's shaping, on a second path of its own. The timestamps sit far enough in the
+# past that shaping_yield's maturity clamp (applied > 7 days ago) admits them,
+# and the engagement lands one day after the apply, inside the 7-day window it
+# is measured against.
+_SHAPED_AT = _OUT_WINDOW
+_ENGAGED_AT = _OUT_WINDOW + timedelta(days=1)
+_MINUTE = timedelta(minutes=1)
+# Two added lessons and one revised one. The first added lesson is engaged with
+# (that Change yields); the revised one never is (that Change does not).
+_ADDED_LESSONS = [str(uuid.uuid4()) for _ in range(2)]
+_REVISED_LESSON = str(uuid.uuid4())
+_CHANGE_ADD = str(uuid.uuid4())
+_CHANGE_REVISE = str(uuid.uuid4())
 
 
 def _rec(span_name: str, at: datetime, **attributes: object) -> dict:
@@ -177,8 +201,213 @@ def _fixture_records() -> list[dict]:
             position_in_path=1,
         ),
         *_tutor_records(),
+        *_shaping_records(),
     ]
     return rows
+
+
+def _shaping_records() -> list[dict]:
+    """B's shaping of a second path, ``path-b2`` (Phase 2B, AL-340).
+
+    Sized so every §7 shaping query computes a number that could not have come
+    out of an empty slice:
+
+    * **four** admitted messages, staggered a minute apart, and four reply
+      resolutions — three successes and one failure carrying the JSON-text
+      ``null`` TTFT, so the latency guardrail has both branches;
+    * **three** Proposals shown against **two** Changes applied, so proposal
+      acceptance is 2/3 rather than a trivial 1;
+    * the first Proposal lands on the *second* message, so depth-to-proposal is
+      2 — a number that can only be right if the ``<= shown_at`` bound and the
+      "count the ask that produced it" rule are both implemented;
+    * one Change **undone**, so the undo rate is 1/2 and the time-to-undo
+      percentile has a fractional value to read;
+    * one added lesson **engaged with**, the revised one not, so the primary
+      metric's yield is 1/2 with both sides real.
+
+    ``lesson_ids`` is written as **JSON text**, not as a nested array: that is
+    exactly how Logfire stores a list attribute (it serialises on the way in),
+    and reproducing it faithfully is what makes the query's
+    ``(attributes ->> 'lesson_ids')::jsonb`` cast a tested claim rather than a
+    guess — the same fidelity the ``ttft_ms='null'`` quirk gets above.
+    """
+    conversation = {"account_id": _ACCOUNT_B, "path_id": "path-b2"}
+    replied = {"prompt_tokens": 400, "completion_tokens": 120, "total_tokens": 520}
+    return [
+        # B's path became shapeable — the shaping-adoption denominator. A's
+        # path-a1 outline above is the other half of it, and A never shaped, so
+        # adoption is 1 of 2.
+        _rec(
+            "outline_generated",
+            _SIGNUP,
+            account_id=_ACCOUNT_B,
+            path_id="path-b2",
+            outcome="ready",
+            success=True,
+            duration_ms=1100,
+            prompt_tokens=100,
+            completion_tokens=50,
+            total_tokens=150,
+        ),
+        _rec("shaping_conversation_started", _SHAPED_AT, **conversation),
+        _rec("shaping_message_sent", _SHAPED_AT, **conversation, source="typed"),
+        _rec(
+            "shaping_reply_completed",
+            _SHAPED_AT,
+            **conversation,
+            **replied,
+            outcome="success",
+            success=True,
+            ttft_ms=120,
+            duration_ms=1500,
+            has_proposal=False,
+        ),
+        # The second ask is the one that produces a card — so two messages had
+        # been sent by the time the first Proposal was shown.
+        _rec(
+            "shaping_message_sent",
+            _SHAPED_AT + _MINUTE,
+            **conversation,
+            source="suggestion",
+        ),
+        _rec(
+            "proposal_shown",
+            _SHAPED_AT + _MINUTE,
+            **conversation,
+            n_add_lessons=2,
+            n_revisions=0,
+            new_unit=False,
+        ),
+        _rec(
+            "shaping_reply_completed",
+            _SHAPED_AT + _MINUTE,
+            **conversation,
+            **replied,
+            outcome="success",
+            success=True,
+            ttft_ms=120,
+            duration_ms=1500,
+            has_proposal=True,
+        ),
+        # A card shown on a reply that then failed: still shown (it reached the
+        # rail), never appliable (D2 persisted nothing).
+        _rec(
+            "shaping_message_sent",
+            _SHAPED_AT + 2 * _MINUTE,
+            **conversation,
+            source="typed",
+        ),
+        _rec(
+            "proposal_shown",
+            _SHAPED_AT + 2 * _MINUTE,
+            **conversation,
+            n_add_lessons=1,
+            n_revisions=0,
+            new_unit=True,
+        ),
+        _rec(
+            "shaping_reply_completed",
+            _SHAPED_AT + 2 * _MINUTE,
+            **conversation,
+            outcome="failure",
+            success=False,
+            # The OTEL quirk, spelled exactly as logfire carries it.
+            ttft_ms="null",
+            duration_ms=30000,
+            prompt_tokens=0,
+            completion_tokens=0,
+            total_tokens=0,
+            has_proposal=True,
+        ),
+        _rec(
+            "shaping_message_sent",
+            _SHAPED_AT + 3 * _MINUTE,
+            **conversation,
+            source="typed",
+        ),
+        _rec(
+            "proposal_shown",
+            _SHAPED_AT + 3 * _MINUTE,
+            **conversation,
+            n_add_lessons=0,
+            n_revisions=1,
+            new_unit=False,
+        ),
+        _rec(
+            "shaping_reply_completed",
+            _SHAPED_AT + 3 * _MINUTE,
+            **conversation,
+            **replied,
+            outcome="success",
+            success=True,
+            ttft_ms=120,
+            duration_ms=1500,
+            has_proposal=True,
+        ),
+        _rec(
+            "change_applied",
+            _SHAPED_AT + 5 * _MINUTE,
+            **conversation,
+            change_id=_CHANGE_ADD,
+            n_add_lessons=2,
+            n_revisions=0,
+            new_unit=False,
+            lesson_ids=json.dumps(_ADDED_LESSONS),
+        ),
+        _rec(
+            "change_applied",
+            _SHAPED_AT + 6 * _MINUTE,
+            **conversation,
+            change_id=_CHANGE_REVISE,
+            n_add_lessons=0,
+            n_revisions=1,
+            new_unit=False,
+            lesson_ids=json.dumps([_REVISED_LESSON]),
+        ),
+        _rec(
+            "change_undone",
+            _SHAPED_AT + 9 * _MINUTE,
+            **conversation,
+            change_id=_CHANGE_REVISE,
+            minutes_since_apply=3.0,
+        ),
+        # The yield: B comes back the next day and works on ONE of the two
+        # lessons the addition created. Nothing ever touches the revised one.
+        _rec(
+            "lesson_viewed",
+            _ENGAGED_AT,
+            account_id=_ACCOUNT_B,
+            path_id="path-b2",
+            lesson_id=_ADDED_LESSONS[0],
+            position_in_path=4,
+        ),
+        _rec(
+            "lesson_viewed",
+            _ENGAGED_AT,
+            account_id=_ACCOUNT_B,
+            path_id="path-b2",
+            lesson_id=_ADDED_LESSONS[1],
+            position_in_path=5,
+        ),
+        _rec(
+            "quick_check_attempted",
+            _ENGAGED_AT,
+            account_id=_ACCOUNT_B,
+            path_id="path-b2",
+            lesson_id=_ADDED_LESSONS[0],
+            position_in_path=4,
+            outcome="correct",
+            is_correct=True,
+        ),
+        _rec(
+            "lesson_completed",
+            _ENGAGED_AT,
+            account_id=_ACCOUNT_B,
+            path_id="path-b2",
+            lesson_id=_ADDED_LESSONS[0],
+            position_in_path=4,
+        ),
+    ]
 
 
 def _tutor_records() -> list[dict]:
@@ -370,6 +599,144 @@ async def test_a_null_ttft_reply_survives_the_latency_percentiles() -> None:
     assert row["p95_ttft_ms"] == pytest.approx(120.0)
     # Duration is over successes only, so the 30s timeout is not in here.
     assert row["p95_duration_ms"] == pytest.approx(1500.0)
+
+
+@pytest.mark.anyio
+@pytest.mark.workflow("W17")
+async def test_the_primary_shaping_metric_separates_yield_from_hoarding() -> None:
+    """Phase 2B's primary metric, executed — two applied Changes, one engaged.
+
+    ``shaping_yield.sql`` joins through a **JSON-encoded list of lesson ids**,
+    which is the one thing about it that could be wrong and still run: a decoding
+    mistake returns a clean ``0.0`` rather than an error, and the panel would
+    read "learners never touch what they ask for" forever. So the fixture makes
+    the two sides different — the addition's lesson is worked on the next day,
+    the revision's target never is — and the assertion pins ``0.5``, which is
+    reachable only if the array really was unnested and matched by id.
+
+    The maturity clamp is exercised implicitly: both Changes are ~20 days old, so
+    a clamp that dropped them (or one that was never applied) moves the count off
+    2 in one direction or the other.
+    """
+    async with db.async_session() as session:
+        await _load_records(session)
+
+        [row] = await _rows(session, "shaping_yield.sql")
+
+    assert row["changes_applied"] == 2, "both applied Changes must be in the cohort"
+    assert row["yield_rate"] == pytest.approx(0.5)
+
+
+@pytest.mark.anyio
+async def test_the_supporting_shaping_metrics_compute_real_numbers() -> None:
+    """Adoption, acceptance, depth-to-proposal and the edit-shape mix.
+
+    Each of these is a ratio that an empty or half-decoded slice would return as
+    NULL, so the assertions are on the arithmetic rather than on "it ran":
+
+    * **adoption** — two accounts have a ready path (A's ``path-a1``, B's
+      ``path-b2``); only B ever applied a Change.
+    * **acceptance** — three Proposals shown (one of them on a reply that then
+      failed, which still counts), two applied.
+    * **depth** — the first card arrived on the second ask, and the ask that
+      produced it counts, so the median is 2 and not 1 or 3.
+    * **mix** — proposed is 3 lessons added + 1 revised across 3 payloads, one
+      of which brought a new unit; applied is 2 added + 1 revised across 2.
+    """
+    async with db.async_session() as session:
+        await _load_records(session)
+
+        [adoption] = await _rows(session, "shaping_adoption.sql")
+        [acceptance] = await _rows(session, "proposal_acceptance.sql")
+        [depth] = await _rows(session, "depth_to_proposal.sql")
+        mix = {row["scope"]: row for row in await _rows(session, "edit_shape_mix.sql")}
+
+    assert adoption["learners_with_a_ready_path"] == 2
+    assert adoption["learners_who_shaped"] == 1
+    assert adoption["adoption_rate"] == pytest.approx(0.5)
+
+    assert (acceptance["proposals_shown"], acceptance["changes_applied"]) == (3, 2)
+    assert acceptance["acceptance_rate"] == pytest.approx(2 / 3)
+
+    assert depth["conversations_with_a_proposal"] == 1
+    assert depth["median_messages_to_proposal"] == pytest.approx(2.0)
+
+    assert set(mix) == {"proposed", "applied"}
+    assert (mix["proposed"]["lessons_added"], mix["proposed"]["lessons_revised"]) == (
+        3,
+        1,
+    )
+    assert mix["proposed"]["with_new_unit"] == 1
+    assert (mix["applied"]["lessons_added"], mix["applied"]["lessons_revised"]) == (
+        2,
+        1,
+    )
+    assert mix["applied"]["with_new_unit"] == 0
+    assert mix["applied"]["addition_share"] == pytest.approx(2 / 3)
+
+
+@pytest.mark.anyio
+@pytest.mark.workflow("W19")
+async def test_the_undo_guardrail_keeps_its_fractional_regret_latency() -> None:
+    """One of two Changes undone, three minutes after it was applied.
+
+    The float matters: ``minutes_since_apply`` is emitted fractional precisely so
+    a fast "that is not what I meant" is not rounded to zero, and a query that
+    cast it to an integer would pass a rate assertion while destroying the
+    distribution the metric is read for.
+    """
+    async with db.async_session() as session:
+        await _load_records(session)
+
+        [row] = await _rows(session, "undo_rate.sql")
+
+    assert (row["changes_applied"], row["changes_undone"]) == (2, 1)
+    assert row["undo_rate"] == pytest.approx(0.5)
+    assert row["median_minutes_to_undo"] == pytest.approx(3.0)
+
+
+@pytest.mark.anyio
+@pytest.mark.workflow("W21")
+async def test_the_shaping_guardrails_compute_both_of_their_sides() -> None:
+    """The hoarding split and the reply-latency panel, both with real math.
+
+    The completion guardrail is only a guardrail if **both** sides exist: B's
+    ``path-b2`` is shaped (two lessons started, one completed → 0.5) and A's
+    ``path-a1`` is not (three started, all three completed → 1.0). The direction
+    here is the fixture's arithmetic, not a claim about the product — the point
+    is that a shaped/unshaped comparison is computable at all.
+
+    The latency panel is 2A's, and the ``null`` TTFT quirk has to survive it on
+    this rail too: four replies, one failure, and the failed reply's JSON-text
+    ``null`` skipped by the percentile rather than raising.
+    """
+    async with db.async_session() as session:
+        await _load_records(session)
+
+        guardrail = {
+            row["shaped"]: row
+            for row in await _rows(session, "shaped_path_completion_guardrail.sql")
+        }
+        [latency] = await _rows(session, "shaping_reply_failure_latency.sql")
+
+    assert set(guardrail) == {True, False}, "the split must have both sides"
+    assert (guardrail[True]["lessons_started"], guardrail[True]["completion_rate"]) == (
+        2,
+        pytest.approx(0.5),
+    )
+    assert guardrail[False]["completion_rate"] is not None, (
+        "an empty slice proves nothing"
+    )
+
+    assert latency["replies"] == 4
+    assert latency["failure_rate"] == pytest.approx(0.25)
+    assert latency["stopped_rate"] == pytest.approx(0.0)
+    assert latency["proposal_rate"] == pytest.approx(0.75)
+    # Only the replies that produced a token are in the percentile; the
+    # null-TTFT failure is counted in failure_rate instead of dragging it up.
+    assert latency["p95_ttft_ms"] == pytest.approx(120.0)
+    # Duration is over successes only, so the 30s failure is not in here.
+    assert latency["p95_duration_ms"] == pytest.approx(1500.0)
 
 
 @pytest.mark.anyio

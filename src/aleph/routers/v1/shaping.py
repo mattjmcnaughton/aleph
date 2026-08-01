@@ -334,8 +334,12 @@ async def apply_proposal(
     if owned is None or not owned.message.proposal:
         raise _not_found()
     path = owned.path
+    # ``owned.path.user_id`` rather than ``user.id``: the walk above proved they
+    # are the same, and taking it off the resolved path is what keeps the event's
+    # account the *path's* owner even if the ownership rule ever grows a shared
+    # path. One value, threaded, so the service never re-reads it (TDD §9).
     change_id = await shaping_change_service.apply_change(
-        path_id=path.id, message_id=message_id
+        account_id=path.user_id, path_id=path.id, message_id=message_id
     )
     view = await load_path_detail(session, generation_orchestrator, path.id)
     change = await ChangeRepository(session).get(change_id)
@@ -367,7 +371,9 @@ async def undo_change(change_id: UUID, user: CurrentUser, session: Session) -> R
     )
     if owned is None:
         raise _not_found()
-    await shaping_change_service.undo_change(path_id=owned.path.id, change_id=change_id)
+    await shaping_change_service.undo_change(
+        account_id=owned.path.user_id, path_id=owned.path.id, change_id=change_id
+    )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
