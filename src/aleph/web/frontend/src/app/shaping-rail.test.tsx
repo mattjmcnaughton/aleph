@@ -330,6 +330,88 @@ describe("Shaping rail — the conversation surface", () => {
   });
 });
 
+describe("Shaping rail — the live turn (PRD §5.6)", () => {
+  it("[AL-330] echoes the question into the thread on send, before any reply exists", async () => {
+    // A turn is persisted whole or not at all, so the cached thread cannot show
+    // the question until the whole reply has landed. The rail shows it in the
+    // meantime rather than leaving the learner staring at an empty composer.
+    configureShaping({ hang: true, replyDeltas: [] });
+    await openShapingRail();
+
+    ask("Add practice on narrowing");
+
+    const echo = await screen.findByTestId("shaping-rail-pending");
+    expect(echo.textContent).toMatch(/add practice on narrowing/i);
+    expect(composer().value).toBe("");
+    // Nothing was persisted: the echo is the client's, not the thread's.
+    expect(messages()).toHaveLength(0);
+    expect(screen.queryByTestId("shaping-rail-empty")).toBeNull();
+  });
+
+  it("[AL-330] says the tutor is thinking until the first token, then gets out of the way", async () => {
+    configureShaping({ hang: true, replyDeltas: [] });
+    await openShapingRail();
+
+    ask("What's missing?");
+
+    const thinking = await screen.findByTestId("shaping-rail-thinking");
+    expect(thinking.textContent).toMatch(/thinking/i);
+    // Nothing pretends to be a reply while there is no reply text.
+    expect(screen.queryByTestId("shaping-rail-streaming")).toBeNull();
+
+    configureShaping({ hang: false });
+    finishShapingStream();
+    await waitFor(() => expect(screen.queryByTestId("shaping-rail-thinking")).toBeNull());
+  });
+
+  it("[AL-330] shows the reply under the question, and hands both over on settle", async () => {
+    configureShaping({ hang: true, replyDeltas: ["Two short lessons ", "would close that gap."] });
+    await openShapingRail();
+
+    // Not one of the suggestion labels: those reappear beside the composer once
+    // the turn settles, and would count as a second copy of the question.
+    ask("Where are the gaps in this path?");
+
+    const streaming = await screen.findByTestId("shaping-rail-streaming");
+    await waitFor(() => expect(streaming.textContent).toMatch(/two short lessons/i));
+    expect(screen.queryByTestId("shaping-rail-thinking")).toBeNull();
+    // The question stays put underneath its own reply for the whole turn.
+    expect(screen.getByTestId("shaping-rail-pending").textContent).toMatch(/where are the gaps/i);
+
+    finishShapingStream();
+
+    // Handed over, not duplicated: the settled pair is the only copy left.
+    await waitFor(() => expect(messages()).toHaveLength(2));
+    expect(screen.queryByTestId("shaping-rail-pending")).toBeNull();
+    expect(screen.queryByTestId("shaping-rail-streaming")).toBeNull();
+    expect(screen.getAllByText(/where are the gaps in this path\?/i)).toHaveLength(1);
+  });
+
+  it("[AL-330] stop and failure take the echo back, leaving one copy in the composer", async () => {
+    configureShaping({ hang: true, replyDeltas: [] });
+    await openShapingRail();
+
+    ask("Add practice on narrowing");
+    fireEvent.click(await screen.findByTestId("shaping-rail-stop"));
+
+    await waitFor(() => expect(composer().value).toBe("Add practice on narrowing"));
+    expect(screen.queryByTestId("shaping-rail-pending")).toBeNull();
+    expect(screen.queryByTestId("shaping-rail-thinking")).toBeNull();
+
+    configureShaping({
+      hang: false,
+      failWith: { code: "upstream_error", message: "The tutor is unavailable right now." },
+    });
+    fireEvent.click(screen.getByTestId("shaping-rail-send"));
+
+    await screen.findByTestId("shaping-rail-error");
+    // "Your question is still here" points at the composer, and it would not be
+    // true twice over.
+    expect(composer().value).toBe("Add practice on narrowing");
+    expect(screen.queryByTestId("shaping-rail-pending")).toBeNull();
+  });
+});
+
 describe("Shaping rail — composer state machine (PRD §5.6)", () => {
   it("[AL-330] disables the composer in flight and offers stop instead of send", async () => {
     configureShaping({ hang: true });

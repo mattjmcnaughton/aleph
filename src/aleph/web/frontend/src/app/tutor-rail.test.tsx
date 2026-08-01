@@ -1,6 +1,7 @@
+import { notifyManager } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { API_V1_BASE, type AuthSession } from "../lib/api";
 import { adminSession, learnerUser } from "../mocks/handlers";
 import { seedLesson } from "../mocks/lessons";
@@ -77,6 +78,50 @@ function ask(question: string): void {
 
 function messages(): HTMLElement[] {
   return screen.queryAllByTestId("tutor-rail-message");
+}
+
+/**
+ * Freeze TanStack's own subscriber notifications, and return the release.
+ *
+ * Used to pin the handover on the `done` frame: the rail clears the live turn
+ * there and relies on the cache write beside it being on screen in the same
+ * render. That is true because a query's result is read at render time rather
+ * than delivered by the notification — which this proves by taking the
+ * notification away and finding the settled turn rendered anyway.
+ */
+function holdCacheNotifications(): () => void {
+  const held: Array<() => void> = [];
+  notifyManager.setScheduler((callback) => held.push(callback));
+  return () => {
+    releaseCacheNotifications();
+    for (const callback of held) callback();
+  };
+}
+
+function releaseCacheNotifications(): void {
+  notifyManager.setScheduler((callback) => setTimeout(callback, 0));
+}
+
+// Never leave a frozen cache behind for the next test, however a test ended.
+afterEach(releaseCacheNotifications);
+
+/**
+ * Give the thread a scrollable shape. jsdom does no layout, so `scrollHeight`
+ * and `clientHeight` are both 0 and every thread reads as "shorter than the
+ * rail" — the one case the follow logic has nothing to do in. It does store
+ * `scrollTop`, which is the thing being asserted.
+ */
+function scrollableThread(scrollHeight = 2000, clientHeight = 400): HTMLElement {
+  const thread = screen.getByTestId("tutor-rail-messages");
+  Object.defineProperty(thread, "scrollHeight", { value: scrollHeight, configurable: true });
+  Object.defineProperty(thread, "clientHeight", { value: clientHeight, configurable: true });
+  return thread;
+}
+
+/** Scroll the thread up to somewhere the learner is reading, and say so. */
+function scrollUp(thread: HTMLElement): void {
+  thread.scrollTop = 0;
+  fireEvent.scroll(thread);
 }
 
 describe("Tutor rail — entry point gating", () => {
@@ -245,6 +290,142 @@ describe("Tutor rail — empty state, chip and suggestions", () => {
   });
 });
 
+describe("Tutor rail — the live turn (PRD §5.6)", () => {
+  it("[AL-230] echoes the question into the thread on send, before any reply exists", async () => {
+    // The wait is the provider's, and it is seconds long. A turn is persisted
+    // whole or not at all (D2), so the cached thread cannot show the question
+    // until the whole reply has landed — the rail shows it in the meantime.
+    useSession(flagOnSession);
+    configureTutor({ hang: true, replyDeltas: [] });
+    seedReadyLesson();
+    await gotoLesson();
+    await openRail();
+
+    ask("What breaks if I drop the extends?");
+
+    const echo = await screen.findByTestId("tutor-rail-pending");
+    expect(echo.textContent).toMatch(/what breaks if i drop the extends\?/i);
+    // The composer really is empty — the question moved into the thread rather
+    // than being left behind in it.
+    expect(composer().value).toBe("");
+    // And nothing was persisted: the echo is the client's, not the thread's.
+    expect(messages()).toHaveLength(0);
+    expect(screen.queryByTestId("tutor-rail-empty")).toBeNull();
+  });
+
+  it("[AL-230] says the tutor is thinking until the first token, then gets out of the way", async () => {
+    useSession(flagOnSession);
+    configureTutor({ hang: true, replyDeltas: [] });
+    seedReadyLesson();
+    await gotoLesson();
+    await openRail();
+
+    ask("Why does the constraint matter?");
+
+    const thinking = await screen.findByTestId("tutor-rail-thinking");
+    expect(thinking.textContent).toMatch(/thinking/i);
+    // Nothing pretends to be a reply while there is no reply text.
+    expect(screen.queryByTestId("tutor-rail-streaming")).toBeNull();
+  });
+
+  it("[AL-230] replaces the thinking indicator with the reply as soon as a delta lands", async () => {
+    useSession(flagOnSession);
+    configureTutor({ hang: true, replyDeltas: ["Think of ", "a constraint"] });
+    seedReadyLesson();
+    await gotoLesson();
+    await openRail();
+
+    ask("Why does the constraint matter?");
+
+    const streaming = await screen.findByTestId("tutor-rail-streaming");
+    await waitFor(() => expect(streaming.textContent).toMatch(/think of a constraint/i));
+    expect(screen.queryByTestId("tutor-rail-thinking")).toBeNull();
+    // The question stays put underneath its own reply for the whole turn.
+    expect(screen.getByTestId("tutor-rail-pending").textContent).toMatch(
+      /why does the constraint matter\?/i,
+    );
+  });
+
+  it("[AL-230] scrolls down to the question it just echoed", async () => {
+    // Showing the question instantly is worth nothing if it is shown below the
+    // fold, and the thread has never scrolled itself. Asking is the learner
+    // saying they want to be where their question is.
+    useSession(flagOnSession);
+    configureTutor({ hang: true, replyDeltas: [] });
+    seedReadyLesson();
+    seedConversation(PATH_ID, [
+      { role: "learner", content: "Explain this simpler" },
+      { role: "tutor", content: "Think of it as a promise." },
+    ]);
+    await gotoLesson();
+    await openRail();
+    await waitFor(() => expect(messages()).toHaveLength(2));
+
+    const thread = scrollableThread();
+    scrollUp(thread);
+
+    ask("What breaks if I drop the extends?");
+
+    await screen.findByTestId("tutor-rail-pending");
+    expect(thread.scrollTop).toBe(2000);
+  });
+
+  it("[AL-230] does not drag a learner who scrolled up mid-reply back down", async () => {
+    // Once they scroll away from the tail they are reading, not waiting. A rail
+    // that re-pinned them on every delta would take what they are reading off
+    // screen several times a second.
+    useSession(flagOnSession);
+    configureTutor({ hang: true, replyDeltas: ["Think of "] });
+    seedReadyLesson();
+    await gotoLesson();
+    await openRail();
+
+    ask("Why does the constraint matter?");
+    await screen.findByTestId("tutor-rail-streaming");
+
+    const thread = scrollableThread();
+    scrollUp(thread);
+
+    // The turn settles underneath them — the thread grows, and stays put.
+    finishTutorStream();
+    await waitFor(() => expect(messages()).toHaveLength(2));
+    expect(thread.scrollTop).toBe(0);
+  });
+
+  it("[AL-230] hands the turn straight over to the cached thread, with nothing in between", async () => {
+    // The handover is the one place the live copy and the cached one could come
+    // apart: the rail drops the echo and the deltas on the `done` frame, so if
+    // the appended pair were not on screen by that same render, every send would
+    // blink its whole turn out and back. Holding TanStack's notifications is how
+    // that is stated — the settled pair has to be rendered without one.
+    useSession(flagOnSession);
+    configureTutor({ hang: true, replyDeltas: ["A constraint is a promise."] });
+    seedReadyLesson();
+    await gotoLesson();
+    await openRail();
+
+    ask("Explain the constraint");
+    await screen.findByTestId("tutor-rail-streaming");
+
+    const release = holdCacheNotifications();
+    finishTutorStream();
+    await waitFor(() => expect(composer().disabled).toBe(false));
+
+    // The live turn is gone and the settled pair has taken its place, in the one
+    // render the `done` frame caused.
+    expect(messages()).toHaveLength(2);
+    expect(screen.queryByTestId("tutor-rail-pending")).toBeNull();
+    expect(screen.queryByTestId("tutor-rail-streaming")).toBeNull();
+    expect(screen.queryByTestId("tutor-rail-thinking")).toBeNull();
+    // Handed over, not duplicated — one copy of the question on screen.
+    expect(screen.getAllByText(/explain the constraint/i)).toHaveLength(1);
+    expect(messages()[1].textContent).toMatch(/a constraint is a promise/i);
+
+    release();
+    await waitFor(() => expect(messages()).toHaveLength(2));
+  });
+});
+
 describe("Tutor rail — composer state machine", () => {
   it("[AL-230] disables the composer and offers stop while a reply is in flight", async () => {
     useSession(flagOnSession);
@@ -298,6 +479,10 @@ describe("Tutor rail — composer state machine", () => {
     // Nothing persisted, nothing left on screen: a turn exists whole or not at all.
     expect(screen.queryByTestId("tutor-rail-streaming")).toBeNull();
     expect(messages()).toHaveLength(0);
+    // The echoed question goes back to the composer rather than standing over a
+    // thread that will never hold it — one copy of it on screen, always.
+    expect(screen.queryByTestId("tutor-rail-pending")).toBeNull();
+    expect(screen.queryByTestId("tutor-rail-thinking")).toBeNull();
   });
 
   it("[AL-230] a failed reply discards the partial text, keeps the question, and retries it", async () => {
@@ -318,6 +503,9 @@ describe("Tutor rail — composer state machine", () => {
     // invalidates nothing, so the thread is still empty.
     expect(screen.queryByTestId("tutor-rail-streaming")).toBeNull();
     expect(messages()).toHaveLength(0);
+    // The echo goes with it: "your question is still here" points at the
+    // composer, and it would not be true twice over.
+    expect(screen.queryByTestId("tutor-rail-pending")).toBeNull();
     // "Your question is still here" is literal: failure restores it to the
     // composer, exactly as stop does, so it can be edited by hand as well as
     // re-sent by the retry button.
@@ -532,6 +720,9 @@ describe("Tutor rail — the thread", () => {
     await waitFor(() => expect(messages()).toHaveLength(0));
     await screen.findByTestId("tutor-rail-empty");
     expect(screen.queryByTestId("tutor-rail-streaming")).toBeNull();
+    // The echoed question is cleared with the thread it was asked into, rather
+    // than left standing over the empty rail.
+    expect(screen.queryByTestId("tutor-rail-pending")).toBeNull();
 
     // The composer is usable again, and empty: the learner chose to clear, so
     // the abandoned question is discarded rather than restored the way stop does.

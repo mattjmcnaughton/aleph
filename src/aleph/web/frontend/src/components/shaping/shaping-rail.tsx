@@ -22,6 +22,7 @@ import { AlephGlyph } from "../aleph-logo";
 import { handleComposerKeyDown } from "../../lib/composer-keys";
 import { Markdown } from "../markdown";
 import { TutorModelPicker } from "../model-picker";
+import { useThreadScroll } from "../use-thread-scroll";
 import type { ShapingMessage } from "../../lib/shaping";
 import { ChangeHistorySheet } from "./change-history-sheet";
 import { ProposalCard } from "./proposal-card";
@@ -88,14 +89,24 @@ export function ShapingRail({ shaping }: { shaping: ShapingRailState }) {
 }
 
 function RailThread({ shaping }: { shaping: ShapingRailState }) {
-  const streaming = shaping.status === "streaming";
-  const empty = shaping.messages.length === 0 && !streaming && shaping.status !== "failed";
+  // A turn the rail is rendering itself: the question, the wait, the deltas.
+  // Read off the question rather than off `status`, which tracks the same window
+  // today only because every exit from a stream clears both — the thing the
+  // empty state and the scroll care about is whether a turn is *on screen*.
+  const live = shaping.pendingQuestion !== null;
+  const empty = shaping.messages.length === 0 && !live && shaping.status !== "failed";
+  // The thread does not scroll itself, and everything a turn adds is added to
+  // the bottom of it — so on a thread taller than the rail, a question shown
+  // the instant it is sent would still be shown off screen.
+  const thread = useThreadScroll(live);
 
   return (
     <>
       <RailHeader shaping={shaping} />
 
       <div
+        ref={thread.ref}
+        onScroll={thread.onScroll}
         data-testid="shaping-rail-messages"
         // Replies arrive progressively and nothing moves focus to them, so the
         // thread announces itself; `polite` because a stream that interrupted
@@ -119,7 +130,16 @@ function RailThread({ shaping }: { shaping: ShapingRailState }) {
           <MessageBubble key={message.id} message={message} shaping={shaping} />
         ))}
 
-        {streaming ? (
+        {/* The live turn, in the order it happens. The question is the same
+            bubble the settled message renders, so the handover to the cached
+            thread changes nothing on screen. */}
+        {shaping.pendingQuestion !== null ? (
+          <LearnerBubble testid="shaping-rail-pending" content={shaping.pendingQuestion} />
+        ) : null}
+
+        {shaping.thinking ? <Thinking /> : null}
+
+        {shaping.streamingText !== "" ? (
           <div className="flex gap-2.5">
             <ShapingGlyph size="2xs" />
             <Markdown
@@ -246,6 +266,60 @@ function RailHeader({ shaping }: { shaping: ShapingRailState }) {
 
 // --- Messages ----------------------------------------------------------------
 
+/**
+ * A learner's turn in the thread. One component for two callers on purpose: the
+ * cached message and the live echo of a question still being answered are the
+ * same bubble, so the moment one replaces the other is invisible. Only the
+ * testid differs — `shaping-rail-message` is a message the conversation *has*,
+ * and an echo is not one until the turn settles.
+ */
+function LearnerBubble({ testid, content }: { testid: string; content: string }) {
+  return (
+    <div data-testid={testid} data-role="learner" className="flex justify-end">
+      <p className="max-w-[85%] whitespace-pre-wrap rounded-lg border border-divider bg-surface px-3 py-2 text-sm leading-6 text-porcelain">
+        {content}
+      </p>
+    </div>
+  );
+}
+
+/**
+ * The wait, said out loud. Between the send and the first token sit admission,
+ * the shared reply semaphore and the provider's own time to first token —
+ * seconds, on a surface whose only other in-flight signal is a disabled
+ * textarea. Shown until the first delta and replaced by the reply itself, so a
+ * running turn is never a silent one.
+ *
+ * The dots are decoration and marked as such; the label is what the messages
+ * list's `aria-live="polite"` announces, and what survives `motion-reduce`.
+ */
+function Thinking() {
+  return (
+    <div data-testid="shaping-rail-thinking" className="flex items-center gap-2.5">
+      <ShapingGlyph size="2xs" />
+      <span aria-hidden="true" className="flex items-center gap-1">
+        {THINKING_DOT_DELAYS.map((delay) => (
+          <span
+            key={delay}
+            className={`h-1.5 w-1.5 animate-thinking rounded-full bg-iris motion-reduce:animate-none ${delay}`}
+          />
+        ))}
+      </span>
+      <span className="text-xs text-mist">Thinking…</span>
+    </div>
+  );
+}
+
+/**
+ * Written out rather than computed: Tailwind scans this file for literal class
+ * strings, so an interpolated delay would generate no CSS at all.
+ */
+const THINKING_DOT_DELAYS = [
+  "[animation-delay:0ms]",
+  "[animation-delay:160ms]",
+  "[animation-delay:320ms]",
+] as const;
+
 function MessageBubble({
   message,
   shaping,
@@ -253,7 +327,9 @@ function MessageBubble({
   message: ShapingMessage;
   shaping: ShapingRailState;
 }) {
-  const isTutor = message.role === "tutor";
+  if (message.role !== "tutor") {
+    return <LearnerBubble testid="shaping-rail-message" content={message.content} />;
+  }
   return (
     <div
       data-testid="shaping-rail-message"
@@ -261,31 +337,25 @@ function MessageBubble({
       // A produced Proposal rides the cached message, so it survives a collapse,
       // a reopen, and a page revisit — with the resolution the server derived.
       data-proposal={message.proposal ? "true" : undefined}
-      className={isTutor ? "flex gap-2.5" : "flex justify-end"}
+      className="flex gap-2.5"
     >
-      {isTutor ? <ShapingGlyph size="2xs" /> : null}
-      {isTutor ? (
-        <div className="min-w-0 flex-1">
-          {/* Generated prose goes through the one renderer, always (the security
-              boundary — no second pipeline, no `dangerouslySetInnerHTML`). */}
-          <Markdown className="text-sm [&_p]:text-sm [&_p]:leading-6">{message.content}</Markdown>
-          {message.proposal ? (
-            <ProposalCard
-              messageId={message.id}
-              proposal={message.proposal}
-              status={shaping.proposalStatus(message.id)}
-              onApply={shaping.applyProposal}
-              onDismiss={shaping.dismissProposal}
-              onAskAgain={shaping.askAgain}
-              onViewInPath={shaping.viewInPath}
-            />
-          ) : null}
-        </div>
-      ) : (
-        <p className="max-w-[85%] whitespace-pre-wrap rounded-lg border border-divider bg-surface px-3 py-2 text-sm leading-6 text-porcelain">
-          {message.content}
-        </p>
-      )}
+      <ShapingGlyph size="2xs" />
+      <div className="min-w-0 flex-1">
+        {/* Generated prose goes through the one renderer, always (the security
+            boundary — no second pipeline, no `dangerouslySetInnerHTML`). */}
+        <Markdown className="text-sm [&_p]:text-sm [&_p]:leading-6">{message.content}</Markdown>
+        {message.proposal ? (
+          <ProposalCard
+            messageId={message.id}
+            proposal={message.proposal}
+            status={shaping.proposalStatus(message.id)}
+            onApply={shaping.applyProposal}
+            onDismiss={shaping.dismissProposal}
+            onAskAgain={shaping.askAgain}
+            onViewInPath={shaping.viewInPath}
+          />
+        ) : null}
+      </div>
     </div>
   );
 }

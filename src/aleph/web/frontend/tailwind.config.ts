@@ -74,6 +74,19 @@ export default {
       letterSpacing: {
         kicker: "0.14em", // uppercase mono section kickers
       },
+      // The tutor's "thinking" dots — the one motion the mocks don't cover,
+      // because no mock surface waits on a token. Three dots share the cycle and
+      // are offset by the delays in `tutor-rail.tsx`; the dim/lift pair reads as
+      // a pulse travelling left to right rather than three lights blinking.
+      keyframes: {
+        thinking: {
+          "0%, 70%, 100%": { opacity: "0.3", transform: "translateY(0)" },
+          "35%": { opacity: "1", transform: "translateY(-2px)" },
+        },
+      },
+      animation: {
+        thinking: "thinking 1.2s ease-in-out infinite",
+      },
     },
   },
   plugins: [],

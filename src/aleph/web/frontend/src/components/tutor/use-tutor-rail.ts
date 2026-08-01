@@ -21,6 +21,17 @@
 //  3. **Partial text is not a reply.** Deltas accumulate in a ref for the live
 //     bubble, and are dropped on stop or failure. A turn exists whole or not at
 //     all, on the client as much as in the database.
+//  4. **The question is on screen from the moment it is asked.** A turn takes as
+//     long as the provider takes to answer, and invariant 2 means the cached
+//     thread learns nothing until it settles — so the rail renders the live turn
+//     itself: the learner's question echoed the instant it is sent, then the
+//     thinking indicator, then the deltas. It is `pendingQuestion` below, it is
+//     never in the cache, and it is dropped on exactly the terms invariants 1-3
+//     set. Handing over to the settled turn is a plain clear because the query
+//     result is read at render time: `appendTurn` writes the cache before this
+//     clears, so the one render that stops showing the echo is the render that
+//     shows the message — the same reason `streamingText` has always been safe
+//     to clear there.
 //
 // And one rule about *ending* a stream, which the three invariants above all
 // depend on: `endStream` is the single owned entry point. Stop, new conversation
@@ -83,6 +94,14 @@ export interface TutorRailState {
   lessonTitle: string;
   messages: ConversationMessage[];
   status: TutorRailStatus;
+  /**
+   * The learner's question while its turn is live — echoed under the thread from
+   * the moment it is sent, because the cached thread will not have it until the
+   * whole reply has arrived (invariant 4). Null when no turn is running.
+   */
+  pendingQuestion: string | null;
+  /** The turn is running and no token has arrived yet — the wait to say something about. */
+  thinking: boolean;
   /** The live reply, mid-stream. Empty once the turn settles, stops, or fails. */
   streamingText: string;
   /** Learner-facing copy for the last failed reply, or null. */
@@ -160,6 +179,10 @@ export function useTutorRail({
   const [openState, setOpenState] = useState(false);
   const [draft, setDraft] = useState("");
   const [status, setStatus] = useState<TutorRailStatus>("idle");
+  // The live turn's question (invariant 4). State rather than a read of
+  // `pendingRef`: that ref outlives a failed turn on purpose, because it is what
+  // "Try again" re-sends, and the echo must not.
+  const [pendingQuestion, setPendingQuestion] = useState<string | null>(null);
   const [streamingText, setStreamingText] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [confirmingNew, setConfirmingNew] = useState(false);
@@ -319,8 +342,10 @@ export function useTutorRail({
       checkRef.current = null;
       // The composer is emptied here rather than in `send`, so every path into a
       // stream clears it and every path out of one restores it: send and retry
-      // clear, stop and failure put the question back (below).
+      // clear, stop and failure put the question back (below). The question does
+      // not vanish while it is emptied — the live turn below is where it goes.
       setDraft("");
+      setPendingQuestion(question.content);
       setStreamingText("");
       setErrorMessage(null);
       setStatus("streaming");
@@ -351,11 +376,18 @@ export function useTutorRail({
         abortRef.current = null;
         await appendTurn(done, question, textRef.current, checkRef.current);
         pendingRef.current = null;
+        // Handed over, not taken away: `appendTurn` has already written the
+        // thread, so the render that drops the echo and the deltas is the render
+        // that draws the settled pair in their place (invariant 4).
+        setPendingQuestion(null);
         setStreamingText("");
         setStatus("idle");
       } catch (error) {
-        // Whatever happened, the partial reply is gone (invariant 3).
+        // Whatever happened, the partial reply is gone (invariant 3) — and so is
+        // the echoed question, which goes back to the composer below rather than
+        // standing over a thread that will never hold it.
         abortRef.current = null;
+        setPendingQuestion(null);
         setStreamingText("");
         textRef.current = "";
         if (isAbort(error)) {
@@ -421,6 +453,8 @@ export function useTutorRail({
     lessonTitle,
     messages,
     status,
+    pendingQuestion,
+    thinking: status === "streaming" && streamingText === "",
     streamingText,
     errorMessage,
 
@@ -447,6 +481,9 @@ export function useTutorRail({
       // request is issued rather than alongside it.
       endStream("discard");
       setStatus("idle");
+      // The echoed question goes with the thread it was asked into, rather than
+      // being left standing over the empty rail the clear leaves behind.
+      setPendingQuestion(null);
       setErrorMessage(null);
       setClearError(null);
       pendingRef.current = null;
