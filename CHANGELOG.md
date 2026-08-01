@@ -1,3 +1,10 @@
+## [1.20.1](https://github.com/mattjmcnaughton/aleph/compare/v1.20.0...v1.20.1) (2026-08-01)
+
+
+### Bug Fixes
+
+* **web:** show a rail question on send, and say when the tutor is thinking ([4e3e44d](https://github.com/mattjmcnaughton/aleph/commit/4e3e44d3d47a59a060e398ca7aff29f2e88607c2))
+
 # [1.20.0](https://github.com/mattjmcnaughton/aleph/compare/v1.19.1...v1.20.0) (2026-08-01)
 
 
