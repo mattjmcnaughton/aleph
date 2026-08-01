@@ -127,6 +127,22 @@ route answers `404` by design. To turn it on for everyone locally, set
 `FEATURE_FLAG_DEFAULTS=tutor:on` in `.env` — the same switch AL-270 flips in
 production.
 
+**Seeing the shaping rail locally.** Phase 2B is the same story on its own key:
+the `shaping` flag defaults **off** for learners and **on for admins**, so
+`admin-dev` sees the shaping mark on a path view and `dev` gets `404` from every
+shaping route. `FEATURE_FLAG_DEFAULTS=shaping:on` (or
+`tutor:on,shaping:on` for both) turns it on for everyone locally — the switch
+AL-370 flips in production
+([deploy.md](deploy.md#launching-a-flagged-phase-al-270--al-370)). Two things
+that are not flag problems: the rail's entry only renders on a **`ready`** path
+(sending is `409` before the outline exists), and a real model proposes when it
+judges an ask concrete. To force the branches, run the shaper slot on the
+deterministic stub (`MODEL_SHAPER=stub` — what `scripts/e2e_backend.py` wires for
+the Playwright suite, and what `ENV=production` forbids) and put a sentinel in
+the message: `[force-proposal-add]`, `[force-proposal-revise]`,
+`[force-shaping-decline]` or `[force-shaping-failure]`
+(`services/stub_model.py`).
+
 ## Common Tasks
 
 ```sh
@@ -167,10 +183,11 @@ Tests are organized by type (see [`ci.md`](ci.md) for the CI job that runs each)
   plus the dev frontend. Locally it creates an `aleph_e2e` database and uses the
   machine's preinstalled chromium via `PW_CHROMIUM_PATH`. **Needs compose
   Keycloak** (`just compose-keycloak-up`): `tests/e2e/journeys/` are the PRD §8
-  workflows — Phase 1's `@w1`..`@w8` plus the tutor's `@w9` and `@w11`..`@w16`
-  (W10 is reserved for the deferred selection-to-quote) — and they sign in for
-  real. The journeys run in the `mobile-390x844` project only; the `desktop`
-  project runs the non-journey specs. See [`ci.md`](ci.md).
+  workflows — Phase 1's `@w1`..`@w8`, the tutor's `@w9` and `@w11`..`@w16`
+  (W10 is reserved for the deferred selection-to-quote), and shaping's
+  `@w17`..`@w21` — and they sign in for real. The journeys run in the
+  `mobile-390x844` project only; the `desktop` project runs the non-journey
+  specs. See [`ci.md`](ci.md).
 - `tests/external/` — live-provider contract tests, opt-in via `just test-external`.
 
 Use `@pytest.mark.external` for tests that hit external services (they must skip cleanly

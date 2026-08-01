@@ -215,9 +215,10 @@ and the transport is the tutor's §5.4 stream **plus one named event**.
 router-level `require_shaping_enabled` dependency: when the `shaping` flag (see
 *Feature flags* below) resolves **off** for the caller, the route answers `404`
 — for that account shaping does not exist. It is a **separate** key from
-`tutor`: the in-lesson tutor is already launched, and shaping ships dark behind
-its own flag (admins dogfood it in production; launch is AL-370 flipping the
-default) and can be killed on its own.
+`tutor`: the two surfaces launch and can be killed independently (the in-lesson
+tutor's launch is AL-270, shaping's is AL-370), so shaping ships dark behind its
+own flag while admins dogfood it in production —
+see [*Launching a flagged phase*](deploy.md#launching-a-flagged-phase-al-270--al-370).
 
 **Two threads, one path.** A path carries at most one conversation of each kind
 (`UNIQUE (path_id, kind)`). The routes below reach only the `shaping` one, and

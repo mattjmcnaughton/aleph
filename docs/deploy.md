@@ -319,6 +319,89 @@ pnpm exec semantic-release --dry-run --no-ci \
   --plugins @semantic-release/commit-analyzer,@semantic-release/release-notes-generator
 ```
 
+## Launching a flagged phase (AL-270 / AL-370)
+
+Phases 2 and 2B both merged and deployed **dark**: the code is in production, the
+routes answer `404` and the surface does not render for anyone whose `tutor` /
+`shaping` flag resolves off. Launch is therefore not a deploy of new code — it is
+one committed configuration change. This section is the whole of it; the ship
+tickets ([AL-270](https://github.com/mattjmcnaughton/aleph/issues/97) for the
+tutor, [AL-370](https://github.com/mattjmcnaughton/aleph/issues/127) for
+shaping) add the pre-flip dogfooding and the PRD §12 release-criteria walk.
+
+**The lever.** Flags are defined in code (`services/feature_flags.py`); the
+global default is overridden by the `FEATURE_FLAG_DEFAULTS` environment
+variable — a comma-separated list of `key:on` / `key:off` entries — which lives
+in [`fly.toml`](../fly.toml) `[env]`, committed and non-secret like the rest of
+that block. Resolution order and the full semantics are in
+[api.md § Feature flags](api.md#feature-flags-admin-apiv1admin-al-203).
+
+**Flipping it on** (shaping; the tutor is the same edit with `tutor:on`):
+
+1. Edit `fly.toml` `[env]`, adding the key alongside anything already there:
+
+   ```toml
+   [env]
+     FEATURE_FLAG_DEFAULTS = 'shaping:on'
+   ```
+
+2. Commit it as a **`fix`** (`fix(config): launch shaping`) — `chore`/`docs`
+   cut no release and therefore never deploy (see *Ongoing CD* above). No code
+   change, no migration, no image rebuild beyond the ordinary release.
+3. Wait for the release job's `deploy` step, then verify as a **non-admin**
+   account (the realm's `dev` user in staging, a real learner account in
+   production): `GET /api/v1/auth/session` carries `user.feature_flags.shaping =
+   true`, and the shaping mark is on a `ready` path's view.
+
+**What `shaping:on` makes visible.** The whole Phase 2B surface, for every
+learner: the shaping rail on the path view (its floating mark, its own
+conversation, the four suggestions), the six shaping routes — the conversation
+read/send/clear, `POST /messages/{id}/apply-proposal`, `POST /changes/{id}/undo`
+and `GET /paths/{id}/changes` — stop answering `404`, and Apply becomes reachable,
+which is the only write path into path structure outside generation. Learners with
+no `ready` path see nothing new (sending is `409` until the outline exists).
+Nothing about the in-lesson tutor changes: the keys are independent, and the two
+can be flipped or killed separately.
+
+**Turning it off again** is the same edit with `shaping:off` and one more
+release. Note the asymmetry that makes it a real kill switch: an **explicit**
+entry beats the admin baseline, so `shaping:off` reaches admins too (silence is
+what leaves admins on). An admin who still needs to dogfood takes a per-user
+override — `PUT /api/v1/admin/feature-flags/shaping/users/{user_id}` — which
+wins over everything.
+
+## Logfire saved queries (import checklist)
+
+[`queries/logfire/`](../queries/logfire) is the source of truth for the PRD §7
+metrics ([metrics.md](metrics.md) maps each file to its metric, and
+`tests/unit/test_metrics_queries.py` keeps the two honest). Logfire has no
+import API here: each file is **pasted in by hand** as a saved query, then
+pinned as a dashboard tile. Do it once per phase, at that phase's launch, so a
+panel is never reading a window the feature was dark for.
+
+| Phase | Import | Files |
+| ----- | ------ | ----- |
+| 1 (AL-103) | 9 | `activation_rate` (north star), `first_lesson_activation`, `path_start_rate`, `continuation`, `return_rate`, `breadth`, `cost_per_path`, `generation_failure_latency`, `quick_check_correctness` |
+| 2 — tutor (AL-240) | 8 | `tutor_assisted_continuation` (primary), `tutor_adoption`, `tutor_repeat_use`, `tutor_depth`, `tutor_entry_mix`, `tutor_check_uptake`, `tutor_completion_guardrail`, `tutor_reply_failure_latency` |
+| 2B — shaping (AL-340) | 8 | `shaping_yield` (primary), `shaping_adoption`, `proposal_acceptance`, `edit_shape_mix`, `undo_rate`, `depth_to_proposal`, `shaped_path_completion_guardrail`, `shaping_reply_failure_latency` |
+
+Two things to expect on the shaping set:
+
+- **`shaping_yield` reads empty for the first week after the flag flip.** It is
+  the phase's primary panel and it clamps to *closed* 7-day windows (a Change
+  applied an hour ago cannot have been engaged with yet, and would drag the
+  metric down exactly while adoption climbs — `activation_rate.sql`'s call,
+  made again). Deleting the single clamp line
+  (`AND start_timestamp < now() - INTERVAL '7 days'`) in a scratch copy is the
+  deliberate way to read that first week; the saved tile keeps the clamp.
+- **Read the two reply-latency panels side by side.**
+  `shaping_reply_failure_latency` is `tutor_reply_failure_latency` column for
+  column because both rails share one permit pool — a rise in both is the pool,
+  a rise in one is that rail.
+
+`LOGFIRE_TOKEN` must be set for any of this to have data (see *Optional*
+secrets above).
+
 ## Manual redeploy / rollback
 
 ```sh
@@ -384,7 +467,9 @@ its contents, so it keeps holding if the stack ever gains a real model.
 The smoke also sets `FEATURE_FLAG_DEFAULTS=tutor:on`, because Phase 2 ships dark and
 the tutor routes answer `404` while the `tutor` flag is off. That is the switch in
 front of the production configuration, not part of it — the same lever AL-270 pulls
-at launch.
+at launch (see [Launching a flagged phase](#launching-a-flagged-phase-al-270--al-370)).
+`shaping` is deliberately left off there: the one authenticated check is a tutor turn,
+and the transport it proves is the same stream both rails use.
 
 Both `migrate` and `app` boot with `ENV=production` (a shared YAML anchor, so they
 cannot drift), which arms the config guards — no `stub` model, real auth secrets
@@ -421,5 +506,8 @@ something else is holding 8000 (the only port the smoke publishes).
 | Path creation returns 503 | `OPENROUTER_API_KEY` unset — the rest of the app is unaffected. |
 | A tutor reply ends in `event: error` with `code: upstream_error` | The model call failed upstream — most often `OPENROUTER_API_KEY` unset or rejected (this is the *expected* outcome in the Compose smoke). Nothing is persisted, so the learner can simply ask again. |
 | The tutor's routes all answer `404` for a real account | The `tutor` flag resolves off for that caller. Check `FEATURE_FLAG_DEFAULTS`, the account's per-user override, and whether the email domain is in `ADMIN_EMAIL_DOMAINS`. |
+| The shaping routes all answer `404`, or the path view shows no shaping mark | The `shaping` flag resolves off for that caller — the same three checks, on its own key (the two flags are independent). Before AL-370 this is the expected state for every non-admin: see [Launching a flagged phase](#launching-a-flagged-phase-al-270--al-370). |
+| Sending a shaping message returns `409 conflict` | The path is not `ready` — there is no structure to shape yet. Reading the thread and the Change history still works. |
+| Apply or Undo returns `409` with a `details.reason` | Expected, first-class UX rather than an error: the reason names which rule fired (stale proposal, `not_latest`, `engaged`, `target_generating` …). The table of reasons is in [api.md](api.md), under *Shaping → Apply, Undo & the Change history*. |
 | Cert stuck / invalid | `fly certs check <domain>`; DNS matches `fly certs setup`; ownership TXT if behind a proxy. |
 | Scale-to-zero cold start | First request after idle wakes the machine. Acceptable for this app. **Note:** an in-flight generation does not survive the machine stopping — the reconciler re-claims it after `GENERATION_STALE_AFTER` on the next start (§5.4). |

@@ -102,7 +102,8 @@ Two pytest markers are registered in `pyproject.toml`:
   Shared vocabulary from PRD → test → trace only; there is **no** enforcement
   machinery (no packaged catalog, no coverage-verification job). Code review, not
   CI tooling, checks that a workflow change updates a meaningful test. Playwright
-  specs use `@w1`..`@w8` tags for the same purpose.
+  specs use the matching `@w1`..`@w21` tags for the same purpose (W10 is
+  reserved for the deferred selection-to-quote).
 
 ## E2E harness
 
@@ -114,7 +115,7 @@ with three projects:
 | ------- | ---- | --- |
 | `setup` | `tests/e2e/auth.setup.ts` | Signs in through the real OIDC code flow twice — once as the `dev` learner, once as `admin-dev` — and saves each session as storage state the journeys replay. |
 | `desktop` | `@smoke` only (`testIgnore: journeys/**`) | Keeps the harness honest on a second viewport without paying for the journeys twice. |
-| `mobile-390x844` | everything | The §12 phone viewport — the primary target surface, and the only one that runs W1–W8. |
+| `mobile-390x844` | everything | The §12 phone viewport — the primary target surface, and the only one that runs the journeys. |
 
 Its `webServer` block boots two processes (unless
 `BASE_URL` points at a running deployment):
@@ -126,9 +127,15 @@ Its `webServer` block boots two processes (unless
    `ENV=test` keeps the production stub-guard satisfied.
 2. **Dev frontend** — `vite`, proxying `/api` to the backend.
 
-Sentinel topics force branches deterministically for the failure/refusal
-journeys: `[force-refusal]` (W7), `[force-outline-failure]` /
-`[force-lesson-failure:N]` (W8) — see `services/stub_model.py`.
+Sentinels force branches deterministically. In a path's **topic**, for the
+failure/refusal journeys: `[force-refusal]` (W7), `[force-outline-failure]` /
+`[force-lesson-failure:N]` (W8). In a **message**, for the two rails: the
+tutor's `[force-tutor-check]` / `[force-tutor-failure]` /
+`[force-tutor-refusal]`, and shaping's `[force-proposal-add]` /
+`[force-proposal-revise]` / `[force-shaping-decline]` /
+`[force-shaping-failure]` (W17–W20). All of them live in
+`services/stub_model.py`, are stateless, and are stripped from what the learner
+sees.
 
 **Running locally:** `just compose-keycloak-up`, then `just test-e2e`. The suite
 signs in for real, so the recipe refuses to start without a reachable realm and
@@ -138,12 +145,14 @@ through `PW_CHROMIUM_PATH` (the managed download may be a different build). In
 CI, `E2E_DATABASE_URL` targets the Postgres service and Playwright installs its
 own matching browser, so that local branch is skipped.
 
-## The W1–W8 journeys (AL-090)
+## The journeys (AL-090, AL-260, AL-360)
 
-`tests/e2e/journeys/` holds one spec per PRD §8 workflow, tagged `@w1`..`@w8`
+`tests/e2e/journeys/` holds one spec per PRD §8 workflow, tagged `@w1`..`@w21`
 (Playwright tag annotations — `pnpm exec playwright test --grep @w3` runs one).
 They drive the SPA the way a learner does: real sign-in, real server, real
-Postgres, stub model.
+Postgres, stub model. The conventions below were set by Phase 1's `@w1`..`@w8`
+and hold for the tutor's (`@w9`, `@w11`..`@w16`) and shaping's (`@w17`..`@w21`)
+journeys too.
 
 - **Auth is real, not injected.** `auth.setup.ts` drives `/auth/login` → the
   realm's login form → `/auth/callback` and saves the resulting cookie as
@@ -170,6 +179,19 @@ Postgres, stub model.
   the `waitWithReload` / `expectRailStateInPlace` docstrings in
   `tests/e2e/fixtures/journey.ts`. Assertions never read a value once and
   compare: every one of them retries.
+- **The shaping journeys have three timing rules** (AL-360), each of them a
+  state to wait for rather than a sleep, and each learned from a flake:
+  1. **Wait for the Revision target to be `generated` before Apply or Undo.** A
+     lesson mid-write is refused (`409 target_generating`), and completing the
+     lesson before it is exactly what advances the prefetch window onto it —
+     `waitForLessonGenerated` is the gate (`fixtures/journey.ts`).
+  2. **Collapse the shaping rail before working the path rail.** At the phone
+     viewport the rail is a sheet *over* the path view, and ghost rows live only
+     while a Proposal is pending in the open thread — so a spec that walks into
+     a lesson calls `closeShapingRail` first and asserts against real rows.
+  3. **Close the Change history sheet before the rail.** The sheet covers the
+     conversation and the rail's own collapse control, so the two closes are
+     ordered: `closeChangeHistory`, then `closeShapingRail`.
 - **W6 uses two paths on one topic.** Proving the answer is hidden needs
   something to look for, and the correct answer is exactly what the learner may
   not see. Since the stub is deterministic in (topic, position), a second path on
