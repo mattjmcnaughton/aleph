@@ -1,3 +1,10 @@
+# [1.20.0](https://github.com/mattjmcnaughton/aleph/compare/v1.19.1...v1.20.0) (2026-08-01)
+
+
+### Features
+
+* **web:** apply, undo, and the change history UI (AL-331) ([544cff2](https://github.com/mattjmcnaughton/aleph/commit/544cff2b7c1615e6b742f094f06de82944f909bf)), closes [#141](https://github.com/mattjmcnaughton/aleph/issues/141) [#123](https://github.com/mattjmcnaughton/aleph/issues/123)
+
 ## [1.19.1](https://github.com/mattjmcnaughton/aleph/compare/v1.19.0...v1.19.1) (2026-08-01)
 
 
