@@ -19,17 +19,32 @@
 //
 // > **Scope note (AL-331 → AL-360).** The epic gives AL-360 the whole W17–W21
 // > set. This file and `w19.spec.ts` are the apply/undo half, landed with the UI
-// > they drive so it is not merged unexercised; AL-360 owns extending them
-// > (W18's revised content, W20's declined edit, W21's guardrail) rather than
-// > writing a second suite beside them.
+// > they drive so it is not merged unexercised; AL-360 extended them in place
+// > (the second test below is its half of W17 — the added lessons generating and
+// > completing) and added `w18`, `w20` and `w21` beside them.
 
 import { expect, test } from "@playwright/test";
 import { DEV_STORAGE_STATE } from "../fixtures/auth";
-import { createPath, railLessons, uniqueTopic } from "../fixtures/journey";
+import {
+  answerQuickCheck,
+  backToPath,
+  completeLessonAt,
+  createPath,
+  expectLessonContent,
+  expectProgressInPlace,
+  expectRailState,
+  expectRailStateInPlace,
+  markComplete,
+  openLessonAt,
+  railLessons,
+  uniqueTopic,
+} from "../fixtures/journey";
 import {
   ADDED_LESSON_TITLE_PREFIX,
   ADDITION_LESSON_COUNT,
+  appliedLessons,
   applyProposal,
+  applyProposalReadingResponse,
   askForAddition,
   closeShapingRail,
   fetchChanges,
@@ -37,8 +52,20 @@ import {
   openShapingRail,
   proposalCards,
 } from "../fixtures/shaping";
+// The Phase 1 wire reads live in `tutor.ts` because W12's bit-identical
+// comparison is what first needed them; they read a *lesson*, not a rail.
+import { fetchLesson, openLessonId } from "../fixtures/tutor";
 
 test.use({ storageState: DEV_STORAGE_STATE });
+
+/**
+ * What an added lesson's `generation_state` may be in apply's own response: not
+ * yet written. `ungenerated` is what apply inserts; `generating` is possible
+ * only because the same request kicks the prefetch driver, which may claim the
+ * row before the body is serialized. `generated` is the one thing it can never
+ * be — that would mean apply waited on content it is not allowed to wait on.
+ */
+const UNWRITTEN = ["ungenerated", "generating"];
 
 test.describe("W17 shape your path — add lessons", { tag: "@w17" }, () => {
   test("a Proposal previews as ghost rows and Apply turns them into real lessons", async ({
@@ -82,6 +109,65 @@ test.describe("W17 shape your path — add lessons", { tag: "@w17" }, () => {
 
     // The card says so, and offers the way back to the thing it changed.
     await expect(card.getByTestId("shaping-rail-proposal-view")).toBeVisible();
+  });
+
+  test("added lessons arrive unwritten, generate on demand, and complete", async ({ page }) => {
+    const pathId = await createPath(page, uniqueTopic("Reef ecology"));
+    const total = await railLessons(page).count();
+
+    // --- progress the Addition has to leave alone ----------------------------
+    await openLessonAt(page, 0);
+    const engagedId = await openLessonId(page);
+    await expectLessonContent(page);
+    await answerQuickCheck(page, 0);
+    await markComplete(page);
+    await backToPath(page);
+    const engagedBefore = await fetchLesson(page, engagedId);
+
+    await openShapingRail(page);
+    const card = await askForAddition(page);
+    // The ghosts sit *after* the finished lesson: an Addition lands at or after
+    // the learner's first non-engaged position, never in front of work already
+    // done (CONTEXT.md).
+    await expect(ghostRows(page)).toHaveCount(ADDITION_LESSON_COUNT);
+    await expect(railLessons(page).nth(0)).toHaveAttribute("data-unlock-state", "complete");
+
+    const applied = await applyProposalReadingResponse(page, card);
+
+    // --- what apply actually landed ------------------------------------------
+    // Read off the response, not the rail: apply schedules the prefetch driver
+    // in the same request, so by the time any assertion reaches the DOM the rows
+    // can already be claimed. This is the moment the claim is about — a Change
+    // is applied when the *structure* lands (PRD §5.7), and what lands is
+    // ordinary unwritten lessons for Phase 1 to fill in.
+    expect(applied.change.status).toBe("applied");
+    const added = appliedLessons(applied).filter((lesson) =>
+      lesson.title.startsWith(ADDED_LESSON_TITLE_PREFIX),
+    );
+    expect(added).toHaveLength(ADDITION_LESSON_COUNT);
+    for (const lesson of added) {
+      expect(UNWRITTEN).toContain(lesson.generation_state);
+    }
+
+    // --- the learner walks into them -----------------------------------------
+    await closeShapingRail(page);
+    await expect(railLessons(page)).toHaveCount(total + ADDITION_LESSON_COUNT);
+    // The first added lesson is the next one open, and it is generated because
+    // the learner walked to it — the same on-demand path W3 walks.
+    await expectRailState(page, 1, "data-unlock-state", "available");
+    await completeLessonAt(page, 1);
+    await expectRailStateInPlace(page, 1, "data-unlock-state", "complete");
+    await expectProgressInPlace(
+      page.getByTestId("path-progress"),
+      2,
+      total + ADDITION_LESSON_COUNT,
+    );
+
+    // --- and the lesson finished before any of this never moved --------------
+    // Whole-payload equality: title, passage, Quick check, the recorded Attempt
+    // with its keyed reveal, completion.
+    expect(await fetchLesson(page, engagedId)).toEqual(engagedBefore);
+    expect((await fetchChanges(page, pathId)).changes).toHaveLength(1);
   });
 
   test("Not now leaves the path exactly as it was, and writes nothing", async ({ page }) => {
