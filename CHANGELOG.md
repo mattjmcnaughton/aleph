@@ -1,3 +1,10 @@
+# [1.18.0](https://github.com/mattjmcnaughton/aleph/compare/v1.17.0...v1.18.0) (2026-08-01)
+
+
+### Features
+
+* **api:** apply-proposal, undo, and the change history (AL-321) ([c7ade5f](https://github.com/mattjmcnaughton/aleph/commit/c7ade5f869d7f8dfcfc921a1fb84d4d701125037)), closes [#121](https://github.com/mattjmcnaughton/aleph/issues/121)
+
 # [1.17.0](https://github.com/mattjmcnaughton/aleph/compare/v1.16.0...v1.17.0) (2026-08-01)
 
 
