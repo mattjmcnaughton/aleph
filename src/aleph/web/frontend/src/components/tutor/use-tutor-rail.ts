@@ -30,7 +30,6 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ApiError } from "../../lib/api";
 import { sessionQueryOptions } from "../../lib/auth";
 import { useFeatureFlag } from "../../lib/feature-flags";
 import {
@@ -42,9 +41,11 @@ import {
   conversationQueryOptions,
 } from "../../lib/tutor";
 import {
+  CLEAR_FAILURE_COPY,
   type TutorCheck,
   type TutorMessageSource,
-  TutorStreamError,
+  failureCopy,
+  isAbort,
   streamTutorReply,
 } from "../../lib/tutor-stream";
 
@@ -63,15 +64,11 @@ export const TUTOR_SUGGESTIONS: readonly string[] = [
   "Show me a real example",
 ] as const;
 
-/** `TutorMessageStr` (docs/api.md) — the server bound, enforced here too. */
-export const TUTOR_MESSAGE_MAX_LENGTH = 2000;
-
-/** Transport-level failure copy. The only case where blaming the connection is honest. */
-const NETWORK_FAILURE_COPY = "The tutor didn't answer. Check your connection and send it again.";
-
-/** New conversation failed. Nothing was cleared, so the offer is to try clearing again. */
-const CLEAR_FAILURE_COPY =
-  "That didn't go through — this conversation is still here. Try clearing it again.";
+// The composer's server bound, and the two pieces of failure copy, now live with
+// the stream client they describe (`lib/tutor-stream.ts`) — both rails word a
+// failure the same way, and both enforce the same `TutorMessageStr`. Re-exported
+// here so `tutor-rail.tsx` keeps importing it from the hook it belongs to.
+export { TUTOR_MESSAGE_MAX_LENGTH } from "../../lib/tutor-stream";
 
 export type TutorRailStatus = "idle" | "streaming" | "failed";
 
@@ -462,32 +459,4 @@ export function useTutorRail({
     isAdmin: session.data?.user?.is_admin ?? false,
     modelAllowlist: session.data?.user?.model_allowlist ?? [],
   };
-}
-
-/**
- * Stop, not failure. Matched on `name` rather than `instanceof DOMException`:
- * the rejection crosses realms (the fetch's abort reason is minted outside the
- * document's global), and an `instanceof` that is true in a browser can be false
- * under jsdom — which would turn every stop into a spurious error state.
- */
-function isAbort(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    (error as { name?: string }).name === "AbortError"
-  );
-}
-
-/**
- * Learner-facing copy for a failed reply. The server already words its own
- * failures for a learner (never provider text) and carries a `code`, so its
- * message is used verbatim — that is what lets an upstream budget failure avoid
- * "check your connection", the wording gap PRD §5.7 names. Only a genuine
- * transport failure gets the connection copy.
- */
-function failureCopy(error: unknown): string {
-  if (error instanceof TutorStreamError || error instanceof ApiError) {
-    return error.message;
-  }
-  return NETWORK_FAILURE_COPY;
 }
