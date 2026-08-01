@@ -246,22 +246,80 @@ class CollectingSpawn:
 
     Production passes ``asyncio.create_task`` (AL-041 wraps it with a registry +
     semaphore); tests need to await the fire-and-forget work deterministically.
+
+    **Recording is not sequencing.** By default a spawned task is scheduled the
+    moment it is handed over, exactly as in production — so it runs at the test's
+    next ``await``, whether or not the test has reached its ``drain()`` yet. That
+    is right for a suite whose subject is the background work itself (poll until
+    ready, reconcile a stale row): the task should make progress on its own.
+
+    It is wrong for a suite that wants to observe what a *request* wrote before
+    the follow-up work it triggered can touch it. ``hold=True`` is for those:
+    every spawned task parks until :meth:`drain` opens the gate, which turns
+    "immediately after the response" into a moment that actually exists.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, hold: bool = False) -> None:
         self.tasks: list[asyncio.Task[Any]] = []
+        self._hold = hold
+        self._gate = asyncio.Event()
+        # Held coroutines that have not started running yet. Tracked so teardown
+        # can close them: a coroutine that is cancelled before its wrapper is
+        # ever scheduled has nowhere to clean itself up, and the garbage
+        # collector complains (``coroutine ... was never awaited``) about work
+        # the test deliberately declined to run.
+        self._unstarted: set[Coroutine[Any, Any, Any]] = set()
 
     def __call__(self, coro: Coroutine[Any, Any, Any]) -> asyncio.Task[Any]:
-        task = asyncio.create_task(coro)
+        if self._hold:
+            self._unstarted.add(coro)
+            task = asyncio.create_task(self._parked(coro))
+        else:
+            task = asyncio.create_task(coro)
         self.tasks.append(task)
         return task
 
+    async def _parked(self, coro: Coroutine[Any, Any, Any]) -> Any:
+        """Hold ``coro`` at the gate, then run it whole once ``drain`` opens it."""
+        try:
+            await self._gate.wait()
+        except BaseException:
+            # Cancelled at the gate: this frame owns the coroutine, so it is the
+            # one that has to close it.
+            self._unstarted.discard(coro)
+            coro.close()
+            raise
+        self._unstarted.discard(coro)
+        return await coro
+
     async def drain(self) -> None:
         """Await every spawned task (including ones spawned while draining)."""
+        self._gate.set()
         while self.tasks:
             batch = self.tasks
             self.tasks = []
             await asyncio.gather(*batch)
+        # Re-arm: work spawned *after* this drain is parked like the work before
+        # it, so a test that drains twice observes the same thing both times.
+        self._gate.clear()
+
+    async def cancel_pending(self) -> None:
+        """Drop whatever the test never drained. Teardown for ``hold`` suites.
+
+        A parked task waits on a gate nobody will open again, so letting the loop
+        close over it prints ``Task was destroyed but it is pending``. Cancelling
+        is the honest end: the test said nothing about that work, so it does not
+        happen.
+        """
+        for task in self.tasks:
+            task.cancel()
+        await asyncio.gather(*self.tasks, return_exceptions=True)
+        self.tasks = []
+        # Whatever is still here was cancelled before its wrapper ever ran, so
+        # no frame got the chance to close it.
+        for coro in self._unstarted:
+            coro.close()
+        self._unstarted.clear()
 
 
 def stub_resolver() -> Callable[[str], Model]:

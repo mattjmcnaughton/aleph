@@ -75,6 +75,8 @@ from ._shaping_send_harness import (
 from .conftest import CollectingSpawn, stub_resolver
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
+
     from fastapi import FastAPI
 
 
@@ -84,8 +86,8 @@ if TYPE_CHECKING:
 
 
 @pytest.fixture(autouse=True)
-def spawn(monkeypatch: pytest.MonkeyPatch) -> CollectingSpawn:
-    """The generation singleton's seams: the stub model + a drainable spawn.
+async def spawn(monkeypatch: pytest.MonkeyPatch) -> AsyncGenerator[CollectingSpawn]:
+    """The generation singleton's seams: the stub model + a *parked* spawn.
 
     Autouse because **apply answers with the refreshed path**, which goes through
     the same read seam ``GET /paths/{id}`` uses — and that seam is a *trigger*
@@ -93,13 +95,25 @@ def spawn(monkeypatch: pytest.MonkeyPatch) -> CollectingSpawn:
     generation against a real provider just by applying a proposal. Draining the
     collector is also how the "and then Phase 1 generates it" half of W17/W18 is
     asserted deterministically.
+
+    ``hold=True`` is what makes "immediately after apply" a moment that exists.
+    Apply's own response triggers the resume, and a spawned task is runnable from
+    that instant — so it lands at this test's very next ``await``, which is the
+    ``await`` that reads the rows back. The assertions here are about what apply
+    *wrote* (an Addition's rows are ``ungenerated``; a Revision's target is reset
+    and its passage cleared), and every one of them races the resume's claim to
+    ``generating`` without the gate. Generation still runs, on the ``drain()``
+    that asks for it — which is the other half of W17/W18, unchanged.
     """
-    collector = CollectingSpawn()
+    collector = CollectingSpawn(hold=True)
     monkeypatch.setattr(
         gen_module.generation_orchestrator, "_resolve_model", stub_resolver()
     )
     monkeypatch.setattr(gen_module.generation_orchestrator, "_spawn", collector)
-    return collector
+    yield collector
+    # Most cases here never drain — they assert on apply's own writes and have
+    # no interest in the generation it triggered. Their parked tasks end here.
+    await collector.cancel_pending()
 
 
 @pytest.fixture(autouse=True)
