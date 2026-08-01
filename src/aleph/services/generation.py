@@ -72,6 +72,7 @@ from aleph.agents.outline import (
     Refusal,
     UnitOutline,
     build_outline_agent,
+    build_outline_prompt,
 )
 from aleph.config import settings as global_settings
 from aleph.db import new_session
@@ -222,10 +223,17 @@ class _OutlineClaim:
 
     ``account_id`` rides the claim so the fenced ``outline_generated`` emissions
     carry it without a second DB read (precedent: :class:`_LessonContext`).
+    ``guidance`` is the learner's optional Guidance (CONTEXT.md), read off the
+    row alongside ``topic``/``level`` — persisted rather than carried only in
+    memory, so a DB-driven resume/reconcile re-runs the outline with the same
+    guidance a crashed attempt saw (§5.4/D6, the same rationale as
+    ``model_outline``). ``None``/blank means "no guidance given";
+    :func:`build_outline_prompt` collapses that to the bare topic.
     """
 
     fence: datetime.datetime
     topic: str
+    guidance: str | None
     level: Level
     model_outline: str | None
     account_id: uuid.UUID
@@ -344,6 +352,7 @@ class GenerationOrchestrator:
         user_id: uuid.UUID,
         topic: str,
         level: Level,
+        guidance: str | None = None,
         model_outline: str | None = None,
         model_lesson: str | None = None,
     ) -> Path:
@@ -352,6 +361,13 @@ class GenerationOrchestrator:
         The caller (AL-050) turns the returned row into a ``202 {id}`` and
         returns immediately while the outline generates in the background. The
         spawn goes through the injected seam (AL-041 wraps it).
+
+        ``guidance`` is the learner's optional Guidance (CONTEXT.md): a second
+        generation input alongside ``topic``/``level``. **Persisted on the row**
+        (not carried in memory to the spawned task) for the same reason the
+        model overrides are — the DB-driven resume/reconcile (§5.4/D6) must
+        re-run the outline with it, not with a blank guidance the in-memory-only
+        version would lose across a crash/restart.
 
         ``model_outline``/``model_lesson`` are an admin's picker overrides
         (AL-052, §5.3): already validated (admin-only, allowlist-bound) at the
@@ -365,6 +381,7 @@ class GenerationOrchestrator:
                 user_id=user_id,
                 topic=topic,
                 level=level,
+                guidance=guidance,
                 model_outline=model_outline,
                 model_lesson=model_lesson,
             )
@@ -467,7 +484,11 @@ class GenerationOrchestrator:
             # (acquired before the claim, §5.4, so queue time never counts against
             # the per-call budget); here we only bound the model call itself.
             async with asyncio.timeout(self._outline_timeout):
-                run = await agent.run(claim.topic, deps=deps, model=model)
+                run = await agent.run(
+                    build_outline_prompt(claim.topic, claim.guidance),
+                    deps=deps,
+                    model=model,
+                )
         except TimeoutError:
             await self._emit_outline_failed(path_id, fence, account_id, started)
             return False
@@ -536,6 +557,11 @@ class GenerationOrchestrator:
             claim = repo.claim_outline_for_retry if retry else repo.claim_outline
             fence = await claim(path_id)
             topic, level, model_outline = path.topic, path.level, path.model_outline
+            # Guidance rides the claim alongside topic/level (§5.4/D6): reading
+            # it off the row, not a request, is what makes a DB-driven resume or
+            # reconcile re-run the outline with the same guidance a crashed
+            # attempt saw.
+            guidance = path.guidance
             # ``user_id`` rides the claim so the fenced ``outline_generated``
             # emissions carry ``account_id`` without a second read.
             account_id = path.user_id
@@ -545,6 +571,7 @@ class GenerationOrchestrator:
         return _OutlineClaim(
             fence=fence,
             topic=topic,
+            guidance=guidance,
             level=level,
             model_outline=model_outline,
             account_id=account_id,
@@ -888,11 +915,25 @@ class GenerationOrchestrator:
         immutable). The repo returns each passage's real unit **and** lesson title
         (joined from ``units``), so ``PriorPassage``'s prompt prefix places each
         passage in the path (``[Unit / Lesson]``, §5.2) — the passage *text*
-        carries continuity, the titles are the locator. This is the sole place the
-        upgrade path (running summary / retrieval, deferred D7) would slot in.
+        carries continuity, the titles are the locator.
+
+        Windowed to the most recent ``continuity_passages_max`` passages
+        (``self._config``, plumbed the same way ``_outline_caps_from``/
+        ``_lesson_caps_from`` plumb the other caps — the agent layer never reads
+        config). Without a window this grows with path position: harmless at
+        the old 30-lesson path cap, unbounded once paths can reach 200 lessons.
+        Nothing is structurally lost by dropping older passages: the lesson
+        prompt already carries the full outline (unit + lesson titles) via
+        ``_load_outline``, so lessons older than the window are still *named*
+        in the prompt — they just stop contributing their full passage text.
+        This is the sole place the upgrade path (running summary / retrieval,
+        deferred D7) would slot in.
         """
         triples = await self._lessons(session).generated_passages_before(
             path_id=path_id, position_in_path=position_in_path
+        )
+        windowed = _window_prior_triples(
+            triples, window=self._config.continuity_passages_max
         )
         return tuple(
             PriorPassage(
@@ -900,7 +941,7 @@ class GenerationOrchestrator:
                 lesson_title=lesson_title,
                 read_passage=passage,
             )
-            for unit_title, lesson_title, passage in triples
+            for unit_title, lesson_title, passage in windowed
         )
 
     async def _load_lesson_context(
@@ -1162,6 +1203,24 @@ class GenerationOrchestrator:
         async with self._session_factory() as session:
             lesson = await self._lessons(session).get(lesson_id)
             return lesson.path_id if lesson is not None else None
+
+
+def _window_prior_triples(
+    triples: list[tuple[str, str, str]], *, window: int
+) -> list[tuple[str, str, str]]:
+    """Keep only the most recent ``window`` prior passages, oldest-first (D7).
+
+    Pulled out of :meth:`GenerationOrchestrator.build_prior_context` as a pure
+    function purely so the truncation rule is unit-testable without a DB
+    session (``tests/unit/test_generation_service.py``) — ``triples`` is
+    already ascending by position (the repository's ``ORDER BY``), so
+    "most recent N" is just "last N", and slicing preserves that order. A
+    non-positive window (defensive; config default is 30) is treated as "no
+    window" rather than truncating to nothing.
+    """
+    if window <= 0:
+        return triples
+    return triples[-window:]
 
 
 # --- caps construction (from Settings, explicit — the agents never read config) --

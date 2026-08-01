@@ -143,7 +143,8 @@ class LessonRepository:
         The §6 poll target (``GET /paths/{id}``) needs each lesson's effective
         generation state (stale ``generating`` → failed). Computing that in SQL
         here — one grouped-free query over the path — avoids N per-id
-        :meth:`effective_state` round-trips for a 30-lesson path.
+        :meth:`effective_state` round-trips for a path that can run up to
+        ``MAX_LESSONS_PER_PATH`` (200) lessons.
         """
         result = await self.session.execute(
             select(Lesson, self._effective_state_expr().label("effective_state"))

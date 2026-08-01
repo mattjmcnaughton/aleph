@@ -205,7 +205,24 @@ export interface PathProgress {
 /** `GET /api/v1/paths/{id}` body — the poll target (docs/api.md). */
 export interface PathDetail {
   id: string;
+  /**
+   * The generation input — frozen after creation, never learner-editable. Kept
+   * on the payload for the surfaces that must still read it (e.g. the shaper's
+   * own prompt, server-side); display sites read `title` instead.
+   */
   topic: string;
+  /**
+   * The learner-editable display label (docs/api.md). Always populated — the
+   * server applies the topic fallback, so the client never respells it. This is
+   * what every display site (breadcrumbs, sidebar, the h1) renders.
+   */
+  title: string;
+  /**
+   * Free-text creation input alongside `topic` (docs/api.md), null when none was
+   * given. Frozen after creation like `topic` — display-only here, never
+   * re-derived or edited from this surface.
+   */
+  guidance: string | null;
   level: Level;
   status: PathStatus;
   /** Non-null **only** when `status == "refused"` (docs/api.md). */
@@ -223,6 +240,8 @@ export interface PathDetail {
 export interface PathSummary {
   id: string;
   topic: string;
+  /** The learner-editable display label — always populated (docs/api.md); see `PathDetail.title`. */
+  title: string;
   level: Level;
   /** Effective status — a stale `generating` reads as `failed` (docs/api.md). */
   status: PathStatus;
@@ -246,6 +265,13 @@ export interface PathCreated {
 export interface CreatePathInput {
   topic: string;
   level: Level;
+  /**
+   * Free-text creation input alongside `topic` (docs/api.md, `GuidanceStr`,
+   * 1-4000 chars). **Optional in the absent sense** — `buildCreatePathInput`
+   * omits the key entirely for a blank/whitespace-only textarea rather than
+   * sending an empty string, mirroring the model-slot rule below.
+   */
+  guidance?: string;
   /**
    * Admin model-picker overrides (AL-052/AL-065, §5.3/D14, docs/api.md): bare
    * OpenRouter ids drawn from the session's `user.model_allowlist`, pinning the
@@ -276,6 +302,21 @@ export function getPath(id: string): Promise<PathDetail> {
 /** Re-claim a `failed` outline (§5.6/W8). Terminal paths are a silent no-op. */
 export function retryPath(id: string): Promise<PathCreated> {
   return apiFetch<PathCreated>(apiV1Path(`/paths/${id}/retry`), { method: "POST" });
+}
+
+/**
+ * Rename a path's learner-facing title (docs/api.md `PATCH /paths/{id}`). Never
+ * `topic` — the title is the only thing this endpoint can touch, and the server
+ * re-applies its own fallback, so the client sends exactly what was typed and
+ * trusts nothing else. Returns the full `PathDetail` (the same shape as the poll
+ * target), so the caller can write the result straight into the cached query.
+ */
+export function updatePathTitle(input: { pathId: string; title: string }): Promise<PathDetail> {
+  return apiFetch<PathDetail>(apiV1Path(`/paths/${input.pathId}`), {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title: input.title }),
+  });
 }
 
 /** The learner's paths, newest first — the switcher's payload (§5.5). */

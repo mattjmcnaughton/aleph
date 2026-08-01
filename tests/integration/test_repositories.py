@@ -138,6 +138,59 @@ async def test_path_repository_crud_round_trip() -> None:
 
 
 @pytest.mark.anyio
+async def test_path_repository_create_persists_guidance() -> None:
+    async with db.async_session() as session:
+        user = await create_user(session)
+        repo = PathRepository(session)
+        path = await repo.create(
+            user_id=user.id,
+            topic="US healthcare",
+            level=Level.NEW_TO_IT,
+            guidance="Focus on the payer side, skip provider billing.",
+        )
+        await session.commit()
+        path_id = path.id
+
+    async with db.async_session() as session:
+        fetched = await PathRepository(session).get(path_id)
+        assert fetched is not None
+        assert fetched.guidance == "Focus on the payer side, skip provider billing."
+        assert fetched.title is None  # never set at create; falls back to topic
+
+
+@pytest.mark.anyio
+async def test_path_repository_set_title_renames_and_needs_a_refresh() -> None:
+    async with db.async_session() as session:
+        user = await create_user(session)
+        path = await PathRepository(session).create(
+            user_id=user.id, topic="US healthcare", level=Level.NEW_TO_IT
+        )
+        await session.commit()
+        path_id = path.id
+
+    async with db.async_session() as session:
+        repo = PathRepository(session)
+        # Load an ORM instance BEFORE the rename, exactly as the PATCH route's
+        # ``OwnedPath`` dependency does — this is the regression the route's
+        # ``session.refresh`` guards against.
+        loaded = await repo.get(path_id)
+        assert loaded is not None
+
+        await repo.set_title(path_id, title="US healthcare, payer side")
+        await session.commit()
+
+        await session.refresh(loaded)
+        assert loaded.title == "US healthcare, payer side"
+        assert loaded.display_title == "US healthcare, payer side"
+
+        # Durable: a fresh read agrees, and ``topic`` is untouched.
+        reloaded = await repo.get(path_id)
+        assert reloaded is not None
+        assert reloaded.title == "US healthcare, payer side"
+        assert reloaded.topic == "US healthcare"
+
+
+@pytest.mark.anyio
 async def test_path_delete_cascades_tree() -> None:
     async with db.async_session() as session:
         user = await create_user(session)

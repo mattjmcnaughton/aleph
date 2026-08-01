@@ -25,8 +25,8 @@ from aleph.services.stub_model import (
 )
 
 # §14 caps the stub outputs must respect.
-_MAX_UNITS = 6
-_MAX_LESSONS_PER_PATH = 30
+_MAX_UNITS = 25
+_MAX_LESSONS_PER_PATH = 200
 # §14 Read-passage word band (``READ_PASSAGE_WORDS`` ~200-500).
 _PASSAGE_MIN_WORDS = 200
 _PASSAGE_MAX_WORDS = 500

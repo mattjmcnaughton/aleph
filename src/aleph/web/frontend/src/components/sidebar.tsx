@@ -127,7 +127,7 @@ export function SwitcherSection({ currentPathId }: { currentPathId?: string }) {
                       : "flex items-center gap-2.5 rounded-md px-3 py-2 text-sm text-mist transition-colors hover:bg-surface hover:text-porcelain"
                   }
                 >
-                  <span className="min-w-0 flex-1 truncate">{path.topic}</span>
+                  <span className="min-w-0 flex-1 truncate">{path.title}</span>
                   <span
                     className={`shrink-0 font-mono text-[11px] ${current ? "text-teal" : "text-slate"}`}
                   >
@@ -165,7 +165,7 @@ export function OutlineSection({
   return (
     <div>
       <div className="mb-1.5 flex items-baseline justify-between gap-2">
-        <p className="min-w-0 truncate text-sm font-semibold text-porcelain">{detail.topic}</p>
+        <p className="min-w-0 truncate text-sm font-semibold text-porcelain">{detail.title}</p>
         <span className="shrink-0 font-mono text-[11px] text-slate">{percent}%</span>
       </div>
       <div className="mb-5 h-[5px] overflow-hidden rounded-full bg-porcelain/10">

@@ -22,7 +22,7 @@ import {
   type PathSummary,
   type PathUnit,
 } from "../lib/api";
-import { TOPIC_MAX_LENGTH } from "../lib/onboarding";
+import { PATH_TITLE_MAX_LENGTH, TOPIC_MAX_LENGTH } from "../lib/onboarding";
 import { ADMIN_MODEL_ALLOWLIST } from "./models";
 
 // --- Reusable path-view fixtures (AL-062) -----------------------------------
@@ -181,6 +181,15 @@ const REFUSAL_MESSAGE =
 interface StoredPath {
   id: string;
   topic: string;
+  /**
+   * The learner-editable display label. `undefined` until a rename PATCH lands,
+   * so `detailFor`/`summaryFor` can apply the identical topic fallback the real
+   * server applies — a fixture that never renames a path must not have to spell
+   * out `title: topic` itself.
+   */
+  title?: string;
+  /** Free-text creation input (docs/api.md), null when none was given. */
+  guidance: string | null;
   level: Level;
   /** The terminal status this path resolves to once `pollsRemaining` hits 0. */
   resolution: PathStatus;
@@ -201,6 +210,8 @@ interface PathsConfig {
   retryFails: boolean;
   /** When true, `DELETE /paths/{id}` raises a generic `500` (AL-064/W5). */
   deleteFails: boolean;
+  /** When true, `PATCH /paths/{id}` (rename) raises a generic `500`. */
+  renameFails: boolean;
   /**
    * Milliseconds `DELETE /paths/{id}` waits before responding. Gives a test a
    * real in-flight window — the only way to observe which row reads "Deleting…".
@@ -221,6 +232,7 @@ const defaultConfig: PathsConfig = {
   retryRateLimited: false,
   retryFails: false,
   deleteFails: false,
+  renameFails: false,
   deleteDelayMs: 0,
   modelAllowlist: [...ADMIN_MODEL_ALLOWLIST],
 };
@@ -238,6 +250,9 @@ const deleted: string[] = [];
 const createBodies: Array<Record<string, unknown>> = [];
 /** How many times `GET /paths` was served — lets a test see the poll stop. */
 let listRequests = 0;
+/** How many times `PATCH /paths/{id}` (rename) was served — did Escape/Cancel
+ *  really send nothing, as opposed to a request that merely resolved fast? */
+let renameRequests = 0;
 
 /** Reset store + config between tests (wired into tests/setup.ts). */
 export function resetPaths(): void {
@@ -247,6 +262,7 @@ export function resetPaths(): void {
   deleted.length = 0;
   createBodies.length = 0;
   listRequests = 0;
+  renameRequests = 0;
 }
 
 /**
@@ -261,6 +277,11 @@ export function createPathBodies(): Array<Record<string, unknown>> {
 /** How many `GET /paths` the fake has served (the switcher's poll count). */
 export function pathsListRequestCount(): number {
   return listRequests;
+}
+
+/** How many `PATCH /paths/{id}` (rename) requests the fake has served. */
+export function pathRenameRequestCount(): number {
+  return renameRequests;
 }
 
 /**
@@ -292,6 +313,9 @@ export function seedPath(path: {
   id: string;
   topic: string;
   level: Level;
+  /** Display label; omit to exercise the topic fallback (the common case). */
+  title?: string;
+  guidance?: string | null;
   resolution?: PathStatus;
   pollsRemaining?: number;
   /** Custom outline for a `ready` path (the rail fixtures above). */
@@ -300,6 +324,8 @@ export function seedPath(path: {
   store.set(path.id, {
     id: path.id,
     topic: path.topic,
+    title: path.title,
+    guidance: path.guidance ?? null,
     level: path.level,
     resolution: path.resolution ?? "ready",
     pollsRemaining: path.pollsRemaining ?? 0,
@@ -335,6 +361,11 @@ function detailFor(path: StoredPath): PathDetail {
   return {
     id: path.id,
     topic: path.topic,
+    // The real server's fallback (docs/api.md): `title` is always populated,
+    // never absent — a fixture that never renamed the path echoes its topic,
+    // exactly like an untouched path fresh out of `POST /paths`.
+    title: path.title ?? path.topic,
+    guidance: path.guidance,
     level: path.level,
     status,
     refusal_message: status === "refused" ? REFUSAL_MESSAGE : null,
@@ -354,6 +385,7 @@ function summaryFor(path: StoredPath): PathSummary {
   return {
     id: detail.id,
     topic: detail.topic,
+    title: detail.title,
     level: detail.level,
     status: detail.status,
     progress: detail.progress,
@@ -406,6 +438,25 @@ function topicTooLongEnvelope() {
   );
 }
 
+/**
+ * `422 validation_error` for a blank or over-long title — `PathTitleStr`
+ * (`dtos/paths.py`, 1-200 chars stripped). The client already trims/caps
+ * before sending, so this exists to catch a client that stops doing that
+ * (F10) rather than to be a realistic day-to-day response.
+ */
+function titleInvalidEnvelope() {
+  return HttpResponse.json(
+    {
+      error: {
+        code: "validation_error",
+        message: `Title must be 1-${PATH_TITLE_MAX_LENGTH} characters.`,
+        request_id: "test-request-id",
+      },
+    },
+    { status: 422 },
+  );
+}
+
 function serverErrorEnvelope() {
   return HttpResponse.json(
     {
@@ -424,6 +475,7 @@ export const pathsHandlers = [
     const body = (await request.json()) as Record<string, unknown> & {
       topic: string;
       level: Level;
+      guidance?: string;
     };
     createBodies.push({ ...body });
     // Request-body validation comes first, as Pydantic's does: an over-long
@@ -449,6 +501,7 @@ export const pathsHandlers = [
     store.set(id, {
       id,
       topic: body.topic,
+      guidance: body.guidance ?? null,
       level: body.level,
       resolution: resolutionForTopic(body.topic),
       pollsRemaining: config.pollsBeforeResolve,
@@ -505,6 +558,38 @@ export const pathsHandlers = [
       path.pollsRemaining -= 1;
     }
     return HttpResponse.json(detail);
+  }),
+
+  http.patch(`${API_V1_BASE}/paths/:id`, async ({ request, params }) => {
+    // Not found first, and uncounted: a PATCH to a path this fake never had
+    // did no rename work, so it should not read as one on `renameRequests`
+    // (F10) — mirrors the real route's `OwnedPath` 404, which runs before any
+    // write.
+    const path = store.get(params.id as string);
+    if (!path) {
+      return HttpResponse.json(
+        { error: { code: "not_found", message: "Path not found." } },
+        { status: 404 },
+      );
+    }
+    renameRequests += 1;
+    if (config.renameFails) {
+      return serverErrorEnvelope();
+    }
+    const body = (await request.json()) as { title?: string };
+    // `PathTitleStr` (docs/api.md): required, 1-200 chars, stripped
+    // server-side. A blank/over-long title is `422 validation_error`, not a
+    // silent no-op (F10) — the fake used to swallow both and echo the OLD
+    // title back with a `200`, which would hide a client that stopped
+    // trimming/capping before sending.
+    const trimmed = body.title?.trim();
+    if (!trimmed || trimmed.length > PATH_TITLE_MAX_LENGTH) {
+      return titleInvalidEnvelope();
+    }
+    path.title = trimmed;
+    // Echoes the full detail — the same shape `GET /paths/{id}` returns
+    // (docs/api.md) — so the caller can write it straight into the poll cache.
+    return HttpResponse.json(detailFor(path));
   }),
 
   http.post(`${API_V1_BASE}/paths/:id/retry`, ({ params }) => {

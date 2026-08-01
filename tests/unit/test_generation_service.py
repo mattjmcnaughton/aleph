@@ -16,6 +16,7 @@ from aleph.services.generation import (
     AGENT_LEVEL,
     _lesson_caps_from,
     _outline_caps_from,
+    _window_prior_triples,
 )
 
 
@@ -40,6 +41,29 @@ def test_lesson_caps_built_from_settings() -> None:
     caps = _lesson_caps_from(settings)
     assert caps.passage_words_min == 150
     assert caps.passage_words_max == 400
+
+
+def test_window_prior_triples_truncates_to_the_most_recent() -> None:
+    # F2/D7: a path longer than the window keeps only the tail, still ascending
+    # (the repository already returns ascending order — slicing must preserve it).
+    triples = [("Unit 1", f"Lesson {i}", f"passage {i}") for i in range(1, 6)]
+    assert _window_prior_triples(triples, window=2) == [
+        ("Unit 1", "Lesson 4", "passage 4"),
+        ("Unit 1", "Lesson 5", "passage 5"),
+    ]
+
+
+def test_window_prior_triples_unchanged_when_shorter_than_the_window() -> None:
+    triples = [("Unit 1", "Lesson 1", "passage 1"), ("Unit 1", "Lesson 2", "passage 2")]
+    assert _window_prior_triples(triples, window=30) == triples
+
+
+def test_window_prior_triples_non_positive_window_is_a_no_op() -> None:
+    # Defensive: config default is a positive 30, but a misconfigured 0/negative
+    # value must not silently truncate every path to zero continuity.
+    triples = [("Unit 1", "Lesson 1", "passage 1")]
+    assert _window_prior_triples(triples, window=0) == triples
+    assert _window_prior_triples(triples, window=-1) == triples
 
 
 def test_every_onboarding_level_maps_to_an_agent_level() -> None:

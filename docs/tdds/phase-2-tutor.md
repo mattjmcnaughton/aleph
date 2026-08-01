@@ -221,11 +221,16 @@ same function signature.
 
 **Budget arithmetic** (why the window keeps the lesson dominant, PRD §6): system prompt
 ≈ 400 tok, Read passage ≤ ~650, Quick check + Attempt ≈ 150, digest ≤ ~400 at the
-30-lesson cap, 10 turns ≈ 10 × (~40 learner + ~250 tutor) ≈ 3k → **≈ 5k
-input tokens per turn, flat for the life of the path**. The lesson block is the largest
-single non-history element and the prompt orders it last (recency position), so a
-90-turn thread cannot crowd it out. Cost stays linear in turn count as a side effect
-(PRD §6's parenthetical, not the goal).
+old 30-lesson cap, 10 turns ≈ 10 × (~40 learner + ~250 tutor) ≈ 3k → **≈ 5k
+input tokens per turn** at that cap. The digest is titles + derived unlock state only
+(no passage text), so it scales with `MAX_LESSONS_PER_PATH`, not flat — at the current
+200-lesson cap it grows to ≤ ~2.7k tokens, pushing the total to **≈ 7k input tokens per
+turn worst case**. Still small relative to the model's context and to the lesson block,
+and grows slowly (titles are short); no windowing needed here the way D7's continuity
+context needed one (§5.2, phase-1 TDD). The lesson block is the largest single
+non-history element and the prompt orders it last (recency position), so a 90-turn
+thread cannot crowd it out. Cost stays linear in turn count as a side effect (PRD §6's
+parenthetical, not the goal).
 
 ### 5.3 Model routing
 

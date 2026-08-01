@@ -249,14 +249,37 @@ class Settings(BaseSettings):
     # the prefetch window is ``first_incomplete_position + prefetch_n``.
     prefetch_n: int = 2
 
+    # D7 continuity bound (``services/generation.py``'s ``build_prior_context``):
+    # the most recent N generated Read passages a lesson's prompt carries
+    # verbatim, regardless of how long the path is. Without this, continuity
+    # context grows with path position — harmless at the old 30-lesson cap
+    # (~19k tokens worst case, TDD §5.2) but unbounded once ``max_lessons_per_path``
+    # stopped being a de facto continuity cap too (raised to 200, ~129k tokens
+    # worst case: breaks 128k-context models in ``MODEL_ALLOWLIST`` and risks
+    # ``GENERATION_TIMEOUT``). 30 is chosen so every path that could exist under
+    # the OLD 30-lesson cap sees byte-identical continuity behaviour — only
+    # paths longer than the old cap are affected, and even then nothing is
+    # structurally lost: the lesson prompt already carries the full outline
+    # (unit + lesson titles) via ``_load_outline``, so older lessons stay
+    # *named* in the prompt, they just stop contributing full passage text.
+    continuity_passages_max: int = 30
+
     # Outline sizing (§14): ``*_target``/band are prompt targets, ``max_*`` are
     # the hard validator caps the outline agent enforces (§5.1). Fed into
     # ``OutlineCaps``, whose own ``__post_init__`` rejects an incoherent set.
+    #
+    # ``max_units``/``lessons_per_unit_max``/``max_lessons_per_path`` are safety
+    # CEILINGS, not product limits — they exist to bound a pathological or
+    # adversarial outline, not to cap how big a legitimately large topic (or a
+    # learner's Guidance asking for a bigger path) may be. Outline size follows
+    # the topic and the learner's Guidance (CONTEXT.md); the ``*_target``/band
+    # numbers are what that sizing aims for by default, and are what the caps
+    # sit far above (``agents/outline.py``'s ``OutlineCaps`` docstring).
     outline_units_target: int = 5
-    max_units: int = 6
+    max_units: int = 25
     lessons_per_unit_min: int = 3
-    lessons_per_unit_max: int = 5
-    max_lessons_per_path: int = 30
+    lessons_per_unit_max: int = 8
+    max_lessons_per_path: int = 200
 
     # Read-passage word band (``READ_PASSAGE_WORDS`` ~200-500, §14). Fed into
     # ``LessonCaps`` (the option count stays the fixed single-select 3-4 band).

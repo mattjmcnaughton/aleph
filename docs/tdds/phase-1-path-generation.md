@@ -20,7 +20,7 @@ Decisions made drafting this TDD, so the rationale isn't re-litigated later:
 | D4 | LLM access | OpenRouter via pydantic-ai, agents bind no model | Habagou's seam; per-role routing is config |
 | D5 | Content delivery | Trigger + poll (no blocking calls, no streaming in MVP) | Robust across timeouts/restarts; same machinery serves prefetch; trivially testable |
 | D6 | Prefetch orchestration | In-process asyncio + DB state machine with stale-recovery, plus an in-process reconciler loop | No new infra; restart self-heals via state timeouts; reconciler removes the "work needs a poller" constraint |
-| D7 | Continuity context | Full prior Read-passage text in the prompt | ≤ ~20k tokens at the path cap; zero extra machinery. Revisit (summary/RAG) only if cost data demands |
+| D7 | Continuity context | Full prior Read-passage text in the prompt, windowed to the most recent `CONTINUITY_PASSAGES_MAX` | ≤ ~20k tokens per lesson, bounded by the window (not by path length — `MAX_LESSONS_PER_PATH` no longer bounds this); zero extra machinery. Revisit (summary/RAG) only if cost data demands |
 | D8 | Model routing | Three config slots: `outline`, `lesson`, `judge` | Structure quality is unrecoverable (no regenerate) → stronger outline model; lessons cheaper/faster |
 | D9 | E2E strategy | Deterministic stub model in CI; opt-in live smoke (`test-external`) | PRD §8 open question resolved; failure/refusal paths become forceable |
 | D10 | Evals | pydantic-evals + deterministic pre-filters + binary LLM judge | Habagou harness shape, extended with the judge the PRD requires |
@@ -250,15 +250,29 @@ outline already makes.
 ### 5.2 Continuity mechanics & token budget
 
 Prompt for lesson N+1 carries prior **Read passages only** (not quick checks), verbatim, in
-order, each prefixed by unit/lesson title. Worst case at the 30-lesson cap with ~500-word
-passages ≈ 29 × ~650 tok ≈ **19k input tokens** for the final lesson — comfortably inside
-any candidate model's context. Cumulative input cost per full path is quadratic-ish:
-≈ 290k input + ≈ 25k output tokens across all 30 lessons; on a Haiku-class lesson model
-($1/$5 per MTok) a worst-case fully-generated path lands around **$0.45** including the
-Sonnet outline; the all-Sonnet starting config (§5.3) runs ≈ 3× that (≈ $1.30) — still
-cents-scale, and on-demand generation means typical paths cost less. Tracked, not assumed (§9, §10). If real data pressures cost, the
-upgrade path is a running summary or retrieval (**explicitly deferred**, D7); the seam is
-a single `build_prior_context()` function in `services/generation.py`.
+order, each prefixed by unit/lesson title — but only the most recent `CONTINUITY_PASSAGES_MAX`
+(30, §14) of them, regardless of how far into the path lesson N+1 sits. This is a deliberate
+bound, separate from `MAX_LESSONS_PER_PATH`: **per-lesson continuity input no longer grows
+with path length.** Worst case, at or past the window, with ~500-word passages ≈
+30 × ~650 tok ≈ **19k input tokens** for any one lesson — comfortably inside any candidate
+model's context, and unchanged whether the path has 30 lessons or 200. Nothing is
+structurally lost by windowing: the prompt already carries the full outline (unit + lesson
+titles, `_load_outline`), so lessons older than the window are still *named*, they just stop
+contributing full passage text.
+
+Cumulative input cost per full path still grows with path length (more lessons, each paying
+up to the ~19k-token window), just no longer quadratically once a path exceeds the window —
+each lesson past position 31 costs the same ~19k input tokens as the one before it, not more.
+For a maximal 200-lesson path: ≈ 3.6M input + ≈ 167k output tokens across all 200 lessons
+(vs. ≈ 290k input + ≈ 25k output across 30 lessons at the old cap); on a Haiku-class lesson
+model ($1/$5 per MTok) a worst-case fully-generated maximal path lands around **$4.50**
+including the Sonnet outline (vs. ≈ $0.45 at the old 30-lesson cap — roughly 10×, not the
+~30× a naive unwindowed extrapolation would suggest); the all-Sonnet starting config (§5.3)
+runs ≈ 3× that. Still an edge case (most paths target ~5 units × 3–8 lessons, §5.1) and
+tracked, not assumed (§9, §10). If real data pressures cost further, the upgrade path is a
+running summary or retrieval (**explicitly deferred**, D7) — replacing the window with
+something smarter, not removing it; the seam is a single `build_prior_context()` function in
+`services/generation.py`.
 
 Ordering invariant (PRD §5.2): lesson N+1 generates only when lessons 1…N are `generated`
 — its context is complete and immutable (content never regenerates). The orchestrator
@@ -275,7 +289,7 @@ refinement directions, when data justifies them:
 | Slot | Starting default | Refinement direction |
 | --- | --- | --- |
 | `MODEL_OUTLINE` | `anthropic/claude-sonnet-5` | Stays strong: once per path, unrecoverable (no regenerate), gates everything downstream |
-| `MODEL_LESSON` | `anthropic/claude-sonnet-5` | The high-volume slot (≤ 30 generations/path with growing continuity context) — step *down* (e.g. `anthropic/claude-haiku-4-5`) if evals hold and cost/latency favor it |
+| `MODEL_LESSON` | `anthropic/claude-sonnet-5` | The high-volume slot (up to `MAX_LESSONS_PER_PATH` generations/path, each paying at most the flat `CONTINUITY_PASSAGES_MAX`-window continuity cost, §5.2) — step *down* (e.g. `anthropic/claude-haiku-4-5`) if evals hold and cost/latency favor it |
 | `MODEL_JUDGE` | `anthropic/claude-sonnet-5` | Likely move **cross-provider** (e.g. `openai/gpt-5.6-terra`): LLM judges exhibit self-preference bias, and a Claude judge grading Claude-written lessons risks inflating the release-gate pass rate. Judge↔human calibration (§11) is the real control either way |
 
 `MODEL_ALLOWLIST` defaults to `anthropic/claude-sonnet-5` plus the refinement candidates:
@@ -552,9 +566,10 @@ All config (pydantic-settings), not constants; provisional pending real data:
 
 | Setting | Default | Notes |
 | --- | --- | --- |
-| `OUTLINE_UNITS_TARGET` / `MAX_UNITS` | ~5 / 6 | Prompt target / validator cap |
-| `LESSONS_PER_UNIT` | 3–5 | Prompt target band |
-| `MAX_LESSONS_PER_PATH` | 30 | Hard validator cap; bounds continuity context (§5.2) |
+| `OUTLINE_UNITS_TARGET` / `MAX_UNITS` | ~5 / 25 | Prompt target / validator cap. `MAX_UNITS` is a far-away safety **ceiling**, not a product limit — outline size follows the topic and the learner's Guidance (CONTEXT.md), and the target, not the ceiling, is what a normal outline is sized against. |
+| `LESSONS_PER_UNIT` | 3–8 | Prompt target band |
+| `MAX_LESSONS_PER_PATH` | 200 | Hard validator cap (ceiling, as `MAX_UNITS` above). No longer bounds per-lesson continuity context — see `CONTINUITY_PASSAGES_MAX` |
+| `CONTINUITY_PASSAGES_MAX` | 30 | D7 continuity window (§5.2): most recent N prior Read passages a lesson's prompt carries verbatim, regardless of path length. Chosen so paths within the old 30-lesson cap are unaffected |
 | `PREFETCH_N` | 2 | Lessons generated ahead of first incomplete |
 | `GENERATION_TIMEOUT` | 60s | Per model call |
 | `GENERATION_STALE_AFTER` | 3 min | `generating` re-claimable after this; must exceed `GENERATION_TIMEOUT` + overhead (tested invariant) |
@@ -578,8 +593,10 @@ All config (pydantic-settings), not constants; provisional pending real data:
 - **Sequential prefetch serializes a path's generation** — by design (continuity). A
   fast reader can outrun `PREFETCH_N`; tune N and lesson-model speed against Logfire
   latency data.
-- **Quadratic-ish continuity cost** (§5.2) — cents per path today; watched via the cost
-  guardrail; summary/RAG deferred, seam ready.
+- **Continuity cost grows with path length** (§5.2) — bounded per-lesson by
+  `CONTINUITY_PASSAGES_MAX` (no longer quadratic-ish in path length, since the window caps
+  each lesson's continuity input flat); cumulative cost across a maximal path is still
+  dollars-scale, watched via the cost guardrail; summary/RAG deferred, seam ready.
 - **Judge quality bounds the gate** (PRD §11 risk) — calibration set + agreement check
   (§11) is the control.
 - **Default model ids are provisional config** (§5.3/§14): the all-Sonnet start is chosen

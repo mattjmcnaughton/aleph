@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { configurePaths, seedPath } from "../mocks/paths";
+import { configurePaths, createPathBodies, seedPath } from "../mocks/paths";
 import { App } from "./app";
 
 // Onboarding state machine (§5.1, §5.6): topic + level → POST → poll → one of
@@ -160,6 +160,33 @@ describe("Onboarding — /new", () => {
 
     await screen.findByTestId("onboarding-retry-error");
     expect(screen.queryByTestId("onboarding-retry-ratelimit")).toBeNull();
+  });
+
+  it("captures optional guidance and sends it trimmed in the create body", async () => {
+    const topic = await gotoNewPath();
+
+    fireEvent.change(topic, { target: { value: "TypeScript generics" } });
+    pickLevel(/new to it/i);
+    fireEvent.change(screen.getByLabelText(/additional guidance/i), {
+      target: { value: "  Cover conditional types before mapped types  " },
+    });
+    submit();
+
+    await screen.findByTestId("path-view");
+    const bodies = createPathBodies();
+    expect(bodies[bodies.length - 1]?.guidance).toBe("Cover conditional types before mapped types");
+  });
+
+  it("guidance is optional — submitting without it omits the field", async () => {
+    const topic = await gotoNewPath();
+
+    fireEvent.change(topic, { target: { value: "TypeScript generics" } });
+    pickLevel(/new to it/i);
+    submit();
+
+    await screen.findByTestId("path-view");
+    const bodies = createPathBodies();
+    expect("guidance" in (bodies[bodies.length - 1] ?? {})).toBe(false);
   });
 
   it("[AL-061] the home New path button routes into onboarding", async () => {

@@ -179,7 +179,7 @@ function LessonView() {
           current={detail.title}
           path={{
             id: detail.path_id,
-            topic: breadcrumbPathQuery.data?.topic ?? "Path",
+            title: breadcrumbPathQuery.data?.title ?? "Path",
           }}
         />
       ) : null}

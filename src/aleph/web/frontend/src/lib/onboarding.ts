@@ -70,6 +70,22 @@ export function canSubmitTopic(topic: string): boolean {
 export const TOPIC_MAX_LENGTH = 500;
 
 /**
+ * The guidance field's cap, mirroring `GuidanceStr` in `dtos/paths.py`
+ * (`max_length=4000`) the way `TOPIC_MAX_LENGTH` mirrors `TopicStr` above. Keep
+ * the two numbers in step.
+ */
+export const GUIDANCE_MAX_LENGTH = 4000;
+
+/**
+ * The path title field's cap, mirroring `PathTitleStr` in `dtos/paths.py`
+ * (`max_length=200`) the way `TOPIC_MAX_LENGTH` mirrors `TopicStr` above. Stop
+ * an over-long rename at the keyboard rather than round-tripping a `422` the
+ * learner can't read (`routes/paths.$pathId.tsx`'s `PathTitle`). Keep the two
+ * numbers in step.
+ */
+export const PATH_TITLE_MAX_LENGTH = 200;
+
+/**
  * The admin model picker's "use the server default" value (AL-065, §5.3/D14).
  * The empty string, because that is what an unselected `<option>` carries — the
  * picker needs a real DOM value for "no override", and the payload builder below
@@ -84,10 +100,16 @@ export const MODEL_SLOT_DEFAULT = "";
  * as null. A non-admin sending `model_outline` at all is `403 forbidden`, so
  * "absent" and "explicitly nothing" are different payloads to this endpoint, and
  * only absent is correct when the picker is unset or was never rendered.
+ *
+ * `guidance` follows the same absent-vs-empty rule: a blank or whitespace-only
+ * textarea omits the key rather than sending `""`, so a learner who opens and
+ * closes the field without typing anything gets the identical payload as one who
+ * never saw it.
  */
 export function buildCreatePathInput(input: {
   topic: string;
   level: Level;
+  guidance?: string;
   modelOutline?: string;
   modelLesson?: string;
 }): CreatePathInput {
@@ -96,6 +118,8 @@ export function buildCreatePathInput(input: {
   // is the whole rule, and `undefined` (the picker never rendered) falls out of
   // it for free.
   const body: CreatePathInput = { topic: input.topic.trim(), level: input.level };
+  const guidance = input.guidance?.trim();
+  if (guidance) body.guidance = guidance;
   if (input.modelOutline) body.model_outline = input.modelOutline;
   if (input.modelLesson) body.model_lesson = input.modelLesson;
   return body;

@@ -195,6 +195,10 @@ async def test_create_poll_ready_lifecycle(
 
         assert body["id"] == path_id
         assert body["topic"] == "Rust ownership"
+        # No rename yet: title falls back to the topic on the wire (the server
+        # applies ``Path.display_title``, never the client, CONTEXT.md).
+        assert body["title"] == "Rust ownership"
+        assert body["guidance"] is None
         assert body["level"] == "some_experience"
         assert body["status"] == "ready"
         assert body["refusal_message"] is None
@@ -464,8 +468,9 @@ async def test_list_paths_switcher_shape(
         # Newest first (created_at desc).
         assert [row["id"] for row in rows] == [second_id, first_id]
         row = rows[0]
-        assert set(row) == {"id", "topic", "level", "status", "progress"}
+        assert set(row) == {"id", "topic", "title", "level", "status", "progress"}
         assert row["topic"] == "Second topic"
+        assert row["title"] == "Second topic"  # no rename yet: falls back to topic
         assert row["level"] == "work_in_it"
         assert row["status"] == "ready"
         assert set(row["progress"]) == {
@@ -474,6 +479,171 @@ async def test_list_paths_switcher_shape(
             "completed_lessons",
         }
         assert row["progress"]["total_lessons"] >= 1
+
+
+# --------------------------------------------------------------------------- #
+# PATCH /paths/{id}: rename the display label (CONTEXT.md: Path title)
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.anyio
+async def test_patch_renames_and_response_carries_the_new_title(
+    app: FastAPI, spawn: CollectingSpawn, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async with _client(app) as client:
+        await _sign_in(client, monkeypatch, OWNER)
+        path_id = await _create(client, spawn, "Rust ownership", "some_experience")
+        await _poll(client, spawn, path_id)
+
+        resp = await client.patch(
+            f"/api/v1/paths/{path_id}", json={"title": "Rust, the fun parts"}
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+
+        # The regression this exists to catch (task instructions): the ORM
+        # instance ``OwnedPath`` resolved is loaded BEFORE the rename commits, so
+        # without an explicit ``session.refresh`` the response would echo the
+        # stale, pre-rename title straight back to the caller who just renamed
+        # it. Assert the NEW title reached the wire, not merely "some string".
+        assert body["title"] == "Rust, the fun parts"
+        assert body["topic"] == "Rust ownership"  # topic is never touched (below)
+        # Same shape GET returns (the poll target) — the client can drop this
+        # response straight into the query it already polls.
+        assert body["id"] == path_id
+        assert body["status"] == "ready"
+
+        # A follow-up GET agrees — the rename is durable, not response-only.
+        after = await _poll(client, spawn, path_id)
+        assert after["title"] == "Rust, the fun parts"
+
+        # The switcher list agrees too.
+        listing = (await client.get("/api/v1/paths")).json()
+        row = next(r for r in listing["paths"] if r["id"] == path_id)
+        assert row["title"] == "Rust, the fun parts"
+        assert row["topic"] == "Rust ownership"
+
+
+@pytest.mark.anyio
+async def test_patch_never_touches_topic(
+    app: FastAPI, spawn: CollectingSpawn, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async with _client(app) as client:
+        await _sign_in(client, monkeypatch, OWNER)
+        path_id = await _create(client, spawn, "Rust ownership", "some_experience")
+
+        # There is no ``topic`` field on the PATCH body at all — an attempt to
+        # smuggle one in is silently ignored (pydantic drops unknown fields by
+        # default; the DTO has no such field to bind it to regardless).
+        resp = await client.patch(
+            f"/api/v1/paths/{path_id}",
+            json={"title": "New title", "topic": "Something else entirely"},
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["topic"] == "Rust ownership"
+
+        row = await _path_row(path_id)
+        assert row.topic == "Rust ownership"
+
+
+@pytest.mark.anyio
+async def test_patch_is_safe_while_generating(
+    app: FastAPI, spawn: CollectingSpawn, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Renaming never touches the generation state machine: a path still mid-flight
+    # (outline not yet drained) can be renamed with no side effect on status.
+    async with _client(app) as client:
+        await _sign_in(client, monkeypatch, OWNER)
+        resp = await client.post(
+            "/api/v1/paths",
+            json={"topic": "Not drained yet", "level": "new_to_it"},
+        )
+        assert resp.status_code == 202
+        path_id = resp.json()["id"]
+
+        patch_resp = await client.patch(
+            f"/api/v1/paths/{path_id}", json={"title": "Renamed mid-flight"}
+        )
+        assert patch_resp.status_code == 200, patch_resp.text
+        assert patch_resp.json()["title"] == "Renamed mid-flight"
+
+        await spawn.drain()
+        after = await _poll(client, spawn, path_id)
+        assert after["status"] == "ready"
+        assert after["title"] == "Renamed mid-flight"
+
+
+@pytest.mark.anyio
+async def test_patch_on_another_learners_path_is_404(
+    app: FastAPI, spawn: CollectingSpawn, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async with _client(app) as owner, _client(app) as other:
+        await _sign_in(owner, monkeypatch, OWNER)
+        path_id = await _create(owner, spawn, "Owner-only path", "some_experience")
+
+        await _sign_in(other, monkeypatch, OTHER)
+        resp = await other.patch(
+            f"/api/v1/paths/{path_id}", json={"title": "Not mine to rename"}
+        )
+        assert resp.status_code == 404
+
+        # Untouched.
+        row = await _path_row(path_id)
+        assert row.title is None
+
+
+@pytest.mark.anyio
+async def test_patch_blank_title_is_422(
+    app: FastAPI, spawn: CollectingSpawn, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async with _client(app) as client:
+        await _sign_in(client, monkeypatch, OWNER)
+        path_id = await _create(client, spawn, "Rust ownership", "some_experience")
+
+        resp = await client.patch(f"/api/v1/paths/{path_id}", json={"title": "   "})
+        assert resp.status_code == 422
+        assert resp.json()["error"]["code"] == "validation_error"
+
+
+# --------------------------------------------------------------------------- #
+# POST /paths with guidance (CONTEXT.md: Guidance)
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.anyio
+async def test_create_with_guidance_persists_it_and_it_shows_on_the_wire(
+    app: FastAPI, spawn: CollectingSpawn, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async with _client(app) as client:
+        await _sign_in(client, monkeypatch, OWNER)
+        resp = await client.post(
+            "/api/v1/paths",
+            json={
+                "topic": "Rust ownership",
+                "level": "some_experience",
+                "guidance": "  Focus on borrowing, skip the history.  ",
+            },
+        )
+        assert resp.status_code == 202, resp.text
+        path_id = resp.json()["id"]
+        await spawn.drain()
+
+        row = await _path_row(path_id)
+        assert row.guidance == "Focus on borrowing, skip the history."
+
+        body = await _poll(client, spawn, path_id)
+        assert body["guidance"] == "Focus on borrowing, skip the history."
+
+
+@pytest.mark.anyio
+async def test_create_without_guidance_is_null_on_the_wire(
+    app: FastAPI, spawn: CollectingSpawn, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async with _client(app) as client:
+        await _sign_in(client, monkeypatch, OWNER)
+        path_id = await _create(client, spawn, "Rust ownership", "some_experience")
+        body = await _poll(client, spawn, path_id)
+        assert body["guidance"] is None
 
 
 # --------------------------------------------------------------------------- #
@@ -492,6 +662,9 @@ async def test_non_owner_gets_404_everywhere(
         await _sign_in(other, monkeypatch, OTHER)
         assert (await other.get(f"/api/v1/paths/{path_id}")).status_code == 404
         assert (await other.post(f"/api/v1/paths/{path_id}/retry")).status_code == 404
+        assert (
+            await other.patch(f"/api/v1/paths/{path_id}", json={"title": "Nope"})
+        ).status_code == 404
         assert (await other.delete(f"/api/v1/paths/{path_id}")).status_code == 404
         # The other learner's switcher is empty (isolation).
         assert (await other.get("/api/v1/paths")).json()["paths"] == []
@@ -691,6 +864,9 @@ async def test_anonymous_requests_get_401(app: FastAPI) -> None:
             await client.post(f"/api/v1/paths/{random_id}/retry")
         ).status_code == 401
         assert (await client.delete(f"/api/v1/paths/{random_id}")).status_code == 401
+        assert (
+            await client.patch(f"/api/v1/paths/{random_id}", json={"title": "Nice try"})
+        ).status_code == 401
 
         body = (await client.get("/api/v1/paths")).json()
         assert body["error"]["code"] == "unauthenticated"

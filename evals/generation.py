@@ -65,6 +65,7 @@ from aleph.agents.outline import (
     PathOutline,
     Refusal,
     build_outline_agent,
+    build_outline_prompt,
     validate_outline,
 )
 from aleph.services.stub_model import FORCE_REFUSAL, build_stub_model
@@ -474,14 +475,17 @@ EVALUATOR_ASSERTIONS: dict[str, frozenset[str]] = {
 
 #: How many lessons a ``full_path`` case generates by default.
 #:
-#: Not the whole path: at the §14 cap a path is 30 lessons, so full-path-ing even
-#: three seed cases end to end would be 90 sequential lesson calls with a
-#: continuity context that grows quadratically — a run nobody would dispatch,
-#: and evals that are never run measure nothing. Three consecutive lessons is
-#: the smallest depth at which continuity is genuinely testable: lesson 2 must
-#: build on 1, and lesson 3 must build on *both* without re-teaching either,
-#: which is the failure mode a single probe lesson cannot see. Raise it with
-#: ``--full-path-lessons`` when a continuity regression needs more rope.
+#: Not the whole path: at the §14 cap a path can run up to 200 lessons, so
+#: full-path-ing even three seed cases end to end would be hundreds of
+#: sequential lesson calls — a run nobody would dispatch, and evals that are
+#: never run measure nothing. (Per-lesson continuity cost is flat past
+#: ``CONTINUITY_PASSAGES_MAX``, not quadratic in path length — phase-1 TDD
+#: §5.2 — but the call count alone still rules this out.) Three consecutive
+#: lessons is the smallest depth at which continuity is genuinely testable:
+#: lesson 2 must build on 1, and lesson 3 must build on *both* without
+#: re-teaching either, which is the failure mode a single probe lesson cannot
+#: see. Raise it with ``--full-path-lessons`` when a continuity regression
+#: needs more rope.
 FULL_PATH_LESSONS = 3
 
 
@@ -544,8 +548,13 @@ def build_generation_task(
         if force_expected_branch and inputs.expected_branch == "refuse":
             topic = f"{topic} {FORCE_REFUSAL}"
 
+        # No case in the seed set carries Guidance (SeedInputs has no such
+        # field), so this is a no-op today — but routing through
+        # ``build_outline_prompt`` rather than the bare ``topic`` is what makes
+        # that function's "evals build the same user prompt the orchestrator
+        # does" docstring claim true, not just aspirational.
         outline_run = await outline_agent.run(
-            topic,
+            build_outline_prompt(topic),
             deps=OutlineDeps(level=inputs.level, caps=OUTLINE_CAPS),
             model=outline_model,
         )

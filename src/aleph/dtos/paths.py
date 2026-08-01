@@ -29,6 +29,27 @@ TopicStr = Annotated[
     str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)
 ]
 
+# The learner-editable display label (CONTEXT.md: *Path title*). Stripped and
+# bounded like ``TopicStr`` but shorter (200 vs 500) — a display label sits atop
+# a switcher row and a page header, not a generation prompt, so a tighter bound
+# keeps the UI honest. Shared by ``UpdatePathRequest`` (the only writer) and
+# nowhere else: creation never accepts a title (it always starts unset, falling
+# back to the topic via ``Path.display_title``).
+PathTitleStr = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)
+]
+
+# The learner's optional free text steering an outline's shape (CONTEXT.md:
+# *Guidance*), captured once at creation alongside topic/level. Stripped and
+# bounded generously (4000, vs the topic's 500) — it is prose about *how* to
+# shape the path ("skip the history, focus on hands-on examples"), not a short
+# subject line, so it needs more room; still bounded so a pathological payload
+# never reaches the model or the DB column unchecked (same rationale as
+# ``TopicStr``).
+GuidanceStr = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=4000)
+]
+
 
 class CreatePathRequest(BaseModel):
     """``POST /api/v1/paths`` body: the topic + onboarding level (W1).
@@ -41,6 +62,13 @@ class CreatePathRequest(BaseModel):
     server-side at the route (403 non-admin, 422 off-allowlist) — the field
     merely carries the request; the wire field being present is never itself a
     grant.
+
+    ``guidance`` is the learner's optional free text steering the outline's
+    shape (CONTEXT.md: *Guidance*) — a second generation input alongside
+    ``topic``/``level``, fixed once the path exists (there is no route to change
+    it later, unlike ``title``). Omitted or blank collapses to "no guidance" —
+    ``build_outline_prompt`` (``agents/outline.py``) then emits the bare topic,
+    byte-identical to a path created before this field existed.
     """
 
     # ``model_outline``/``model_lesson`` start with the ``model_`` prefix pydantic
@@ -51,8 +79,24 @@ class CreatePathRequest(BaseModel):
 
     topic: TopicStr
     level: Level
+    guidance: GuidanceStr | None = None
     model_outline: str | None = None
     model_lesson: str | None = None
+
+
+class UpdatePathRequest(BaseModel):
+    """``PATCH /api/v1/paths/{id}`` body: rename the path's display label.
+
+    Exactly **one** field, and it is ``title`` — never ``topic``. That is not
+    an incidental minimalism; it is what makes "topic is immutable" a fact
+    about the wire contract rather than a review habit someone has to keep
+    remembering to enforce: there is no field here a caller could even attempt
+    to use to rewrite the generation input, so no route/service code has to
+    reject one. Safe at any path status (renaming triggers no regeneration —
+    see ``routers/v1/paths.py``'s ``update_path``).
+    """
+
+    title: PathTitleStr
 
 
 class CreatePathResponse(BaseModel):
@@ -75,10 +119,18 @@ class PathProgressDTO(BaseModel):
 
 
 class PathSummaryDTO(BaseModel):
-    """One row of the "Your paths" switcher (``GET /api/v1/paths``, §6)."""
+    """One row of the "Your paths" switcher (``GET /api/v1/paths``, §6).
+
+    ``title`` is always populated on the wire — the server applies
+    ``Path.display_title``'s topic fallback before this DTO is built, so the
+    client never has to respell "no title yet, show the topic" itself.
+    ``topic`` is retained alongside it (unchanged, still the generation input)
+    rather than replaced, so any existing reader of the raw topic keeps working.
+    """
 
     id: UUID
     topic: str
+    title: str
     level: Level
     status: PathStatus
     progress: PathProgressDTO
@@ -126,10 +178,23 @@ class PathDetailResponse(BaseModel):
     reads as ``failed`` so the client shows retry, not a dead spinner).
     ``refusal_message`` is populated **only** when ``status == refused`` (W7) — a
     ``failed`` path carries ``null`` here, keeping refusal and failure distinct.
+
+    ``title`` is always populated (the server-applied ``Path.display_title``
+    fallback, as in ``PathSummaryDTO``). ``guidance`` is the learner's free text
+    from creation, or ``null`` when none was given — display-only here (the
+    outline already ran with it); there is no route that lets a learner change
+    it after the fact.
+
+    ``PATCH /paths/{id}`` (``update_path``) returns this exact shape — the same
+    body ``GET`` does — so the client can drop the response straight into the
+    query it already polls (precedent: Phase 2B's Apply, ``path_detail_response``'s
+    docstring).
     """
 
     id: UUID
     topic: str
+    title: str
+    guidance: str | None
     level: Level
     status: PathStatus
     refusal_message: str | None
