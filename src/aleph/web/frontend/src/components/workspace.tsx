@@ -40,6 +40,7 @@ export function Workspace({
   width,
   sidebar,
   tutorRail,
+  railTestid = "tutor-rail-column",
   children,
 }: {
   /** The route's existing `main` testid (`paths-switcher` / `path-view` /
@@ -61,8 +62,20 @@ export function Workspace({
    *
    * Occupying this slot also gives `main` its bottom clearance below `lg`
    * (`RAIL_CLEARANCE`), so the sheet never strands the tail of the page.
+   *
+   * **The slot is the rail grammar, not one rail** (Phase 2B D14). The path
+   * route mounts the *shaping* rail through the very same slot, which is the
+   * whole content of "the rail tree's third mount": one `<aside>`, one pair of
+   * CSS presentations, two surfaces that fill it.
    */
   tutorRail?: ReactNode;
+  /**
+   * The rail column's testid. It names *which* rail is docked, so a test can
+   * assert the shaping rail's presentation without the two surfaces sharing a
+   * selector. Defaults to the in-lesson rail's, leaving 2A's call site (and
+   * every test that queries it) unchanged.
+   */
+  railTestid?: string;
   children: ReactNode;
 }) {
   return (
@@ -87,7 +100,7 @@ export function Workspace({
 
       {tutorRail ? (
         <aside
-          data-testid="tutor-rail-column"
+          data-testid={railTestid}
           // Below `lg`: a sheet anchored to the bottom of the viewport, capped
           // so the lesson stays visible behind it (the PRD's chosen entry).
           // At `lg`: an ordinary flex sibling — the docked right column.

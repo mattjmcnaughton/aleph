@@ -13,6 +13,8 @@ import {
 import { PRIMARY_CTA, PlayIcon, RetryNotices, Spinner, StateCard } from "../components/state-card";
 import { Breadcrumbs } from "../components/breadcrumbs";
 import { LessonMarker, UNLOCK_STATE_LABEL } from "../components/lesson-marker";
+import { ShapingMark, ShapingRail } from "../components/shaping/shaping-rail";
+import { useShapingRail } from "../components/shaping/use-shaping-rail";
 import { Sidebar, SwitcherSection } from "../components/sidebar";
 import { Workspace } from "../components/workspace";
 import { makePollingRefetchInterval } from "../lib/polling";
@@ -40,6 +42,13 @@ const pathViewPollConfig = {
 // A learner can also deep-link here onto a non-ready outline (a shared/bookmarked
 // link, or a reload mid-generation). Those states render minimally so the learner
 // never dead-ends — onboarding (AL-061) owns the rich topic-preserving versions.
+//
+// **This route is also the shaping rail's mount** (Phase 2B AL-330, D14): the
+// rail tree's third presentation, in `Workspace`'s rail slot, gated on the
+// `shaping` flag and on the outline being `ready` (PRD §5.1 — there must be a
+// structure to shape). Every non-`ready` branch below therefore renders with no
+// rail and no mark, which falls out of `pathReady` rather than being restated
+// per branch.
 function PathView() {
   const { pathId } = Route.useParams();
   const navigate = useNavigate();
@@ -52,6 +61,12 @@ function PathView() {
   const retry = useRetryGeneration({ mutationFn: retryPath, queryKey: pathQueryKey });
 
   const detail = pathQuery.data;
+
+  const shaping = useShapingRail({
+    pathId,
+    topic: detail?.topic ?? "",
+    pathReady: detail?.status === "ready",
+  });
 
   function openLesson(lessonId: string) {
     navigate({ to: "/lessons/$lessonId", params: { lessonId } });
@@ -66,6 +81,8 @@ function PathView() {
           <SwitcherSection currentPathId={pathId} />
         </Sidebar>
       }
+      tutorRail={shaping.open ? <ShapingRail shaping={shaping} /> : null}
+      railTestid="shaping-rail-column"
     >
       {detail ? <Breadcrumbs current={detail.topic} /> : null}
 
@@ -89,6 +106,10 @@ function PathView() {
       ) : (
         <ReadyPath detail={detail} onOpenLesson={openLesson} />
       )}
+
+      {/* The way in, and the way back from the header's collapse. It renders
+          itself only when the rail is closed *and* the surface exists at all. */}
+      <ShapingMark shaping={shaping} />
     </Workspace>
   );
 }

@@ -3,6 +3,7 @@ import { API_V1_BASE, AUTH_LOGOUT_PATH, type AuthSession, type AuthUser } from "
 import { lessonsHandlers } from "./lessons";
 import { ADMIN_MODEL_ALLOWLIST } from "./models";
 import { pathsHandlers } from "./paths";
+import { shapingHandlers } from "./shaping";
 import { tutorHandlers } from "./tutor";
 
 // Contract-shaped fakes for the session endpoint AL-020/AL-021 will serve live.
@@ -82,4 +83,5 @@ export const handlers = [
   ...pathsHandlers,
   ...lessonsHandlers,
   ...tutorHandlers,
+  ...shapingHandlers,
 ];

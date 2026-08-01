@@ -157,25 +157,36 @@ export function ModelPicker({
  * model. A tutor reply is request-scoped, so this choice rides one message and
  * is never persisted — which is exactly why it belongs beside the conversation
  * it applies to, and why switching it mid-thread is a legitimate thing to do.
+ *
+ * **Two rails, one picker** (AL-330): the shaping rail's header carries the same
+ * control for the `MODEL_SHAPER` slot (Phase 2B D10), under identical rules and
+ * with identical semantics — a per-message override, resolved per request and
+ * persisted nowhere. The only things that differ are the two strings a test and
+ * a screen reader need to tell the surfaces apart, so those are the only things
+ * this takes as arguments; both default to 2A's, leaving its call site untouched.
  */
 export function TutorModelPicker({
   isAdmin,
   allowlist,
   value,
   onChange,
+  testid = "tutor-rail-model-picker",
+  label = "Tutor model (admin)",
 }: {
   isAdmin: boolean;
   allowlist: readonly string[];
   value: string;
   onChange: (value: string) => void;
+  testid?: string;
+  label?: string;
 }) {
   if (!isAdmin || allowlist.length === 0) {
     return null;
   }
   return (
     <select
-      data-testid="tutor-rail-model-picker"
-      aria-label="Tutor model (admin)"
+      data-testid={testid}
+      aria-label={label}
       value={value}
       onChange={(event) => onChange(event.target.value)}
       className="max-w-[10rem] appearance-none rounded-md border border-divider bg-surface px-2 py-1.5 text-xs text-mist focus:border-iris focus:outline-none"
