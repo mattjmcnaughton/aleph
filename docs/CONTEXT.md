@@ -132,16 +132,16 @@ Some terms name things drawn in the mocks that are **not all built**. Use them, 
 phase:
 
 - **Tutor** in **lesson scope** — the in-lesson rail, its **Suggestions**, its **Tutor check**, one
-  **Conversation** per path, and streamed replies: **shipped (Phase 2)**, behind the `tutor`
-  flag until AL-270 flips its global default. Everything in "The tutor" above is built except
-  where a row says otherwise.
+  **Conversation** per path, and streamed replies: **shipped and launched (Phase 2)** — AL-270
+  flipped the `tutor` flag's global default on, so every learner sees it. Everything in "The
+  tutor" above is built except where a row says otherwise.
 - **Shape your path, learner-initiated** — the shaping rail, Proposals, Additions, Revisions,
-  Apply/Undo, Change history: **built and shipped dark** behind the `shaping` feature flag
-  ([PRD](prds/phase-2b-shape-your-path.md) · [TDD](tdds/phase-2b-shape-your-path.md)). Every
-  term in the Shaping table above is implemented; admins see it in production, learners do
-  not, and **launch is AL-370 flipping the flag's global default**
-  ([deploy.md](deploy.md#launching-a-flagged-phase-al-270--al-370)). "2B" names this slice, by
-  owner re-scope — not the Q&A slice below.
+  Apply/Undo, Change history: **shipped and launched** ([PRD](prds/phase-2b-shape-your-path.md) ·
+  [TDD](tdds/phase-2b-shape-your-path.md)). Every term in the Shaping table above is
+  implemented, and AL-370 flipped the `shaping` flag's global default on, so the surface is
+  live for every learner rather than admins alone. Both flags remain registered as kill
+  switches ([deploy.md](deploy.md#launching-a-flagged-phase-al-270--al-370)). "2B" names this
+  slice, by owner re-scope — not the Q&A slice below.
 - **Path scope** / scope switching / lesson citations as links / the **Shaky** badge on a lesson with
   missed Quick checks — the in-path *Q&A* tutor (**a later slice, sequenced against usage**;
   formerly called 2B, still specified in the Phase 2 PRD).

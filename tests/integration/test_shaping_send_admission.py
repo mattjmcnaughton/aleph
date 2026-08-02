@@ -91,7 +91,7 @@ if TYPE_CHECKING:
 
 @pytest.mark.anyio
 async def test_flag_off_hides_the_send_route(
-    app: FastAPI, monkeypatch: pytest.MonkeyPatch
+    app: FastAPI, monkeypatch: pytest.MonkeyPatch, shaping_flag_disabled: None
 ) -> None:
     """The router-level gate covers the streamed route too.
 
@@ -113,7 +113,7 @@ async def test_flag_off_hides_the_send_route(
 
 @pytest.mark.anyio
 async def test_flag_off_hides_the_conversation_routes(
-    app: FastAPI, monkeypatch: pytest.MonkeyPatch
+    app: FastAPI, monkeypatch: pytest.MonkeyPatch, shaping_flag_disabled: None
 ) -> None:
     """Read and clear are gated by the same router-level dependency."""
     async with _client(app) as client:
@@ -130,12 +130,18 @@ async def test_flag_off_hides_the_conversation_routes(
 
 @pytest.mark.anyio
 async def test_the_tutor_flag_does_not_open_the_shaping_surface(
-    app: FastAPI, monkeypatch: pytest.MonkeyPatch, tutor_flag_enabled: None
+    app: FastAPI,
+    monkeypatch: pytest.MonkeyPatch,
+    tutor_flag_enabled: None,
+    shaping_flag_disabled: None,
 ) -> None:
     """Two flags, independently thrown (epic #114): ``tutor`` on is not consent.
 
-    The in-lesson tutor is already launched; shaping must still be able to ship
-    dark behind its own key, and be killed on its own.
+    Both are launched and default on (AL-270, AL-370), so the independence claim
+    is now stated with both keys explicit: ``tutor`` on, ``shaping`` killed. The
+    invariant is unchanged and is exactly what a one-sided kill depends on —
+    silencing shaping must not take the in-lesson tutor down with it, and the
+    tutor being live must not resurrect shaping.
     """
     async with _client(app) as client:
         user_id = await _sign_in(client, monkeypatch, OWNER)

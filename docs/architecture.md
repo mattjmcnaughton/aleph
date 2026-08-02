@@ -85,7 +85,8 @@ database stores only per-user exceptions, and the resolved map rides on the auth
 session probe (that module's docstring is the authoritative statement of the
 resolution order — see [`docs/api.md`](api.md)). Phase 2 shipped dark behind the
 `tutor` flag, which is why the whole tutor router hangs off one `404` gate;
-Phase 2B repeats the pattern on its own `shaping` key, and flipping either is
+Phase 2B repeated the pattern on its own `shaping` key. Both are now launched and
+default on in code, and the gates remain as kill switches — turning either off is
 one committed config change ([`docs/deploy.md`](deploy.md#launching-a-flagged-phase-al-270--al-370)).
 
 ## Shaping: the one write path into path structure (Phase 2B)

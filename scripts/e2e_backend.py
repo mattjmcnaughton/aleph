@@ -53,14 +53,12 @@ def create_stub_app() -> FastAPI:
     settings.rate_limit_lesson_generations_per_day = 0
     settings.rate_limit_tutor_messages_per_day = 0
     settings.rate_limit_shaping_messages_per_day = 0
-    # Phase 2 ships dark behind the ``tutor`` flag (AL-203) and Phase 2B behind
-    # ``shaping`` (AL-301) — both off globally, on for admins. The browser suite
-    # signs in as a plain learner, so without this the rails would be (correctly)
-    # hidden and every tutor/shaping spec would fail on an absent surface.
-    # Flipping the *global defaults* rather than seeding an admin account or
-    # override rows is deliberate: it exercises each surface exactly as a
-    # post-launch learner meets it — AL-270's and AL-370's configuration,
-    # rehearsed.
+    # ``tutor`` (AL-203/AL-270) and ``shaping`` (AL-301/AL-370) are launched and
+    # default on in ``services/feature_flags.py``, so the browser suite's plain
+    # learner meets both rails with nothing set here. This line is kept as an
+    # explicit *pin* rather than deleted as redundant: the suite asserts against
+    # surfaces that must exist, and "every tutor spec failed on an absent rail"
+    # is a confusing way to discover someone flipped a code default.
     settings.feature_flag_defaults = "tutor:on,shaping:on"
 
     # Imported lazily so mutating settings above lands before app assembly.

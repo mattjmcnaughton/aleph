@@ -12,9 +12,10 @@ Two invariants get their own coverage because they are the ticket's whole point:
   amendment 1). ``routers/v1/tutor.py`` mounts ``require_tutor_enabled`` as a
   *router-level* dependency, so every route — including AL-220's send endpoint
   once it lands — answers ``404`` (never ``403``) for an account the ``tutor``
-  flag resolves off for. The ``tutor_flag_enabled`` fixture (AL-203) is how a
-  test opts into the post-launch world; an admin needs no fixture at all, which
-  is what makes production dogfooding real.
+  flag resolves off for. Since AL-270 launched the tutor the code default is
+  ``True``, so the gate is exercised by forcing a flag *off* rather than on; the
+  ``tutor_flag_enabled`` fixture (AL-203) remains for tests that want the
+  post-launch world stated explicitly rather than inherited.
 * **A Tutor check creates no Attempt** (W12). The check-answer write is a JSONB
   reassignment on the tutor message and nothing else — asserted here by counting
   the ``attempts`` table before and after.
@@ -57,6 +58,7 @@ from aleph.models import (
     Unit,
 )
 from aleph.repositories import ConversationRepository
+from aleph.services import feature_flags
 
 if TYPE_CHECKING:
     from fastapi import FastAPI
@@ -75,8 +77,10 @@ OTHER = AuthIdentity(
     display_name="Tutor Other",
     email="other@example.com",
 )
-# The email domain (``mattjmcnaughton.com``) is the default admin domain, so this
-# identity resolves ``tutor`` on through ``ADMIN_DEFAULT_FLAGS`` with no fixture.
+# The email domain (``mattjmcnaughton.com``) is the default admin domain. Since
+# AL-270 the ``tutor`` flag resolves on for *every* identity by code default; this
+# one additionally resolves on through ``ADMIN_DEFAULT_FLAGS``, which is what the
+# dark-flag test below forces the code default off to prove.
 ADMIN = AuthIdentity(
     issuer="https://issuer.example.test",
     subject="tutor-admin-subject",
@@ -207,7 +211,7 @@ def _answer_url(message_id: uuid.UUID | str) -> str:
 
 @pytest.mark.anyio
 async def test_flag_off_hides_every_tutor_route(
-    app: FastAPI, monkeypatch: pytest.MonkeyPatch
+    app: FastAPI, monkeypatch: pytest.MonkeyPatch, tutor_flag_disabled: None
 ) -> None:
     """With ``tutor`` off, the whole surface reads ``404`` — never ``403``.
 
@@ -253,13 +257,21 @@ async def test_flag_on_serves_the_conversation(
 async def test_admin_resolves_the_flag_on_with_defaults_untouched(
     app: FastAPI, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """An admin dogfoods the tutor with the global default still off (AL-203).
+    """An admin dogfoods a **dark** flag end to end (AL-203).
 
-    No ``tutor_flag_enabled`` fixture here on purpose: this is the production
-    posture during the build-out — ``FEATURE_FLAG_DEFAULTS`` silent, the code
+    ``tutor`` now defaults on (AL-270), which would make this test pass for a
+    reason it does not name — the code default, not the admin baseline. So it
+    forces the code default back off for the duration, reproducing the posture
+    every future phase ships in: ``FEATURE_FLAG_DEFAULTS`` silent, the code
     default off, and ``ADMIN_DEFAULT_FLAGS`` opening the surface for the admin
     class alone.
+
+    Still no ``tutor_flag_enabled`` fixture, for the same reason as before: the
+    fixture would set the settings map and outrank exactly the step under test.
     """
+    monkeypatch.setitem(
+        feature_flags.FLAG_DEFAULTS, feature_flags.FeatureFlag.TUTOR, False
+    )
     assert not settings.feature_flag_defaults, "the global default must stay off"
 
     async with _client(app) as client:

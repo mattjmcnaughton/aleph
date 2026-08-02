@@ -403,8 +403,10 @@ class Settings(BaseSettings):
     # branch appends its own; keep them separate to avoid merge conflicts).
     # Flags are defined in code (``services/feature_flags.py``); this setting
     # overrides their **global defaults**, so a flag flips without a code
-    # deploy — AL-270's launch is ``FEATURE_FLAG_DEFAULTS=tutor:on`` on the
-    # deployed app, no release cut.
+    # deploy. Both launched flags (``tutor``, ``shaping``) default **on** in that
+    # registry rather than here, so this setting is normally *empty* — it is the
+    # override and the kill switch (``tutor:off``), not the statement of what is
+    # live.
     #
     # Comma-separated ``key:on`` / ``key:off`` entries. Malformed entries are
     # dropped rather than raising: this is an operator knob turned under

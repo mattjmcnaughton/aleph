@@ -68,9 +68,10 @@ forward from Phase 4 by owner decision, superseding the original plan to gate 2B
 on in-lesson adoption data (📄 [Phase 2B PRD — Shape your path](prds/phase-2b-shape-your-path.md)).
 It resolves the collision with Phase 1's continuity and immutability rules by
 shrinking the edit vocabulary: additions and revisions only, and content becomes
-**immutable once engaged** rather than once generated. It is now built and
-deployed **dark** behind the `shaping` feature flag — admins use it in
-production, learners do not see it yet, and launch is the flag flip (AL-370).
+**immutable once engaged** rather than once generated. It is built, deployed and
+now **launched**: AL-370 flipped the `shaping` flag's global default on, so every
+learner sees it rather than admins alone (AL-270 did the same for the in-lesson
+tutor). Both flags stay registered as kill switches.
 The whole-path *Q&A* slice
 (path scope, scope switching, lesson citations as links) and **selection-to-quote**
 are re-deferred to a later slice, sequenced against real usage.

@@ -101,23 +101,35 @@ def test_feature_flag_default_map_empty_by_default() -> None:
     assert Settings(feature_flag_defaults="").feature_flag_default_map == {}
 
 
-def test_tutor_is_registered_and_ships_dark_but_on_for_admins() -> None:
-    """Phase 2's one flag: off globally, on for the admin class (amendment 1)."""
-    assert feature_flags.FeatureFlag.TUTOR == "tutor"
-    assert feature_flags.FLAG_DEFAULTS[feature_flags.FeatureFlag.TUTOR] is False
-    assert feature_flags.FeatureFlag.TUTOR in feature_flags.ADMIN_DEFAULT_FLAGS
+def test_tutor_is_registered_and_launched_on_by_default() -> None:
+    """Phase 2's one flag: launched, so it defaults **on** (AL-270).
 
-
-def test_shaping_is_registered_and_ships_dark_but_on_for_admins() -> None:
-    """Phase 2B's one flag, registered the same way (epic #114, convention 1).
-
-    Off globally so every 2B ticket merges and deploys with zero learner
-    exposure; on for the admin class so admins dogfood shaping in production.
-    Launch (AL-370) is ``FEATURE_FLAG_DEFAULTS=shaping:on``, no code deploy.
+    It spent Phase 2's build-out at ``False`` (epic #82, amendment 1) — that is
+    what shipping dark meant. Now that the tutor is live for every learner, the
+    code default is the statement of it, so a clone with no
+    ``FEATURE_FLAG_DEFAULTS`` set resolves it on.
     """
+    assert feature_flags.FeatureFlag.TUTOR == "tutor"
+    assert feature_flags.FLAG_DEFAULTS[feature_flags.FeatureFlag.TUTOR] is True
+
+
+def test_shaping_is_registered_and_launched_on_by_default() -> None:
+    """Phase 2B's one flag, registered and launched the same way (AL-370)."""
     assert feature_flags.FeatureFlag.SHAPING == "shaping"
-    assert feature_flags.FLAG_DEFAULTS[feature_flags.FeatureFlag.SHAPING] is False
-    assert feature_flags.FeatureFlag.SHAPING in feature_flags.ADMIN_DEFAULT_FLAGS
+    assert feature_flags.FLAG_DEFAULTS[feature_flags.FeatureFlag.SHAPING] is True
+
+
+def test_a_launched_flag_is_still_killable_without_a_code_deploy() -> None:
+    """The point of leaving the machinery in place: ``:off`` still outranks.
+
+    A default of ``True`` is a default, not a hardcode — the settings map beats
+    it (step 2 of the resolution order), which is what keeps the mid-incident
+    kill switch real now that neither flag is dark.
+    """
+    config = Settings(feature_flag_defaults="tutor:off")
+
+    assert feature_flags.effective_defaults(config)["tutor"] is False
+    assert feature_flags.effective_defaults(config)["shaping"] is True
 
 
 def test_the_registry_is_exactly_the_two_phase_flags() -> None:

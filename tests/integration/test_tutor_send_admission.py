@@ -59,7 +59,7 @@ if TYPE_CHECKING:
 
 @pytest.mark.anyio
 async def test_flag_off_hides_the_send_route(
-    app: FastAPI, monkeypatch: pytest.MonkeyPatch
+    app: FastAPI, monkeypatch: pytest.MonkeyPatch, tutor_flag_disabled: None
 ) -> None:
     """The inherited router-level gate covers the send endpoint too.
 
