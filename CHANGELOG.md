@@ -1,3 +1,10 @@
+## [1.21.1](https://github.com/mattjmcnaughton/aleph/compare/v1.21.0...v1.21.1) (2026-08-02)
+
+
+### Bug Fixes
+
+* **streaks:** size the activity window to the grid — 49 days, exactly full ([#150](https://github.com/mattjmcnaughton/aleph/issues/150)) ([04a5d68](https://github.com/mattjmcnaughton/aleph/commit/04a5d68986cf3c6dc93229e371f0325cdb36188d))
+
 # [1.21.0](https://github.com/mattjmcnaughton/aleph/compare/v1.20.2...v1.21.0) (2026-08-02)
 
 
