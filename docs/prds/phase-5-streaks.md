@@ -1,6 +1,6 @@
 # PRD — Phase 5, slice 1: Streaks
 
-**Status:** Proposal (not accepted) · **Owner:** solo builder · **Roadmap item:** [Phase 5 — Momentum](../roadmap.md#phase-5--momentum)
+**Status:** Accepted — **shipped and launched** (the `streaks` flag defaults on) · **Owner:** solo builder · **Roadmap item:** [Phase 5 — Momentum](../roadmap.md#phase-5--momentum)
 **Companion to:** [Phase 5 streaks TDD](../tdds/phase-5-streaks.md)
 **References:** [`README.md`](../../README.md) · [`roadmap.md`](../roadmap.md) · [`CONTEXT.md`](../CONTEXT.md) (ubiquitous language) · [Phase 1 PRD](phase-1-path-generation.md) · [`metrics.md`](../metrics.md) · prior art: habagou `domains/streaks.py`, `services/progress.py`
 

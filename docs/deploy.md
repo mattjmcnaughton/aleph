@@ -331,6 +331,8 @@ code — it is one committed configuration change.
 > about either key, and a laptop, a CI run and production all resolve them the
 > same way with no configuration. That is the intended end state for a launched
 > phase: the env var is the *override*, not the statement of what is live.
+> **Phase 5's `streaks` launched the same way**, so all three registered flags
+> now default on and the registry currently holds nothing dark.
 >
 > This section stays the reference for the lever itself, now read mainly for
 > **turning a flag off** (the kill switch below) and for launching the next phase

@@ -18,21 +18,20 @@ Auth is the real cookie flow with a stubbed OIDC code exchange (mirroring
 ``test_auth_api`` / ``test_paths_api``), so the admin gate is genuine — admin
 status is derived from the email domain (``authz.is_admin``), never stored.
 
-**Both ``tutor`` and ``shaping`` are now launched and default on** (AL-270,
-AL-370), which would make most of the resolution machinery below untestable — a
-flag that is on for everyone cannot demonstrate an admin baseline, an override
-that flips a learner *on*, or a `404` gate. So ``dark_flag_defaults`` (autouse)
-puts both code defaults back to ``False`` for this module: every test here is
-about the machinery, and the machinery's interesting case is a dark flag. The
-launched defaults get their own test, ``test_launched_flags_reach_a_plain_learner``,
+**All three registered flags are now launched and default on** — ``tutor``
+(AL-270), ``shaping`` (AL-370) and Phase 5's ``streaks`` (D7) — which would make
+most of the resolution machinery below untestable — a flag that is on for
+everyone cannot demonstrate an admin baseline, an override that flips a learner
+*on*, or a `404` gate. So ``dark_flag_defaults`` (autouse) puts every code
+default back to ``False`` for this module: every test here is about the
+machinery, and the machinery's interesting case is a dark flag. The launched
+defaults get their own test, ``test_launched_flags_reach_a_plain_learner``,
 which opts back out.
 
-**Phase 5's ``streaks`` (D7) is registered but still ships dark** — its code
-default is already ``False`` and it needs no forcing, so it is deliberately
-left out of ``dark_flag_defaults``. Every resolved map and every admin listing
-below still carries it (the session/list surfaces the whole registry, not just
-the flags a given test is about), which is what proves adding a third flag
-never widens what a plain learner sees.
+Every resolved map and every admin listing below carries all three keys (the
+session/list surfaces the whole registry, not just the flags a given test is
+about), which is what proves a third flag joining the registry never widens what
+a plain learner sees.
 """
 
 from __future__ import annotations
@@ -112,16 +111,19 @@ async def _sign_in(
 
 @pytest.fixture(autouse=True)
 def dark_flag_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Force both code defaults back to ``False`` for this module.
+    """Force every code default back to ``False`` for this module.
 
-    See the module docstring: ``tutor`` and ``shaping`` are launched and default
-    on, but every test here is about the *resolution machinery*, whose whole
-    subject matter is a flag that is not simply on for everyone. Patching
+    See the module docstring: all three flags are launched and default on, but
+    every test here is about the *resolution machinery*, whose whole subject
+    matter is a flag that is not simply on for everyone. Patching
     ``FLAG_DEFAULTS`` (rather than the settings map) is deliberate — the settings
     map is step 2 of the resolution order and would outrank the admin baseline
     these tests exist to exercise.
+
+    Iterating the registry rather than naming flags means the next flag to join
+    it is dark here by construction, which is the posture this module wants.
     """
-    for flag in (feature_flags.FeatureFlag.TUTOR, feature_flags.FeatureFlag.SHAPING):
+    for flag in feature_flags.FLAG_DEFAULTS:
         monkeypatch.setitem(feature_flags.FLAG_DEFAULTS, flag, False)
 
 
@@ -137,9 +139,10 @@ def _resolved(*, tutor: bool, shaping: bool, streaks: bool = False) -> dict[str,
     Spelled as a helper so a new flag joining the registry is one edit here
     rather than one per assertion, while the assertions stay exact: an extra key
     leaking into a learner's map (a stale override row, say) still fails.
-    ``streaks`` defaults to ``False`` because none of this module's tests
-    override or dogfood it — it is here purely to prove the third registered
-    flag never leaks a different value than its own resolution would give.
+    ``streaks`` defaults to ``False`` because ``dark_flag_defaults`` closes it
+    like the other two and none of this module's tests override or dogfood it —
+    it is here purely to prove the third registered flag never leaks a different
+    value than its own resolution would give.
     """
     return {TUTOR: tutor, SHAPING: shaping, STREAKS: streaks}
 
@@ -232,21 +235,23 @@ async def test_unknown_flag_or_user_is_404(
 async def test_launched_flags_reach_a_plain_learner(
     app: FastAPI, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The launched posture (AL-270, AL-370): on for everyone, nothing configured.
+    """The launched posture: on for everyone, with nothing configured.
 
     Opts back out of ``dark_flag_defaults`` by restoring the real registry
     values, so this is the one test in the module reading the defaults the
     codebase actually ships. A plain learner — no admin domain, no override row,
-    no ``FEATURE_FLAG_DEFAULTS`` — gets both surfaces, which is what makes a
+    no ``FEATURE_FLAG_DEFAULTS`` — gets every surface, which is what makes a
     fresh clone and a local ``just dev`` show the real product.
     """
-    for flag in (feature_flags.FeatureFlag.TUTOR, feature_flags.FeatureFlag.SHAPING):
+    for flag in feature_flags.FLAG_DEFAULTS:
         monkeypatch.setitem(feature_flags.FLAG_DEFAULTS, flag, True)
     assert not settings.feature_flag_defaults, "nothing may be configured here"
 
     async with _client(app) as learner:
         await _sign_in(learner, monkeypatch, LEARNER)
-        assert await _flags_on_session(learner) == _resolved(tutor=True, shaping=True)
+        assert await _flags_on_session(learner) == _resolved(
+            tutor=True, shaping=True, streaks=True
+        )
 
 
 @pytest.mark.anyio

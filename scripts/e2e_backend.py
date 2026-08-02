@@ -124,20 +124,15 @@ def create_stub_app() -> FastAPI:
     settings.rate_limit_lesson_generations_per_day = 0
     settings.rate_limit_tutor_messages_per_day = 0
     settings.rate_limit_shaping_messages_per_day = 0
-    # ``tutor`` (AL-203/AL-270) and ``shaping`` (AL-301/AL-370) are launched and
-    # default on in ``services/feature_flags.py``, so the browser suite's plain
-    # learner meets both rails with nothing set here. This line is kept as an
-    # explicit *pin* rather than deleted as redundant: the suite asserts against
-    # surfaces that must exist, and "every tutor spec failed on an absent rail"
-    # is a confusing way to discover someone flipped a code default.
-    #
-    # ``streaks`` (Phase 5 D7) is different from its two neighbours here: its
-    # code default is ``False`` (it ships dark), and the harness's one learner
-    # (``DEV_USER``) is not an admin, so it gets none of ``ADMIN_DEFAULT_FLAGS``'
-    # baseline either. Without this entry the W22/W23 journeys would 404 on
-    # `GET /progress/summary` the moment the code default is exactly what it is
-    # supposed to be — the same "confusing way to discover a default" the
-    # comment above already warns about, just one flag over.
+    # ``tutor`` (AL-203/AL-270), ``shaping`` (AL-301/AL-370) and ``streaks``
+    # (Phase 5 D7) are all launched and default on in
+    # ``services/feature_flags.py``, so the browser suite's plain learner —
+    # ``DEV_USER``, who is not an admin and gets none of ``ADMIN_DEFAULT_FLAGS``'
+    # baseline — meets both rails and the streak line with nothing set here.
+    # This line is kept as an explicit *pin* rather than deleted as redundant:
+    # the suite asserts against surfaces that must exist, and "every tutor spec
+    # failed on an absent rail" is a confusing way to discover someone flipped a
+    # code default.
     settings.feature_flag_defaults = "tutor:on,shaping:on,streaks:on"
 
     # Imported lazily so mutating settings above lands before app assembly.

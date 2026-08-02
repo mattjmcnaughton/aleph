@@ -461,11 +461,12 @@ def shaping_flag_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
 def streaks_flag_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
     """Turn the ``streaks`` flag on globally for one test (Phase 5 TDD D7).
 
-    The Phase 5 twin of ``tutor_flag_enabled``/``shaping_flag_enabled``: unlike
-    those two, ``streaks`` has never launched, so its code default is already
-    ``False`` — but the surface is still exercised as a post-launch learner
-    would meet it, by flipping the *global default* rather than making the
-    test's learner an admin or seeding an override row.
+    The Phase 5 twin of ``tutor_flag_enabled``/``shaping_flag_enabled``, and
+    redundant for the same reason they are: since the launch flip the code
+    default is ``True``, so the Progress surface is open without it. Kept, and
+    still requested by the tests that drive that surface, because it states
+    which flag a test's subject hangs off — and because it is what those tests
+    would need again if this flag ever went dark.
     """
     _enable_flag_globally(monkeypatch, "streaks")
 
@@ -474,9 +475,11 @@ def streaks_flag_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
 def streaks_flag_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
     """Turn the ``streaks`` flag off globally for one test.
 
-    Unlike ``tutor_flag_disabled``/``shaping_flag_disabled`` this is not yet
-    needed to prove a kill switch (``streaks`` is already off by code default),
-    but it is registered for symmetry and for the day this flag launches too.
+    The mirror of ``streaks_flag_enabled``, and now the one that does the work:
+    since the launch flip the code default is ``True``, so a test that wants to
+    prove the ``404`` gate has to *close* the flag rather than assume it — the
+    same move ``tutor_flag_disabled``/``shaping_flag_disabled`` make, through
+    the same documented kill switch.
     """
     _disable_flag_globally(monkeypatch, "streaks")
 

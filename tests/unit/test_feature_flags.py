@@ -119,16 +119,19 @@ def test_shaping_is_registered_and_launched_on_by_default() -> None:
     assert feature_flags.FLAG_DEFAULTS[feature_flags.FeatureFlag.SHAPING] is True
 
 
-def test_streaks_is_registered_and_ships_dark_by_default() -> None:
-    """Phase 5's one flag: registered, but still off (D7) — not launched yet.
+def test_streaks_is_registered_and_launched_on_by_default() -> None:
+    """Phase 5's one flag, registered and launched the same way (D7).
 
-    Unlike ``tutor``/``shaping`` this one is still at the "every ticket merges
-    dark" stage of the playbook: the code default is ``False``, and it is an
-    admin default so it can be dogfooded in production before the
-    ``FEATURE_FLAG_DEFAULTS`` flip that launches it.
+    It spent the streaks build-out at ``False`` — that is what shipping dark
+    meant, and what let the whole slice merge and deploy while only admins saw
+    it. Now that the streak line, the activity strip and the path chips are live
+    for every learner, the code default is the statement of it. Membership in
+    :data:`ADMIN_DEFAULT_FLAGS` is asserted still: it is redundant while the
+    default is ``True``, but it is what the flag falls back to if this is ever
+    flipped dark again.
     """
     assert feature_flags.FeatureFlag.STREAKS == "streaks"
-    assert feature_flags.FLAG_DEFAULTS[feature_flags.FeatureFlag.STREAKS] is False
+    assert feature_flags.FLAG_DEFAULTS[feature_flags.FeatureFlag.STREAKS] is True
     assert feature_flags.FeatureFlag.STREAKS in feature_flags.ADMIN_DEFAULT_FLAGS
 
 

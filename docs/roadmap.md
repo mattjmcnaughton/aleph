@@ -16,9 +16,41 @@ that knows where you are, a path that bends around your weak spots. We build the
 whole loop one vertical slice at a time rather than spreading thin across
 half-finished features.
 
+## Status at a glance
+
+Where each phase stands, and where its specification lives. **Shipped** means the
+code is merged and deployed; **launched** means it is on for every learner rather
+than admins alone (the flag playbook is in
+[`deploy.md`](deploy.md#launching-a-flagged-phase-al-270--al-370)). A phase with no
+PRD has not been specified yet — that document is its first deliverable, not an
+afterthought.
+
+| Phase | Status | Specs |
+| ----- | ------ | ----- |
+| **1 — The generated path (MVP)** | ✅ Shipped & launched | [PRD](prds/phase-1-path-generation.md) · [TDD](tdds/phase-1-path-generation.md) |
+| **2 — The tutor** (2A, in-lesson) | ✅ Shipped & launched (`tutor` flag on, AL-270) | [PRD](prds/phase-2-tutor.md) · [TDD](tdds/phase-2-tutor.md) |
+| **2B — Shape your path** (learner-initiated) | ✅ Shipped & launched (`shaping` flag on, AL-370) | [PRD](prds/phase-2b-shape-your-path.md) · [TDD](tdds/phase-2b-shape-your-path.md) |
+| **3 — Flashcards and spaced repetition** | ⬜ Not started — **no PRD yet** | — |
+| **4 — Adaptive paths** | ⬜ Not started — **no PRD yet** (2B pre-built the proposal/apply machinery) | — |
+| **5 — Momentum** | 🟡 In progress — streaks shipped **and launched**; goal ring and daily minutes unbuilt | streaks: [PRD](prds/phase-5-streaks.md) · [TDD](tdds/phase-5-streaks.md) |
+| **Beyond** | ⬜ Unscoped, sequenced against real usage | — |
+
+Three tails hang off the shipped phases and are tracked as open issues rather than
+here: the **eval artifact kinds** and their labelled calibration sets (AL-083/AL-091
+for Phase 1, AL-250/AL-251 for Phase 2, AL-350/AL-351 for Phase 2B) and the
+**ship-verification sweeps** (AL-270, AL-370) whose flag flips have already landed.
+The Phase 2 and 2B epics (#82, #114) stay open until those close.
+
+So, concretely, what is left to build: **the rest of Phase 5** — the goal ring and
+the daily-minutes target, now that streaks are launched — then **all of Phase 3**,
+then **all of Phase 4**, plus the Phase 2 slices listed as deferred below.
+
 ## Phase 1 — The generated path (MVP)
 
-> 📄 **Full spec:** [Phase 1 PRD — Path generation](prds/phase-1-path-generation.md)
+> ✅ **Status:** shipped and launched — accounts, generation, paths, lessons and
+> Quick checks are live for every learner.
+> 📄 **Full spec:** [Phase 1 PRD — Path generation](prds/phase-1-path-generation.md) ·
+> [Phase 1 TDD](tdds/phase-1-path-generation.md)
 
 The MVP is the first complete vertical slice: name a topic and skill level, and
 Aleph generates a structured path you can immediately start learning. Onboarding
@@ -42,7 +74,13 @@ success metrics, end-to-end workflows, and AI evals.
 
 ## Phase 2 — The tutor
 
+> ✅ **Status:** both shipped slices are launched — **2A** (in-lesson tutor) and
+> **2B** (Shape your path). Deferred to a later slice: the whole-path **Q&A** tutor,
+> **selection-to-quote**, and summarized carried context.
 > 📄 **Full spec:** [Phase 2 PRD — The tutor (in-lesson)](prds/phase-2-tutor.md) ·
+> [Phase 2 TDD](tdds/phase-2-tutor.md) ·
+> [Phase 2B PRD — Shape your path](prds/phase-2b-shape-your-path.md) ·
+> [Phase 2B TDD](tdds/phase-2b-shape-your-path.md) ·
 > mock: [phase-2 tutor](mocks/aleph-phase-2-tutor.html)
 
 With a real path to talk about, we add the feature that makes Aleph a tutor and
@@ -78,6 +116,14 @@ are re-deferred to a later slice, sequenced against real usage.
 
 ## Phase 3 — Flashcards and spaced repetition
 
+> ⬜ **Status:** not started. Nothing of this exists in the code — no card model, no
+> scheduler, no drafting agent — and **no PRD or TDD has been written**. Writing the
+> PRD is the first ticket of this phase, not a formality: Phase 5's streak slice is
+> explicitly instrumentation for a return metric this phase is supposed to earn
+> ([streaks PRD §2](prds/phase-5-streaks.md)), so the retention loop is the largest
+> unbuilt thing on this roadmap.
+> 📄 **Full spec:** none yet.
+
 Now we close the retention loop. When you finish a lesson, the AI drafts a handful
 of candidate flashcards from it — and, importantly, you stay in control: you
 review the drafts and keep only the ones worth remembering, exactly as the mock
@@ -89,6 +135,14 @@ produces a second stream of signal about what a learner does and doesn't know,
 which the next phase puts to work.
 
 ## Phase 4 — Adaptive paths
+
+> ⬜ **Status:** not started, and **no PRD or TDD yet** — but materially de-risked:
+> Phase 2B already built and launched the proposal card, ghost-row preview,
+> apply-with-undo and change history this phase would have had to invent
+> ([Phase 2B TDD](tdds/phase-2b-shape-your-path.md)). What remains is genuinely
+> Phase 4's own: the *system* proposing edits unprompted, which needs Phase 3's miss
+> signal first, and the destructive edit shapes 2B declined.
+> 📄 **Full spec:** none yet.
 
 This is where "dynamically generated" earns its name. Until now the path is
 generated once and then fixed; here it starts bending around the individual. Using
@@ -114,7 +168,13 @@ any change that touches finished work.
 
 ## Phase 5 — Momentum
 
-> 📄 **Full spec:** [Phase 5 streaks PRD](prds/phase-5-streaks.md) ·
+> 🟡 **Status:** partially built. The **streaks** slice is shipped and **launched**
+> — the `streaks` flag defaults on, so every learner sees the streak line, the
+> activity strip and the path chips, and the flag stays registered as a kill
+> switch. The **weekly goal ring**, the **daily-minutes target** and the small
+> **progress/stats view** are unbuilt and unspecified; "minutes this week" and
+> "cards mastered" additionally wait on Phase 3.
+> 📄 **Full spec (streaks only):** [Phase 5 streaks PRD](prds/phase-5-streaks.md) ·
 > [Phase 5 streaks TDD](tdds/phase-5-streaks.md)
 
 The final core phase turns the tool into a habit. With learners already running
@@ -128,12 +188,18 @@ The **streaks** slice was pulled forward and shipped early, the same move Phase
 2B was for Phase 2 (📄 [Phase 5 streaks PRD](prds/phase-5-streaks.md)): a global
 **Daily streak** and a per-path **Path streak**, both derived from
 `lessons.completed_at` with no new table (a `GROUP BY` over rows that already
-exist), plus the 45-day activity strip the mock draws as a heatmap. It ships
-behind the `streaks` flag — dark by default, admin dogfood only, the same
-playbook `tutor`/`shaping` used before their own launches. The weekly goal ring
-and the daily-minutes target remain here, unbuilt, for the rest of this phase.
+exist), plus the activity strip the mock draws as a heatmap — 49 days, seven
+whole weeks, so the grid is exactly full. It ran the `streaks` flag through the
+same playbook `tutor` and `shaping` used — dark through the build-out, admin
+dogfood only, then one code-default flip — and is now **launched** for every
+learner. The weekly goal ring and the daily-minutes target remain here, unbuilt,
+for the rest of this phase.
 
 ## Beyond
+
+> ⬜ **Status:** unscoped by design — nothing here is committed to, and none of it
+> has a PRD.
+> 📄 **Full spec:** none, deliberately.
 
 Once the core loop is proven end to end, natural extensions open up: richer lesson
 formats (diagrams, worked examples, code you can run), cross-device sync, sharing or

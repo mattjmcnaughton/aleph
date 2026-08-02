@@ -39,12 +39,16 @@ tutor in production. ``shaping`` (Phase 2B, epic #114 adopted convention 1) was
 registered the same way — a separate flag, so either could ship dark or be killed
 without disturbing the other.
 
-**Both are now launched and default on** (AL-270, AL-370). Their entry in
-:data:`FLAG_DEFAULTS` is the whole of that: a clone with no ``FEATURE_FLAG_DEFAULTS``
-set — a laptop, a CI run, a fresh deploy — resolves both on and shows the product
-a learner actually sees. Nothing about the machinery changed, and the dark posture
-above is still exactly how the next phase ships: register the flag ``False``, add
-it to :data:`ADMIN_DEFAULT_FLAGS`, flip it here at launch.
+``streaks`` (Phase 5, D7) was registered the same way again, and rode the same
+playbook from dark to launched.
+
+**All three are now launched and default on** (AL-270, AL-370, and the streaks
+flip). Their entry in :data:`FLAG_DEFAULTS` is the whole of that: a clone with no
+``FEATURE_FLAG_DEFAULTS`` set — a laptop, a CI run, a fresh deploy — resolves them
+on and shows the product a learner actually sees. Nothing about the machinery
+changed, and the dark posture above is still exactly how the next phase ships:
+register the flag ``False``, add it to :data:`ADMIN_DEFAULT_FLAGS`, flip it here at
+launch.
 
 A launched flag is still a **kill switch**: ``FEATURE_FLAG_DEFAULTS=tutor:off``
 outranks this module's defaults with no code deploy, and reaches admins too (step
@@ -109,12 +113,11 @@ FLAG_DEFAULTS: dict[FeatureFlag, bool] = {
     FeatureFlag.TUTOR: True,
     # On: Phase 2B is launched (AL-370), for the same two reasons.
     FeatureFlag.SHAPING: True,
-    # Off: Phase 5's streaks slice ships dark (D7), the same posture ``tutor``
-    # and ``shaping`` started at — every ticket merges and deploys with zero
-    # learner exposure while admins dogfood it (:data:`ADMIN_DEFAULT_FLAGS`
-    # below), and launch is one ``FEATURE_FLAG_DEFAULTS`` entry flipping this
-    # to ``True`` here, exactly as AL-270/AL-370 did.
-    FeatureFlag.STREAKS: False,
+    # On: Phase 5's streaks slice is launched. It spent its whole build-out at
+    # ``False`` — shipping dark (D7) is what let every ticket merge and deploy
+    # with zero learner exposure while admins dogfooded it — and this flip is
+    # the launch itself, exactly the move AL-270/AL-370 made for the two above.
+    FeatureFlag.STREAKS: True,
 }
 
 
@@ -125,8 +128,8 @@ FLAG_DEFAULTS: dict[FeatureFlag, bool] = {
 # ``tutor:off`` there turns the flag off for admins too (kill switch), and a
 # per-user override beats it for everyone, admins included.
 #
-# Both members are **currently redundant**: a flag whose code default is already
-# ``True`` is on for admins by that default alone, and after a ``:off`` kill the
+# All three members are **currently redundant**: a flag whose code default is
+# already ``True`` is on for admins by that default alone, and after a ``:off`` kill the
 # settings map outranks this baseline anyway, so membership changes no answer
 # either way. They stay listed rather than dropped because this is the seam the
 # *next* dark phase uses, and re-deriving which flags belong here is exactly the
