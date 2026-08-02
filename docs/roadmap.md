@@ -32,7 +32,7 @@ afterthought.
 | **2B — Shape your path** (learner-initiated) | ✅ Shipped & launched (`shaping` flag on, AL-370) | [PRD](prds/phase-2b-shape-your-path.md) · [TDD](tdds/phase-2b-shape-your-path.md) |
 | **3 — Flashcards and spaced repetition** | ⬜ Not started — **no PRD yet** | — |
 | **4 — Adaptive paths** | ⬜ Not started — **no PRD yet** (2B pre-built the proposal/apply machinery) | — |
-| **5 — Momentum** | 🟡 In progress — streaks shipped **dark**; goal ring and daily minutes unbuilt | streaks: [PRD](prds/phase-5-streaks.md) · [TDD](tdds/phase-5-streaks.md) |
+| **5 — Momentum** | 🟡 In progress — streaks shipped **and launched**; goal ring and daily minutes unbuilt | streaks: [PRD](prds/phase-5-streaks.md) · [TDD](tdds/phase-5-streaks.md) |
 | **Beyond** | ⬜ Unscoped, sequenced against real usage | — |
 
 Three tails hang off the shipped phases and are tracked as open issues rather than
@@ -41,9 +41,9 @@ for Phase 1, AL-250/AL-251 for Phase 2, AL-350/AL-351 for Phase 2B) and the
 **ship-verification sweeps** (AL-270, AL-370) whose flag flips have already landed.
 The Phase 2 and 2B epics (#82, #114) stay open until those close.
 
-So, concretely, what is left to build: **the launch of streaks and the rest of Phase
-5**, then **all of Phase 3**, then **all of Phase 4** — plus the Phase 2 slices
-listed as deferred below.
+So, concretely, what is left to build: **the rest of Phase 5** — the goal ring and
+the daily-minutes target, now that streaks are launched — then **all of Phase 3**,
+then **all of Phase 4**, plus the Phase 2 slices listed as deferred below.
 
 ## Phase 1 — The generated path (MVP)
 
@@ -168,11 +168,12 @@ any change that touches finished work.
 
 ## Phase 5 — Momentum
 
-> 🟡 **Status:** partially built. The **streaks** slice is shipped and deployed but
-> **not launched** — the `streaks` flag still defaults off, so it is admin dogfood
-> only, and the flip is the next step. The **weekly goal ring**, the
-> **daily-minutes target** and the small **progress/stats view** are unbuilt and
-> unspecified; "minutes this week" and "cards mastered" additionally wait on Phase 3.
+> 🟡 **Status:** partially built. The **streaks** slice is shipped and **launched**
+> — the `streaks` flag defaults on, so every learner sees the streak line, the
+> activity strip and the path chips, and the flag stays registered as a kill
+> switch. The **weekly goal ring**, the **daily-minutes target** and the small
+> **progress/stats view** are unbuilt and unspecified; "minutes this week" and
+> "cards mastered" additionally wait on Phase 3.
 > 📄 **Full spec (streaks only):** [Phase 5 streaks PRD](prds/phase-5-streaks.md) ·
 > [Phase 5 streaks TDD](tdds/phase-5-streaks.md)
 
@@ -188,11 +189,11 @@ The **streaks** slice was pulled forward and shipped early, the same move Phase
 **Daily streak** and a per-path **Path streak**, both derived from
 `lessons.completed_at` with no new table (a `GROUP BY` over rows that already
 exist), plus the activity strip the mock draws as a heatmap — 49 days, seven
-whole weeks, so the grid is exactly full. It ships behind the `streaks` flag —
-dark by default, admin dogfood only, the same playbook `tutor`/`shaping` used
-before their own launches, and **that launch has not happened yet**. The weekly
-goal ring and the daily-minutes target remain here, unbuilt, for the rest of this
-phase.
+whole weeks, so the grid is exactly full. It ran the `streaks` flag through the
+same playbook `tutor` and `shaping` used — dark through the build-out, admin
+dogfood only, then one code-default flip — and is now **launched** for every
+learner. The weekly goal ring and the daily-minutes target remain here, unbuilt,
+for the rest of this phase.
 
 ## Beyond
 

@@ -61,7 +61,8 @@ async def require_streaks_enabled(user: CurrentUser, session: Session) -> None:
     Resolution order lives in ``services/feature_flags`` — per-user override >
     ``FEATURE_FLAG_DEFAULTS`` > admin default > code default — the same chain
     that let ``tutor`` and ``shaping`` ship dark and be dogfooded by admins
-    before launch; ``streaks`` follows the identical playbook (D7).
+    before launch; ``streaks`` followed the identical playbook (D7) and is now
+    launched too, which makes this gate a kill switch rather than a curtain.
     """
     flags = await FeatureFlagService(session).resolve_for_user(user)
     if not flags.get(FeatureFlag.STREAKS, False):

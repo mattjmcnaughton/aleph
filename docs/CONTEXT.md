@@ -165,5 +165,6 @@ phase:
   shipped early, see the streaks PRD** ([PRD](prds/phase-5-streaks.md) ·
   [TDD](tdds/phase-5-streaks.md)), the same pull-forward move Phase 2B was.
   **Daily streak**, **Path streak**, **Active day** and **Best streak** above
-  are built, behind the `streaks` flag (dark by default, admin dogfood only,
-  same playbook as `tutor`/`shaping` before launch).
+  are built and **launched** — the `streaks` flag defaults on, having run the
+  same dark-then-flip playbook as `tutor`/`shaping`, and stays registered as a
+  kill switch.

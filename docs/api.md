@@ -363,9 +363,10 @@ get wrong.
 **The whole surface is feature-flagged.** The single route sits behind a
 router-level `require_streaks_enabled` dependency: when the `streaks` flag (see
 *Feature flags* below) resolves **off** for the caller, it answers `404` — for
-that account the surface does not exist. Ships dark, the same playbook
-`tutor`/`shaping` used: admins dogfood it in production while it is off for
-everyone else.
+that account the surface does not exist. It shipped dark, the same playbook
+`tutor`/`shaping` used — admins dogfooding it in production while it was off for
+everyone else — and is now **launched**: the code default is on, so the gate is
+open for every learner and the flag is a kill switch.
 
 | Method | Path | Query | Success | Notes |
 | ------ | ---- | ----- | ------- | ----- |
@@ -456,7 +457,7 @@ costs no extra request. The frontend reads it through `useFeatureFlag(key)`
 | --- | ------------ | ------------- | ------- |
 | `tutor` | **on** | on (redundantly — the code default already carries it) | The Phase 2 in-lesson tutor — the rail, its API, and its stream. Shipped **dark** at `off` through Phase 2's build-out (epic #82 amendment 1) while admins dogfooded it; **launched at AL-270**, which flipped this code default on. Kill it without a code deploy with `FEATURE_FLAG_DEFAULTS=tutor:off`. |
 | `shaping` | **on** | on (redundantly, as above) | Phase 2B shaping — the shaping rail, its API and its stream, and the apply/undo endpoints. Same history on its own key (epic #114, adopted convention 1): dark through 2B's build-out, **launched at AL-370**. Independent of `tutor`, so either can be killed without disturbing the other. |
-| `streaks` | off | on | Phase 5 streaks — `GET /progress/summary` and everything under it (see [Progress](#progress-apiv1-phase-5-tdd-546)). Ships **dark**, the same playbook `tutor`/`shaping` started at: admins dogfood it in production while it defaults off for everyone else. Launch is one `FEATURE_FLAG_DEFAULTS` entry flipping the code default on, exactly as AL-270/AL-370 did. |
+| `streaks` | **on** | on (redundantly, as above) | Phase 5 streaks — `GET /progress/summary` and everything under it (see [Progress](#progress-apiv1-phase-5-tdd-546)). Same history again on its own key (TDD D7): dark at `off` through the slice's build-out while admins dogfooded it, then **launched** by flipping this code default on, exactly as AL-270/AL-370 did. Kill it with `FEATURE_FLAG_DEFAULTS=streaks:off`. |
 
 **Operating it.** `FEATURE_FLAG_DEFAULTS` is a comma-separated list of
 `key:on` / `key:off` entries (`FEATURE_FLAG_DEFAULTS="tutor:on"`). Malformed and
