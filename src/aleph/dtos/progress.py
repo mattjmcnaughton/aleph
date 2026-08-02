@@ -28,7 +28,7 @@ TzOffsetMinutes = Annotated[int, Field(ge=-900, le=900)]
 
 
 class ActivityCellDTO(BaseModel):
-    """One day of the 45-day activity strip (D12): a date and its lesson count.
+    """One day of the 49-day activity strip (D12): a date and its lesson count.
 
     ``count`` is zero-filled for a day with no completions — the strip always
     carries exactly ``STREAK_ACTIVITY_WINDOW_DAYS`` entries, oldest first,

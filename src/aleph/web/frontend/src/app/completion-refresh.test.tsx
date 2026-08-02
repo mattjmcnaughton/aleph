@@ -237,7 +237,7 @@ function progressSummaryFixture(overrides: {
   };
 }
 
-/** Today's cell — the last of the 45, oldest-first (TDD §6). */
+/** Today's cell — the last of the 49, oldest-first (TDD §6). */
 function todayActivityCell(): HTMLElement {
   const cells = screen.getAllByTestId("activity-cell");
   return cells[cells.length - 1];

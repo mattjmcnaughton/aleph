@@ -485,7 +485,14 @@ class Settings(BaseSettings):
     # repository both take no config (the purity rule, ``domains/__init__.py``)
     # — only the service reads this setting. Must be positive (``ge=1``): a
     # non-positive window would ask the domain for zero or negative cells.
-    streak_activity_window_days: int = Field(default=45, ge=1)
+    #
+    # **49, not 45** — TDD §15's open window question, settled the way D12's own
+    # geometry argues: the strip is a 7-row × 7-column week grid, and 7×7 is 49.
+    # Shipping 45 into it meant four permanently blank leading cells and a rule
+    # to produce them; asking for 49 deletes both and buys four more days of
+    # history. The grid is exactly full, which is what makes "one column is one
+    # week" true by construction rather than by a pad that happens to be right.
+    streak_activity_window_days: int = Field(default=49, ge=1)
 
 
 settings = Settings()

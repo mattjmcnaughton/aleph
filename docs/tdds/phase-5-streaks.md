@@ -33,7 +33,7 @@ always qualified ("Phase 1 D5", "Phase 2B §5.6").
 | D9 | Instrumentation | **No new product event.** `EVENT_FIELDS` is untouched; `queries/logfire/streak_return.sql` computes streak length from `lesson_completed`, which has carried `account_id` and a timestamp since Phase 1 | §14, R3. A `progress_summary_viewed` firing per GET would mostly count invalidation refetches caused by completions (D10) — a number that reads as engagement and isn't. The retroactive baseline, which is the whole reason the combined doc wanted an event, comes free from `lesson_completed` instead |
 | D10 | Cache wiring | Own key `["progress", "summary", tzOffset]`, invalidated **explicitly** by the completion mutation, plus an **optimistic bump** of the cached payload when the completion is the day's first | The honest key: a global cross-path summary does not belong under the `["paths"]` prefix, even though nesting it there would make invalidation free. The forgettable line is pinned by `src/app/completion-refresh.test.tsx`, which exists for exactly this class of bug. Optimism is what makes PRD §3's "same interaction" true on a phone rather than true after a round trip |
 | D11 | E2E clock | The stub backend (`scripts/e2e_backend.py`) mounts a test-only `POST /__e2e__/shift-completions` that backdates a path's completions. **Mounted by `create_stub_app` only** — the production factory never sees the router | Phase 1 D10 / Phase 2B D12 discipline: determinism lives in the stub backend, never behind a config guard in real code. W23 needs yesterday to exist and Playwright cannot wait; a *shift* primitive is enough, so no fabricated lessons and no clock seam in the server |
-| D12 | Activity strip | A **7-row × 7-column week grid** (49 cells, of which the window's 45 are live), weekday-aligned, three teal intensities | 45 cells in one row is ~6px each on a 390px viewport. The week grid lands at ~14–16px, and the weekly rhythm ("never on Wednesdays") is legible — which a flat row hides. Costs a leading-pad rule and vertical space on home |
+| D12 | Activity strip | A **7-row × 7-column week grid**, exactly full: the window is **49** days, so all 49 cells are live and there is no pad. Rows are weekday-consistent, three teal intensities | 49 cells in one row is ~5px each on a 390px viewport. The week grid lands at ~14–16px, and the weekly rhythm ("never on Wednesdays") is legible — which a flat row hides. Sizing the window to the grid rather than padding it to fit costs nothing and buys four more days (§15's open question, since settled) |
 
 ## 2. Extension map
 
@@ -95,7 +95,7 @@ GET /progress/summary?tz_offset_minutes=-120
       → today = (now(UTC) - offset).date()
       → compute_streaks({all days})                 → global Streaks
       → compute_streaks({days of path p}) per path  → per-path Streaks
-      → activity_window({day: sum(count)}, today, 45)
+      → activity_window({day: sum(count)}, today, 49)
   → ProgressSummaryResponse
 ```
 
@@ -293,7 +293,7 @@ New router `routers/v1/progress.py`, prefix `/api/v1`, all conventions verbatim 
   "current_streak": 5,
   "best_streak": 12,
   "completed_today": 1,
-  "activity": [                       // exactly 45 entries, oldest first, zero-filled
+  "activity": [                       // exactly 49 entries, oldest first, zero-filled
     { "date": "2026-06-19", "count": 0 },
     { "date": "2026-06-20", "count": 2 }
   ],
@@ -364,7 +364,7 @@ sign convention (D3) has exactly one place to be wrong, and one test that says i
 - **`activity-strip.tsx`** — the 7×7 week grid (D12), weekday-aligned with leading pad cells,
   three teal intensities (`teal/dim` 1 lesson, `teal` 2–3, `teal/bright` 4+), empty days at
   `surface`. `aria-label` per cell carries the date and count; the grid as a whole is a `role="img"`
-  with a summary label, because 45 individually-announced cells is a screen-reader denial of
+  with a summary label, because 49 individually-announced cells is a screen-reader denial of
   service.
 - **`streak-chip.tsx`** — the neutral per-path chip, `3-day`, rendered **only at ≥ 2 days**
   (PRD §4.3), in `mist` on `elevated`, no flame, no colour escalation.
@@ -548,7 +548,7 @@ database to it.
 
 | Setting | Default | Notes |
 | --- | --- | --- |
-| `STREAK_ACTIVITY_WINDOW_DAYS` | `45` | The strip's window (§8, D12). The only knob this slice adds |
+| `STREAK_ACTIVITY_WINDOW_DAYS` | `49` | The strip's window (§8, D12) — 7×7, so the grid is exactly full. The only knob this slice adds |
 | `FeatureFlag.STREAKS` | `False` in `FLAG_DEFAULTS`, present in `ADMIN_DEFAULT_FLAGS` | D7; launch flips it via `FEATURE_FLAG_DEFAULTS` |
 
 No model slot, no timeout, no semaphore, no rate limit. This table being short is the point of D1.
@@ -564,7 +564,7 @@ than a quiet rewrite; the PRD's remaining §§1–4 are unaffected except where 
 | **R1** | **`AT TIME ZONE 'UTC'` added to the day expression.** The PRD's `(l.completed_at - make_interval(…))::date` is correct only while the session's `TimeZone` GUC is UTC, because `timestamptz::date` truncates in that setting — nothing in this repository sets, asserts, or documents it. Pinning to UTC first makes the arithmetic independent of server configuration, which is the entire premise of taking the offset from the request. An integration test under `America/Chicago` is the guard | D3, §5.2, §11 |
 | **R2** | **`paths` omits paths with no completions.** The combined doc's §7 promised "one entry per live path, including 0-streak paths", which its own §6 `GROUP BY` over `lessons` cannot produce. Absent now means zero, and it costs no pixel: the chip is hidden below 2 days anyway. The alternatives were a `LEFT JOIN` that spoils the index's usefulness on its outer side, or a second query on an endpoint D4 justified partly by being one | D5, §6 |
 | **R3** | **`progress_summary_viewed` dropped.** It would have fired per GET, and §8 refetches the summary on every completion — so the event would mostly have counted invalidation refetches while reading like engagement. `lesson_completed` answers the only question PRD §5 actually poses, retroactively. `EVENT_FIELDS` is untouched | D9, §9 |
-| **R4** | **`best_streak` is all-time, so the query is unbounded by the 45-day window.** The PRD's payload implied both without reconciling them. Stated explicitly with its growth ceiling (~1 row per path-day, forever) rather than discovered later | §4 |
+| **R4** | **`best_streak` is all-time, so the query is unbounded by the 49-day window.** The PRD's payload implied both without reconciling them. Stated explicitly with its growth ceiling (~1 row per path-day, forever) rather than discovered later | §4 |
 | **R5** | **`best_streak` renders.** The PRD shipped it in the payload and showed it nowhere. It now appears on the streak line — in `mist`, only when it exceeds the current streak, so it reads as an aim rather than a scoreboard of a broken run. **This changes PRD §3** | §8 |
 | **R6** | **Chips are home-only.** PRD §3 gave the path view a chip beside its progress roll-up. Scoped to the home list: the path view is the busiest polling route in the app, and §4.3's own argument is that this stat is not one anybody acts on. **This changes PRD §3**; re-adding it is one component and one hook | §8 |
 
@@ -596,10 +596,13 @@ than a quiet rewrite; the PRD's remaining §§1–4 are unaffected except where 
 - **Open: does the path streak earn its place?** (PRD open Q3.) It is nearly free given D5, and it
   now has exactly one surface (§8). A few weeks of dogfooding decides; removing it is deleting one
   component and one field.
-- **Open: is 45 the right window?** D12's grid makes 49 the natural number (7×7) and renders 45 of
-  them. Either move the window to 49 and let the grid be exactly full, or keep 45 and accept four
-  pad cells. This is a design question to settle before step 4 is built, not a
-  technical one.
+- **Settled: the window is 49, not 45.** This shipped at 45 with four pad cells; the owner's call
+  was the other branch — move the window to 49 and let the grid be exactly full. 7×7 is the
+  geometry D12 already committed to, so sizing the window to the grid deletes the leading-pad rule
+  entirely (rather than leaving it computing zero), makes "one column is one week" true by
+  construction, and buys four more days of history for nothing. Only the default of
+  `STREAK_ACTIVITY_WINDOW_DAYS` changed: the query is unbounded either way (R4), the domain takes
+  `days` as an argument, and the strip hard-codes no length.
 - **Open: does the streak line survive its own success?** PRD §2's honest counter-argument stands
   — Phases 3 and 4 produce the reasons to return that a streak merely counts. §9's Return
   comparison is the answer, and it is the one result that should be allowed to stop the rest of

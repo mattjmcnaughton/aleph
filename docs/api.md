@@ -353,7 +353,7 @@ undoing the ones above it in turn.
 ## Progress (`/api/v1`, Phase 5 TDD §5.4/§6)
 
 The Streaks slice's whole API: one read-only route folding the global **Daily
-streak**, the 45-day activity strip, and the per-path **Path streak** breakdown
+streak**, the 49-day activity strip, and the per-path **Path streak** breakdown
 into a single payload (TDD D4) — a `GROUP BY` over `lessons.completed_at`
 (TDD D1), nothing stored, nothing written. Session-cookie protected (`401` via
 the shared envelope when anonymous); scoped to the caller's own completions by
@@ -377,7 +377,7 @@ everyone else.
   "current_streak": 5,
   "best_streak": 12,
   "completed_today": 1,
-  "activity": [                       // exactly STREAK_ACTIVITY_WINDOW_DAYS (45)
+  "activity": [                       // exactly STREAK_ACTIVITY_WINDOW_DAYS (49)
     { "date": "2026-06-19", "count": 0 },   // entries, oldest first, zero-filled
     { "date": "2026-06-20", "count": 2 }
   ],
@@ -398,7 +398,7 @@ server configuration.
 
 **The current streak does not break at midnight** (PRD §4.4): it is the run of
 consecutive days ending today, **or yesterday if today has no completion yet**.
-`best_streak` is the longest run ever, all-time (not windowed to the 45-day
+`best_streak` is the longest run ever, all-time (not windowed to the 49-day
 strip) — it can exceed `current_streak`, and the frontend renders it only when
 it does.
 

@@ -575,7 +575,7 @@ export function isLessonViewTerminal(detail: LessonDetail | undefined): boolean 
 
 // --- Progress API (Streaks TDD §6/§8) ---------------------------------------
 //
-// One endpoint, `GET /progress/summary`: the global daily streak, the 45-day
+// One endpoint, `GET /progress/summary`: the global daily streak, the 49-day
 // activity window and the per-path breakdown, all derived server-side from
 // `lessons.completed_at` (Streaks TDD D1) — there is nothing here to trigger or
 // poll, and (§7) no `refetchInterval`: unlike the paths list, nothing about a
@@ -583,7 +583,7 @@ export function isLessonViewTerminal(detail: LessonDetail | undefined): boolean 
 // on exactly two triggers — a completion (D10, `routes/lessons.$lessonId.tsx`)
 // and TanStack's default remount/refocus behaviour.
 
-/** One day of the 45-day activity window (Streaks TDD §6), oldest first. */
+/** One day of the 49-day activity window (Streaks TDD §6), oldest first. */
 export interface ActivityCell {
   date: string;
   count: number;
@@ -604,7 +604,8 @@ export interface ProgressSummary {
   current_streak: number;
   best_streak: number;
   completed_today: number;
-  /** Exactly 45 entries, oldest first, zero-filled — `activity-strip.tsx`'s input. */
+  /** Exactly `STREAK_ACTIVITY_WINDOW_DAYS` (49) entries, oldest first,
+   *  zero-filled — `activity-strip.tsx`'s input, and exactly 7×7. */
   activity: ActivityCell[];
   /** Paths with at least one completion; a path with none is simply absent (D5). */
   paths: PathStreak[];
