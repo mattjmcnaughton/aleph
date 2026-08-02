@@ -6,8 +6,9 @@
 import { HttpResponse, http } from "msw";
 import { API_V1_BASE, type ActivityCell, type ProgressSummary } from "../lib/api";
 
-/** 45 zero-filled entries ending at `today` — the "no completions" shape (§5.4). */
-export function zeroActivity(today: string, days = 45): ActivityCell[] {
+/** 49 zero-filled entries ending at `today` — the "no completions" shape
+ *  (§5.4), and the shipped `STREAK_ACTIVITY_WINDOW_DAYS` window. */
+export function zeroActivity(today: string, days = 49): ActivityCell[] {
   const anchor = new Date(today);
   return Array.from({ length: days }, (_, i) => {
     const date = new Date(anchor);

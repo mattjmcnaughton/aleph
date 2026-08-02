@@ -89,7 +89,7 @@ describe("Streaks — the home surface (PRD §3/§4.3, TDD §8)", () => {
     expect((await screen.findByTestId("streak-line")).textContent).toBe(
       "🔥 5-day streak · 1 lesson today",
     );
-    expect(screen.getAllByTestId("activity-cell")).toHaveLength(45);
+    expect(screen.getAllByTestId("activity-cell")).toHaveLength(49);
     expect(progressRequestCount()).toBe(1);
   });
 
