@@ -1,3 +1,10 @@
+## [1.20.2](https://github.com/mattjmcnaughton/aleph/compare/v1.20.1...v1.20.2) (2026-08-02)
+
+
+### Bug Fixes
+
+* **config:** default the tutor and shaping flags on (AL-270, AL-370) ([#147](https://github.com/mattjmcnaughton/aleph/issues/147)) ([7c7e6b0](https://github.com/mattjmcnaughton/aleph/commit/7c7e6b08b3be3206ad2ee991dd07a1099ef68799))
+
 ## [1.20.1](https://github.com/mattjmcnaughton/aleph/compare/v1.20.0...v1.20.1) (2026-08-01)
 
 
