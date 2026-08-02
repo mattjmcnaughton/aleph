@@ -32,13 +32,23 @@ Keys absent from the registry — stale settings entries or database rows for
 deleted flags — are ignored, so removing a flag from code needs no data
 migration and no cleanup pass.
 
-This is what lets Phase 2 ship dark (epic #82, owner amendment 1): ``tutor``
-defaults **off** globally but is in :data:`ADMIN_DEFAULT_FLAGS`, so every ticket
-merges and deploys with zero learner exposure while admins dogfood the tutor in
-production. Launch (AL-270) is one environment variable. ``shaping`` (Phase 2B,
-epic #114 adopted convention 1) is registered the same way and launches the same
-way (AL-370) — a separate flag, so shaping can ship dark or be killed without
-disturbing the already-launched tutor.
+This is what let Phase 2 ship dark (epic #82, owner amendment 1): ``tutor``
+defaulted **off** globally but sat in :data:`ADMIN_DEFAULT_FLAGS`, so every
+ticket merged and deployed with zero learner exposure while admins dogfooded the
+tutor in production. ``shaping`` (Phase 2B, epic #114 adopted convention 1) was
+registered the same way — a separate flag, so either could ship dark or be killed
+without disturbing the other.
+
+**Both are now launched and default on** (AL-270, AL-370). Their entry in
+:data:`FLAG_DEFAULTS` is the whole of that: a clone with no ``FEATURE_FLAG_DEFAULTS``
+set — a laptop, a CI run, a fresh deploy — resolves both on and shows the product
+a learner actually sees. Nothing about the machinery changed, and the dark posture
+above is still exactly how the next phase ships: register the flag ``False``, add
+it to :data:`ADMIN_DEFAULT_FLAGS`, flip it here at launch.
+
+A launched flag is still a **kill switch**: ``FEATURE_FLAG_DEFAULTS=tutor:off``
+outranks this module's defaults with no code deploy, and reaches admins too (step
+2 above), which is what makes it usable mid-incident.
 
 Ported from habagou's service of the same name; adapted to aleph's
 ``authz.is_admin(user, settings)`` signature, which takes the config explicitly,
@@ -85,11 +95,14 @@ class FeatureFlag(StrEnum):
 # Code defaults per flag. Every FeatureFlag member gets an entry here; a flag
 # missing from this dict does not exist as far as resolution is concerned.
 FLAG_DEFAULTS: dict[FeatureFlag, bool] = {
-    # Off: Phase 2 merges and deploys dark until AL-270 flips it.
-    FeatureFlag.TUTOR: False,
-    # Off: Phase 2B merges and deploys dark until AL-370 flips it (epic #114,
-    # adopted convention 1).
-    FeatureFlag.SHAPING: False,
+    # On: Phase 2 is launched (AL-270). Both phases spent their build-out at
+    # ``False`` here, which is what let every ticket merge and deploy dark; now
+    # that they are live for all learners, **on is the honest default** — and
+    # the one that makes a fresh clone, a local ``just dev`` and an integration
+    # run show the same product a learner sees, with no environment to set.
+    FeatureFlag.TUTOR: True,
+    # On: Phase 2B is launched (AL-370), for the same two reasons.
+    FeatureFlag.SHAPING: True,
 }
 
 
@@ -99,6 +112,13 @@ FLAG_DEFAULTS: dict[FeatureFlag, bool] = {
 # applies only to flags with no entry in ``FEATURE_FLAG_DEFAULTS``, so an explicit
 # ``tutor:off`` there turns the flag off for admins too (kill switch), and a
 # per-user override beats it for everyone, admins included.
+#
+# Both members are **currently redundant**: a flag whose code default is already
+# ``True`` is on for admins by that default alone, and after a ``:off`` kill the
+# settings map outranks this baseline anyway, so membership changes no answer
+# either way. They stay listed rather than dropped because this is the seam the
+# *next* dark phase uses, and re-deriving which flags belong here is exactly the
+# kind of thing that gets forgotten at the moment a flag flips back off.
 ADMIN_DEFAULT_FLAGS: frozenset[FeatureFlag] = frozenset(
     {FeatureFlag.TUTOR, FeatureFlag.SHAPING}
 )

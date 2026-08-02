@@ -144,8 +144,9 @@ router-level `require_tutor_enabled` dependency: when the `tutor` flag (see
 — for that account the tutor does not exist. `404`, not `403`, for the same
 reason ownership failures are: `403` would confirm the feature exists. The gate
 runs *after* authentication, so an anonymous request is still `401`. This is
-what lets Phase 2 merge and deploy dark while admins (`ADMIN_DEFAULT_FLAGS`)
-dogfood it in production; launch is AL-270 flipping the default.
+what let Phase 2 merge and deploy dark while admins (`ADMIN_DEFAULT_FLAGS`)
+dogfooded it in production; AL-270 launched it by flipping the code default on,
+and the gate now only fires for an account with an explicit `off`.
 
 | Method | Path | Body | Success | Notes |
 | ------ | ---- | ---- | ------- | ----- |
@@ -216,8 +217,8 @@ router-level `require_shaping_enabled` dependency: when the `shaping` flag (see
 *Feature flags* below) resolves **off** for the caller, the route answers `404`
 — for that account shaping does not exist. It is a **separate** key from
 `tutor`: the two surfaces launch and can be killed independently (the in-lesson
-tutor's launch is AL-270, shaping's is AL-370), so shaping ships dark behind its
-own flag while admins dogfood it in production —
+tutor's launch was AL-270, shaping's AL-370). Both are now launched and default
+on; shaping spent 2B's build-out dark behind this key while admins dogfooded it —
 see [*Launching a flagged phase*](deploy.md#launching-a-flagged-phase-al-270--al-370).
 
 **Two threads, one path.** A path carries at most one conversation of each kind
@@ -388,8 +389,8 @@ costs no extra request. The frontend reads it through `useFeatureFlag(key)`
 
 | Key | Code default | Admin default | Purpose |
 | --- | ------------ | ------------- | ------- |
-| `tutor` | off | **on** (only while `FEATURE_FLAG_DEFAULTS` is silent about `tutor`) | The Phase 2 in-lesson tutor — the rail, its API, and its stream. Phase 2 merges and deploys **dark** behind it (epic #82 amendment 1) while admins dogfood in production; launch (AL-270) is setting `FEATURE_FLAG_DEFAULTS=tutor:on`, no code deploy. |
-| `shaping` | off | **on** (only while `FEATURE_FLAG_DEFAULTS` is silent about `shaping`) | Phase 2B shaping — the shaping rail, its API and its stream, and the apply/undo endpoints. Same posture, its own key (epic #114, adopted convention 1): Phase 2B merges and deploys **dark** while admins dogfood it, and launch (AL-370) is setting `FEATURE_FLAG_DEFAULTS=shaping:on`. Independent of `tutor`, so either can be flipped or killed without disturbing the other. |
+| `tutor` | **on** | on (redundantly — the code default already carries it) | The Phase 2 in-lesson tutor — the rail, its API, and its stream. Shipped **dark** at `off` through Phase 2's build-out (epic #82 amendment 1) while admins dogfooded it; **launched at AL-270**, which flipped this code default on. Kill it without a code deploy with `FEATURE_FLAG_DEFAULTS=tutor:off`. |
+| `shaping` | **on** | on (redundantly, as above) | Phase 2B shaping — the shaping rail, its API and its stream, and the apply/undo endpoints. Same history on its own key (epic #114, adopted convention 1): dark through 2B's build-out, **launched at AL-370**. Independent of `tutor`, so either can be killed without disturbing the other. |
 
 **Operating it.** `FEATURE_FLAG_DEFAULTS` is a comma-separated list of
 `key:on` / `key:off` entries (`FEATURE_FLAG_DEFAULTS="tutor:on"`). Malformed and

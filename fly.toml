@@ -29,6 +29,11 @@ primary_region = 'ewr'
   # look like they bound the listener. `internal_port` below is the real knob.
   SESSION_COOKIE_SECURE = 'true'
   OIDC_PROVIDER = 'auth0'
+  # No FEATURE_FLAG_DEFAULTS: `tutor` and `shaping` are launched and default on
+  # in `services/feature_flags.py`, so production needs to say nothing to get
+  # them. This key comes back only to *override* that — `tutor:off` as a kill
+  # switch (it outranks the code default and reaches admins too), or to open a
+  # future dark phase early. See docs/deploy.md, "Launching a flagged phase".
 
 [http_service]
   internal_port = 8000

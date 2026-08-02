@@ -321,10 +321,22 @@ pnpm exec semantic-release --dry-run --no-ci \
 
 ## Launching a flagged phase (AL-270 / AL-370)
 
-Phases 2 and 2B both merged and deployed **dark**: the code is in production, the
-routes answer `404` and the surface does not render for anyone whose `tutor` /
-`shaping` flag resolves off. Launch is therefore not a deploy of new code — it is
-one committed configuration change. This section is the whole of it; the ship
+Phases 2 and 2B both merged and deployed **dark**: the code went to production
+while the routes answered `404` and the surface did not render for anyone whose
+`tutor` / `shaping` flag resolved off. Launch is therefore not a deploy of new
+code — it is one committed configuration change.
+
+> **Both are now launched, by flipping their code defaults on** (AL-270, AL-370)
+> rather than by setting the environment variable — so `fly.toml` says nothing
+> about either key, and a laptop, a CI run and production all resolve them the
+> same way with no configuration. That is the intended end state for a launched
+> phase: the env var is the *override*, not the statement of what is live.
+>
+> This section stays the reference for the lever itself, now read mainly for
+> **turning a flag off** (the kill switch below) and for launching the next phase
+> that ships dark.
+
+This section is the whole of it; the ship
 tickets ([AL-270](https://github.com/mattjmcnaughton/aleph/issues/97) for the
 tutor, [AL-370](https://github.com/mattjmcnaughton/aleph/issues/127) for
 shaping) add the pre-flip dogfooding and the PRD §12 release-criteria walk.
@@ -336,7 +348,15 @@ in [`fly.toml`](../fly.toml) `[env]`, committed and non-secret like the rest of
 that block. Resolution order and the full semantics are in
 [api.md § Feature flags](api.md#feature-flags-admin-apiv1admin-al-203).
 
-**Flipping it on** (shaping; the tutor is the same edit with `tutor:on`):
+**Launching a dark phase.** Flip its entry in `FLAG_DEFAULTS`
+(`services/feature_flags.py`) from `False` to `True`. That is the launch: it
+reaches production *and* every developer's laptop and every CI run at once, which
+is why it beats setting the env var — one statement of what is live, not two.
+`tutor` and `shaping` were both launched this way.
+
+Use the `fly.toml` env var instead only when the flip must be **reversible
+without a code deploy** — a staged rollout you expect to roll back, or an early
+open of a flag still under construction:
 
 1. Edit `fly.toml` `[env]`, adding the key alongside anything already there:
 
@@ -506,7 +526,7 @@ something else is holding 8000 (the only port the smoke publishes).
 | Path creation returns 503 | `OPENROUTER_API_KEY` unset — the rest of the app is unaffected. |
 | A tutor reply ends in `event: error` with `code: upstream_error` | The model call failed upstream — most often `OPENROUTER_API_KEY` unset or rejected (this is the *expected* outcome in the Compose smoke). Nothing is persisted, so the learner can simply ask again. |
 | The tutor's routes all answer `404` for a real account | The `tutor` flag resolves off for that caller. Check `FEATURE_FLAG_DEFAULTS`, the account's per-user override, and whether the email domain is in `ADMIN_EMAIL_DOMAINS`. |
-| The shaping routes all answer `404`, or the path view shows no shaping mark | The `shaping` flag resolves off for that caller — the same three checks, on its own key (the two flags are independent). Before AL-370 this is the expected state for every non-admin: see [Launching a flagged phase](#launching-a-flagged-phase-al-270--al-370). |
+| The shaping routes all answer `404`, or the path view shows no shaping mark | The `shaping` flag resolves off for that caller — the same three checks, on its own key (the two flags are independent). Since AL-370 this should not happen for anyone: `fly.toml` sets `shaping:on`, so suspect a per-user override (which beats it) or an edited `FEATURE_FLAG_DEFAULTS`. See [Launching a flagged phase](#launching-a-flagged-phase-al-270--al-370). |
 | Sending a shaping message returns `409 conflict` | The path is not `ready` — there is no structure to shape yet. Reading the thread and the Change history still works. |
 | Apply or Undo returns `409` with a `details.reason` | Expected, first-class UX rather than an error: the reason names which rule fired (stale proposal, `not_latest`, `engaged`, `target_generating` …). The table of reasons is in [api.md](api.md), under *Shaping → Apply, Undo & the Change history*. |
 | Cert stuck / invalid | `fly certs check <domain>`; DNS matches `fly certs setup`; ownership TXT if behind a proxy. |

@@ -431,19 +431,60 @@ def shaping_flag_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
     _enable_flag_globally(monkeypatch, "shaping")
 
 
-def _enable_flag_globally(monkeypatch: pytest.MonkeyPatch, key: str) -> None:
-    """Add ``key:on`` to ``FEATURE_FLAG_DEFAULTS``, keeping the entries already set.
+@pytest.fixture
+def tutor_flag_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Turn the ``tutor`` flag off globally for one test (AL-270).
 
-    Additive rather than assigning the whole string, so a test that requests both
-    flag fixtures gets both flags — the obvious ``setattr(..., "shaping:on")``
-    would silently clobber the tutor entry depending on fixture order.
+    The mirror of ``tutor_flag_enabled``, and now the one that does the work:
+    since AL-270 launched the tutor its code default is ``True``, so a test that
+    wants to prove the ``404`` gate has to *close* it rather than assume it.
+
+    Uses the settings map — the documented kill switch — rather than patching
+    ``FLAG_DEFAULTS``, so what the test exercises is the lever an operator would
+    actually pull. Note the asymmetry that makes it a real kill switch: an
+    explicit ``:off`` outranks ``ADMIN_DEFAULT_FLAGS``, so this closes the
+    surface for admins too.
+    """
+    _disable_flag_globally(monkeypatch, "tutor")
+
+
+@pytest.fixture
+def shaping_flag_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Turn the ``shaping`` flag off globally for one test (AL-370).
+
+    The Phase 2B twin of ``tutor_flag_disabled``, for the same reason.
+    """
+    _disable_flag_globally(monkeypatch, "shaping")
+
+
+def _enable_flag_globally(monkeypatch: pytest.MonkeyPatch, key: str) -> None:
+    """Add ``key:on`` to ``FEATURE_FLAG_DEFAULTS``, keeping the entries already set."""
+    _set_flag_globally(monkeypatch, key, state="on")
+
+
+def _disable_flag_globally(monkeypatch: pytest.MonkeyPatch, key: str) -> None:
+    """Add ``key:off`` to ``FEATURE_FLAG_DEFAULTS``, keeping the entries already set."""
+    _set_flag_globally(monkeypatch, key, state="off")
+
+
+def _set_flag_globally(
+    monkeypatch: pytest.MonkeyPatch, key: str, *, state: str
+) -> None:
+    """Write one ``key:state`` entry into ``FEATURE_FLAG_DEFAULTS``.
+
+    Additive rather than assigning the whole string, so a test that requests two
+    flag fixtures gets both — the obvious ``setattr(..., "shaping:on")`` would
+    silently clobber the tutor entry depending on fixture order. Any existing
+    entry for ``key`` is dropped first, so on-then-off (or the reverse) across
+    two fixtures resolves to the last one applied rather than to whichever the
+    parser happened to see first.
     """
     entries = [
         entry.strip()
         for entry in settings.feature_flag_defaults.split(",")
         if entry.strip() and not entry.strip().startswith(f"{key}:")
     ]
-    entries.append(f"{key}:on")
+    entries.append(f"{key}:{state}")
     monkeypatch.setattr(settings, "feature_flag_defaults", ",".join(entries))
 
 

@@ -1,11 +1,11 @@
 """Admin feature-flag API + session delivery (real app, real Postgres).
 
-AL-203 (epic #82, owner amendment 1). Phase 2 ships dark: the ``tutor`` flag
-defaults **off** globally and **on for admins**, so every Phase 2 ticket can
-merge and deploy with zero learner exposure while admins dogfood in production.
-Phase 2B's ``shaping`` flag (AL-301, epic #114) is registered the same way, so
-every resolved map here carries both keys and the assertions read them together.
-This module is the contract test for that story end to end:
+AL-203 (epic #82, owner amendment 1). A dark flag defaults **off** globally and
+**on for admins**, so a phase can merge and deploy with zero learner exposure
+while admins dogfood in production. Both registered flags — Phase 2's ``tutor``
+and Phase 2B's ``shaping`` (AL-301, epic #114) — shipped that way, so every
+resolved map here carries both keys and the assertions read them together. This
+module is the contract test for that story end to end:
 
 * the admin-only override API (403 / 404 / upsert / idempotent delete),
 * the resolved map delivered on ``GET /api/v1/auth/session`` (the only surface a
@@ -17,6 +17,15 @@ This module is the contract test for that story end to end:
 Auth is the real cookie flow with a stubbed OIDC code exchange (mirroring
 ``test_auth_api`` / ``test_paths_api``), so the admin gate is genuine — admin
 status is derived from the email domain (``authz.is_admin``), never stored.
+
+**Both flags are now launched and default on** (AL-270, AL-370), which would make
+most of the resolution machinery below untestable — a flag that is on for
+everyone cannot demonstrate an admin baseline, an override that flips a learner
+*on*, or a `404` gate. So ``dark_flag_defaults`` (autouse) puts both code
+defaults back to ``False`` for this module: every test here is about the
+machinery, and the machinery's interesting case is a dark flag. The launched
+defaults get their own test, ``test_launched_flags_reach_a_plain_learner``, which
+opts back out.
 """
 
 from __future__ import annotations
@@ -33,6 +42,7 @@ from aleph.app import create_app
 from aleph.auth import AuthIdentity
 from aleph.config import settings
 from aleph.models import User, UserFeatureOverride
+from aleph.services import feature_flags
 
 if TYPE_CHECKING:
     from fastapi import FastAPI
@@ -88,6 +98,21 @@ async def _sign_in(
     assert response.status_code == 303
     body = (await client.get(SESSION_URL)).json()
     return uuid.UUID(body["user"]["id"])
+
+
+@pytest.fixture(autouse=True)
+def dark_flag_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Force both code defaults back to ``False`` for this module.
+
+    See the module docstring: ``tutor`` and ``shaping`` are launched and default
+    on, but every test here is about the *resolution machinery*, whose whole
+    subject matter is a flag that is not simply on for everyone. Patching
+    ``FLAG_DEFAULTS`` (rather than the settings map) is deliberate — the settings
+    map is step 2 of the resolution order and would outrank the admin baseline
+    these tests exist to exercise.
+    """
+    for flag in (feature_flags.FeatureFlag.TUTOR, feature_flags.FeatureFlag.SHAPING):
+        monkeypatch.setitem(feature_flags.FLAG_DEFAULTS, flag, False)
 
 
 async def _flags_on_session(client: AsyncClient) -> dict[str, bool]:
@@ -187,6 +212,27 @@ async def test_unknown_flag_or_user_is_404(
 # --------------------------------------------------------------------------- #
 # Session delivery + the override round trip
 # --------------------------------------------------------------------------- #
+
+
+@pytest.mark.anyio
+async def test_launched_flags_reach_a_plain_learner(
+    app: FastAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The launched posture (AL-270, AL-370): on for everyone, nothing configured.
+
+    Opts back out of ``dark_flag_defaults`` by restoring the real registry
+    values, so this is the one test in the module reading the defaults the
+    codebase actually ships. A plain learner — no admin domain, no override row,
+    no ``FEATURE_FLAG_DEFAULTS`` — gets both surfaces, which is what makes a
+    fresh clone and a local ``just dev`` show the real product.
+    """
+    for flag in (feature_flags.FeatureFlag.TUTOR, feature_flags.FeatureFlag.SHAPING):
+        monkeypatch.setitem(feature_flags.FLAG_DEFAULTS, flag, True)
+    assert not settings.feature_flag_defaults, "nothing may be configured here"
+
+    async with _client(app) as learner:
+        await _sign_in(learner, monkeypatch, LEARNER)
+        assert await _flags_on_session(learner) == _resolved(tutor=True, shaping=True)
 
 
 @pytest.mark.anyio

@@ -289,7 +289,12 @@ async def test_anonymous_read_is_401(app: FastAPI) -> None:
 async def test_an_admin_reaches_the_surface_with_no_fixture(
     app: FastAPI, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """``ADMIN_DEFAULT_FLAGS`` is what makes production dogfooding real."""
+    """An admin reaches the surface with nothing configured.
+
+    Since AL-370 the code default carries this for every account, not just
+    admins; the admin-baseline mechanism itself is proved against a forced-dark
+    flag in ``test_tutor_api`` and in the unit suite.
+    """
     async with _client(app) as client:
         user_id = await _sign_in(client, monkeypatch, ADMIN)
         path_id, _lessons = await _seed_path(user_id)

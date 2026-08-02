@@ -119,20 +119,29 @@ just dev-fe   # Frontend dev server
 
 The API will be available at `http://localhost:8000`. Interactive docs at `http://localhost:8000/docs`.
 
-**Seeing the tutor locally.** Phase 2 ships behind the `tutor` feature flag, which
-defaults **off** for learners and **on for admins** ([`api.md`](api.md#feature-flags-admin-apiv1admin-al-203)).
-So sign in as the realm's `admin-dev` user (`admin@mattjmcnaughton.com`, an admin
-via `ADMIN_EMAIL_DOMAINS`) and the rail is there; sign in as `dev` and every tutor
-route answers `404` by design. To turn it on for everyone locally, set
-`FEATURE_FLAG_DEFAULTS=tutor:on` in `.env` — the same switch AL-270 flips in
-production.
+**Seeing the tutor and the shaping rail locally.** Nothing to configure: `tutor`
+and `shaping` are both launched and default **on** in code
+([`api.md`](api.md#feature-flags-admin-apiv1admin-al-203)), so a fresh clone with
+no `.env` shows both surfaces to every account. Sign in as the realm's `dev` user
+and the in-lesson rail and the path view's shaping mark are simply there.
 
-**Seeing the shaping rail locally.** Phase 2B is the same story on its own key:
-the `shaping` flag defaults **off** for learners and **on for admins**, so
-`admin-dev` sees the shaping mark on a path view and `dev` gets `404` from every
-shaping route. `FEATURE_FLAG_DEFAULTS=shaping:on` (or
-`tutor:on,shaping:on` for both) turns it on for everyone locally — the switch
-AL-370 flips in production
+This is deliberate: for most of Phase 2 and 2B these flags defaulted **off**, and
+the local story was "sign in as `admin-dev` or set an environment variable, or the
+feature you are working on answers `404`" — a papercut on every fresh clone and a
+confusing first run for anyone who had not read this paragraph. A launched feature
+should be on by default everywhere, including on a laptop.
+
+**Turning one off locally** — to reproduce a `404` gate, or to check how a surface
+degrades — is the same lever production uses, in `.env`:
+
+```bash
+FEATURE_FLAG_DEFAULTS=shaping:off      # or tutor:off, or tutor:off,shaping:off
+```
+
+An explicit `:off` outranks the code default *and* the admin baseline, so it
+silences admin accounts too. A phase still under construction should register its
+flag `False` and ride `ADMIN_DEFAULT_FLAGS`, exactly as these two did — that
+posture is unchanged, it just no longer applies to a launched feature
 ([deploy.md](deploy.md#launching-a-flagged-phase-al-270--al-370)). Two things
 that are not flag problems: the rail's entry only renders on a **`ready`** path
 (sending is `409` before the outline exists), and a real model proposes when it

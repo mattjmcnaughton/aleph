@@ -1426,7 +1426,7 @@ async def test_a_message_with_no_proposal_is_404(
 
 @pytest.mark.anyio
 async def test_the_apply_and_undo_routes_are_behind_the_shaping_flag(
-    app: FastAPI, monkeypatch: pytest.MonkeyPatch
+    app: FastAPI, monkeypatch: pytest.MonkeyPatch, shaping_flag_disabled: None
 ) -> None:
     """Ships dark: with the flag off the whole surface does not exist (epic #114)."""
     async with _client(app) as client:
