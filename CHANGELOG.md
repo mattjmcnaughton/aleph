@@ -1,3 +1,10 @@
+# [1.21.0](https://github.com/mattjmcnaughton/aleph/compare/v1.20.2...v1.21.0) (2026-08-02)
+
+
+### Features
+
+* **streaks:** derive daily and path streaks from lesson completions ([#149](https://github.com/mattjmcnaughton/aleph/issues/149)) ([3b43122](https://github.com/mattjmcnaughton/aleph/commit/3b4312226d73925002886f76daa291a7442b9457))
+
 ## [1.20.2](https://github.com/mattjmcnaughton/aleph/compare/v1.20.1...v1.20.2) (2026-08-02)
 
 
