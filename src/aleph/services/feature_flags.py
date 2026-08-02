@@ -90,6 +90,12 @@ class FeatureFlag(StrEnum):
     # in-lesson tutor is already launched, and shaping must be able to ship dark
     # and be killed on its own without disturbing it.
     SHAPING = "shaping"
+    # Phase 5's one flag (streaks, pulled forward — CONTEXT.md phase-boundary
+    # note): ``GET /progress/summary`` and everything under it. Its own key,
+    # independent of ``TUTOR``/``SHAPING``, for the same reason those two are
+    # independent of each other — a kill switch that only kills the surface it
+    # names.
+    STREAKS = "streaks"
 
 
 # Code defaults per flag. Every FeatureFlag member gets an entry here; a flag
@@ -103,6 +109,12 @@ FLAG_DEFAULTS: dict[FeatureFlag, bool] = {
     FeatureFlag.TUTOR: True,
     # On: Phase 2B is launched (AL-370), for the same two reasons.
     FeatureFlag.SHAPING: True,
+    # Off: Phase 5's streaks slice ships dark (D7), the same posture ``tutor``
+    # and ``shaping`` started at — every ticket merges and deploys with zero
+    # learner exposure while admins dogfood it (:data:`ADMIN_DEFAULT_FLAGS`
+    # below), and launch is one ``FEATURE_FLAG_DEFAULTS`` entry flipping this
+    # to ``True`` here, exactly as AL-270/AL-370 did.
+    FeatureFlag.STREAKS: False,
 }
 
 
@@ -120,7 +132,7 @@ FLAG_DEFAULTS: dict[FeatureFlag, bool] = {
 # *next* dark phase uses, and re-deriving which flags belong here is exactly the
 # kind of thing that gets forgotten at the moment a flag flips back off.
 ADMIN_DEFAULT_FLAGS: frozenset[FeatureFlag] = frozenset(
-    {FeatureFlag.TUTOR, FeatureFlag.SHAPING}
+    {FeatureFlag.TUTOR, FeatureFlag.SHAPING, FeatureFlag.STREAKS}
 )
 
 

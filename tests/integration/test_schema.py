@@ -8,9 +8,10 @@ and the enum columns round-trip as their CONTEXT.md/TDD state names.
 from __future__ import annotations
 
 import uuid
+from typing import cast
 
 import pytest
-from sqlalchemy import delete, func, select, text
+from sqlalchemy import Table, delete, func, select, text
 from sqlalchemy.exc import IntegrityError
 
 from aleph import db
@@ -305,3 +306,43 @@ async def test_updated_at_is_populated() -> None:
         assert user.created_at is not None
         assert user.updated_at is not None
         assert isinstance(user.id, uuid.UUID)
+
+
+@pytest.mark.anyio
+async def test_the_streak_index_is_declared_on_both_model_and_migration() -> None:
+    """Phase 5 TDD §4/D6: ``Lesson.__table_args__`` and migration ``0009`` agree.
+
+    Migration ``0009`` is the only thing that actually creates
+    ``ix_lessons_path_id_completed_at`` in a real database; the model's
+    ``__table_args__`` is what any ORM-driven context (this suite's own
+    ``Base.metadata``, a future script) would produce instead. Asserting both
+    here is what keeps a hand-edit of one from silently drifting from the
+    other — the property the migration's own docstring names this test for.
+    """
+    lessons_table = cast("Table", Lesson.__table__)
+    model_index = next(
+        index
+        for index in lessons_table.indexes
+        if index.name == "ix_lessons_path_id_completed_at"
+    )
+    assert [column.name for column in model_index.columns] == [
+        "path_id",
+        "completed_at",
+    ]
+    # A partial index (``postgresql_where``) — not a full one — is the whole
+    # point (D6): most lessons on a growing path are incomplete.
+    assert model_index.dialect_options["postgresql"]["where"] is not None
+
+    async with db.async_session() as session:
+        indexdef = await session.scalar(
+            text(
+                "SELECT indexdef FROM pg_indexes "
+                "WHERE tablename = 'lessons' AND indexname = :name"
+            ),
+            {"name": "ix_lessons_path_id_completed_at"},
+        )
+
+    assert indexdef is not None
+    assert "path_id" in indexdef
+    assert "completed_at" in indexdef
+    assert "completed_at IS NOT NULL" in indexdef

@@ -1,9 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { skipToken } from "@tanstack/react-query";
+import { describe, expect, it, vi } from "vitest";
 import { configurePaths, seedPath } from "../mocks/paths";
+import { progressReceivedOffsets, progressRequestCount } from "../mocks/progress";
 import {
   ApiError,
   PATHS_LIST_QUERY_KEY,
   PATHS_QUERY_PREFIX,
+  PROGRESS_QUERY_PREFIX,
   type LessonDetail,
   type LessonGenerationState,
   type LessonUnlockState,
@@ -16,6 +19,8 @@ import {
   isPathViewTerminal,
   isValidationError,
   pathQueryKey,
+  progressSummaryQueryKey,
+  progressSummaryQueryOptions,
   updatePathTitle,
 } from "./api";
 
@@ -272,5 +277,51 @@ describe("updatePathTitle", () => {
 
     expect(error).toBeInstanceOf(ApiError);
     expect(isValidationError(error)).toBe(true);
+  });
+});
+
+// Streaks TDD §7/§8: the summary's own query namespace, and the one call site
+// for `getTimezoneOffset()` — §15's own words for why this matters: "the sign
+// convention is the highest-consequence, lowest-visibility surface here."
+
+describe("progressSummaryQueryKey", () => {
+  it("sits under PROGRESS_QUERY_PREFIX, never PATHS_QUERY_PREFIX (D10)", () => {
+    const key = progressSummaryQueryKey(-120);
+    expect(key).toEqual(["progress", "summary", -120]);
+    const depth = PROGRESS_QUERY_PREFIX.length;
+    expect(key.slice(0, depth)).toEqual([...PROGRESS_QUERY_PREFIX]);
+  });
+
+  it("keys different offsets apart — a timezone/DST crossing is a cache miss (§7)", () => {
+    expect(progressSummaryQueryKey(-120)).not.toEqual(progressSummaryQueryKey(300));
+  });
+});
+
+describe("progressSummaryQueryOptions", () => {
+  it("[TDD §8/§15] reads the offset from exactly one `getTimezoneOffset()` call", () => {
+    const spy = vi.spyOn(Date.prototype, "getTimezoneOffset").mockReturnValue(-120);
+
+    const options = progressSummaryQueryOptions(true);
+
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(options.queryKey).toEqual(["progress", "summary", -120]);
+  });
+
+  it("skipToken when disabled — no flag, no request (TDD §8)", () => {
+    const options = progressSummaryQueryOptions(false);
+    expect(options.queryFn).toBe(skipToken);
+  });
+
+  it("a real fetcher when enabled, sending that same offset on the wire", async () => {
+    vi.spyOn(Date.prototype, "getTimezoneOffset").mockReturnValue(-120);
+    const options = progressSummaryQueryOptions(true);
+    expect(options.queryFn).not.toBe(skipToken);
+
+    // @ts-expect-error queryOptions types its queryFn generically; this file
+    // knows it is a concrete `() => Promise<ProgressSummary>` when enabled.
+    await options.queryFn();
+
+    expect(progressRequestCount()).toBe(1);
+    expect(progressReceivedOffsets()).toEqual([-120]);
   });
 });

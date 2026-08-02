@@ -3,6 +3,7 @@ import { cleanup } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, vi } from "vitest";
 import { resetLessons } from "../src/mocks/lessons";
 import { resetPaths } from "../src/mocks/paths";
+import { resetProgress } from "../src/mocks/progress";
 import { server } from "../src/mocks/server";
 import { resetShaping } from "../src/mocks/shaping";
 import { resetTutor } from "../src/mocks/tutor";
@@ -16,6 +17,7 @@ afterEach(() => {
   resetLessons();
   resetTutor();
   resetShaping();
+  resetProgress();
   vi.restoreAllMocks();
   cleanup();
   window.history.pushState({}, "", "/");

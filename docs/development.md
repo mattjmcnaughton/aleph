@@ -193,10 +193,10 @@ Tests are organized by type (see [`ci.md`](ci.md) for the CI job that runs each)
   machine's preinstalled chromium via `PW_CHROMIUM_PATH`. **Needs compose
   Keycloak** (`just compose-keycloak-up`): `tests/e2e/journeys/` are the PRD §8
   workflows — Phase 1's `@w1`..`@w8`, the tutor's `@w9` and `@w11`..`@w16`
-  (W10 is reserved for the deferred selection-to-quote), and shaping's
-  `@w17`..`@w21` — and they sign in for real. The journeys run in the
-  `mobile-390x844` project only; the `desktop` project runs the non-journey
-  specs. See [`ci.md`](ci.md).
+  (W10 is reserved for the deferred selection-to-quote), shaping's
+  `@w17`..`@w21`, and streaks' `@w22`/`@w23` — and they sign in for real. The
+  journeys run in the `mobile-390x844` project only; the `desktop` project runs
+  the non-journey specs. See [`ci.md`](ci.md).
 - `tests/external/` — live-provider contract tests, opt-in via `just test-external`.
 
 Use `@pytest.mark.external` for tests that hit external services (they must skip cleanly

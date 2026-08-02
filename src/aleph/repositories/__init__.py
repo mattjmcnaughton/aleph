@@ -21,7 +21,11 @@ from aleph.repositories.conversations import (
     ThreadMessage,
 )
 from aleph.repositories.feature_flags import FeatureFlagRepository
-from aleph.repositories.lessons import LessonRepository, PathGenerationProgress
+from aleph.repositories.lessons import (
+    CompletionDay,
+    LessonRepository,
+    PathGenerationProgress,
+)
 from aleph.repositories.paths import PathRepository
 from aleph.repositories.quick_checks import QuickCheckRepository
 from aleph.repositories.units import UnitRepository
@@ -31,6 +35,7 @@ from aleph.repositories.users import UserRepository
 __all__ = [
     "AttemptRepository",
     "ChangeRepository",
+    "CompletionDay",
     "ConversationRepository",
     "FeatureFlagRepository",
     "LessonAnswer",

@@ -350,6 +350,71 @@ the restriction is the correctness boundary rather than a simplification. It
 costs nothing PRD §5.5 promises: a Change stays undoable until it is engaged, by
 undoing the ones above it in turn.
 
+## Progress (`/api/v1`, Phase 5 TDD §5.4/§6)
+
+The Streaks slice's whole API: one read-only route folding the global **Daily
+streak**, the 45-day activity strip, and the per-path **Path streak** breakdown
+into a single payload (TDD D4) — a `GROUP BY` over `lessons.completed_at`
+(TDD D1), nothing stored, nothing written. Session-cookie protected (`401` via
+the shared envelope when anonymous); scoped to the caller's own completions by
+the query's own `paths.user_id` predicate, so there is no ownership parameter to
+get wrong.
+
+**The whole surface is feature-flagged.** The single route sits behind a
+router-level `require_streaks_enabled` dependency: when the `streaks` flag (see
+*Feature flags* below) resolves **off** for the caller, it answers `404` — for
+that account the surface does not exist. Ships dark, the same playbook
+`tutor`/`shaping` used: admins dogfood it in production while it is off for
+everyone else.
+
+| Method | Path | Query | Success | Notes |
+| ------ | ---- | ----- | ------- | ----- |
+| `GET` | `/api/v1/progress/summary` | `tz_offset_minutes` (optional, default `0`, `-900..900`) | `200 {today, current_streak, best_streak, completed_today, activity, paths}` | The learner's whole streak snapshot. `tz_offset_minutes` is the client's `getTimezoneOffset()` value **verbatim** — minutes to *subtract* from UTC to reach local time, so a zone ahead of UTC sends a negative number. Out of range is `422 validation_error`. |
+
+```jsonc
+{
+  "today": "2026-08-02",
+  "current_streak": 5,
+  "best_streak": 12,
+  "completed_today": 1,
+  "activity": [                       // exactly STREAK_ACTIVITY_WINDOW_DAYS (45)
+    { "date": "2026-06-19", "count": 0 },   // entries, oldest first, zero-filled
+    { "date": "2026-06-20", "count": 2 }
+  ],
+  "paths": [                          // paths with at least one completion;
+    { "path_id": "…", "current_streak": 3, "best_streak": 7, "completed_today": 1 }
+    // absent means zero — a path with no completions is not listed at all
+  ]
+}
+```
+
+**A day is the learner's local calendar day** (PRD §4.1). The server derives it
+from `tz_offset_minutes` after pinning `completed_at` to UTC first
+(`(completed_at AT TIME ZONE 'UTC') - make_interval(mins => tz_offset_minutes)`,
+TDD D3) — casting a `timestamptz` to `date` directly would resolve in whatever
+the database session's `TimeZone` happens to be, which nothing in this codebase
+sets or asserts, so the UTC pin is what makes the day boundary independent of
+server configuration.
+
+**The current streak does not break at midnight** (PRD §4.4): it is the run of
+consecutive days ending today, **or yesterday if today has no completion yet**.
+`best_streak` is the longest run ever, all-time (not windowed to the 45-day
+strip) — it can exceed `current_streak`, and the frontend renders it only when
+it does.
+
+**`completed_today`** counts today's completions — globally at the top level,
+per path inside `paths` — and is what the client's optimistic bump on a
+completion keys off (no round trip needed to move the number in the same
+interaction).
+
+**Absent means zero.** A path with no completions produces no row in `paths`
+(the `GROUP BY` this endpoint is built on cannot manufacture one), which the
+frontend already treats identically to "streak below 2 days, no chip shown."
+**Deleting a path erases its completion days from the global streak** — the
+accepted cost of storing nothing new for this feature (PRD §4.6): there is no
+warning on delete, and the behavior is pinned by a test rather than left to be
+discovered.
+
 ## Feature flags (admin) (`/api/v1/admin`, AL-203)
 
 Flags are **defined in code** (`services/feature_flags.py`); the database stores
@@ -391,6 +456,7 @@ costs no extra request. The frontend reads it through `useFeatureFlag(key)`
 | --- | ------------ | ------------- | ------- |
 | `tutor` | **on** | on (redundantly — the code default already carries it) | The Phase 2 in-lesson tutor — the rail, its API, and its stream. Shipped **dark** at `off` through Phase 2's build-out (epic #82 amendment 1) while admins dogfooded it; **launched at AL-270**, which flipped this code default on. Kill it without a code deploy with `FEATURE_FLAG_DEFAULTS=tutor:off`. |
 | `shaping` | **on** | on (redundantly, as above) | Phase 2B shaping — the shaping rail, its API and its stream, and the apply/undo endpoints. Same history on its own key (epic #114, adopted convention 1): dark through 2B's build-out, **launched at AL-370**. Independent of `tutor`, so either can be killed without disturbing the other. |
+| `streaks` | off | on | Phase 5 streaks — `GET /progress/summary` and everything under it (see [Progress](#progress-apiv1-phase-5-tdd-546)). Ships **dark**, the same playbook `tutor`/`shaping` started at: admins dogfood it in production while it defaults off for everyone else. Launch is one `FEATURE_FLAG_DEFAULTS` entry flipping the code default on, exactly as AL-270/AL-370 did. |
 
 **Operating it.** `FEATURE_FLAG_DEFAULTS` is a comma-separated list of
 `key:on` / `key:off` entries (`FEATURE_FLAG_DEFAULTS="tutor:on"`). Malformed and

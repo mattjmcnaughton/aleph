@@ -4,14 +4,20 @@ import { useEffect, useRef, useState } from "react";
 import { AlephGlyph } from "../components/aleph-logo";
 import {
   type PathStatus,
+  type PathStreak,
   type PathSummary,
   isNotFound,
   isPathListTerminal,
   pathsListQueryOptions,
+  progressSummaryQueryOptions,
 } from "../lib/api";
+import { ActivityStrip } from "../components/activity-strip";
 import { PRIMARY_CTA, PRIMARY_CTA_BASE, StateCard } from "../components/state-card";
+import { StreakChip } from "../components/streak-chip";
+import { StreakLine } from "../components/streak-line";
 import { Workspace } from "../components/workspace";
 import { sessionQueryOptions } from "../lib/auth";
+import { useFeatureFlag } from "../lib/feature-flags";
 import { levelLabel } from "../lib/onboarding";
 import { makePollingRefetchInterval } from "../lib/polling";
 import { type DeletePath, useDeletePath } from "../lib/use-delete-path";
@@ -64,6 +70,19 @@ function Home() {
     ...pathsListQueryOptions,
     refetchInterval: stalled ? false : makePollingRefetchInterval(pathsListPollConfig),
   });
+
+  // Streaks (Streaks TDD §8): flag-gated (`skipToken` when off — no request,
+  // no rendered surface) and un-polled (§7 — nothing about a streak arrives
+  // asynchronously). `progressQuery.data` flows straight into `StreakLine`/
+  // `ActivityStrip`/`StreakChip` without a branch on `isError` anywhere here:
+  // those components already render nothing for `undefined`, which is what
+  // makes a failed summary query fail as decoration (TDD §5.4's last row)
+  // rather than as a route that forgot to guard it.
+  const streaksEnabled = useFeatureFlag("streaks");
+  const progressQuery = useQuery(progressSummaryQueryOptions(streaksEnabled));
+  const pathStreaks = new Map<string, PathStreak>(
+    (progressQuery.data?.paths ?? []).map((streak) => [streak.path_id, streak]),
+  );
 
   // Armed only while some row is still non-terminal; a poll that resolves the
   // last one flips this false and tears the timer down.
@@ -142,6 +161,19 @@ function Home() {
         </button>
       </div>
 
+      {/* Above the list, never blocking it (TDD §5.4's last row): both read
+          straight off `progressQuery.data` and render nothing when it is
+          `undefined` — loading, flag off, or a failed GET all look the same
+          to the paths list below, which is the whole point. No wrapper margin
+          when there is nothing to show — an empty decoration must not even
+          cost the layout a gap. */}
+      {progressQuery.data !== undefined ? (
+        <div className="mt-6">
+          <StreakLine summary={progressQuery.data} />
+          <ActivityStrip activity={progressQuery.data.activity} />
+        </div>
+      ) : null}
+
       {paths === undefined ? (
         pathsQuery.isError ? (
           <UnavailableState />
@@ -157,7 +189,7 @@ function Home() {
         >
           {paths.map((path) => (
             <li key={path.id}>
-              <PathRow path={path} deletion={deletion} />
+              <PathRow path={path} deletion={deletion} streak={pathStreaks.get(path.id)} />
             </li>
           ))}
         </ul>
@@ -234,7 +266,18 @@ function statusLabel(path: PathSummary): string {
   }
 }
 
-function PathRow({ path, deletion }: { path: PathSummary; deletion: DeletePath }) {
+function PathRow({
+  path,
+  deletion,
+  streak,
+}: {
+  path: PathSummary;
+  deletion: DeletePath;
+  /** This path's row in the summary's `paths` (Streaks TDD §6); absent means
+   *  zero (D5) — the caller (`Home`) already resolved the lookup, so this
+   *  component never sees `path.id` and the summary side by side. */
+  streak: PathStreak | undefined;
+}) {
   // One lookup: `variant` drives the styling, and the raw (possibly undefined)
   // value is what `data-variant` exposes to tests — a neutral row carries none.
   const rowVariant = ROW_VARIANT[path.status];
@@ -260,12 +303,17 @@ function PathRow({ path, deletion }: { path: PathSummary; deletion: DeletePath }
           <p data-testid="path-item-topic" className="text-base font-semibold leading-snug">
             {path.title}
           </p>
-          <p
-            data-testid="path-item-level"
-            className="mt-1 font-mono text-[11px] uppercase tracking-kicker text-slate"
-          >
-            {levelLabel(path.level)}
-          </p>
+          <div className="mt-1 flex items-center gap-2">
+            <p
+              data-testid="path-item-level"
+              className="font-mono text-[11px] uppercase tracking-kicker text-slate"
+            >
+              {levelLabel(path.level)}
+            </p>
+            {/* Hidden below 2 days by the chip itself (PRD §4.3) — `?? 0`
+                covers the "absent from `paths`" case (D5) the same way. */}
+            <StreakChip days={streak?.current_streak ?? 0} />
+          </div>
         </div>
 
         {total > 0 ? (

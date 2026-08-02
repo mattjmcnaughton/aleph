@@ -457,6 +457,30 @@ def shaping_flag_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
     _disable_flag_globally(monkeypatch, "shaping")
 
 
+@pytest.fixture
+def streaks_flag_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Turn the ``streaks`` flag on globally for one test (Phase 5 TDD D7).
+
+    The Phase 5 twin of ``tutor_flag_enabled``/``shaping_flag_enabled``: unlike
+    those two, ``streaks`` has never launched, so its code default is already
+    ``False`` — but the surface is still exercised as a post-launch learner
+    would meet it, by flipping the *global default* rather than making the
+    test's learner an admin or seeding an override row.
+    """
+    _enable_flag_globally(monkeypatch, "streaks")
+
+
+@pytest.fixture
+def streaks_flag_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Turn the ``streaks`` flag off globally for one test.
+
+    Unlike ``tutor_flag_disabled``/``shaping_flag_disabled`` this is not yet
+    needed to prove a kill switch (``streaks`` is already off by code default),
+    but it is registered for symmetry and for the day this flag launches too.
+    """
+    _disable_flag_globally(monkeypatch, "streaks")
+
+
 def _enable_flag_globally(monkeypatch: pytest.MonkeyPatch, key: str) -> None:
     """Add ``key:on`` to ``FEATURE_FLAG_DEFAULTS``, keeping the entries already set."""
     _set_flag_globally(monkeypatch, key, state="on")

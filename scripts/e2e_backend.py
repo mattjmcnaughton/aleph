@@ -22,12 +22,83 @@ two Playwright projects sharing one backend never trip a cap.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import uuid  # noqa: TC003 - pydantic resolves ShiftRequest's annotations at class-definition time.
+from typing import TYPE_CHECKING, Annotated
+
+from fastapi import APIRouter, Depends
+from pydantic import BaseModel
+from sqlalchemy import func, update
+from sqlalchemy.ext.asyncio import (  # noqa: TC002 - FastAPI resolves annotations.
+    AsyncSession,
+)
 
 from aleph.config import MODEL_SLOTS, STUB_MODEL_ID, settings
+from aleph.db import get_session
+from aleph.models import Lesson
 
 if TYPE_CHECKING:
     from fastapi import FastAPI
+
+# Same alias every ``routers/v1/`` module spells out — a plain FastAPI
+# dependency, not the manual generator-draining a raw call to ``get_session()``
+# would need. This router is test-only, but it is still real FastAPI wiring
+# (``@e2e_router.post``), so it gets the real dependency machinery.
+Session = Annotated[AsyncSession, Depends(get_session)]
+
+
+class ShiftRequest(BaseModel):
+    """Body for ``POST /__e2e__/shift-completions``: which path, how far back.
+
+    Test-only, so it lives here rather than in ``dtos/`` — that package is the
+    wire contract for the real app, and this shape is never sent to it. No
+    bound (``Field(ge=...)``) on ``days``: a journey deciding "how far back" is
+    a test detail, not a boundary this harness needs to defend.
+    """
+
+    path_id: uuid.UUID
+    days: int
+
+
+# Phase 5 TDD D11 / §11: the e2e clock. Determinism for W23 (a streak that must
+# survive a missed *day boundary*) lives here, in the harness, never behind a
+# config guard in real code — the discipline Phase 1 D10 / Phase 2B D12 already
+# set. Defined as a **module-level** router rather than inline in
+# ``create_stub_app`` so ``tests/unit/test_smoke.py``'s guard has something
+# concrete to name in its own docstring, but it is still only ever mounted
+# below, in ``create_stub_app`` — nothing in ``aleph.app`` imports this module,
+# so the production app builds with no reference to this router at all.
+e2e_router = APIRouter()
+
+
+@e2e_router.post("/__e2e__/shift-completions")
+async def shift_completions(body: ShiftRequest, session: Session) -> None:
+    """Backdate a path's completions so a journey can observe "yesterday".
+
+    A **shift** primitive, not a seeder (D11): it fabricates no lessons, moves
+    only the one column every reader already treats as the source of truth
+    (D1), and so cannot put the database into a state the real app could not
+    reach on its own — a learner who genuinely completed a lesson a few days
+    ago looks identical on every read. Repeatable: shifting twice by ``1`` is
+    the same as shifting once by ``2`` (W23 uses exactly that to go from
+    "yesterday" to "the day before").
+
+    No ownership check and no auth dependency — unlike every route in
+    ``routers/v1/``, this one is never reachable in production (it is not
+    mounted by ``create_app``), and the harness's one learner account is the
+    only caller that will ever exist.
+
+    ``make_interval``'s positional args are (years, months, weeks, days, hours,
+    mins, secs) — same helper ``LessonRepository.completion_days_for_user``
+    uses (Phase 5 TDD §5.2), here with ``days`` (index 3) the only non-zero one.
+    """
+    await session.execute(
+        update(Lesson)
+        .where(Lesson.path_id == body.path_id, Lesson.completed_at.isnot(None))
+        .values(
+            completed_at=Lesson.completed_at - func.make_interval(0, 0, 0, body.days)
+        )
+    )
+    await session.commit()
 
 
 def create_stub_app() -> FastAPI:
@@ -59,9 +130,22 @@ def create_stub_app() -> FastAPI:
     # explicit *pin* rather than deleted as redundant: the suite asserts against
     # surfaces that must exist, and "every tutor spec failed on an absent rail"
     # is a confusing way to discover someone flipped a code default.
-    settings.feature_flag_defaults = "tutor:on,shaping:on"
+    #
+    # ``streaks`` (Phase 5 D7) is different from its two neighbours here: its
+    # code default is ``False`` (it ships dark), and the harness's one learner
+    # (``DEV_USER``) is not an admin, so it gets none of ``ADMIN_DEFAULT_FLAGS``'
+    # baseline either. Without this entry the W22/W23 journeys would 404 on
+    # `GET /progress/summary` the moment the code default is exactly what it is
+    # supposed to be — the same "confusing way to discover a default" the
+    # comment above already warns about, just one flag over.
+    settings.feature_flag_defaults = "tutor:on,shaping:on,streaks:on"
 
     # Imported lazily so mutating settings above lands before app assembly.
     from aleph.app import create_app
 
-    return create_app()
+    app = create_app()
+    # Mounted **only here** — never by ``create_app`` (D11, TDD §11): the
+    # production factory has no reference to this module at all, which is the
+    # whole guarantee ``tests/unit/test_smoke.py`` pins.
+    app.include_router(e2e_router)
+    return app
