@@ -119,6 +119,19 @@ def test_shaping_is_registered_and_launched_on_by_default() -> None:
     assert feature_flags.FLAG_DEFAULTS[feature_flags.FeatureFlag.SHAPING] is True
 
 
+def test_streaks_is_registered_and_ships_dark_by_default() -> None:
+    """Phase 5's one flag: registered, but still off (D7) — not launched yet.
+
+    Unlike ``tutor``/``shaping`` this one is still at the "every ticket merges
+    dark" stage of the playbook: the code default is ``False``, and it is an
+    admin default so it can be dogfooded in production before the
+    ``FEATURE_FLAG_DEFAULTS`` flip that launches it.
+    """
+    assert feature_flags.FeatureFlag.STREAKS == "streaks"
+    assert feature_flags.FLAG_DEFAULTS[feature_flags.FeatureFlag.STREAKS] is False
+    assert feature_flags.FeatureFlag.STREAKS in feature_flags.ADMIN_DEFAULT_FLAGS
+
+
 def test_a_launched_flag_is_still_killable_without_a_code_deploy() -> None:
     """The point of leaving the machinery in place: ``:off`` still outranks.
 
@@ -132,11 +145,11 @@ def test_a_launched_flag_is_still_killable_without_a_code_deploy() -> None:
     assert feature_flags.effective_defaults(config)["shaping"] is True
 
 
-def test_the_registry_is_exactly_the_two_phase_flags() -> None:
+def test_the_registry_is_exactly_the_three_phase_flags() -> None:
     # The whole registry in one assertion: a flag added to the enum but missed by
     # ``FLAG_DEFAULTS`` does not exist as far as resolution is concerned, and
     # would silently resolve off everywhere.
-    assert feature_flags.known_flag_keys() == frozenset({"tutor", "shaping"})
+    assert feature_flags.known_flag_keys() == frozenset({"tutor", "shaping", "streaks"})
 
 
 def test_effective_defaults_applies_settings_over_code_defaults(

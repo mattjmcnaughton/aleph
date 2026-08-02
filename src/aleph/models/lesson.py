@@ -17,6 +17,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     Uuid,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -48,6 +49,18 @@ class Lesson(Base, UUIDAuditMixin):
             name="uq_lessons_path_position_in_path",
         ),
         Index("ix_lessons_unit_id", "unit_id"),
+        # The Streaks slice's one query (Phase 5 TDD D6, migration ``0009``):
+        # ``completion_days_for_user`` joins on ``path_id`` and groups by the
+        # local day derived from ``completed_at``, for exactly the completed
+        # rows. Partial — most lessons on a growing path are incomplete, and
+        # the query never wants those — so an index-only scan is available
+        # covering both the join and the group-by without touching the row.
+        Index(
+            "ix_lessons_path_id_completed_at",
+            "path_id",
+            "completed_at",
+            postgresql_where=text("completed_at IS NOT NULL"),
+        ),
     )
 
     unit_id: Mapped[uuid.UUID] = mapped_column(

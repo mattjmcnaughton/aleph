@@ -162,6 +162,30 @@ the ids to slice on are already on the event. **Eval pass rate** is not
 event-derived at all (see [`docs/evals.md`](evals.md)), and this phase's evals
 run post-launch.
 
+### Phase 5 — streaks (PRD §5, TDD §9)
+
+Streaks gets no new event and no north star of its own: Phase 1's activation
+rate stays it, and the one question this slice asks is whether it moves the
+existing **Return** metric at all.
+
+| Metric (Phase 5 PRD §5) | Query | Events consumed |
+| --- | --- | --- |
+| **Streak return** — the existing Return metric, split into before/after cohorts by the `streaks` flag flip date | [`streak_return.sql`](../queries/logfire/streak_return.sql) | `account_created`, `lesson_completed`, `quick_check_attempted`, `lesson_viewed` |
+
+**No new event, on purpose** (D9): `lesson_completed` already carries
+`account_id` and a timestamp since Phase 1, so streak length — and therefore a
+before-cohort — is computable retroactively, including for every account that
+signed up before this slice shipped. A `progress_summary_viewed` event would
+mostly have counted invalidation refetches the client fires on every
+completion, which reads as engagement without being it. The flag-flip date the
+cohort split needs is a dated constant in `streak_return.sql`'s header, not a
+column — there is no event for it, and inventing one would be a worse kind of
+precision than a comment that says when to update it.
+
+If Return does not move for the "after" cohort, this slice is decoration and
+the rest of Phase 5's scope should be re-argued rather than built — the one
+sentence in the TDD that could stop the phase.
+
 ## Importing the queries into Logfire
 
 Every file in [`queries/logfire/`](../queries/logfire/) is a saved query / tile

@@ -16,6 +16,7 @@
 //    the suite) is invisible to it.
 
 import { type Locator, type Page, expect } from "@playwright/test";
+import { BACKEND_URL } from "../servers";
 
 /** The learner's self-assessed starting point (`Level` in lib/api.ts). */
 export type Level = "new_to_it" | "some_experience" | "work_in_it";
@@ -440,4 +441,68 @@ export async function completeLessonAt(page: Page, index: number, answer = 0): P
   await answerQuickCheck(page, answer);
   await markComplete(page);
   await backToPath(page);
+}
+
+// --- The e2e clock (Streaks TDD D11) -----------------------------------------
+
+/**
+ * Backdate a path's completions by `days` whole days — the one seam W23 needs
+ * to observe "yesterday" without Playwright waiting for an actual day to pass.
+ *
+ * Hits the stub backend's own origin directly, not the frontend's `/api/...`
+ * path: `/__e2e__` is not one of the two prefixes the vite dev proxy forwards
+ * (`vite.config.ts` proxies only `/api` and `/auth`), the same reason
+ * `fixtures/auth.ts`'s `signIn` drives `BACKEND_URL` for the OIDC flow instead
+ * of going through the frontend origin.
+ *
+ * A **shift** primitive, not a seeder (D11): repeat calls compound (shifting
+ * by `1` twice is the same as shifting by `2` once), which is exactly how W23
+ * walks a streak from "yesterday" to "the day before" without a fresh path.
+ * Mounted only on `create_stub_app` (`scripts/e2e_backend.py`) — this helper
+ * has no meaning, and no caller, outside this harness.
+ */
+export async function shiftCompletions(
+  page: Page,
+  { pathId, days }: { pathId: string; days: number },
+): Promise<void> {
+  const response = await page.request.post(`${BACKEND_URL}/__e2e__/shift-completions`, {
+    data: { path_id: pathId, days },
+  });
+  expect(response.ok()).toBe(true);
+}
+
+/** One path's row in `GET /progress/summary`'s `paths` (Streaks TDD §6). */
+export interface PathStreakSummary {
+  path_id: string;
+  current_streak: number;
+  best_streak: number;
+  completed_today: number;
+}
+
+/** `GET /api/v1/progress/summary` body, as far as W22/W23 need to reach into it. */
+export interface ProgressSummary {
+  current_streak: number;
+  best_streak: number;
+  completed_today: number;
+  paths: PathStreakSummary[];
+}
+
+/**
+ * The summary off the wire, evaluated **inside the page** rather than through
+ * `page.request` — so it computes `tz_offset_minutes` with the exact same
+ * `getTimezoneOffset()` call `lib/api.ts` makes at its one call site, and a
+ * comparison against what the DOM renders is comparing like with like. Needs a
+ * page that has already navigated somewhere on the app's own origin (the
+ * frontend's `/api` proxy, cookies included) — never call this before the
+ * first `gotoSwitcher`/`createPath` of a spec.
+ */
+export async function fetchProgressSummary(page: Page): Promise<ProgressSummary> {
+  return page.evaluate(async () => {
+    const offset = new Date().getTimezoneOffset();
+    const response = await fetch(`/api/v1/progress/summary?tz_offset_minutes=${offset}`);
+    if (!response.ok) {
+      throw new Error(`progress summary fetch failed: ${response.status}`);
+    }
+    return response.json();
+  });
 }

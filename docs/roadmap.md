@@ -114,12 +114,24 @@ any change that touches finished work.
 
 ## Phase 5 — Momentum
 
+> 📄 **Full spec:** [Phase 5 streaks PRD](prds/phase-5-streaks.md) ·
+> [Phase 5 streaks TDD](tdds/phase-5-streaks.md)
+
 The final core phase turns the tool into a habit. With learners already running
 several paths, we add the light gamification the README is careful to bound: a
 weekly goal ring, a day streak, a daily-minutes target, and a small progress view
 with stats like cards mastered and minutes this week. The rule here is restraint —
 streaks and progress tracking, and nothing more — because the point is to reinforce
 the learning loop, not to bolt a game onto it.
+
+The **streaks** slice was pulled forward and shipped early, the same move Phase
+2B was for Phase 2 (📄 [Phase 5 streaks PRD](prds/phase-5-streaks.md)): a global
+**Daily streak** and a per-path **Path streak**, both derived from
+`lessons.completed_at` with no new table (a `GROUP BY` over rows that already
+exist), plus the 45-day activity strip the mock draws as a heatmap. It ships
+behind the `streaks` flag — dark by default, admin dogfood only, the same
+playbook `tutor`/`shaping` used before their own launches. The weekly goal ring
+and the daily-minutes target remain here, unbuilt, for the rest of this phase.
 
 ## Beyond
 

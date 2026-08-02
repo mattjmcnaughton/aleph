@@ -572,3 +572,92 @@ export function isLessonViewTerminal(detail: LessonDetail | undefined): boolean 
   if (detail.unlock_state === "locked") return true;
   return isLessonStateTerminal(detail.generation_state);
 }
+
+// --- Progress API (Streaks TDD §6/§8) ---------------------------------------
+//
+// One endpoint, `GET /progress/summary`: the global daily streak, the 45-day
+// activity window and the per-path breakdown, all derived server-side from
+// `lessons.completed_at` (Streaks TDD D1) — there is nothing here to trigger or
+// poll, and (§7) no `refetchInterval`: unlike the paths list, nothing about a
+// streak arrives asynchronously, so polling it would be pure cost. It refetches
+// on exactly two triggers — a completion (D10, `routes/lessons.$lessonId.tsx`)
+// and TanStack's default remount/refocus behaviour.
+
+/** One day of the 45-day activity window (Streaks TDD §6), oldest first. */
+export interface ActivityCell {
+  date: string;
+  count: number;
+}
+
+/** One path's row in the summary's `paths` array. Absent means zero (D5). */
+export interface PathStreak {
+  path_id: string;
+  current_streak: number;
+  best_streak: number;
+  completed_today: number;
+}
+
+/** `GET /api/v1/progress/summary` body (Streaks TDD §6). */
+export interface ProgressSummary {
+  /** The learner's local calendar day, as the server resolved it (D3). */
+  today: string;
+  current_streak: number;
+  best_streak: number;
+  completed_today: number;
+  /** Exactly 45 entries, oldest first, zero-filled — `activity-strip.tsx`'s input. */
+  activity: ActivityCell[];
+  /** Paths with at least one completion; a path with none is simply absent (D5). */
+  paths: PathStreak[];
+}
+
+/** The summary for one instant's offset — always called through the options
+ *  factory below, never given a hand-rolled `getTimezoneOffset()` result. */
+export function getProgressSummary(tzOffsetMinutes: number): Promise<ProgressSummary> {
+  return apiFetch<ProgressSummary>(
+    apiV1Path(`/progress/summary?tz_offset_minutes=${tzOffsetMinutes}`),
+  );
+}
+
+/**
+ * The prefix the completion mutation invalidates (Streaks D10,
+ * `routes/lessons.$lessonId.tsx`). Its own namespace, not a branch of
+ * `PATHS_QUERY_PREFIX`: a global cross-path summary does not belong under the
+ * paths prefix, even though nesting it there would make invalidation free
+ * (Streaks TDD D10).
+ */
+export const PROGRESS_QUERY_PREFIX: readonly ["progress"] = ["progress"] as const;
+
+/**
+ * TanStack query key for the summary. The offset rides in the key itself
+ * (Streaks TDD §7): crossing a timezone or a DST boundary is a cache miss and a
+ * refetch rather than a stale day boundary, and that behaviour falls out of the
+ * key rather than needing logic.
+ */
+export function progressSummaryQueryKey(
+  tzOffsetMinutes: number,
+): readonly ["progress", "summary", number] {
+  return [...PROGRESS_QUERY_PREFIX, "summary", tzOffsetMinutes] as const;
+}
+
+/**
+ * THE progress-summary query — key + fetcher paired in one place (the
+ * `sessionQueryOptions` house rule), and **the one call site** for
+ * `getTimezoneOffset()` in the whole app (Streaks TDD §8/§15): the sign
+ * convention (D3) has exactly one place to be wrong, and `api.test.ts` is the
+ * one test that says it isn't. `enabled` comes from `useFeatureFlag("streaks")`
+ * (Streaks TDD §8) — off means `skipToken`, i.e. no request and no rendered
+ * surface, matching every other flag-gated query in this file.
+ *
+ * The completion mutation's optimistic bump (`routes/lessons.$lessonId.tsx`,
+ * D10) needs this same key to patch the right cache entry. It gets it by
+ * calling this factory too and reading `.queryKey` back off it, rather than
+ * calling `getTimezoneOffset()` a second time anywhere — which is what keeps
+ * this the *only* site, not merely the first one.
+ */
+export function progressSummaryQueryOptions(enabled: boolean) {
+  const tzOffsetMinutes = new Date().getTimezoneOffset();
+  return queryOptions({
+    queryKey: progressSummaryQueryKey(tzOffsetMinutes),
+    queryFn: enabled ? () => getProgressSummary(tzOffsetMinutes) : skipToken,
+  });
+}

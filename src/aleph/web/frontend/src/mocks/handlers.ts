@@ -3,6 +3,7 @@ import { API_V1_BASE, AUTH_LOGOUT_PATH, type AuthSession, type AuthUser } from "
 import { lessonsHandlers } from "./lessons";
 import { ADMIN_MODEL_ALLOWLIST } from "./models";
 import { pathsHandlers } from "./paths";
+import { progressHandlers } from "./progress";
 import { shapingHandlers } from "./shaping";
 import { tutorHandlers } from "./tutor";
 
@@ -25,8 +26,10 @@ export const learnerUser: AuthUser = {
   model_allowlist: [],
   // Phase 2's flag ships dark (AL-203): the default fake learner sees the
   // tutor off, so any surface gated on it must stay hidden unless a test
-  // deliberately serves a session with it on.
-  feature_flags: { tutor: false },
+  // deliberately serves a session with it on. `streaks` (Streaks TDD D7)
+  // follows the same rule — off by default in `FLAG_DEFAULTS`, on only for
+  // admins (`ADMIN_DEFAULT_FLAGS`) until launch.
+  feature_flags: { tutor: false, streaks: false },
 };
 
 export const authenticatedSession: AuthSession = {
@@ -84,4 +87,5 @@ export const handlers = [
   ...lessonsHandlers,
   ...tutorHandlers,
   ...shapingHandlers,
+  ...progressHandlers,
 ];

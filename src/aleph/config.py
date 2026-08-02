@@ -471,5 +471,21 @@ class Settings(BaseSettings):
     # raising this above 0 — deliberately not built while the cap is off.
     rate_limit_shaping_messages_per_day: int = 0
 
+    # --- Phase 5: streaks (TDD §13, D1/D12) -----------------------------------
+    # Appended as this phase's self-contained block at the END of Settings
+    # (every phase branch appends its own; keep them separate to avoid merge
+    # conflicts). This is the **only** knob the slice adds — no model slot, no
+    # timeout, no semaphore, no rate limiter, because D1's whole payoff is a
+    # feature derived from existing rows rather than one with new machinery to
+    # tune.
+
+    # The activity strip's window (§8, D12): how many day-cells
+    # ``services/progress_read.py`` asks ``domains.streaks.activity_window``
+    # for, oldest first, ending "today". The pure domain module and the
+    # repository both take no config (the purity rule, ``domains/__init__.py``)
+    # — only the service reads this setting. Must be positive (``ge=1``): a
+    # non-positive window would ask the domain for zero or negative cells.
+    streak_activity_window_days: int = Field(default=45, ge=1)
+
 
 settings = Settings()

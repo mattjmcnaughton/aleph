@@ -6,6 +6,8 @@ import {
   type LessonDetail,
   type PathDetail,
   PATHS_QUERY_PREFIX,
+  PROGRESS_QUERY_PREFIX,
+  type ProgressSummary,
   type QuickCheck,
   attemptLesson,
   completeLesson,
@@ -15,6 +17,7 @@ import {
   lessonQueryKey,
   lessonQueryOptions,
   pathQueryOptions,
+  progressSummaryQueryOptions,
 } from "../lib/api";
 import { Breadcrumbs } from "../components/breadcrumbs";
 import { Markdown } from "../components/markdown";
@@ -94,6 +97,15 @@ function LessonView() {
 
   const generate = useRetryGeneration({ mutationFn: generateLesson, queryKey: lessonQueryKey });
 
+  // Streaks D10: the same key `routes/index.tsx` reads through
+  // `progressSummaryQueryOptions`, obtained here only for its `.queryKey` —
+  // never a second `getTimezoneOffset()` call site (TDD §8/§15). `true` is
+  // arbitrary: the key depends only on the offset, never on whether *this*
+  // learner has the flag on, and a flag-off/never-visited-home cache simply
+  // has no entry at this key yet — exactly the "cold cache" case the patch
+  // below has to no-op on.
+  const progressSummaryKey = progressSummaryQueryOptions(true).queryKey;
+
   const attemptMutation = useMutation({
     mutationFn: ({ id, index }: { id: string; index: number }) => attemptLesson(id, index),
     // Fold the reveal into the cached detail so everything derives from one
@@ -128,6 +140,39 @@ function LessonView() {
       // awaited because marking those queries stale is synchronous and no
       // refetch needs to land before the completed state renders.
       void queryClient.invalidateQueries({ queryKey: PATHS_QUERY_PREFIX });
+
+      // Streaks D10: the day's first completion moves the number in this
+      // interaction, not a round trip later (PRD §3's "Day 6 🔥" beat fires
+      // off this optimistic value). `old` is `undefined` on a cold cache
+      // (flag off, or home never visited) — the updater returns it unchanged
+      // rather than fabricating a payload nobody fetched. `completed_today >
+      // 0` makes a *second* completion today a no-op too: the streak is a day
+      // counter, not a lesson counter (PRD §3), so nothing here should move
+      // twice in one day. The activity strip's last cell — `activity` is
+      // oldest-first, ending at today (TDD §6) — is bumped by the same patch
+      // so the grid and the number can never disagree mid-flight, and the
+      // `invalidateQueries` below is what makes the value authoritative
+      // within one round trip, bounding how wrong the optimism above can ever
+      // be (TDD §15: two devices, or a completion racing the server's own day
+      // boundary).
+      queryClient.setQueryData<ProgressSummary>(progressSummaryKey, (old) => {
+        if (!old || old.completed_today > 0) return old;
+        const current = old.current_streak + 1;
+        const lastDay = old.activity.length - 1;
+        return {
+          ...old,
+          completed_today: 1,
+          current_streak: current,
+          best_streak: Math.max(old.best_streak, current),
+          activity:
+            lastDay < 0
+              ? old.activity
+              : old.activity.map((cell, index) =>
+                  index === lastDay ? { ...cell, count: cell.count + 1 } : cell,
+                ),
+        };
+      });
+      void queryClient.invalidateQueries({ queryKey: PROGRESS_QUERY_PREFIX });
     },
   });
 

@@ -120,11 +120,14 @@ def test_e2e_backend_boots_with_the_shaper_slot_stubbed_and_the_flag_on(
     create_stub_app()
 
     assert restored_live_settings.model_shaper == STUB_MODEL_ID
-    # Both dark surfaces are opened, and the shaping message cap is lifted like
-    # the other per-account caps: the e2e projects share one backend + user and
-    # would otherwise exhaust it.
+    # All three dark surfaces are opened, and the shaping message cap is lifted
+    # like the other per-account caps: the e2e projects share one backend + user
+    # and would otherwise exhaust it. ``streaks`` joined this pin in Phase 5
+    # (TDD D7): it ships dark and the harness's one learner is not an admin, so
+    # without this entry W22/W23 would 404 rather than exercise the surface.
     assert restored_live_settings.feature_flag_default_map == {
         str(FeatureFlag.TUTOR): True,
         str(FeatureFlag.SHAPING): True,
+        str(FeatureFlag.STREAKS): True,
     }
     assert restored_live_settings.rate_limit_shaping_messages_per_day == 0

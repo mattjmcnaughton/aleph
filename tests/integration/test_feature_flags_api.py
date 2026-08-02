@@ -2,10 +2,10 @@
 
 AL-203 (epic #82, owner amendment 1). A dark flag defaults **off** globally and
 **on for admins**, so a phase can merge and deploy with zero learner exposure
-while admins dogfood in production. Both registered flags — Phase 2's ``tutor``
-and Phase 2B's ``shaping`` (AL-301, epic #114) — shipped that way, so every
-resolved map here carries both keys and the assertions read them together. This
-module is the contract test for that story end to end:
+while admins dogfood in production. Phase 2's ``tutor`` and Phase 2B's
+``shaping`` (AL-301, epic #114) shipped that way, so every resolved map here
+carries both keys and the assertions read them together. This module is the
+contract test for that story end to end:
 
 * the admin-only override API (403 / 404 / upsert / idempotent delete),
 * the resolved map delivered on ``GET /api/v1/auth/session`` (the only surface a
@@ -18,14 +18,21 @@ Auth is the real cookie flow with a stubbed OIDC code exchange (mirroring
 ``test_auth_api`` / ``test_paths_api``), so the admin gate is genuine — admin
 status is derived from the email domain (``authz.is_admin``), never stored.
 
-**Both flags are now launched and default on** (AL-270, AL-370), which would make
-most of the resolution machinery below untestable — a flag that is on for
-everyone cannot demonstrate an admin baseline, an override that flips a learner
-*on*, or a `404` gate. So ``dark_flag_defaults`` (autouse) puts both code
-defaults back to ``False`` for this module: every test here is about the
-machinery, and the machinery's interesting case is a dark flag. The launched
-defaults get their own test, ``test_launched_flags_reach_a_plain_learner``, which
-opts back out.
+**Both ``tutor`` and ``shaping`` are now launched and default on** (AL-270,
+AL-370), which would make most of the resolution machinery below untestable — a
+flag that is on for everyone cannot demonstrate an admin baseline, an override
+that flips a learner *on*, or a `404` gate. So ``dark_flag_defaults`` (autouse)
+puts both code defaults back to ``False`` for this module: every test here is
+about the machinery, and the machinery's interesting case is a dark flag. The
+launched defaults get their own test, ``test_launched_flags_reach_a_plain_learner``,
+which opts back out.
+
+**Phase 5's ``streaks`` (D7) is registered but still ships dark** — its code
+default is already ``False`` and it needs no forcing, so it is deliberately
+left out of ``dark_flag_defaults``. Every resolved map and every admin listing
+below still carries it (the session/list surfaces the whole registry, not just
+the flags a given test is about), which is what proves adding a third flag
+never widens what a plain learner sees.
 """
 
 from __future__ import annotations
@@ -54,6 +61,9 @@ TUTOR = "tutor"
 # same way. It is in every resolved map below because the session carries the
 # whole registry, not just the flag a test is about.
 SHAPING = "shaping"
+# Phase 5's flag (D7), registered the same way but not yet launched — see the
+# module docstring. Also in every resolved map below, for the same reason.
+STREAKS = "streaks"
 
 LEARNER = AuthIdentity(
     issuer="https://issuer.example.test",
@@ -121,14 +131,17 @@ async def _flags_on_session(client: AsyncClient) -> dict[str, bool]:
     return response.json()["user"]["feature_flags"]
 
 
-def _resolved(*, tutor: bool, shaping: bool) -> dict[str, bool]:
+def _resolved(*, tutor: bool, shaping: bool, streaks: bool = False) -> dict[str, bool]:
     """The full resolved map — the session carries **every** registered flag.
 
     Spelled as a helper so a new flag joining the registry is one edit here
     rather than one per assertion, while the assertions stay exact: an extra key
     leaking into a learner's map (a stale override row, say) still fails.
+    ``streaks`` defaults to ``False`` because none of this module's tests
+    override or dogfood it — it is here purely to prove the third registered
+    flag never leaks a different value than its own resolution would give.
     """
-    return {TUTOR: tutor, SHAPING: shaping}
+    return {TUTOR: tutor, SHAPING: shaping, STREAKS: streaks}
 
 
 def _flag_row(key: str, *, enabled_default: bool, override_count: int = 0) -> dict:
@@ -183,6 +196,7 @@ async def test_admin_lists_every_registered_flag(
         assert response.json() == {
             "flags": [
                 _flag_row(SHAPING, enabled_default=False),
+                _flag_row(STREAKS, enabled_default=False),
                 _flag_row(TUTOR, enabled_default=False),
             ]
         }
@@ -252,12 +266,15 @@ async def test_dark_flags_resolve_on_for_admins(
 
     async with _client(app) as admin:
         await _sign_in(admin, monkeypatch, ADMIN)
-        assert await _flags_on_session(admin) == _resolved(tutor=True, shaping=True)
+        assert await _flags_on_session(admin) == _resolved(
+            tutor=True, shaping=True, streaks=True
+        )
         # The global defaults are still off — nothing was mutated to make the
         # admin's map true.
         listed = (await admin.get(FLAGS_URL)).json()["flags"]
         assert listed == [
             _flag_row(SHAPING, enabled_default=False),
+            _flag_row(STREAKS, enabled_default=False),
             _flag_row(TUTOR, enabled_default=False),
         ]
 
@@ -288,6 +305,7 @@ async def test_override_flips_a_learner_on_and_clears_idempotently(
         assert await _override_count() == 1
         assert (await admin.get(FLAGS_URL)).json()["flags"] == [
             _flag_row(SHAPING, enabled_default=False),
+            _flag_row(STREAKS, enabled_default=False),
             _flag_row(TUTOR, enabled_default=False, override_count=1),
         ]
 
@@ -302,14 +320,18 @@ async def test_override_flips_a_learner_on_and_clears_idempotently(
         assert (await admin.put(admin_target, json={"enabled": False})).status_code == (
             200
         )
-        assert await _flags_on_session(admin) == _resolved(tutor=False, shaping=True)
+        assert await _flags_on_session(admin) == _resolved(
+            tutor=False, shaping=True, streaks=True
+        )
 
         # DELETE is idempotent: clearing an absent override is still a 204.
         assert (await admin.delete(target)).status_code == 204
         assert (await admin.delete(target)).status_code == 204
         assert await _flags_on_session(learner) == _resolved(tutor=False, shaping=False)
         assert (await admin.delete(admin_target)).status_code == 204
-        assert await _flags_on_session(admin) == _resolved(tutor=True, shaping=True)
+        assert await _flags_on_session(admin) == _resolved(
+            tutor=True, shaping=True, streaks=True
+        )
         assert await _override_count() == 0
 
 
@@ -328,6 +350,7 @@ async def test_settings_default_flips_the_flag_without_a_deploy(
         assert await _flags_on_session(learner) == _resolved(tutor=True, shaping=False)
         assert (await admin.get(FLAGS_URL)).json()["flags"] == [
             _flag_row(SHAPING, enabled_default=False),
+            _flag_row(STREAKS, enabled_default=False),
             _flag_row(TUTOR, enabled_default=True),
         ]
 

@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     ColumnElement,
+    Date,
+    cast,
     delete,
     func,
     select,
@@ -37,6 +39,24 @@ _RETRY_CLAIMABLE_STATES = (
     LessonGenerationState.UNGENERATED,
     LessonGenerationState.FAILED,
 )
+
+
+@dataclass(frozen=True)
+class CompletionDay:
+    """One ``(path, local day)`` group from ``completion_days_for_user`` (below).
+
+    ``day`` is already resolved to the learner's **local** calendar day (Phase 5
+    TDD D3/§5.2) — the query, not this dataclass, does that arithmetic, so
+    every caller downstream (the pure ``domains/streaks`` module included) only
+    ever sees a plain date. ``count`` is how many lessons were completed on that
+    path on that day — the streak domain never reads it (D2: membership in the
+    set of days *is* the target), but ``services/progress_read.py`` needs it for
+    the activity strip's three intensities and for ``completed_today``.
+    """
+
+    path_id: uuid.UUID
+    day: datetime.date
+    count: int
 
 
 @dataclass(frozen=True)
@@ -594,3 +614,66 @@ class LessonRepository:
             )
             for path_id, by_state in summaries.items()
         }
+
+    # -- streaks: the one read (Phase 5 TDD §5.2, D3/D5) -------------------- #
+
+    async def completion_days_for_user(
+        self, *, user_id: uuid.UUID, tz_offset_minutes: int
+    ) -> list[CompletionDay]:
+        """Every ``(path, local day)`` this learner has a completion on, grouped.
+
+        The whole of the Streaks slice's read (D1: nothing here is stored). The
+        day expression is the one three things about this query make
+        load-bearing (TDD §5.2):
+
+        1. **Pin to UTC before subtracting the offset.** ``completed_at`` is
+           ``timestamptz``; casting a ``timestamptz`` straight to ``date``
+           resolves in the session's ``TimeZone`` GUC, which nothing in this
+           codebase sets, asserts, or documents — so that cast alone would make
+           the feature's correctness depend on a setting nobody controls.
+           ``func.timezone("UTC", ...)`` compiles to ``AT TIME ZONE 'UTC'``,
+           which converts ``completed_at`` to a plain (zoneless) ``timestamp``
+           first; the arithmetic and the cast that follow are then
+           deterministic regardless of server configuration. This is the §14
+           R1 correction to the original combined doc's expression, and
+           ``tests/integration/test_progress_api.py`` pins it under
+           ``SET TIME ZONE 'America/Chicago'``.
+        2. **Ownership lives in the query.** The ``paths.user_id`` predicate is
+           the same posture as :meth:`get_for_user` — another learner's
+           completions can never enter the fold, even if a caller forgets to
+           filter, because there is no code path where they are fetched and
+           then filtered out.
+        3. **The offset is a bound parameter.** It is validated at the DTO
+           boundary (``TzOffsetMinutes``, ``ge=-900 le=900``), but passing a
+           plain Python ``int`` to ``func.make_interval`` compiles it as a bind
+           parameter either way — it is never string-interpolated into SQL.
+
+        A path with no completions produces no row (D5, §14 R2): the group-by
+        cannot manufacture one, and the service does not zero-fill it — a
+        second query just to add rows the frontend hides below 2 days anyway
+        would spend a round trip on nothing (§5.3).
+
+        Returns every completion day **ever** — ``best_streak`` is all-time
+        (§14 R4), so there is no window to bound this by. One row per
+        ``(path, day)``: a learner studying daily on three paths for two years
+        is ~2 000 rows, which is the honest ceiling (§4).
+        """
+        # AT TIME ZONE 'UTC' first (a plain timestamp), then subtract the
+        # offset, then cast to date — see point 1 above. ``make_interval``'s
+        # positional args are (years, months, weeks, days, hours, mins, secs);
+        # only minutes is non-zero here.
+        local_day = cast(
+            func.timezone("UTC", Lesson.completed_at)
+            - func.make_interval(0, 0, 0, 0, 0, tz_offset_minutes),
+            Date,
+        )
+        result = await self.session.execute(
+            select(Lesson.path_id, local_day.label("day"), func.count().label("n"))
+            .join(Path, Path.id == Lesson.path_id)
+            .where(Path.user_id == user_id, Lesson.completed_at.isnot(None))
+            .group_by(Lesson.path_id, local_day)
+        )
+        return [
+            CompletionDay(path_id=path_id, day=day, count=count)
+            for path_id, day, count in result.all()
+        ]

@@ -102,7 +102,7 @@ Two pytest markers are registered in `pyproject.toml`:
   Shared vocabulary from PRD → test → trace only; there is **no** enforcement
   machinery (no packaged catalog, no coverage-verification job). Code review, not
   CI tooling, checks that a workflow change updates a meaningful test. Playwright
-  specs use the matching `@w1`..`@w21` tags for the same purpose (W10 is
+  specs use the matching `@w1`..`@w23` tags for the same purpose (W10 is
   reserved for the deferred selection-to-quote).
 
 ## E2E harness
@@ -147,12 +147,12 @@ own matching browser, so that local branch is skipped.
 
 ## The journeys (AL-090, AL-260, AL-360)
 
-`tests/e2e/journeys/` holds one spec per PRD §8 workflow, tagged `@w1`..`@w21`
+`tests/e2e/journeys/` holds one spec per PRD §8 workflow, tagged `@w1`..`@w23`
 (Playwright tag annotations — `pnpm exec playwright test --grep @w3` runs one).
 They drive the SPA the way a learner does: real sign-in, real server, real
 Postgres, stub model. The conventions below were set by Phase 1's `@w1`..`@w8`
-and hold for the tutor's (`@w9`, `@w11`..`@w16`) and shaping's (`@w17`..`@w21`)
-journeys too.
+and hold for the tutor's (`@w9`, `@w11`..`@w16`), shaping's (`@w17`..`@w21`),
+and streaks' (`@w22`, `@w23`) journeys too.
 
 - **Auth is real, not injected.** `auth.setup.ts` drives `/auth/login` → the
   realm's login form → `/auth/callback` and saves the resulting cookie as

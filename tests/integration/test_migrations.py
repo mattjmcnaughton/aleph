@@ -38,6 +38,9 @@ APPLIED_CHANGE_HEAD = "0007_applied_change_uniqueness"
 APPLIED_CHANGE_INDEX = "uq_path_changes_applied_message"
 # Path title + Guidance's step: two additive, nullable columns on ``paths``.
 TITLE_GUIDANCE_HEAD = "0008_path_title_and_guidance"
+# Phase 5 streaks' step (D6): one partial index covering the one query.
+STREAK_INDEX_HEAD = "0009_lesson_completed_at_index"
+STREAK_INDEX_NAME = "ix_lessons_path_id_completed_at"
 
 PHASE_1_TABLES = ("users", "paths", "units", "lessons", "quick_checks", "attempts")
 PHASE_2_TABLES = ("conversations", "messages")
@@ -894,3 +897,51 @@ def test_the_title_and_guidance_step_downgrades_and_reapplies_cleanly(
     # Reapplying is schema-only (no backfill): the columns are back, but empty —
     # the same honest "nothing to compute" state a pre-migration row gets.
     assert asyncio.run(_title_and_guidance(database_url, path_id)) == (None, None)
+
+
+# --------------------------------------------------------------------------- #
+# Phase 5 streaks: the completion-day index (migration 0009)
+#
+# D1's whole payoff shows up here too: the slice's entire migration is one
+# partial index, nothing else — no table, no column, no backfill (TDD §4/D6).
+# What is worth asserting mirrors 0007's own index-only step: the index
+# appears, is genuinely partial (``WHERE completed_at IS NOT NULL``), and no
+# table or column moves either way.
+# --------------------------------------------------------------------------- #
+
+
+def test_the_streak_index_downgrades_and_reapplies_cleanly(
+    isolated_database: str,
+) -> None:
+    """Index-only, both ways: nothing else about ``lessons`` moves."""
+    database_url = isolated_database
+
+    at_head = asyncio.run(_indexes(database_url, "lessons"))
+    assert STREAK_INDEX_NAME in at_head
+    assert "completed_at IS NOT NULL" in at_head[STREAK_INDEX_NAME]
+    columns = asyncio.run(_columns(database_url, "lessons"))
+
+    run_alembic(database_url, TITLE_GUIDANCE_HEAD, downgrade=True)
+
+    after_downgrade = asyncio.run(_indexes(database_url, "lessons"))
+    assert STREAK_INDEX_NAME not in after_downgrade
+    assert after_downgrade.keys() | {STREAK_INDEX_NAME} == at_head.keys()
+    assert asyncio.run(_columns(database_url, "lessons")) == columns
+
+    run_alembic(database_url, STREAK_INDEX_HEAD)
+
+    assert asyncio.run(_indexes(database_url, "lessons")).keys() == at_head.keys()
+
+
+def test_earlier_tables_are_unchanged_by_the_streak_index_migration(
+    isolated_database: str,
+) -> None:
+    """The step adds one index; it alters no table or column."""
+    database_url = isolated_database
+    tracked = (*PHASE_1_TABLES, *PHASE_2_TABLES, FLAGS_TABLE, CHANGES_TABLE)
+
+    before = {table: asyncio.run(_columns(database_url, table)) for table in tracked}
+    run_alembic(database_url, TITLE_GUIDANCE_HEAD, downgrade=True)
+    after = {table: asyncio.run(_columns(database_url, table)) for table in tracked}
+
+    assert before == after

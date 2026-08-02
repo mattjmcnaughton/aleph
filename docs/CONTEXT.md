@@ -6,11 +6,14 @@ synonym (say **path**, not "course"; **Quick check**, not "quiz question").
 
 > Status: **living document, started at the Phase 1 PRD, extended by the Phase 1 TDD** (states,
 > generation mechanics, model slots), **the Phase 2 PRD** (the tutor), **the Phase 2 TDD**
-> (the tutor model slot, reply transport) **and the Phase 2B PRD** (shaping). References:
+> (the tutor model slot, reply transport), **the Phase 2B PRD** (shaping), **and the Phase 5
+> streaks PRD** (Daily streak, Path streak, Active day, Best streak — pulled forward, see the
+> phase-boundary note below). References:
 > [`README.md`](../README.md) · [`roadmap.md`](roadmap.md) ·
 > [Phase 1 PRD](prds/phase-1-path-generation.md) · [Phase 1 TDD](tdds/phase-1-path-generation.md) ·
 > [Phase 2 PRD](prds/phase-2-tutor.md) · [Phase 2 TDD](tdds/phase-2-tutor.md) ·
-> [Phase 2B PRD](prds/phase-2b-shape-your-path.md) · [Phase 2B TDD](tdds/phase-2b-shape-your-path.md).
+> [Phase 2B PRD](prds/phase-2b-shape-your-path.md) · [Phase 2B TDD](tdds/phase-2b-shape-your-path.md) ·
+> [Phase 5 streaks PRD](prds/phase-5-streaks.md) · [Phase 5 streaks TDD](tdds/phase-5-streaks.md).
 
 ## Core domain
 
@@ -59,6 +62,10 @@ synonym (say **path**, not "course"; **Quick check**, not "quiz question").
 | **Progress** | The persisted record of which lessons/units are complete, per path, per account. |
 | **Switcher** | The "Your paths" UI for moving between a learner's multiple paths, each keeping its own progress. |
 | **Delete path** | Removing a path and its progress (confirmed, not undoable in MVP). Doubles as **reset**: with no regenerate, deleting and creating anew is how a learner discards an unsatisfying path. |
+| **Active day** | A calendar day, in the learner's local timezone, on which they completed **at least one lesson** — the only signal a streak counts (not a view, not an Attempt on its own). The daily target is one lesson (Phase 5 PRD §4.5), so membership in the set of Active days *is* the target. |
+| **Daily streak** | The learner's **global** streak: the count of consecutive Active days, across every path, ending today — or ending yesterday if today has no completion yet, so it does not break at midnight (Phase 5 PRD §4.4). *The* streak: the one with the flame and the celebration. Derived from `lessons.completed_at`, never stored (Phase 5 TDD D1). |
+| **Path streak** | The same run-of-consecutive-Active-days count, scoped to one path's completions instead of every path. A quieter stat, shown on the home list and deliberately not celebrated — with multiple paths a learner naturally alternates, which is the **Breadth** metric working, and a per-path streak breaks every time they do (Phase 5 PRD §4.3). |
+| **Best streak** | The longest run of consecutive Active days ever recorded — global or per path, matching whichever streak it sits beside — including a run that is not the current one. Renders only when it exceeds the current streak (Phase 5 TDD §14 R5). |
 
 ## The tutor
 
@@ -154,4 +161,9 @@ phase:
 - **System-proposed path edits** — Aleph proposing changes unprompted from miss data, plus the
   destructive edit shapes (remove, reorder, touching engaged work): **Phase 4**, building on 2B's
   Proposal/Apply machinery.
-- **Streak / goal ring / daily minutes** — light gamification (**Phase 5**).
+- **Goal ring / daily minutes** — light gamification (**Phase 5**); **streaks
+  shipped early, see the streaks PRD** ([PRD](prds/phase-5-streaks.md) ·
+  [TDD](tdds/phase-5-streaks.md)), the same pull-forward move Phase 2B was.
+  **Daily streak**, **Path streak**, **Active day** and **Best streak** above
+  are built, behind the `streaks` flag (dark by default, admin dogfood only,
+  same playbook as `tutor`/`shaping` before launch).
