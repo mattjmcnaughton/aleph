@@ -1,3 +1,10 @@
+## [1.21.2](https://github.com/mattjmcnaughton/aleph/compare/v1.21.1...v1.21.2) (2026-08-02)
+
+
+### Bug Fixes
+
+* **config:** launch streaks — default the flag on ([#151](https://github.com/mattjmcnaughton/aleph/issues/151)) ([cf767df](https://github.com/mattjmcnaughton/aleph/commit/cf767df17b68fde76932e12ae03dcc654e0c1517))
+
 ## [1.21.1](https://github.com/mattjmcnaughton/aleph/compare/v1.21.0...v1.21.1) (2026-08-02)
 
 
