@@ -6,14 +6,16 @@ synonym (say **path**, not "course"; **Quick check**, not "quiz question").
 
 > Status: **living document, started at the Phase 1 PRD, extended by the Phase 1 TDD** (states,
 > generation mechanics, model slots), **the Phase 2 PRD** (the tutor), **the Phase 2 TDD**
-> (the tutor model slot, reply transport), **the Phase 2B PRD** (shaping), **and the Phase 5
+> (the tutor model slot, reply transport), **the Phase 2B PRD** (shaping), **the Phase 5
 > streaks PRD** (Daily streak, Path streak, Active day, Best streak — pulled forward, see the
-> phase-boundary note below). References:
+> phase-boundary note below), **and the Phase 3 PRD** (which widened **Active day** to count a
+> review, and owns the retention vocabulary that arrives with it). References:
 > [`README.md`](../README.md) · [`roadmap.md`](roadmap.md) ·
 > [Phase 1 PRD](prds/phase-1-path-generation.md) · [Phase 1 TDD](tdds/phase-1-path-generation.md) ·
 > [Phase 2 PRD](prds/phase-2-tutor.md) · [Phase 2 TDD](tdds/phase-2-tutor.md) ·
 > [Phase 2B PRD](prds/phase-2b-shape-your-path.md) · [Phase 2B TDD](tdds/phase-2b-shape-your-path.md) ·
-> [Phase 5 streaks PRD](prds/phase-5-streaks.md) · [Phase 5 streaks TDD](tdds/phase-5-streaks.md).
+> [Phase 5 streaks PRD](prds/phase-5-streaks.md) · [Phase 5 streaks TDD](tdds/phase-5-streaks.md) ·
+> [Phase 3 PRD](prds/phase-3-flashcards.md).
 
 ## Core domain
 
@@ -62,9 +64,9 @@ synonym (say **path**, not "course"; **Quick check**, not "quiz question").
 | **Progress** | The persisted record of which lessons/units are complete, per path, per account. |
 | **Switcher** | The "Your paths" UI for moving between a learner's multiple paths, each keeping its own progress. |
 | **Delete path** | Removing a path and its progress (confirmed, not undoable in MVP). Doubles as **reset**: with no regenerate, deleting and creating anew is how a learner discards an unsatisfying path. |
-| **Active day** | A calendar day, in the learner's local timezone, on which they completed **at least one lesson** — the only signal a streak counts (not a view, not an Attempt on its own). The daily target is one lesson (Phase 5 PRD §4.5), so membership in the set of Active days *is* the target. |
-| **Daily streak** | The learner's **global** streak: the count of consecutive Active days, across every path, ending today — or ending yesterday if today has no completion yet, so it does not break at midnight (Phase 5 PRD §4.4). *The* streak: the one with the flame and the celebration. Derived from `lessons.completed_at`, never stored (Phase 5 TDD D1). |
-| **Path streak** | The same run-of-consecutive-Active-days count, scoped to one path's completions instead of every path. A quieter stat, shown on the home list and deliberately not celebrated — with multiple paths a learner naturally alternates, which is the **Breadth** metric working, and a per-path streak breaks every time they do (Phase 5 PRD §4.3). |
+| **Active day** | A calendar day, in the learner's local timezone, on which the learner did **at least one** of: completed a lesson, or reviewed a flashcard. Those are the two signals a streak counts — not a view, not an Attempt on its own, not drafting or keeping a card. Membership in the set of Active days *is* the daily target, so there is no separate goal concept. **Widened by the Phase 3 PRD** (§4.9) — it was lesson completion alone through Phase 5, and the second signal arrives only when review ships. |
+| **Daily streak** | The learner's **global** streak: the count of consecutive Active days, across every path, ending today — or ending yesterday if today is still empty, so it does not break at midnight (Phase 5 PRD §4.4). *The* streak: the one with the flame and the celebration. Derived, never stored (Phase 5 TDD D1) — from `lessons.completed_at` today, and from that **union** the reviews once Phase 3 ships. |
+| **Path streak** | The same run-of-consecutive-Active-days count, scoped to one path's **lesson completions** instead of every path's. Deliberately narrower than the Daily streak: reviews never count toward it, because a flashcard belongs to the learner rather than to a path (Phase 3 PRD §4.1) and an orphaned card has no path to credit. A quieter stat, shown on the home list and deliberately not celebrated — with multiple paths a learner naturally alternates, which is the **Breadth** metric working, and a per-path streak breaks every time they do (Phase 5 PRD §4.3). |
 | **Best streak** | The longest run of consecutive Active days ever recorded — global or per path, matching whichever streak it sits beside — including a run that is not the current one. Renders only when it exceeds the current streak (Phase 5 TDD §14 R5). |
 
 ## The tutor
@@ -157,7 +159,15 @@ phase:
 - **Summarized carried context** — Phase 2 carries a bounded window of the most recent turns and
   **drops** what falls out of it; summarizing older turns instead is a later upgrade behind the same
   context seam (Phase 2 TDD D6).
-- **Flashcard** / **spaced repetition** / grading (**Again/Hard/Good/Easy**) — retention loop (**Phase 3**).
+- **Flashcard** / **Draft** / **Kept card** / **Daily queue** / **Review** / **Lapse** — the
+  retention loop (**Phase 3**): **specified, not built**
+  ([PRD](prds/phase-3-flashcards.md) · mock: [phase-3 flashcards](mocks/aleph-phase-3-flashcards.html)).
+  Grading ships as **two outcomes on a fixed ladder** — *Again* / *Got it* — not the
+  Again/Hard/Good/Easy this list used to promise; that needs ease factors and is deferred to a
+  follow-on slice (Phase 3 PRD §4.6). **Active day above is already widened to count a review**
+  (§4.9): the definition changed the day it was decided rather than the day it ships, because the
+  vocabulary is authoritative — and because no review exists yet, so no past day and no live streak
+  moves when it does.
 - **System-proposed path edits** — Aleph proposing changes unprompted from miss data, plus the
   destructive edit shapes (remove, reorder, touching engaged work): **Phase 4**, building on 2B's
   Proposal/Apply machinery.

@@ -1,0 +1,967 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aleph — Phase 3 mock: Flashcards</title>
+<style>
+  /* ── Page chrome: theme-aware. The phones inside are always Nocturne dark,
+     because Nocturne is a committed dark system (index.css: color-scheme: dark). ── */
+  :root {
+    --page-bg: #f4f4f6;
+    --page-fg: #1b1c24;
+    --page-muted: #5c6070;
+    --page-rule: #d8d9e0;
+    --page-card: #ffffff;
+    --page-accent: #2f7f88;
+    --page-iris: #5d5294;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page-bg: #101119;
+      --page-fg: #e9e9ed;
+      --page-muted: #9397ab;
+      --page-rule: #2c2e3d;
+      --page-card: #191b26;
+      --page-accent: #6fced9;
+      --page-iris: #b5abfc;
+    }
+  }
+  :root[data-theme="dark"] {
+    --page-bg: #101119;
+    --page-fg: #e9e9ed;
+    --page-muted: #9397ab;
+    --page-rule: #2c2e3d;
+    --page-card: #191b26;
+    --page-accent: #6fced9;
+    --page-iris: #b5abfc;
+  }
+  :root[data-theme="light"] {
+    --page-bg: #f4f4f6;
+    --page-fg: #1b1c24;
+    --page-muted: #5c6070;
+    --page-rule: #d8d9e0;
+    --page-card: #ffffff;
+    --page-accent: #2f7f88;
+    --page-iris: #5d5294;
+  }
+
+  /* Nocturne tokens — lifted from tailwind.config.ts, unchanged. */
+  .noc {
+    --night: #161826;
+    --surface: #232532;
+    --elevated: #292b31;
+    --porcelain: #e9e9ed;
+    --mist: #9397ab;
+    --slate: #75798c;
+    --faint: #595d6c;
+    --teal: #4fb8c4;
+    --teal-bright: #6fced9;
+    --teal-dim: #3f959f;
+    --iris: #9184d9;
+    --iris-400: #b5abfc;
+    --iris-700: #5d5294;
+    --iris-900: #2b2741;
+    --divider: #e9e9ed29;
+    --danger: #ff8a80;
+  }
+
+  body {
+    background: var(--page-bg);
+    color: var(--page-fg);
+    font-family: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+    line-height: 1.5;
+  }
+
+  .wrap {
+    max-width: 1240px;
+    margin: 0 auto;
+    padding: 40px 24px 72px;
+  }
+
+  /* ── Masthead ── */
+  .masthead { display: flex; flex-direction: column; gap: 14px; max-width: 62ch; }
+  .kicker {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--page-muted);
+  }
+  h1 {
+    font-size: clamp(28px, 4vw, 40px);
+    line-height: 1.12;
+    letter-spacing: -0.02em;
+    font-weight: 600;
+    text-wrap: balance;
+  }
+  .standfirst { color: var(--page-muted); font-size: 16.5px; }
+  .caveat {
+    margin-top: 4px;
+    padding: 10px 14px;
+    border-left: 2px solid var(--page-iris);
+    background: color-mix(in srgb, var(--page-iris) 8%, transparent);
+    border-radius: 0 8px 8px 0;
+    font-size: 14px;
+    color: var(--page-fg);
+    max-width: 62ch;
+  }
+
+  hr.rule { border: 0; border-top: 1px solid var(--page-rule); margin: 40px 0 34px; }
+
+  /* ── Phone rail ── */
+  .rail {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 34px 28px;
+    align-items: start;
+  }
+  .slot { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+  .slot-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .slot-num {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px;
+    color: var(--page-accent);
+    font-weight: 600;
+  }
+  .slot-title { font-size: 16px; font-weight: 600; letter-spacing: -0.01em; }
+  .slot-note { font-size: 13.5px; color: var(--page-muted); max-width: 42ch; }
+
+  /* The device. Fixed phone metrics — this is a phone-first product. */
+  .phone {
+    background: var(--night);
+    border-radius: 26px;
+    padding: 10px;
+    box-shadow: 0 0 0 1px var(--page-rule), 0 18px 44px rgba(0, 0, 0, 0.28);
+  }
+  .screen {
+    background: var(--night);
+    border-radius: 18px;
+    height: 660px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    color: var(--porcelain);
+    font-size: 14px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--faint) transparent;
+  }
+  .screen::-webkit-scrollbar { width: 6px; }
+  .screen::-webkit-scrollbar-thumb { background: var(--faint); border-radius: 3px; }
+
+  .appbar {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    height: 52px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 16px;
+    background: var(--night);
+    border-bottom: 1px solid var(--divider);
+  }
+  .glyph {
+    font-family: Georgia, "Times New Roman", serif;
+    font-size: 20px;
+    color: var(--iris-400);
+    line-height: 1;
+  }
+  .appbar-right { font-size: 12px; color: var(--slate); display: flex; align-items: center; gap: 9px; }
+  /* The one piece of persistent navigation the feature adds: a due count in the
+     bar, reachable from every screen. Teal, because a due card is path-derived. */
+  .due-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 11.5px;
+    font-weight: 600;
+    color: #08252a;
+    background: var(--teal);
+    border-radius: 999px;
+    padding: 3px 9px 3px 7px;
+    font-variant-numeric: tabular-nums;
+    text-decoration: none;
+  }
+  .due-pill::before {
+    content: "";
+    width: 6px;
+    height: 6px;
+    border-radius: 999px;
+    background: #08252a;
+    opacity: 0.55;
+  }
+
+  .pad { padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+
+  .noc .kicker { color: var(--mist); }
+
+  /* Cards */
+  .card {
+    background: var(--surface);
+    border-radius: 14px;
+    padding: 14px;
+    box-shadow: 0 0 0 1px #3f424d;
+  }
+  .card-teal { box-shadow: 0 0 0 1px rgba(79, 184, 196, 0.45), 0 10px 34px rgba(79, 184, 196, 0.16); }
+  .card-iris { box-shadow: 0 0 0 1px rgba(145, 132, 217, 0.45), 0 10px 34px rgba(145, 132, 217, 0.16); }
+
+  .h-lesson { font-size: 19px; font-weight: 600; letter-spacing: -0.01em; line-height: 1.25; }
+  .muted { color: var(--mist); }
+  .dim { color: var(--slate); }
+  .tiny { font-size: 12px; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .num { font-variant-numeric: tabular-nums; }
+
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.92em;
+    background: #ffffff10;
+    padding: 1px 4px;
+    border-radius: 4px;
+  }
+
+  /* Buttons */
+  .btn {
+    font: inherit;
+    font-size: 14px;
+    font-weight: 600;
+    border: 0;
+    border-radius: 8px;
+    padding: 12px 16px;
+    cursor: pointer;
+    width: 100%;
+    background: var(--teal);
+    color: #08252a;
+    transition: background 120ms ease;
+  }
+  .btn:hover { background: var(--teal-bright); }
+  .btn-ghost {
+    background: transparent;
+    color: var(--mist);
+    box-shadow: inset 0 0 0 1px var(--faint);
+    font-weight: 500;
+  }
+  .btn-ghost:hover { background: #ffffff0a; color: var(--porcelain); }
+  .btn:focus-visible, .toggle:focus-visible, .grade:focus-visible, .flip:focus-visible {
+    outline: 2px solid var(--teal-bright);
+    outline-offset: 2px;
+  }
+
+  /* Screen 1 — draft review */
+  .draft {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    padding: 12px;
+    border-radius: 10px;
+    background: var(--elevated);
+    box-shadow: inset 0 0 0 1px #ffffff0f;
+    transition: opacity 140ms ease;
+  }
+  .draft.off { opacity: 0.42; }
+  .draft-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+  .draft-front { font-weight: 600; font-size: 13.5px; line-height: 1.35; }
+  .draft-back { font-size: 12.5px; color: var(--mist); line-height: 1.4; }
+  .toggle {
+    flex: none;
+    width: 26px;
+    height: 26px;
+    border-radius: 7px;
+    border: 0;
+    cursor: pointer;
+    background: var(--teal);
+    color: #08252a;
+    font-size: 14px;
+    font-weight: 700;
+    line-height: 26px;
+    padding: 0;
+  }
+  .draft.off .toggle { background: transparent; color: var(--slate); box-shadow: inset 0 0 0 1px var(--faint); }
+
+  .streakline {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13.5px;
+    color: var(--porcelain);
+  }
+  .streakline .flame { font-size: 14px; }
+
+  /* Screen 2 — home */
+  .strip { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+  .cell { aspect-ratio: 1; border-radius: 3px; background: #ffffff0d; }
+  .cell.l1 { background: rgba(79, 184, 196, 0.28); }
+  .cell.l2 { background: rgba(79, 184, 196, 0.58); }
+  .cell.l3 { background: var(--teal); }
+
+  .due-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+  .due-count { font-size: 30px; font-weight: 600; letter-spacing: -0.02em; line-height: 1; color: var(--teal-bright); }
+
+  .path-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 13px 14px;
+    border-radius: 12px;
+    background: var(--surface);
+    box-shadow: 0 0 0 1px #3f424d;
+  }
+  .path-name { font-weight: 600; font-size: 14px; }
+  .chip {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--mist);
+    background: #ffffff0f;
+    border-radius: 999px;
+    padding: 3px 9px;
+    white-space: nowrap;
+  }
+  .chip-teal { color: #08252a; background: var(--teal); }
+
+  .bar { height: 4px; border-radius: 2px; background: #ffffff14; overflow: hidden; margin-top: 8px; }
+  .bar > span { display: block; height: 100%; background: var(--teal-dim); border-radius: 2px; }
+
+  /* Screen 3 — review */
+  .progress-row { display: flex; align-items: center; justify-content: space-between; }
+  .flip {
+    width: 100%;
+    text-align: left;
+    background: var(--surface);
+    border: 0;
+    border-radius: 14px;
+    padding: 22px 18px;
+    color: var(--porcelain);
+    font: inherit;
+    cursor: pointer;
+    box-shadow: 0 0 0 1px #595d6c, 0 6px 18px rgba(0, 0, 0, 0.55);
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    min-height: 232px;
+  }
+  .face-front { font-size: 17.5px; font-weight: 600; line-height: 1.35; letter-spacing: -0.01em; }
+  .face-back {
+    font-size: 14px;
+    color: var(--porcelain);
+    line-height: 1.5;
+    border-top: 1px solid var(--divider);
+    padding-top: 14px;
+  }
+  .hint { font-size: 12px; color: var(--slate); margin-top: auto; }
+  .source { font-size: 11.5px; color: var(--slate); }
+  .source a { color: var(--teal); text-decoration: none; }
+
+  .grades { display: grid; grid-template-columns: repeat(2, 1fr); gap: 9px; }
+  .grade {
+    font: inherit;
+    font-size: 12.5px;
+    font-weight: 600;
+    border: 0;
+    border-radius: 9px;
+    padding: 11px 4px 9px;
+    cursor: pointer;
+    background: var(--elevated);
+    color: var(--porcelain);
+    box-shadow: inset 0 0 0 1px #ffffff14;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    align-items: center;
+  }
+  .grade small { font-size: 10.5px; font-weight: 500; color: var(--slate); font-variant-numeric: tabular-nums; }
+  .grade:hover { background: #33353d; }
+  .grade-again { box-shadow: inset 0 0 0 1px rgba(255, 138, 128, 0.5); color: var(--danger); }
+  .grade-again small { color: rgba(255, 138, 128, 0.75); }
+  .grades[hidden] { display: none; }
+
+  /* Pins — numbered because they map to real open questions, in order. */
+  .pin {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 19px;
+    height: 19px;
+    border-radius: 999px;
+    background: var(--iris-700);
+    color: #fff;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px;
+    font-weight: 700;
+    flex: none;
+  }
+  .pin-note {
+    display: flex;
+    gap: 9px;
+    align-items: flex-start;
+    font-size: 12.5px;
+    color: var(--mist);
+    line-height: 1.45;
+    padding: 10px 12px;
+    border-radius: 10px;
+    background: var(--iris-900);
+  }
+
+  /* ── Decision table ── */
+  .decisions { margin-top: 8px; display: flex; flex-direction: column; gap: 18px; }
+  .dgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+  .dcard {
+    background: var(--page-card);
+    border-radius: 12px;
+    padding: 18px;
+    box-shadow: 0 0 0 1px var(--page-rule);
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+  }
+  .dcard h3 { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; display: flex; gap: 9px; align-items: center; }
+  .dcard p { font-size: 13.5px; color: var(--page-muted); }
+  .dcard .rec {
+    font-size: 13px;
+    color: var(--page-fg);
+    border-top: 1px solid var(--page-rule);
+    padding-top: 9px;
+    margin-top: auto;
+  }
+  .rec b { color: var(--page-accent); font-weight: 600; }
+
+  footer.foot { margin-top: 42px; font-size: 13px; color: var(--page-muted); max-width: 62ch; }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; }
+  }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header class="masthead">
+    <span class="kicker">Aleph · Phase 3 · mock, not a spec</span>
+    <h1>Flashcards and spaced repetition</h1>
+    <p class="standfirst">
+      Three surfaces the feature actually has: the moment cards are drafted, the moment
+      they come due, and the review itself. Drawn in Nocturne, phone first, so it sits
+      beside the Phase 1 and Phase 2 mocks rather than beside a new visual language.
+    </p>
+    <p class="caveat">
+      This drawing is now the companion to the
+      <span class="mono">Phase 3 PRD</span> — where they disagree, the PRD wins. The pins
+      mark the decisions each screen encodes; two are still open, and both are collected
+      at the foot of the page.
+    </p>
+  </header>
+
+  <hr class="rule">
+
+  <div class="rail">
+
+    <!-- ───────────────── Screen 1 ───────────────── -->
+    <section class="slot">
+      <div class="slot-head">
+        <span class="slot-num">01</span>
+        <span class="slot-title">Keep what's worth remembering</span>
+      </div>
+      <p class="slot-note">
+        The end of a lesson. Aleph proposes; the learner disposes. Iris marks the AI's
+        proposal, the same rule Phase 2 set for the tutor — teal is the path, iris is
+        Aleph speaking.
+      </p>
+
+      <div class="phone noc">
+        <div class="screen">
+          <div class="appbar">
+            <span class="glyph">א</span>
+            <span class="appbar-right">
+              <a class="due-pill" href="#">10 due</a>
+              <span>Learn TypeScript</span>
+            </span>
+          </div>
+          <div class="pad">
+            <div>
+              <span class="kicker">Lesson complete</span>
+              <p class="h-lesson" style="margin-top:6px">Generic constraints</p>
+            </div>
+
+            <div class="streakline">
+              <span class="flame">🔥</span>
+              <span><b>Day 6</b></span>
+              <span class="dim">· 1 lesson today</span>
+            </div>
+
+            <div class="card card-iris">
+              <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px">
+                <span class="kicker" style="color:var(--iris-400)">Aleph drafted 4 cards</span>
+                <span class="tiny dim num" id="keep-count">3 kept</span>
+              </div>
+              <p class="tiny muted" style="margin:8px 0 12px">
+                Keep only what you want to see again. Discarded drafts are not saved.
+              </p>
+
+              <div style="display:flex;flex-direction:column;gap:8px" id="drafts">
+                <div class="draft">
+                  <div class="draft-body">
+                    <p class="draft-front">What does <code>extends</code> mean in <code>&lt;T extends X&gt;</code>?</p>
+                    <p class="draft-back">It constrains T — T must be assignable to X. It is not class inheritance.</p>
+                  </div>
+                  <button class="toggle" aria-pressed="true" aria-label="Keep this card">✓</button>
+                </div>
+                <div class="draft">
+                  <div class="draft-body">
+                    <p class="draft-front">Why constrain a generic at all?</p>
+                    <p class="draft-back">So the body can rely on a property existing — <code>T.length</code> only typechecks once T is constrained.</p>
+                  </div>
+                  <button class="toggle" aria-pressed="true" aria-label="Keep this card">✓</button>
+                </div>
+                <div class="draft off">
+                  <div class="draft-body">
+                    <p class="draft-front">What is a generic?</p>
+                    <p class="draft-back">A type parameter that varies by call site.</p>
+                  </div>
+                  <button class="toggle" aria-pressed="false" aria-label="Keep this card">✓</button>
+                </div>
+                <div class="draft">
+                  <div class="draft-body">
+                    <p class="draft-front">Default type parameter syntax?</p>
+                    <p class="draft-back"><code>&lt;T extends X = Y&gt;</code> — Y is used when the call site names nothing.</p>
+                  </div>
+                  <button class="toggle" aria-pressed="true" aria-label="Keep this card">✓</button>
+                </div>
+              </div>
+            </div>
+
+            <button class="btn" id="keep-btn">Keep 3 cards</button>
+            <button class="btn btn-ghost">Skip — keep none</button>
+            <p class="tiny dim" style="text-align:center">Next: Utility types</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="pin-note">
+        <span class="pin">1</span>
+        <span>
+          Drawn as <b>non-blocking</b>: the lesson is already complete and the streak has
+          already advanced above the drafts. If drafting instead gated completion, a
+          failed generation would block the streak — the thing we just launched.
+        </span>
+      </div>
+    </section>
+
+    <!-- ───────────────── Screen 2 ───────────────── -->
+    <section class="slot">
+      <div class="slot-head">
+        <span class="slot-num">02</span>
+        <span class="slot-title">A reason to come back</span>
+      </div>
+      <p class="slot-note">
+        Home, after streaks launched. Due cards sit above the paths, because between
+        lessons they are the whole reason to open the app.
+      </p>
+
+      <div class="phone noc">
+        <div class="screen">
+          <div class="appbar">
+            <span class="glyph">א</span>
+            <span class="appbar-right">
+              <a class="due-pill" href="#">10 due</a>
+              <span>Your paths</span>
+            </span>
+          </div>
+          <div class="pad">
+            <div class="streakline">
+              <span class="flame">🔥</span>
+              <span><b>6-day streak</b></span>
+              <span class="dim">· best 12 · 1 lesson today</span>
+            </div>
+
+            <div class="strip" id="strip" aria-hidden="true"></div>
+
+            <div class="card card-teal" style="margin-top:2px">
+              <div class="due-head">
+                <div>
+                  <span class="kicker" style="color:var(--teal-bright)">Due today</span>
+                  <p class="due-count num" style="margin-top:7px">10 cards</p>
+                </div>
+                <span class="tiny dim num">~4 min</span>
+              </div>
+              <p class="tiny muted" style="margin:10px 0 12px">
+                Across every path. 3 from Learn TypeScript, 7 from SQL performance.
+              </p>
+              <button class="btn">Review</button>
+            </div>
+
+            <span class="kicker" style="margin-top:4px">Your paths</span>
+
+            <div style="display:flex;flex-direction:column;gap:9px">
+              <div class="path-row">
+                <div style="min-width:0;flex:1">
+                  <p class="path-name">Learn TypeScript</p>
+                  <p class="tiny dim num" style="margin-top:2px">Unit 4 · 12 of 20 lessons</p>
+                  <div class="bar"><span style="width:60%"></span></div>
+                </div>
+                <span class="chip">3-day</span>
+              </div>
+              <div class="path-row">
+                <div style="min-width:0;flex:1">
+                  <p class="path-name">SQL performance</p>
+                  <p class="tiny dim num" style="margin-top:2px">Unit 2 · 5 of 18 lessons</p>
+                  <div class="bar"><span style="width:28%"></span></div>
+                </div>
+                <a href="#" class="chip chip-teal" style="text-decoration:none">Review 7</a>
+              </div>
+              <div class="path-row">
+                <div style="min-width:0;flex:1">
+                  <p class="path-name">Rust ownership</p>
+                  <p class="tiny dim num" style="margin-top:2px">Not started</p>
+                  <div class="bar"><span style="width:0%"></span></div>
+                </div>
+              </div>
+            </div>
+
+            <button class="btn btn-ghost" style="margin-top:2px">+ New path</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="pin-note">
+        <span class="pin">2</span>
+        <span>
+          Drawn as <b>one global queue</b> — "12 cards" spans every path, the header pill
+          carries the same number everywhere, and the per-path chip filters that one queue
+          rather than opening a second. See <i>Navigation</i> below.
+        </span>
+      </div>
+    </section>
+
+    <!-- ───────────────── Screen 3 ───────────────── -->
+    <section class="slot">
+      <div class="slot-head">
+        <span class="slot-num">03</span>
+        <span class="slot-title">The review itself</span>
+      </div>
+      <p class="slot-note">
+        Tap the card to reveal the answer — then grade it. Try it. Two grades, not four:
+        the ladder underneath has two outcomes, so the UI has two buttons.
+      </p>
+
+      <div class="phone noc">
+        <div class="screen">
+          <div class="appbar">
+            <span class="glyph">א</span>
+            <span class="appbar-right">Review</span>
+          </div>
+          <div class="pad">
+            <div class="progress-row">
+              <span class="kicker">Card <span class="num">4</span> of <span class="num">10</span></span>
+              <span class="chip">All paths</span>
+            </div>
+            <div class="bar" style="margin-top:0"><span style="width:40%"></span></div>
+
+            <button class="flip" id="flip" aria-expanded="false">
+              <p class="face-front">
+                What does <code>extends</code> mean in <code>&lt;T extends X&gt;</code>?
+              </p>
+              <p class="face-back" id="back" hidden>
+                It <b>constrains</b> T: T must be assignable to X. It is not class
+                inheritance — nothing is being subclassed, the type parameter is just
+                being narrowed.
+              </p>
+              <p class="hint" id="hint">Tap to reveal</p>
+            </button>
+
+            <div class="grades" id="grades" hidden>
+              <button class="grade grade-again">Again<small>later today</small></button>
+              <button class="grade">Got it<small>in 7 days</small></button>
+            </div>
+
+            <p class="source">
+              From <a href="#">Generic constraints</a> · Learn TypeScript
+            </p>
+
+            <!-- The day's first review is streak-bearing, exactly as the day's first
+                 lesson completion is — same line, same restraint, no second celebration. -->
+            <div class="streakline" style="margin-top:6px">
+              <span class="flame">🔥</span>
+              <span><b>Day 7</b></span>
+              <span class="dim">· first review today</span>
+            </div>
+
+            <div style="margin-top:auto;padding-top:10px;display:flex;flex-direction:column;gap:10px">
+              <p class="tiny dim" style="text-align:center">10 today · the 7 most overdue, plus 3 at random</p>
+              <button class="btn btn-ghost">Done for now</button>
+            </div>
+
+            <!-- The end of a filtered session: the one moment widening the scope is
+                 what the learner actually wants, and the only place it is offered. -->
+            <div class="card" style="background:var(--elevated);box-shadow:inset 0 0 0 1px #ffffff14">
+              <span class="kicker" style="font-size:10px">At the end of a filtered session</span>
+              <p style="font-size:13px;margin:8px 0 10px;line-height:1.45">
+                Nothing left in <b>Learn TypeScript</b>.
+                <span class="muted">7 cards are due on your other paths.</span>
+              </p>
+              <button class="btn" style="padding:9px 14px;font-size:13px">Review those too</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="pin-note">
+        <span class="pin">3</span>
+        <span>
+          <b>Settled:</b> a fixed Leitner ladder — Again demotes a rung, Got it promotes
+          one — so the screen shows the two outcomes the scheduler actually has. The
+          roadmap's Again / Hard / Good / Easy needs ease factors, and is deferred to this
+          phase's own follow-on rather than faked with four labels.
+        </span>
+      </div>
+      <div class="pin-note">
+        <span class="pin">4</span>
+        <span>
+          The source line is a link. If cards outlive their lesson — revised by 2B,
+          removed by Phase 4, or the whole path deleted — <b>that link is what breaks</b>,
+          and this screen has to say something honest instead.
+        </span>
+      </div>
+    </section>
+
+  </div>
+
+  <hr class="rule">
+
+  <section class="decisions">
+    <div class="masthead">
+      <span class="kicker">Navigation</span>
+      <h1 style="font-size:clamp(22px,3vw,28px)">One schedule, three doors, and a filter</h1>
+      <p class="standfirst" style="font-size:15.5px">
+        Aleph has no tab bar — the header is a glyph and a sign-out, and the routes are
+        <span class="mono">/</span>, <span class="mono">/new</span>,
+        <span class="mono">/paths/$id</span>, <span class="mono">/lessons/$id</span>. So
+        review has to be given a door rather than slotted into one that exists.
+      </p>
+    </div>
+
+    <div class="dgrid">
+      <article class="dcard">
+        <h3>Door 1 — Home</h3>
+        <p>
+          The <b>Due today</b> card, above the path list. The primary door: between
+          lessons, this is the reason to open the app at all, so it outranks the paths it
+          sits over.
+        </p>
+        <p class="rec">Route: <b>/review</b> · drawn in screen 02</p>
+      </article>
+
+      <article class="dcard">
+        <h3>Door 2 — The header pill</h3>
+        <p>
+          A <span class="mono">10 due</span> pill in the app bar, on every screen. The
+          only persistent navigation the feature adds — and the only way to reach review
+          from inside a lesson without abandoning it via home.
+        </p>
+        <p class="rec">Route: <b>/review</b> · drawn in screens 01 and 02</p>
+      </article>
+
+      <article class="dcard">
+        <h3>Door 3 — A path</h3>
+        <p>
+          The path view offers <b>Review this path</b>, and the home list's per-path chip
+          does the same. This is a <b>filter over the one queue</b>, not a second queue —
+          the schedule underneath is identical.
+        </p>
+        <p class="rec">Route: <b>/review?path=…</b> · the chip in screen 02</p>
+      </article>
+
+      <article class="dcard">
+        <h3>Can you change scope from inside?</h3>
+        <p>
+          <b>No — scope is set at the door, not in the session.</b> The screen shows which
+          scope you are in (<span class="mono">All paths</span>) but offers no switcher:
+          <span class="mono">4 of 12</span> is a contract with the learner, and changing
+          the denominator underneath them breaks it.
+        </p>
+        <p class="rec">
+          The exception is the <b>end of a filtered session</b>, where widening is what
+          you actually want — so that is the one place it is offered. Mid-session
+          switching follows Phase 2's precedent and waits.
+        </p>
+      </article>
+
+      <article class="dcard" style="box-shadow:0 0 0 1px var(--page-accent)">
+        <h3><span class="pin">2</span> So: global, with a path filter</h3>
+        <p>
+          The schedule is global — one due date per card, one queue, one daily habit,
+          matching the Daily streak that just launched. Mixing paths in one session is
+          <b>interleaving</b>, which retains better than drilling one path at a time.
+        </p>
+        <p class="rec">
+          Per-path stays a <b>view</b>, never a schedule. Two schedules would be two
+          streaks, two habits, and two things to keep honest.
+        </p>
+      </article>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <section class="decisions">
+    <div class="masthead">
+      <span class="kicker">Decisions</span>
+      <h1 style="font-size:clamp(22px,3vw,28px)">Settled, and still open</h1>
+      <p class="standfirst" style="font-size:15.5px">
+        Each of these changes the data model, not just the screen. The four settled ones
+        are written up in the
+        <span class="mono">Phase 3 PRD</span>; the open ones are its §8.
+      </p>
+    </div>
+
+    <div class="dgrid">
+      <article class="dcard">
+        <h3><span class="pin">2</span> A card belongs to the learner</h3>
+        <p>
+          Habagou keys review state to a fixed shared curriculum. Aleph has none — paths
+          are generated per learner and 2B lets learners mutate them — so a card cannot
+          be owned by a lesson that may not survive it.
+        </p>
+        <p class="rec">
+          Settled: <b>learner-owned, one global queue</b>. Forced by the global schedule;
+          a per-path queue would split one habit three ways.
+        </p>
+      </article>
+
+      <article class="dcard">
+        <h3><span class="pin">3</span> A ladder, and two grades</h3>
+        <p>
+          A fixed Leitner ladder on a binary signal: <b>Again</b> demotes a rung,
+          <b>Got it</b> promotes one. Habagou's shipped scheduler — a pure function with
+          nothing to tune, which is right when there is no review data to tune against.
+        </p>
+        <p class="rec">
+          Settled. The daily cap argues for it too: with a cap, <b>due is advisory</b>,
+          and a ladder shrugs at a late review where ease factors must react to it.
+        </p>
+      </article>
+
+      <article class="dcard" style="box-shadow:0 0 0 1px var(--page-accent)">
+        <h3>Ten a day — 7 overdue, 3 at random</h3>
+        <p>
+          Ten cards is the whole day. Over ten due, the queue takes the <b>7 most
+          overdue</b> plus <b>3 drawn at random</b> from the rest; ten or fewer, it takes
+          them all. Nothing is pulled forward to fill a short day.
+        </p>
+        <p class="rec">
+          The 3 are <b>anti-starvation</b>: without them the oldest cards monopolise every
+          session and a mid-aged card is never seen again. Home shows the ten, never the
+          backlog.
+        </p>
+      </article>
+
+      <article class="dcard">
+        <h3><span class="pin">4</span> A card outlives its lesson</h3>
+        <p>
+          2B can revise a lesson, Phase 4 will remove and reorder them, and a path can be
+          deleted outright. The card still reviews — its front and back stand alone — and
+          the source line stops being a link.
+        </p>
+        <p class="rec">
+          Settled: <b>survive, degrade the citation</b>. Note this differs from the streak,
+          where deleting a path really does erase its days.
+        </p>
+      </article>
+
+      <article class="dcard">
+        <h3><span class="pin">1</span> A review keeps the streak alive</h3>
+        <p>
+          An <b>Active day</b> is now a day you completed a lesson <b>or reviewed a
+          card</b>. Otherwise clearing the whole daily queue and starting no lesson would
+          break a streak you were actively maintaining — a retention feature punishing
+          retention.
+        </p>
+        <p class="rec">
+          Settled, and free to settle <b>now</b>: no review exists yet, so widening the
+          definition adds no past active day and moves no live streak. Global streak only —
+          never the path streak.
+        </p>
+      </article>
+
+      <article class="dcard">
+        <h3>Open — is the debt ever visible?</h3>
+        <p>
+          Hiding the backlog is right for a learner returning after a week away and wrong
+          for one who wants to know where they stand. There is no stats view to put it in
+          yet.
+        </p>
+        <p class="rec">
+          Probably decided with the rest of Phase 5 — the goal ring and daily minutes —
+          rather than here. PRD §8.2.
+        </p>
+      </article>
+    </div>
+  </section>
+
+  <footer class="foot">
+    Nocturne tokens taken from <span class="mono">tailwind.config.ts</span>; the streak
+    line, activity strip and path chips are the surfaces shipped in Phase 5, redrawn here
+    only so the new ones can be seen sitting beside them.
+  </footer>
+</div>
+
+<script>
+  // Activity strip — 49 cells, seven whole weeks, matching what shipped in #150.
+  // Fixed pattern, not random: a mock that redraws differently each load is not a mock.
+  (function () {
+    var levels = [
+      0,1,2,1,0,0,1, 2,3,1,0,2,1,0, 1,1,0,3,2,2,1,
+      0,2,3,3,1,0,1, 1,0,1,2,3,2,0, 2,1,1,0,1,3,2,
+      1,2,3,2,3,1,2
+    ];
+    var strip = document.getElementById("strip");
+    levels.forEach(function (lvl) {
+      var cell = document.createElement("div");
+      cell.className = "cell" + (lvl ? " l" + lvl : "");
+      strip.appendChild(cell);
+    });
+  })();
+
+  // Screen 1 — keep/discard toggles drive the button copy, so the mock shows the
+  // rule rather than asserting it: the primary action names the count it will save.
+  (function () {
+    var drafts = document.getElementById("drafts");
+    var btn = document.getElementById("keep-btn");
+    var readout = document.getElementById("keep-count");
+
+    function sync() {
+      var kept = drafts.querySelectorAll(".draft:not(.off)").length;
+      readout.textContent = kept + " kept";
+      btn.textContent = kept === 0 ? "Keep none" : "Keep " + kept + (kept === 1 ? " card" : " cards");
+    }
+
+    drafts.addEventListener("click", function (e) {
+      var toggle = e.target.closest(".toggle");
+      if (!toggle) return;
+      var row = toggle.closest(".draft");
+      var off = row.classList.toggle("off");
+      toggle.setAttribute("aria-pressed", String(!off));
+      sync();
+    });
+  })();
+
+  // Screen 3 — reveal, then grade. Grades are hidden until the answer is shown:
+  // grading a card you have not seen the back of is not a review.
+  (function () {
+    var flip = document.getElementById("flip");
+    var back = document.getElementById("back");
+    var hint = document.getElementById("hint");
+    var grades = document.getElementById("grades");
+
+    flip.addEventListener("click", function () {
+      var shown = !back.hidden;
+      back.hidden = shown;
+      grades.hidden = shown;
+      hint.textContent = shown ? "Tap to reveal" : "How well did you know it?";
+      flip.setAttribute("aria-expanded", String(!shown));
+    });
+  })();
+</script>
+</body>
+</html>

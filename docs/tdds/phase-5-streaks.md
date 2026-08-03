@@ -22,7 +22,7 @@ always qualified ("Phase 1 D5", "Phase 2B §5.6").
 
 | # | Decision | Choice | Why |
 | --- | --- | --- | --- |
-| D1 | Storage | **Derive from `lessons.completed_at`; store nothing.** No streak table, no ledger, no backfill, no dual-write on the completion path | PRD §1's core design claim. Aleph's grain is *derived, never stored* — unlock state (`domains/progression`), engagement (`domains/engagement`) and a Proposal's resolution (Phase 2B D3) are all computed, because a second stored copy is how two answers to one question start disagreeing. The source rows already exist and every historical completion counts from day one |
+| D1 | Storage | **Derive from `lessons.completed_at`; store nothing.** *(Amended by [Phase 3 PRD](../prds/phase-3-flashcards.md) §4.9: the global streak's day set becomes the **union** of lesson completions and review days when Phase 3 ships. D2's pure function is unaffected — it takes the set, not its provenance — so the change is confined to §5.2's query and §5.3's fold. The per-path streak is **not** amended.)* No streak table, no ledger, no backfill, no dual-write on the completion path | PRD §1's core design claim. Aleph's grain is *derived, never stored* — unlock state (`domains/progression`), engagement (`domains/engagement`) and a Proposal's resolution (Phase 2B D3) are all computed, because a second stored copy is how two answers to one question start disagreeing. The source rows already exist and every historical completion counts from day one |
 | D2 | Pure module | **`domains/streaks.py`** — `compute_streaks(active_days: AbstractSet[date], *, today) -> Streaks` and, separately, `activity_window(counts: Mapping[date, int], *, today, days) -> list[ActivityCell]` | A port of habagou's `compute_streaks` with the daily target collapsed to 1 (PRD §4.5), which simplifies its input from `Mapping[date, int]` to a set. **The streak function never sees counts** — a threshold we do not have is a threshold that cannot drift. The window function needs them and is therefore a different function, not a different parameter |
 | D3 | Day boundary | Client sends `tz_offset_minutes` (`getTimezoneOffset()` verbatim); the server subtracts it to reach local time, **after** pinning the timestamp to UTC: `((completed_at AT TIME ZONE 'UTC') - make_interval(mins => :tz))::date` | PRD §4.1. The `AT TIME ZONE 'UTC'` is a **correction to the combined doc's SQL** (§14, R1): casting a `timestamptz` to `date` resolves in the session's `TimeZone` GUC, so that expression is correct only while that GUC is UTC. Pinning first makes the arithmetic independent of server configuration — which is the entire point of taking the offset from the request |
 | D4 | Endpoint | **One** endpoint, `GET /api/v1/progress/summary`, returning the global streak, the activity window and the per-path breakdown in one payload | Folding streaks into `PathProgressDTO` would add a `GROUP BY` to the path-detail poll, which fires every 2–5s during generation; a separate `/paths/{id}/streak` would be a round trip per row on a screen that needs every row. The name is a Phase-5 envelope: the goal ring, the minutes target and the stats page grow the payload rather than the API |
@@ -155,7 +155,10 @@ def activity_window(
 **`compute_streaks` semantics**, stated once here and pinned by the unit tests:
 
 - An **Active day** is a day on which at least one lesson was completed (PRD §4.5 — the target is
-  one, so membership in the set *is* the target).
+  one, so membership in the set *is* the target). *(Amended: [Phase 3](../prds/phase-3-flashcards.md)
+  §4.9 adds "or reviewed a flashcard" to the global set. Nothing in this section moves — the
+  function's whole contract is that it takes a set of dates and asks no questions about where
+  they came from.)*
 - `current` is the length of the run of consecutive days ending at `today`, **or at `today - 1` if
   today has no completion yet** (PRD §4.4 — the streak does not break at midnight, it breaks when
   a whole day passes empty). If neither today nor yesterday is active, `current` is `0`.
