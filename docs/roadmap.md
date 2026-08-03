@@ -30,7 +30,7 @@ afterthought.
 | **1 — The generated path (MVP)** | ✅ Shipped & launched | [PRD](prds/phase-1-path-generation.md) · [TDD](tdds/phase-1-path-generation.md) |
 | **2 — The tutor** (2A, in-lesson) | ✅ Shipped & launched (`tutor` flag on, AL-270) | [PRD](prds/phase-2-tutor.md) · [TDD](tdds/phase-2-tutor.md) |
 | **2B — Shape your path** (learner-initiated) | ✅ Shipped & launched (`shaping` flag on, AL-370) | [PRD](prds/phase-2b-shape-your-path.md) · [TDD](tdds/phase-2b-shape-your-path.md) |
-| **3 — Flashcards and spaced repetition** | ⬜ Not started — **no PRD yet** | — |
+| **3 — Flashcards and spaced repetition** | 📝 Specified, unbuilt — PRD proposed, **no TDD yet** | [PRD](prds/phase-3-flashcards.md) · [mock](mocks/aleph-phase-3-flashcards.html) |
 | **4 — Adaptive paths** | ⬜ Not started — **no PRD yet** (2B pre-built the proposal/apply machinery) | — |
 | **5 — Momentum** | 🟡 In progress — streaks shipped **and launched**; goal ring and daily minutes unbuilt | streaks: [PRD](prds/phase-5-streaks.md) · [TDD](tdds/phase-5-streaks.md) |
 | **Beyond** | ⬜ Unscoped, sequenced against real usage | — |
@@ -116,13 +116,15 @@ are re-deferred to a later slice, sequenced against real usage.
 
 ## Phase 3 — Flashcards and spaced repetition
 
-> ⬜ **Status:** not started. Nothing of this exists in the code — no card model, no
-> scheduler, no drafting agent — and **no PRD or TDD has been written**. Writing the
-> PRD is the first ticket of this phase, not a formality: Phase 5's streak slice is
-> explicitly instrumentation for a return metric this phase is supposed to earn
-> ([streaks PRD §2](prds/phase-5-streaks.md)), so the retention loop is the largest
-> unbuilt thing on this roadmap.
-> 📄 **Full spec:** none yet.
+> 📝 **Status:** specified, unbuilt. Nothing of this exists in the code — no card model,
+> no scheduler, no drafting agent — but the product boundary is now written
+> ([PRD](prds/phase-3-flashcards.md), drawn in the
+> [mock](mocks/aleph-phase-3-flashcards.html)). The **TDD is the next ticket**. This is
+> the largest unbuilt thing on the roadmap, and the one Phase 5 is already waiting on:
+> the streak slice is explicitly instrumentation for a return metric *this* phase has to
+> earn ([streaks PRD §2](prds/phase-5-streaks.md)).
+> 📄 **Full spec:** [Phase 3 PRD — Flashcards and spaced repetition](prds/phase-3-flashcards.md) ·
+> mock: [phase-3 flashcards](mocks/aleph-phase-3-flashcards.html)
 
 Now we close the retention loop. When you finish a lesson, the AI drafts a handful
 of candidate flashcards from it — and, importantly, you stay in control: you
@@ -133,6 +135,16 @@ Easy — so due cards resurface at widening intervals. This gives learners a rea
 to return between lessons and turns passive reading into durable recall. It also
 produces a second stream of signal about what a learner does and doesn't know,
 which the next phase puts to work.
+
+The [PRD](prds/phase-3-flashcards.md) departs from that paragraph in two places, both
+deliberate. Cards are **learner-owned and reviewed in one queue spanning every path**,
+not per path — the Daily streak is global, and mixing paths in a session is interleaving.
+And grading ships as **two outcomes, not four**: a fixed interval ladder (Again / Got it)
+rather than the Again/Hard/Good/Easy above, which needs ease factors this phase has no
+data to tune. The four-way grading is deferred to a follow-on slice rather than dropped.
+The PRD also adds a daily cap this paragraph never mentioned — ten cards a day, the seven
+most overdue plus three at random — so a backlog after an absence is a bounded session
+rather than a wall.
 
 ## Phase 4 — Adaptive paths
 

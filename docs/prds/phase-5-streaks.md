@@ -94,6 +94,13 @@ complete does not count, and neither does an Attempt on its own. This matches th
 diverges from **Engaged** (attempt *or* complete), which is the immutability boundary and answers a
 different question; the two must not be conflated in code or prose.
 
+> **Amended by [Phase 3](phase-3-flashcards.md) §4.9: a second input, a reviewed flashcard.** The
+> exclusions above all still hold — a view and a bare Attempt still count for nothing — but
+> "**one** input" no longer does: an **Active day** is a completed lesson *or* a reviewed card.
+> The amendment lands in [`CONTEXT.md`](../CONTEXT.md) now and in the query when Phase 3 ships,
+> and it changes no streak that exists today, because no review does. **The path streak is not
+> amended** — it stays lesson completions only (Phase 3 §4.9).
+
 **4.3 The path streak is a stat, not a game.** With multiple paths a learner naturally alternates —
 which is exactly the behavior the **Breadth** metric wants — and a per-path streak breaks every time
 they do. Celebrating it would punish the product's own goal. So the path streak is displayed
@@ -108,6 +115,10 @@ one that shouts at you before breakfast.)
 **4.5 The daily target is one lesson.** habagou's streak requires 3 completions a day because its
 activities are ~1 minute each; an Aleph lesson is a Read passage plus a Quick check. One is the
 right bar, and it means the daily goal *is* the streak — no separate goal concept, no ring.
+
+> **Amended by [Phase 3](phase-3-flashcards.md) §4.9:** one lesson **or one reviewed card**. The
+> bar stays the lowest honest one for each input rather than growing a threshold per activity —
+> "membership in the set is the target" is the rule, and it survives the second input unchanged.
 
 **4.6 Deleting a path erases its days from the global streak.** This is the real cost of the
 no-new-table design (TDD D1), and it is a genuine product wart: delete a path you soured on, lose the
