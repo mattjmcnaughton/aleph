@@ -117,13 +117,15 @@ are re-deferred to a later slice, sequenced against real usage.
 ## Phase 3 — Flashcards and spaced repetition
 
 > 📝 **Status:** specified, unbuilt. Nothing of this exists in the code — no card model,
-> no scheduler, no drafting agent — but the product boundary is now written
+> no scheduler, no drafting agent — but both specs are now written: the product boundary
 > ([PRD](prds/phase-3-flashcards.md), drawn in the
-> [mock](mocks/aleph-phase-3-flashcards.html)). The **TDD is the next ticket**. This is
-> the largest unbuilt thing on the roadmap, and the one Phase 5 is already waiting on:
-> the streak slice is explicitly instrumentation for a return metric *this* phase has to
-> earn ([streaks PRD §2](prds/phase-5-streaks.md)).
+> [mock](mocks/aleph-phase-3-flashcards.html)) and the technical design
+> ([TDD](tdds/phase-3-flashcards.md), which cuts to AL-5xx tickets). This is the largest
+> unbuilt thing on the roadmap, and the one Phase 5 is already waiting on: the streak slice
+> is explicitly instrumentation for a return metric *this* phase has to earn
+> ([streaks PRD §2](prds/phase-5-streaks.md)).
 > 📄 **Full spec:** [Phase 3 PRD — Flashcards and spaced repetition](prds/phase-3-flashcards.md) ·
+> [Phase 3 TDD](tdds/phase-3-flashcards.md) ·
 > mock: [phase-3 flashcards](mocks/aleph-phase-3-flashcards.html)
 
 Now we close the retention loop. When you finish a lesson, the AI drafts a handful

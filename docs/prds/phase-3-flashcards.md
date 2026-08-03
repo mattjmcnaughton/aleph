@@ -1,14 +1,14 @@
 # PRD — Phase 3: Flashcards and spaced repetition
 
 **Status:** Proposal (not accepted) · **Owner:** solo builder · **Roadmap item:** [Phase 3 — Flashcards and spaced repetition](../roadmap.md#phase-3--flashcards-and-spaced-repetition)
-**Companion to:** Phase 3 TDD (not yet written — this document owns the product boundary only)
+**Companion to:** [Phase 3 TDD](../tdds/phase-3-flashcards.md) — this document owns the product boundary only
 **References:** [`README.md`](../../README.md) · [`roadmap.md`](../roadmap.md) · [`CONTEXT.md`](../CONTEXT.md) (ubiquitous language) · [Phase 1 PRD](phase-1-path-generation.md) · [Phase 2B PRD](phase-2b-shape-your-path.md) · [Phase 5 streaks PRD](phase-5-streaks.md) · [`metrics.md`](../metrics.md) · mock: [phase-3 flashcards](../mocks/aleph-phase-3-flashcards.html) · prior art: habagou `domains/scheduling.py`, [ADR 0008](https://github.com/mattjmcnaughton/habagou/blob/main/docs/adrs/0008-review-state-as-rebuildable-projection.md)
 
 > **This document owns the product boundary only.** Schema, the scheduler's
-> implementation, the API, the queue's persistence, instrumentation and delivery belong to
-> the TDD, which does not exist yet — writing it is the first ticket of this phase. Where
-> this PRD names a mechanism it is because the product rule is unintelligible without it;
-> the TDD owns how.
+> implementation, the API, how the day's queue is pinned, instrumentation and delivery belong
+> to the [TDD](../tdds/phase-3-flashcards.md), which now exists. Where this PRD names a
+> mechanism it is because the product rule is unintelligible without it; the TDD owns how —
+> and it settles §8's open questions 3, 4 and 5 in its own §14.
 
 ## 1. Summary
 
