@@ -24,7 +24,13 @@
 //    `force`.
 
 import { type Locator, type Page, expect } from "@playwright/test";
-import { ACTION_TIMEOUT, GENERATION_TIMEOUT, type Reveal, readReveal } from "./journey";
+import {
+  ACTION_TIMEOUT,
+  GENERATION_TIMEOUT,
+  type Reveal,
+  readReveal,
+  waitForSurface,
+} from "./journey";
 
 /**
  * Sentinels the stub model reads out of the **question** text
@@ -301,6 +307,26 @@ export async function submitAndCompleteWithRailOpen(page: Page): Promise<Reveal>
   await tapAboveRail(page, page.getByTestId("lesson-complete-button"));
   await expect(page.getByTestId("lesson-completed")).toBeVisible({ timeout: ACTION_TIMEOUT });
   return reveal;
+}
+
+/**
+ * `backToPath`, aimed past the open sheet — the completed lesson's own "Back to
+ * your path", tapped without dismissing the tutor first.
+ *
+ * `journey.ts`'s `backToPath` clicks plainly, which is fine when the link is the
+ * last thing on the page: Playwright's minimal scroll leaves it in the band
+ * above the sheet. Since AL-400 it is **not** the last thing — drafting starts
+ * when the lesson opens, so by the time a learner marks a lesson complete the
+ * drafts block is usually already resolved and renders directly below the
+ * completion state (Phase 3 TDD D5/§8). The link then sits mid-document, the
+ * minimal scroll puts its centre under the sheet, and the click is intercepted
+ * for the whole timeout. `tapAboveRail` is the same aiming fix every other
+ * rail-open tap in this file uses, and it still throws rather than falling back
+ * to `force`, so an genuinely unreachable link stays a failure worth seeing.
+ */
+export async function backToPathAboveRail(page: Page): Promise<void> {
+  await tapAboveRail(page, page.getByTestId("lesson-completed-back"));
+  await waitForSurface(page, "path-rail");
 }
 
 // --- Wire reads ---------------------------------------------------------------
