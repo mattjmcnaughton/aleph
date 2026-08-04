@@ -424,12 +424,14 @@ halves of one router: drafting (trigger, poll, keep — CONTEXT.md: *Draft*,
 *Due*, *Daily queue*, *Review*, *Lapse*).
 
 **The whole surface is feature-flagged, router-level.** Every route here sits
-behind a single `flashcards` flag gate (TDD D10): off (the code default —
-Phase 3 has not launched) → `404` on every route, before any work, and the
-Progress summary's streak silently loses its second signal (§5.5). It ships
-the same dark-then-flip playbook `tutor`/`shaping`/`streaks` each took —
-admins dogfood it via the admin baseline while every other learner sees
-nothing at all.
+behind a single `flashcards` flag gate (TDD D10): on (the code default —
+Phase 3 is launched), so a fresh clone and every learner see the surface with
+no configuration; off → `404` on every route, before any work, and the
+Progress summary's streak silently loses its second signal (§5.5). It shipped
+dark, ran the same dark-then-flip playbook `tutor`/`shaping`/`streaks` each
+took — admins dogfooding it via the admin baseline while every other learner
+saw nothing at all — and then launched the same way: the flag stays
+registered as a kill switch.
 
 ### Drafting (§5.2)
 
@@ -530,6 +532,51 @@ already satisfied today) · `409 conflict` with `details.reason ==
 succeeded — absorbed as a no-op rather than a double promotion) · `422
 validation_error` (`tz_offset_minutes` out of `[-900, 900]`).
 
+### Card list, edit & delete (AL-410, TDD D16–D17)
+
+The one surface the daily queue never offered: every kept card at once, editable
+and deletable, not just due-today's ten. Same router, same `flashcards` gate,
+same `404`-never-`403` ownership convention.
+
+| Method | Path | Query / Body | Success | Notes |
+| ------ | ---- | ------------- | ------- | ----- |
+| `GET` | `/api/v1/flashcards` | `limit` (optional, default `20`, `1..50`), `cursor` (optional), `path_id` (optional), `q` (optional) | `200 {cards, next_cursor}` | Every kept card (CONTEXT.md: *Kept card*), newest-kept first. Cursor-paginated, not offset — stable across a concurrent delete. `q` is a case-insensitive substring match on front **or** back; a literal `%`/`_` in `q` is escaped, never a wildcard. A malformed `cursor` is `422`, never a `500`. |
+| `PATCH` | `/api/v1/flashcards/{card_id}` | `{front, back}` | `200` `CardListItemDTO` | Edit a kept card's text in place. Validated against the **same** shape caps the drafting agent's own predicates enforce (`is_non_empty`, `within_word_cap`, `sides_differ` — `FlashcardCaps()`'s 25/60-word defaults); a violation is `422` and mutates nothing. Both sides are additionally bounded in **characters** (1000 front / 2000 back) and stripped of surrounding whitespace, the `TopicStr`/`TutorMessageStr` convention: a word cap alone counts whitespace-separated tokens, so one unbroken token of any size would otherwise pass every predicate — and unlike an agent-drafted card, this body is learner-supplied at the trust boundary `edited_at` exists to mark. The character bound sits far above the word cap and so never competes with it. Stamps `edited_at`; **never** writes `rung`/`due_on` (D17) — fixing wording does not reset what the learner knows about the card. |
+| `DELETE` | `/api/v1/flashcards/{card_id}` | — | `204` | Soft-delete (D16): sets `deleted_at`, leaves the row and its `flashcard_reviews` log intact, so past Active days and recall-rate-by-rung are untouched. Disappears from the list, the daily queue, and grading (`404`) in the same commit. Already-deleted is `404`, not a silent no-op — a double-tapped delete is honest. |
+
+```jsonc
+// GET /api/v1/flashcards?limit=20
+{
+  "cards": [
+    {
+      "id": "…",
+      "front": "What does `extends` mean in `<T extends X>`?",
+      "back": "It constrains T — T must be assignable to X. It is not class inheritance.",
+      "rung": 2,
+      "due_on": "2026-08-07",
+      "edited_at": null,
+      "source": {                       // D12 — the same discriminated shape as the queue
+        "kind": "linked",
+        "lesson_id": "…",
+        "lesson_title": "Generic constraints",
+        "path_title": "Learn TypeScript"
+      }
+    }
+  ],
+  "next_cursor": "2026-08-04T10:15:00Z|3f2a1c9e-…"   // opaque; pass back verbatim for the next page
+}
+```
+
+`rung` ships on the DTO (`CardListItemDTO`) but the list does not render it — a
+row shows only the due date (`Due in 3 days` / `Due today` / `Due yesterday`);
+*rung* is scheduler vocabulary CONTEXT.md never hands the learner, and this
+surface is not where that changes.
+
+**Wire codes (card list):** `401 unauthenticated` · `404 not_found` (flag off,
+before any work; or an unowned/unknown/draft/already-deleted card id) · `422
+validation_error` (a malformed `cursor`, an out-of-range `limit`, or an edit
+that is empty, over the word cap, or leaves both sides identical).
+
 ## Feature flags (admin) (`/api/v1/admin`, AL-203)
 
 Flags are **defined in code** (`services/feature_flags.py`); the database stores
@@ -572,7 +619,7 @@ costs no extra request. The frontend reads it through `useFeatureFlag(key)`
 | `tutor` | **on** | on (redundantly — the code default already carries it) | The Phase 2 in-lesson tutor — the rail, its API, and its stream. Shipped **dark** at `off` through Phase 2's build-out (epic #82 amendment 1) while admins dogfooded it; **launched at AL-270**, which flipped this code default on. Kill it without a code deploy with `FEATURE_FLAG_DEFAULTS=tutor:off`. |
 | `shaping` | **on** | on (redundantly, as above) | Phase 2B shaping — the shaping rail, its API and its stream, and the apply/undo endpoints. Same history on its own key (epic #114, adopted convention 1): dark through 2B's build-out, **launched at AL-370**. Independent of `tutor`, so either can be killed without disturbing the other. |
 | `streaks` | **on** | on (redundantly, as above) | Phase 5 streaks — `GET /progress/summary` and everything under it (see [Progress](#progress-apiv1-phase-5-tdd-546)). Same history again on its own key (TDD D7): dark at `off` through the slice's build-out while admins dogfooded it, then **launched** by flipping this code default on, exactly as AL-270/AL-370 did. Kill it with `FEATURE_FLAG_DEFAULTS=streaks:off`. |
-| `flashcards` | **off** | on | Phase 3 flashcards — every route under [Flashcards](#flashcards-apiv1-phase-3-tdd-53-56-6) (drafting, the daily queue, grading) and the progress summary's second streak signal (§5.5). This phase's **only** kill switch: one flag gates drafting, the queue, review and the due pill together (TDD D10), because a queue with no drafting is an empty queue and drafting with no queue is a card sink. Dark at `off` through the build-out while admins dogfood it via the admin baseline; launch is a separate `FEATURE_FLAG_DEFAULTS=flashcards:on` change after dogfooding, the same playbook `tutor`/`shaping`/`streaks` each took. |
+| `flashcards` | **on** | on (redundantly, as above) | Phase 3 flashcards — every route under [Flashcards](#flashcards-apiv1-phase-3-tdd-53-56-6) (drafting, the daily queue, grading) and the progress summary's second streak signal (§5.5). This phase's **only** kill switch: one flag gates drafting, the queue, review and the due pill together (TDD D10), because a queue with no drafting is an empty queue and drafting with no queue is a card sink. Shipped dark at `off` through the build-out while admins dogfooded it via the admin baseline; **launched** by flipping this code default on, the fourth flag to run the `tutor`/`shaping`/`streaks` playbook. Kill it without a code deploy with `FEATURE_FLAG_DEFAULTS=flashcards:off`. |
 
 **Operating it.** `FEATURE_FLAG_DEFAULTS` is a comma-separated list of
 `key:on` / `key:off` entries (`FEATURE_FLAG_DEFAULTS="tutor:on"`). Malformed and

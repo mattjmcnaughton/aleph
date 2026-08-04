@@ -18,18 +18,18 @@ Auth is the real cookie flow with a stubbed OIDC code exchange (mirroring
 ``test_auth_api`` / ``test_paths_api``), so the admin gate is genuine — admin
 status is derived from the email domain (``authz.is_admin``), never stored.
 
-**Three of the four registered flags are launched and default on** — ``tutor``
-(AL-270), ``shaping`` (AL-370) and Phase 5's ``streaks`` (D7) — which would make
-most of the resolution machinery below untestable — a flag that is on for
-everyone cannot demonstrate an admin baseline, an override that flips a learner
-*on*, or a `404` gate. So ``dark_flag_defaults`` (autouse) puts every code
-default back to ``False`` for this module: every test here is about the
-machinery, and the machinery's interesting case is a dark flag. The launched
-defaults get their own test, ``test_launched_flags_reach_a_plain_learner``,
-which opts back out. Phase 3's ``flashcards`` (D10) is the fourth, and is the
-one flag still genuinely dark: off for every learner, on for admins via
-``ADMIN_DEFAULT_FLAGS`` — so it is what actually exercises the admin-baseline
-path here, rather than standing in for it.
+**All four registered flags are launched and default on** — ``tutor``
+(AL-270), ``shaping`` (AL-370), Phase 5's ``streaks`` (D7), and Phase 3's
+``flashcards`` (D10) — which would make most of the resolution machinery
+below untestable — a flag that is on for everyone cannot demonstrate an admin
+baseline, an override that flips a learner *on*, or a `404` gate. So
+``dark_flag_defaults`` (autouse) puts every code default back to ``False`` for
+this module: every test here is about the machinery, and the machinery's
+interesting case is a dark flag. The launched defaults get their own test,
+``test_launched_flags_reach_a_plain_learner``, which opts back out. With no
+flag left genuinely dark in the registry, ``dark_flag_defaults`` is what
+actually exercises the admin-baseline path here, standing in for the dark
+phase the machinery is built for rather than reading it off a real one.
 
 Every resolved map and every admin listing below carries all four keys (the
 session/list surfaces the whole registry, not just the flags a given test is
@@ -63,11 +63,11 @@ TUTOR = "tutor"
 # same way. It is in every resolved map below because the session carries the
 # whole registry, not just the flag a test is about.
 SHAPING = "shaping"
-# Phase 5's flag (D7), registered the same way but not yet launched — see the
+# Phase 5's flag (D7), registered the same way and also launched — see the
 # module docstring. Also in every resolved map below, for the same reason.
 STREAKS = "streaks"
-# Phase 3's flag (D10), registered the same way and shipping dark. Also in every
-# resolved map below, for the same reason.
+# Phase 3's flag (D10), registered the same way and also launched. Also in
+# every resolved map below, for the same reason.
 FLASHCARDS = "flashcards"
 
 LEARNER = AuthIdentity(
@@ -119,9 +119,9 @@ async def _sign_in(
 def dark_flag_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     """Force every code default back to ``False`` for this module.
 
-    See the module docstring: three of the four flags are launched and default
-    on, but every test here is about the *resolution machinery*, whose whole
-    subject matter is a flag that is not simply on for everyone. Patching
+    See the module docstring: all four flags are launched and default on, but
+    every test here is about the *resolution machinery*, whose whole subject
+    matter is a flag that is not simply on for everyone. Patching
     ``FLAG_DEFAULTS`` (rather than the settings map) is deliberate — the settings
     map is step 2 of the resolution order and would outrank the admin baseline
     these tests exist to exercise.
@@ -153,12 +153,14 @@ def _resolved(
     leaking into a learner's map (a stale override row, say) still fails.
     ``streaks`` and ``flashcards`` default to ``False`` because
     ``dark_flag_defaults`` closes their code defaults like the other two, so a
-    plain learner sees them off. Both still have to be passed explicitly in the
-    **admin** scenarios: they are members of ``ADMIN_DEFAULT_FLAGS``, so the
-    admin baseline resolves them *on* even while every learner sees a `404` —
-    which is the dark-launch story this module exists to test, now told by two
-    flags that are actually in it rather than by ``tutor``/``shaping``, which
-    have since launched.
+    plain learner sees them off — the real code default for all four is
+    ``True``, but this module's whole point is exercising the dark-flag
+    machinery, which needs a flag that is not simply on for everyone. Both
+    still have to be passed explicitly in the **admin** scenarios: they are
+    members of ``ADMIN_DEFAULT_FLAGS``, so the admin baseline resolves them
+    *on* even while every learner sees a `404` — which is the dark-launch
+    story this module exists to test, now told by two closed-here flags rather
+    than by ``tutor``/``shaping``, which no fixture in this file darkens.
     """
     return {TUTOR: tutor, SHAPING: shaping, STREAKS: streaks, FLASHCARDS: flashcards}
 

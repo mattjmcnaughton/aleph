@@ -151,4 +151,49 @@ describe("Flashcards — the home surfaces (PRD §3, Phase 3 TDD §8)", () => {
     expect(screen.queryByTestId("due-today-card")).toBeNull();
     expect(screen.queryByTestId("review-chip")).toBeNull();
   });
+
+  // AL-410 review finding 1: a learner with kept cards and none due today has
+  // no door into `/cards` unless home's own link is unconditional on the flag
+  // alone — `DueTodayCard` hides outright at zero (the test above), and that
+  // used to be the link's only home too.
+  it("[AL-410 finding 1] 'Your cards' renders on a quiet day too — no due cards, still a door", async () => {
+    useFlashcardsSession();
+    seedPath({ id: "p-one", topic: "TypeScript", level: "new_to_it", title: "Learn TypeScript" });
+    configureFlashcards({
+      summary: { today: "2026-08-04", due_count: 0, estimated_minutes: 0, paths: [] },
+    });
+    await gotoHome();
+
+    await screen.findByTestId("path-list-item");
+    // The card this link used to live inside is genuinely gone…
+    expect(screen.queryByTestId("due-today-card")).toBeNull();
+    // …but the door itself is not: it renders straight off the flag, never
+    // off `due_count`.
+    const link = await screen.findByTestId("due-today-your-cards");
+    expect(link.textContent).toBe("Your cards");
+    expect(link.getAttribute("href")).toBe("/cards");
+  });
+
+  it("[AL-410 finding 1] 'Your cards' still renders alongside a non-empty Due today card — one door, not two", async () => {
+    useFlashcardsSession();
+    seedPath({ id: "p-one", topic: "TypeScript", level: "new_to_it", title: "Learn TypeScript" });
+    configureFlashcards({
+      summary: { today: "2026-08-04", due_count: 3, estimated_minutes: 2, paths: [] },
+    });
+    await gotoHome();
+
+    await screen.findByTestId("due-today-card");
+    // Exactly one "Your cards" link on the page — not a second copy inside
+    // `DueTodayCard` itself.
+    expect(screen.getAllByTestId("due-today-your-cards")).toHaveLength(1);
+  });
+
+  it("[AL-410 finding 1] 'Your cards' is absent with the flag off — same gate as everything else", async () => {
+    // Default fake learner ships `flashcards: false`.
+    seedPath({ id: "p-one", topic: "TypeScript", level: "new_to_it", title: "Learn TypeScript" });
+    await gotoHome();
+
+    await screen.findByTestId("path-list-item");
+    expect(screen.queryByTestId("due-today-your-cards")).toBeNull();
+  });
 });

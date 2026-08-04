@@ -9,10 +9,19 @@
 // not a scheduler, just enough so a test's authoritative refetch (the
 // `invalidateQueries` every grade triggers) sees a world consistent with the
 // grade it just posted, without every test having to reconfigure by hand.
+//
+// AL-410's card list is the one Flashcards surface that genuinely needs a real
+// in-memory store rather than a dialed-in payload: `GET /flashcards` filters,
+// searches and paginates it, `PATCH`/`DELETE` mutate one row of it, and a test
+// needs the *result* of that mutation to come back out the next `GET` — the
+// same reason `draftRuns` (above) is a `Map`, not a config field, extended
+// here to `cardsStore` (below).
 
 import { HttpResponse, http } from "msw";
 import {
   API_V1_BASE,
+  type CardListItem,
+  type FlashcardCitation,
   type FlashcardDraftRunState,
   type FlashcardGrade,
   type ReviewQueue,
@@ -100,6 +109,90 @@ let queueRequests = 0;
  *  bound, every 5s, forever. */
 const draftsPollRequests = new Map<string, number>();
 
+// --- AL-410: the card list (`/cards`) ----------------------------------------
+//
+// `CardListItem` plus the one field the wire shape never carries — `pathId`,
+// kept here only so the fake can filter by `path_id` the way the real query
+// does (`source_path_id == path_id`, AL-410 plan §2). Never serialized: the
+// citation names a path only through its (already-copied) `path_title`, so
+// leaking a bare `pathId` onto the wire payload would be a shape the real API
+// never sends.
+interface CardRecord {
+  id: string;
+  front: string;
+  back: string;
+  rung: number;
+  due_on: string;
+  edited_at: string | null;
+  source: FlashcardCitation;
+  pathId: string | null;
+  /** ISO datetime — the real ordering/cursor key (`kept_at DESC, id DESC`,
+   *  AL-410 plan §2). Distinct from `due_on`, which is a bare date and has
+   *  nothing to do with keep order. */
+  keptAt: string;
+  /** Mirrors `deleted_at IS NOT NULL` (AL-410 plan §1) — filtered out of
+   *  every read below, never spliced out of the array, so a re-`DELETE`
+   *  after the first still has a row to find and correctly re-404. */
+  deleted: boolean;
+}
+
+let cardsStore: CardRecord[] = [];
+/** When true, `PATCH /flashcards/:id` raises a generic `500` (mirrors
+ *  `keepFails` above) — a test proving Save surfaces a retry notice. */
+let updateCardFails = false;
+let cardsListRequests = 0;
+let cardUpdateRequests: { card_id: string; front: string; back: string }[] = [];
+let cardDeleteRequests: string[] = [];
+
+function toCardListItem(record: CardRecord): CardListItem {
+  return {
+    id: record.id,
+    front: record.front,
+    back: record.back,
+    rung: record.rung,
+    due_on: record.due_on,
+    edited_at: record.edited_at,
+    source: record.source,
+  };
+}
+
+/** Active (non-deleted) cards, newest-kept-first — `kept_at DESC, id DESC`,
+ *  the real query's own order (AL-410 plan §2). */
+function sortedActiveCards(): CardRecord[] {
+  return cardsStore
+    .filter((record) => !record.deleted)
+    .sort((a, b) => {
+      if (a.keptAt !== b.keptAt) return a.keptAt < b.keptAt ? 1 : -1;
+      return a.id < b.id ? 1 : -1;
+    });
+}
+
+function matchesCardFilters(record: CardRecord, pathId: string | null, q: string | null): boolean {
+  if (pathId !== null && record.pathId !== pathId) return false;
+  if (q !== null && q !== "") {
+    const needle = q.toLowerCase();
+    if (
+      !record.front.toLowerCase().includes(needle) &&
+      !record.back.toLowerCase().includes(needle)
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/** Opaque `"{kept_at}|{id}"` cursor (AL-410 plan §2) — built and parsed only
+ *  here, exactly as disposable to a caller as the real one is. */
+function buildCardsCursor(record: CardRecord): string {
+  return `${record.keptAt}|${record.id}`;
+}
+
+function parseCardsCursor(cursor: string): { keptAt: string; id: string } | null {
+  const separator = cursor.indexOf("|");
+  if (separator === -1) return null;
+  return { keptAt: cursor.slice(0, separator), id: cursor.slice(separator + 1) };
+}
+
 /** Reset store + config between tests (wired into tests/setup.ts). */
 export function resetFlashcards(): void {
   config = { ...defaultConfig };
@@ -110,6 +203,11 @@ export function resetFlashcards(): void {
   summaryRequests = 0;
   queueRequests = 0;
   draftsPollRequests.clear();
+  cardsStore = [];
+  updateCardFails = false;
+  cardsListRequests = 0;
+  cardUpdateRequests = [];
+  cardDeleteRequests = [];
 }
 
 /** Dial in the summary/queue a test needs, or force a write to fail. */
@@ -126,6 +224,53 @@ export function configureFlashcards(overrides: Partial<FlashcardsConfig>): void 
  */
 export function seedFlashcardDraftRun(lessonId: string, run: DraftRun): void {
   draftRuns.set(lessonId, run);
+}
+
+/**
+ * Directly seed a kept card into the `/cards` store (AL-410's `seedPath`
+ * analogue). `pathId` is fake-only filtering plumbing (see `CardRecord`
+ * above), never part of the wire shape a test asserts against.
+ */
+export function seedCard(card: {
+  id: string;
+  front: string;
+  back: string;
+  due_on: string;
+  source: FlashcardCitation;
+  rung?: number;
+  edited_at?: string | null;
+  pathId?: string | null;
+  keptAt?: string;
+}): void {
+  cardsStore.push({
+    id: card.id,
+    front: card.front,
+    back: card.back,
+    rung: card.rung ?? 0,
+    due_on: card.due_on,
+    edited_at: card.edited_at ?? null,
+    source: card.source,
+    pathId: card.pathId ?? null,
+    keptAt: card.keptAt ?? new Date().toISOString(),
+    deleted: false,
+  });
+}
+
+/** Force `PATCH /flashcards/:id` to fail with a generic `500`. */
+export function configureCardUpdateFailure(fails: boolean): void {
+  updateCardFails = fails;
+}
+
+export function cardsListRequestCount(): number {
+  return cardsListRequests;
+}
+
+export function cardUpdateRequestBodies(): typeof cardUpdateRequests {
+  return [...cardUpdateRequests];
+}
+
+export function cardDeleteRequestIds(): string[] {
+  return [...cardDeleteRequests];
 }
 
 export function flashcardGradeRequests(): typeof gradeRequests {
@@ -302,4 +447,81 @@ export const flashcardHandlers = [
       return HttpResponse.json({ kept_ids: body.kept_ids });
     },
   ),
+
+  // --- AL-410: `/cards` -------------------------------------------------------
+
+  http.get(`${API_V1_BASE}/flashcards`, ({ request }) => {
+    cardsListRequests += 1;
+    const url = new URL(request.url);
+    const limit = Number(url.searchParams.get("limit") ?? "20");
+    const cursorParam = url.searchParams.get("cursor");
+    const pathId = url.searchParams.get("path_id");
+    const q = url.searchParams.get("q");
+
+    let rows = sortedActiveCards().filter((record) => matchesCardFilters(record, pathId, q));
+    if (cursorParam) {
+      const cursor = parseCardsCursor(cursorParam);
+      if (cursor) {
+        // `(kept_at, id) < (cursor_kept_at, cursor_id)`, desc order (AL-410
+        // plan §2) — the same one-row-comparison the real keyset predicate
+        // makes, just spelled without `tuple_()`.
+        rows = rows.filter((record) => {
+          if (record.keptAt !== cursor.keptAt) return record.keptAt < cursor.keptAt;
+          return record.id < cursor.id;
+        });
+      }
+    }
+
+    // Fetch `limit + 1` and trim (AL-410 plan §2): the extra row's presence,
+    // not a count comparison against the *filtered* total, is what says
+    // whether there is a next page — matching the real query exactly.
+    const page = rows.slice(0, limit);
+    const hasMore = rows.length > limit;
+    const next_cursor = hasMore ? buildCardsCursor(page[page.length - 1]) : null;
+
+    return HttpResponse.json({ cards: page.map(toCardListItem), next_cursor });
+  }),
+
+  http.patch(`${API_V1_BASE}/flashcards/:cardId`, async ({ params, request }) => {
+    const cardId = params.cardId as string;
+    const body = (await request.json()) as { front: string; back: string };
+    const record = cardsStore.find((row) => row.id === cardId && !row.deleted);
+    // Unowned / unknown / already-deleted all read as `404` on the real route
+    // (AL-410 plan §5) — the fake collapses the same three cases into one
+    // "no matching active row" branch, since it never models ownership at all.
+    if (!record) {
+      return HttpResponse.json(
+        { error: { code: "not_found", message: "Card not found." } },
+        { status: 404 },
+      );
+    }
+    if (updateCardFails) {
+      return serverErrorEnvelope();
+    }
+    cardUpdateRequests.push({ card_id: cardId, front: body.front, back: body.back });
+    // Never touches `rung`/`due_on` (AL-410 plan §2) — only these two fields
+    // and the provenance marker move.
+    record.front = body.front;
+    record.back = body.back;
+    record.edited_at = new Date().toISOString();
+    return HttpResponse.json(toCardListItem(record));
+  }),
+
+  http.delete(`${API_V1_BASE}/flashcards/:cardId`, ({ params }) => {
+    const cardId = params.cardId as string;
+    const record = cardsStore.find((row) => row.id === cardId && !row.deleted);
+    if (!record) {
+      // Already-deleted is `404`, not a silent success (AL-410 plan §2) — what
+      // makes a double-tapped delete honest rather than quietly successful
+      // twice; `use-delete-card.ts` relies on exactly this to fold a repeat
+      // delete into its own "already gone" success path.
+      return HttpResponse.json(
+        { error: { code: "not_found", message: "Card not found." } },
+        { status: 404 },
+      );
+    }
+    record.deleted = true;
+    cardDeleteRequests.push(cardId);
+    return new HttpResponse(null, { status: 204 });
+  }),
 ];

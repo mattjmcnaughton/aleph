@@ -281,4 +281,21 @@ describe("Flashcards — the review session (PRD §3/§4, Phase 3 TDD §8)", () 
     const nothing = await screen.findByTestId("review-nothing-due");
     expect(nothing.textContent).not.toMatch(/\d/);
   });
+
+  // AL-410 review finding 1/3: `SessionComplete`'s own "Your cards" door — the
+  // other of the two the plan specifies (`routes/index.tsx` is the first) —
+  // was untested before this.
+  it("[AL-410 plan §6] the end-of-queue screen's 'Your cards' link points at /cards", async () => {
+    useFlashcardsSession();
+    configureFlashcards({ queue: queue({ total: 1, cards: [CARD_ONE] }) });
+    await gotoReview();
+
+    await screen.findByTestId("review-card-front");
+    fireEvent.click(screen.getByTestId("review-card-flip"));
+    fireEvent.click(screen.getByTestId("review-grade-got-it"));
+
+    const link = await screen.findByTestId("session-complete-your-cards");
+    expect(link.textContent).toBe("Your cards");
+    expect(link.getAttribute("href")).toBe("/cards");
+  });
 });

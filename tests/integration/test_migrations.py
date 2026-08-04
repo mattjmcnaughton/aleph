@@ -1014,7 +1014,14 @@ def test_flashcards_migration_downgrades_and_reapplies_cleanly(
 def test_flashcards_migration_creates_the_documented_columns(
     isolated_database: str,
 ) -> None:
+    """Asserted at ``0010`` (``FLASHCARDS_HEAD``), not at ``head``: ``0011``
+    (AL-410) adds two more columns to ``flashcards``, so this step's own
+    column set is only stable if bracketed rather than read off whatever
+    ``head`` happens to be — the same "a step is asserted from its own
+    vantage point" rule the module docstring states.
+    """
     database_url = isolated_database
+    run_alembic(database_url, FLASHCARDS_HEAD, downgrade=True)
 
     assert asyncio.run(_columns(database_url, "flashcards")) == {
         "id",
@@ -1072,6 +1079,122 @@ def test_earlier_tables_are_unchanged_by_the_flashcards_migration(
 
     before = {table: asyncio.run(_columns(database_url, table)) for table in tracked}
     run_alembic(database_url, STREAK_INDEX_HEAD, downgrade=True)
+    after = {table: asyncio.run(_columns(database_url, table)) for table in tracked}
+
+    assert before == after
+
+
+# --------------------------------------------------------------------------- #
+# AL-410 (issue #156): card management (migration 0011)
+#
+# Two nullable columns (`deleted_at`, `edited_at`) plus a rewritten partial
+# index and one new one — the migration's own docstring records *why* (soft
+# delete protects the streak/D1's replay guarantee; edit provenance protects
+# the eval sample). What is worth asserting mirrors every other pure-schema
+# step in this file: the columns appear/disappear cleanly, the rewritten
+# index's *predicate* really does widen (not just survive under the same
+# name), the new index is genuinely partial, and no other table moves either
+# way.
+# --------------------------------------------------------------------------- #
+
+CARD_MANAGEMENT_HEAD = "0011_flashcard_management"
+DUE_ON_INDEX = "ix_flashcards_user_id_due_on"
+KEPT_AT_INDEX = "ix_flashcards_user_id_kept_at"
+
+
+def test_the_card_management_migration_downgrades_and_reapplies_cleanly(
+    isolated_database: str,
+) -> None:
+    database_url = isolated_database
+
+    at_head = asyncio.run(_columns(database_url, "flashcards"))
+    assert {"deleted_at", "edited_at"} <= at_head
+    at_head_indexes = asyncio.run(_indexes(database_url, "flashcards"))
+    assert KEPT_AT_INDEX in at_head_indexes
+    assert "kept_at IS NOT NULL" in at_head_indexes[DUE_ON_INDEX]
+    assert "deleted_at IS NULL" in at_head_indexes[DUE_ON_INDEX]
+
+    username = asyncio.run(_seed_phase_1_row(database_url))
+
+    run_alembic(database_url, FLASHCARDS_HEAD, downgrade=True)
+
+    after_downgrade = asyncio.run(_columns(database_url, "flashcards"))
+    assert after_downgrade == at_head - {"deleted_at", "edited_at"}
+    after_indexes = asyncio.run(_indexes(database_url, "flashcards"))
+    assert KEPT_AT_INDEX not in after_indexes
+    # The old, narrower predicate comes back exactly — not left widened.
+    assert "kept_at IS NOT NULL" in after_indexes[DUE_ON_INDEX]
+    assert "deleted_at" not in after_indexes[DUE_ON_INDEX]
+    assert asyncio.run(_count(database_url, "users")) == 1
+
+    run_alembic(database_url, CARD_MANAGEMENT_HEAD)
+
+    reapplied = asyncio.run(_columns(database_url, "flashcards"))
+    assert reapplied == at_head
+    reapplied_indexes = asyncio.run(_indexes(database_url, "flashcards"))
+    assert KEPT_AT_INDEX in reapplied_indexes
+    assert "kept_at IS NOT NULL" in reapplied_indexes[DUE_ON_INDEX]
+    assert "deleted_at IS NULL" in reapplied_indexes[DUE_ON_INDEX]
+    assert asyncio.run(_count(database_url, "users")) == 1
+    assert username == "migration-user"
+
+
+def test_the_card_management_migration_widens_the_due_on_index_predicate(
+    isolated_database: str,
+) -> None:
+    """The step this test is named for: ``0011`` does not merely add a
+    column, it **rewrites** the one index the daily selection's hot path
+    actually uses, so a soft-deleted card cannot linger in it."""
+    database_url = isolated_database
+
+    run_alembic(database_url, FLASHCARDS_HEAD, downgrade=True)
+    before_indexes = asyncio.run(_indexes(database_url, "flashcards"))
+    assert "kept_at IS NOT NULL" in before_indexes[DUE_ON_INDEX]
+    assert "deleted_at" not in before_indexes[DUE_ON_INDEX]
+
+    run_alembic(database_url, CARD_MANAGEMENT_HEAD)
+
+    after_indexes = asyncio.run(_indexes(database_url, "flashcards"))
+    assert "kept_at IS NOT NULL" in after_indexes[DUE_ON_INDEX]
+    assert "deleted_at IS NULL" in after_indexes[DUE_ON_INDEX]
+
+
+def test_the_new_kept_at_index_is_partial_and_descending(
+    isolated_database: str,
+) -> None:
+    """The card list's own ordering index (§2): partial like the rewritten
+    one above, and genuinely ``DESC`` — a plain ascending index would not
+    match `ORDER BY kept_at DESC, id DESC`."""
+    database_url = isolated_database
+
+    indexdef = asyncio.run(_indexes(database_url, "flashcards"))[KEPT_AT_INDEX]
+
+    assert "user_id" in indexdef
+    assert "kept_at" in indexdef
+    assert "DESC" in indexdef
+    assert "kept_at IS NOT NULL" in indexdef
+    assert "deleted_at IS NULL" in indexdef
+
+
+def test_earlier_tables_are_unchanged_by_the_card_management_migration(
+    isolated_database: str,
+) -> None:
+    """The step adds two columns and rewrites/adds indexes on ``flashcards``
+    alone; it alters no other table."""
+    database_url = isolated_database
+    tracked = (
+        *PHASE_1_TABLES,
+        *PHASE_2_TABLES,
+        FLAGS_TABLE,
+        CHANGES_TABLE,
+        "lessons",
+        "paths",
+        "flashcard_reviews",
+        "flashcard_draft_runs",
+    )
+
+    before = {table: asyncio.run(_columns(database_url, table)) for table in tracked}
+    run_alembic(database_url, FLASHCARDS_HEAD, downgrade=True)
     after = {table: asyncio.run(_columns(database_url, table)) for table in tracked}
 
     assert before == after

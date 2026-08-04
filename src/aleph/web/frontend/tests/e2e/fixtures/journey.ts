@@ -553,7 +553,7 @@ export async function fetchProgressSummary(page: Page): Promise<ProgressSummary>
   });
 }
 
-// --- Flashcards: drafting + keep (Phase 3 TDD §5.2/§8, W24-W27) -------------
+// --- Flashcards: drafting + keep (Phase 3 TDD §5.2/§8, W24-W28) -------------
 
 /**
  * Keep exactly `keepCount` of the open lesson's drafts, discarding the tail
@@ -588,7 +588,7 @@ async function keepDrafts(page: Page, keepCount: number): Promise<string[]> {
 /**
  * Complete the lesson at `index`, keep `keepCount` of its drafts (discarding
  * the rest) and return to the path view — the one unit of work every
- * W24-W27 journey is built from: a kept card these specs can trust came
+ * W24-W28 journey is built from: a kept card these specs can trust came
  * through the real drafting + keep flow (D6), never fabricated the way only
  * `shiftFlashcardDue` is allowed to backdate it (D15).
  *
@@ -612,16 +612,16 @@ export async function completeLessonAndKeepDrafts(
   return keptFronts;
 }
 
-// --- Flashcards: the review session (Phase 3 TDD §5.3/§8, W24-W27) ---------
+// --- Flashcards: the review session (Phase 3 TDD §5.3/§8, W24-W28) ---------
 
-/** One card in `GET /api/v1/reviews/queue`'s `cards`, as far as W24-W27 need. */
+/** One card in `GET /api/v1/reviews/queue`'s `cards`, as far as W24-W28 need. */
 export interface ReviewQueueCard {
   card_id: string;
   front: string;
   back: string;
 }
 
-/** `GET /api/v1/reviews/queue` body, as far as W24-W27 need to reach into it. */
+/** `GET /api/v1/reviews/queue` body, as far as W24-W28 need to reach into it. */
 export interface ReviewQueueSnapshot {
   today: string;
   total: number;
@@ -643,7 +643,12 @@ export interface ReviewQueueSnapshot {
  * and the cap makes exactly ten hold regardless of whose cards they are.
  * W27 runs on its own account with nothing else on it, so it does not need
  * this for residue, but reads it too — `bringToFront` bounds its search by
- * the real `total` rather than an assumed one.
+ * the real `total` rather than an assumed one. W28 (AL-410) shares that same
+ * account with W27 and passes its own `pathId` here — `path_id` filtering
+ * happens after selection (`services/reviews.py`), so it never changes which
+ * cards are drawn, only which of the drawn cards this call returns; see
+ * `w28.spec.ts`'s own header for why that is still enough to keep its
+ * presence assertions honest.
  */
 export async function fetchReviewQueue(
   page: Page,
@@ -670,7 +675,7 @@ export async function currentReviewFront(page: Page): Promise<string> {
 
 /**
  * Flip the current review card and grade it — the one reveal-then-grade round
- * trip every beat in W24-W27 makes. Assumes a card is already showing.
+ * trip every beat in W24-W28 makes. Assumes a card is already showing.
  */
 export async function gradeCurrentCard(page: Page, grade: "again" | "got_it"): Promise<void> {
   await page.getByTestId("review-card-flip").click();

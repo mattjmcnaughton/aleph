@@ -64,6 +64,21 @@ class Flashcard(Base, UUIDAuditMixin):
     citation line renderable with no join. ``source_generated_at`` is the
     revision detector — the citation is a link iff the source lesson row still
     exists *and* its live ``generated_at`` still equals this stamp.
+
+    ``deleted_at IS NOT NULL`` is a **soft-deleted** card (AL-410/issue #156,
+    migration ``0011``): gone from every learner-facing read — the daily
+    queue, the summary, the card list — but its ``flashcard_reviews`` rows
+    survive untouched. A hard delete would cascade (``flashcard_reviews`` is
+    ``ON DELETE CASCADE`` from this table) and erase the card's review log,
+    which retroactively removes past Active days from the **Daily streak**
+    (D11's union reads that table), skews recall-rate-by-rung, and breaks D1's
+    rebuildable-projection guarantee — one nullable column is cheaper than any
+    of that. ``edited_at`` is set the moment a learner edits a kept card's
+    text (never touched by grading) — the trust-boundary marker D6's
+    single-table choice was partly made for: the ``flashcard_draft`` eval
+    artifact samples what the agent actually produced, and ``edited_at IS NOT
+    NULL`` is what lets that sampling keep telling agent-written text from
+    learner-written text apart once cards are learner-editable.
     """
 
     __tablename__ = "flashcards"
@@ -72,12 +87,27 @@ class Flashcard(Base, UUIDAuditMixin):
         # the daily selection needs, and — partial, mirroring the Phase 5 D6
         # shape (``lessons ... WHERE completed_at IS NOT NULL``) — excludes
         # drafts, which the queue never wants and which would otherwise be most
-        # of the index's size on an actively-drafting learner.
+        # of the index's size on an actively-drafting learner. Widened in
+        # ``0011`` to also exclude soft-deleted cards (``deleted_at IS NULL``)
+        # — a deleted card must not stay in the daily selection's hot path.
         Index(
             "ix_flashcards_user_id_due_on",
             "user_id",
             "due_on",
-            postgresql_where=text("kept_at IS NOT NULL"),
+            postgresql_where=text("kept_at IS NOT NULL AND deleted_at IS NULL"),
+        ),
+        # AL-410's list ordering (``0011``): the same partial predicate as
+        # above (a kept, non-deleted card), ``kept_at DESC`` because the card
+        # list shows most-recently-kept first. A plain string column name
+        # cannot express ``DESC`` in a declarative ``Index`` — ``text()`` is
+        # the escape hatch, and the migration builds the identical index the
+        # same way so ``tests/integration/test_flashcards_schema.py`` can
+        # compare the two.
+        Index(
+            "ix_flashcards_user_id_kept_at",
+            "user_id",
+            text("kept_at DESC"),
+            postgresql_where=text("kept_at IS NOT NULL AND deleted_at IS NULL"),
         ),
         Index("ix_flashcards_source_lesson_id", "source_lesson_id"),
     )
@@ -108,6 +138,15 @@ class Flashcard(Base, UUIDAuditMixin):
     source_path_title: Mapped[str] = mapped_column(Text, nullable=False)
     source_generated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
+    )
+    # AL-410 / migration 0011. Both nullable, both additive: ``NULL`` is the
+    # honest default for every card written before this ticket (never deleted,
+    # never edited), not a placeholder needing a backfill.
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    edited_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
 
 

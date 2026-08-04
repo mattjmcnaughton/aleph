@@ -2,6 +2,13 @@
 // full stop. No "study more" button — the cap is the point — and the widen
 // offer appears only at the end of a **filtered** session with cards due
 // elsewhere (PRD §4.10's one exception to "scope is chosen at the door").
+//
+// Also carries a `/cards` door of its own (AL-410 plan §6 — the other lives on
+// `routes/index.tsx`, gated on the `flashcards` flag alone, AL-410 review
+// finding 1): a learner who just finished today's queue is a natural moment
+// to offer "browse everything you've kept", on top of home's own
+// always-rendered link, without this being a third, always-visible nav item
+// (PRD §3 keeps the due pill the only persistent one).
 
 import { Link } from "@tanstack/react-router";
 import { PRIMARY_CTA_BASE } from "../state-card";
@@ -47,6 +54,16 @@ export function SessionComplete({
           </Link>
         </div>
       ) : null}
+
+      {/* Plain text, no kept-card total (plan's product call #1) — the same
+          copy and treatment `due-today-card.tsx`'s own link uses. */}
+      <Link
+        to="/cards"
+        data-testid="session-complete-your-cards"
+        className="text-sm text-mist transition-colors hover:text-porcelain"
+      >
+        Your cards
+      </Link>
     </div>
   );
 }

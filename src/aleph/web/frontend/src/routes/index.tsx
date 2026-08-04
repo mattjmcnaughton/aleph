@@ -196,6 +196,29 @@ function Home() {
 
       <DueTodayCard summary={reviewSummaryQuery.data} pathTitles={pathTitles} />
 
+      {/* Home's one door into `/cards` (AL-410 review finding 1) — gated only
+          on the `flashcards` flag, never on `due_count`: `DueTodayCard` above
+          hides outright at zero due (PRD §3's own restraint for that card),
+          which used to leave a learner with kept cards and nothing due today
+          with no in-app route to browse them — exactly the day they would
+          want to. This is *not* a third, always-visible app-bar item (PRD §3
+          keeps the due pill the sole persistent nav this phase adds); it is
+          one always-rendered link among this route's own decoration, in the
+          same place `session-complete.tsx` offers the other of the two doors
+          the plan specifies. Plain text, no kept-card total (product call
+          #1: two teal numbers meaning different things on one screen is
+          worse than dropping one) — and the only door, now that
+          `DueTodayCard` no longer carries a duplicate of its own. */}
+      {flashcardsEnabled ? (
+        <Link
+          to="/cards"
+          data-testid="due-today-your-cards"
+          className="mt-4 block text-center text-sm text-mist transition-colors hover:text-porcelain"
+        >
+          Your cards
+        </Link>
+      ) : null}
+
       {paths === undefined ? (
         pathsQuery.isError ? (
           <UnavailableState />

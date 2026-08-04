@@ -177,22 +177,19 @@ def create_stub_app() -> FastAPI:
     # helper's `waitForSurface("draft-list")` times out — the same failure
     # mode the four caps above exist to prevent, just one cap late.
     settings.flashcard_drafts_per_day = 0
-    # ``tutor`` (AL-203/AL-270), ``shaping`` (AL-301/AL-370) and ``streaks``
-    # (Phase 5 D7) are all launched and default on in
-    # ``services/feature_flags.py``, so the browser suite's plain learner —
-    # ``DEV_USER``, who is not an admin and gets none of ``ADMIN_DEFAULT_FLAGS``'
-    # baseline — meets both rails and the streak line with nothing set here.
-    # This line is kept as an explicit *pin* rather than deleted as redundant:
-    # the suite asserts against surfaces that must exist, and "every tutor spec
-    # failed on an absent rail" is a confusing way to discover someone flipped a
-    # code default.
-    #
-    # ``flashcards`` (Phase 3 TDD D10) is still admin-only in
-    # ``ADMIN_DEFAULT_FLAGS`` — launch is a separate flag flip after
-    # dogfooding (TDD §16) — so it *needs* an explicit entry here, unlike the
-    # three above: without it ``DEV_USER`` never sees the pill, the drafts
-    # block or ``/review`` at all, and W24-W27 (TDD §11) would 404 on every
-    # route before a single assertion ran.
+    # ``tutor`` (AL-203/AL-270), ``shaping`` (AL-301/AL-370), ``streaks``
+    # (Phase 5 D7), and ``flashcards`` (Phase 3 TDD D10) are all launched and
+    # default on in ``services/feature_flags.py``, so the browser suite's plain
+    # learner — ``DEV_USER``, who is not an admin and gets none of
+    # ``ADMIN_DEFAULT_FLAGS``' baseline — meets both rails, the streak line and
+    # the flashcards surfaces with nothing set here. This line is kept as an
+    # explicit *pin* rather than deleted as redundant: the suite asserts
+    # against surfaces that must exist, and "every tutor spec failed on an
+    # absent rail" is a confusing way to discover someone flipped a code
+    # default — the same reasoning that already applied to ``tutor``/
+    # ``shaping``/``streaks`` now covers ``flashcards`` too, since its own
+    # launch flip removed the one thing that used to make it different (the
+    # admin-only default this comment used to describe).
     settings.feature_flag_defaults = "tutor:on,shaping:on,streaks:on,flashcards:on"
 
     # Imported lazily so mutating settings above lands before app assembly.

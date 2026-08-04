@@ -331,8 +331,9 @@ code — it is one committed configuration change.
 > about either key, and a laptop, a CI run and production all resolve them the
 > same way with no configuration. That is the intended end state for a launched
 > phase: the env var is the *override*, not the statement of what is live.
-> **Phase 5's `streaks` launched the same way**, so all three registered flags
-> now default on and the registry currently holds nothing dark.
+> **Phase 5's `streaks` launched the same way, and Phase 3's `flashcards` then
+> did too**, so all four registered flags now default on and the registry
+> currently holds nothing dark.
 >
 > This section stays the reference for the lever itself, now read mainly for
 > **turning a flag off** (the kill switch below) and for launching the next phase
@@ -354,7 +355,7 @@ that block. Resolution order and the full semantics are in
 (`services/feature_flags.py`) from `False` to `True`. That is the launch: it
 reaches production *and* every developer's laptop and every CI run at once, which
 is why it beats setting the env var — one statement of what is live, not two.
-`tutor` and `shaping` were both launched this way.
+`tutor`, `shaping`, `streaks`, and `flashcards` were all launched this way.
 
 Use the `fly.toml` env var instead only when the flip must be **reversible
 without a code deploy** — a staged rollout you expect to roll back, or an early

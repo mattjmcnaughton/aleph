@@ -43,21 +43,23 @@ const backendCommand = [
 // all against a BASE_URL deployment (where only the @smoke specs make sense).
 const journeys = "journeys/**";
 
-// The flashcards journeys (W24-W27, Phase 3 TDD D15, §11) get their **own**
-// Playwright project below rather than running inside "mobile-390x844" with
-// everything else: `FlashcardRepository.due_candidates` admits a card via
-// `due_on <= today` **or** `a review exists today`, and `select_daily_queue`
-// is blind to `satisfied` (TDD §5.1/§5.3) — so every card any earlier spec in
-// the *same run* graded stays in the candidate pool, competing for the day's
-// ten slots, for the rest of the calendar day. With `workers: 1,
-// fullyParallel: false` running every spec alphabetically on one shared
-// `DEV_USER`, W1-W23's ~30 completions (each drafting cards once
-// `flashcard_drafts_per_day` stops capping them, `scripts/e2e_backend.py`)
-// would sit in that pool by the time W24 runs, and W24-W27 would go on to
-// pollute each other the same way. This project runs them as different,
-// otherwise-idle accounts instead (`fixtures/auth.ts`'s `ADMIN_USER` /
-// `UNVERIFIED_USER`), which is what the specs' own headers now describe.
-const flashcardsJourneys = "journeys/w2[4-7].spec.ts";
+// The flashcards journeys (W24-W28, Phase 3 TDD D15, §11; W28 added by
+// AL-410) get their **own** Playwright project below rather than running
+// inside "mobile-390x844" with everything else: `FlashcardRepository.
+// due_candidates` admits a card via `due_on <= today` **or** `a review exists
+// today`, and `select_daily_queue` is blind to `satisfied` (TDD §5.1/§5.3) —
+// so every card any earlier spec in the *same run* graded stays in the
+// candidate pool, competing for the day's ten slots, for the rest of the
+// calendar day. With `workers: 1, fullyParallel: false` running every spec
+// alphabetically on one shared `DEV_USER`, W1-W23's ~30 completions (each
+// drafting cards once `flashcard_drafts_per_day` stops capping them,
+// `scripts/e2e_backend.py`) would sit in that pool by the time W24 runs, and
+// W24-W28 would go on to pollute each other the same way. This project runs
+// them as different, otherwise-idle accounts instead (`fixtures/auth.ts`'s
+// `ADMIN_USER` / `UNVERIFIED_USER`), which is what the specs' own headers now
+// describe — W28 shares `UNVERIFIED_USER` with W27 rather than the busier
+// `ADMIN_USER` (see `w28.spec.ts`'s own header for why).
+const flashcardsJourneys = "journeys/w2[4-8].spec.ts";
 const bootsOwnServers = !process.env.BASE_URL;
 
 export default defineConfig({
@@ -120,7 +122,7 @@ export default defineConfig({
     {
       // The phone viewport §12 mandates (390x844) — the primary target surface,
       // and the only one that runs the journeys. The flashcards journeys
-      // (W24-W27) run in their own project below instead, on their own
+      // (W24-W28) run in their own project below instead, on their own
       // accounts — excluded here so each spec runs exactly once.
       name: "mobile-390x844",
       testIgnore: bootsOwnServers ? flashcardsJourneys : journeys,
@@ -131,14 +133,14 @@ export default defineConfig({
         ...chromiumLaunch,
       },
     },
-    // W24-W27 (Phase 3 TDD D15, §11 — see the `flashcardsJourneys` note
+    // W24-W28 (Phase 3 TDD D15, §11 — see the `flashcardsJourneys` note
     // above): the same phone viewport and the same stub backend, but split
     // into their own project so a residue-inducing shared account never
     // needs to include everything else the suite does. Each spec file still
     // selects its own account via `test.use({ storageState })` (W24-W26 on
-    // `ADMIN_STORAGE_STATE`, W27 alone on `UNVERIFIED_STORAGE_STATE`) — same
-    // pattern W1's admin sub-test already uses inside "mobile-390x844", just
-    // scoped to a dedicated project rather than a nested `describe`. Only
+    // `ADMIN_STORAGE_STATE`, W27 and W28 together on `UNVERIFIED_STORAGE_STATE`)
+    // — same pattern W1's admin sub-test already uses inside "mobile-390x844",
+    // just scoped to a dedicated project rather than a nested `describe`. Only
     // meaningful against the harness's own stub backend, so it does not
     // exist at all in the BASE_URL/prod-smoke case (mirroring "setup" above).
     ...(bootsOwnServers
