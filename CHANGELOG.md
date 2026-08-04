@@ -1,3 +1,10 @@
+# [1.23.0](https://github.com/mattjmcnaughton/aleph/compare/v1.22.0...v1.23.0) (2026-08-04)
+
+
+### Features
+
+* **flashcards:** draft cards when the lesson opens, not when it completes ([#157](https://github.com/mattjmcnaughton/aleph/issues/157)) ([9fa53a7](https://github.com/mattjmcnaughton/aleph/commit/9fa53a7507f5c3cb364ce945130c0fec20845414)), closes [#155](https://github.com/mattjmcnaughton/aleph/issues/155)
+
 # [1.22.0](https://github.com/mattjmcnaughton/aleph/compare/v1.21.2...v1.22.0) (2026-08-04)
 
 
