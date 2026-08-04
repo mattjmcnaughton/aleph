@@ -307,7 +307,7 @@ just evals --smoke --flashcards --judge
 ```
 
 A parallel, smaller harness rather than a branch inside the outline/lesson one:
-a card is drafted from a **completed lesson**, not from a bare topic, so each
+a card is drafted from a **generated lesson**, not from a bare topic, so each
 case in `evals/flashcard_seed_set.yaml` runs the outline agent, then the lesson
 agent for the path's first slot (the same probe-lesson generation
 `build_generation_task` already does), and finally the flashcard agent
@@ -318,7 +318,7 @@ against the configured `MODEL_FLASHCARD` slot, not comparing models in it.
 
 **There is no refusal branch to score.** Every case in
 `flashcard_seed_set.yaml` is a topic that generates — a refused topic has no
-completed lesson to draft a card from — so unlike the outline/lesson set there
+generated lesson to draft a card from — so unlike the outline/lesson set there
 is no `RefusalBranch`-equivalent check here.
 
 **The seed set (`evals/flashcard_seed_set.yaml`)** reuses eight cases

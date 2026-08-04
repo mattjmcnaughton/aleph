@@ -25,7 +25,7 @@ qualified ("Phase 5 D1", "Phase 1 D5", "Phase 2B §5.6").
 | D2 | Pure domain | **`domains/scheduling.py`** — the ladder (`initial_state`, `apply_grade`, `next_interval_days`) *and* the day's selection (`select_daily_queue`), stdlib only, no ORM | A port of habagou's module under `domains/__init__.py`'s contract. One module because both halves are the same concern and neither is useful without the other; two functions rather than one because the ladder never sees a queue and the selection never sees a grade — the Phase 5 D2 discipline (a parameter a function does not need is a parameter that can drift) |
 | D3 | The daily queue | **Derived, not stored.** No queue table. The day's ten are a pure function of `(candidates, today, user_id)` where the candidate population is `due_on <= today` **∪** `reviewed today`, and the "3 at random" are the three lowest `sha256(user_id:day:card_id)` | The population is **stable across the day** (§5.3's invariant): grading moves a card's `due_on` into the future but the `reviewed today` arm holds it in the set, so the same inputs re-derive the same ten on every request. That is what §4.5 asks for, with nothing stored and no `GET` that writes. The hash order replaces `random.Random`, whose `sample()` is stable within a Python version and promises nothing across one — a runtime upgrade must not reroll every learner's day mid-session |
 | D4 | Day boundary | **Reuse Phase 5 D3 unchanged**: the client sends `tz_offset_minutes` (`getTimezoneOffset()` verbatim), the service subtracts it from `now(UTC)` to reach `today`. `flashcards.due_on` is a **`date`**, not a timestamp | The ladder's intervals are whole days and the cap is a day, so a timestamp would carry a precision the product has no rule for. A `date` makes the hot query `due_on <= :today` with no timezone expression at all — the tz arithmetic happens once, in the service, in the one place Phase 5 already put it. Price: a learner who reviews in Tokyo and then in Berlin can see a card a day early, the same accepted risk as the streak (§15) |
-| D5 | Drafting delivery | **Trigger + poll, on its own endpoint.** `POST /lessons/{id}/flashcard-drafts` → `202`, background task, client polls `GET`. **`complete_lesson` is not touched** | Phase 1 D5's transport, and the completion path stays bit-identical — which matters more than it looks: Phase 5 D8's inherited idempotence rests on `mark_completed_and_finalize`'s `completed_at IS NULL` guard, and the streak's correctness rests on that method having no second write beside it. With the flag off, completion is unchanged *by construction* rather than by a branch |
+| D5 | Drafting delivery | **Trigger + poll, on its own endpoint.** `POST /lessons/{id}/flashcard-drafts` → `202`, background task, client polls `GET`. **Fired when the client opens a generated, unlocked lesson (AL-400), not when it completes** — the trigger route's own guard moved from `completed_at IS NOT NULL` to `generation_state = 'generated'` to match. **`complete_lesson` is still not touched** | Phase 1 D5's transport, and the completion path stays bit-identical — which matters more than it looks: Phase 5 D8's inherited idempotence rests on `mark_completed_and_finalize`'s `completed_at IS NULL` guard, and the streak's correctness rests on that method having no second write beside it. With the flag off, completion is unchanged *by construction* rather than by a branch. Moving the trigger earlier (AL-400) only changes *when* drafting starts, never *what* completion does — `DraftContext` already reads only `read_passage` + `quick_check_stem`, both present at `generated`, well before completion — so the cards are usually ready by the time the learner finishes, without completion growing a second write |
 | D6 | Drafts | **Rows in `flashcards` with `kept_at IS NULL`.** Keep is one atomic `POST …/keep` carrying the ids to keep; every unlisted draft for that lesson is deleted in the same transaction. "Skip — keep none" is the same request with `[]` | PRD §3's "discarded drafts are not saved anywhere" is satisfied by the delete. The alternative — drafts live only in the response and the client POSTs back the front/back strings — makes card text **learner-supplied at the trust boundary** and makes the eval artifact (§10) something we sample from a request body rather than from what the agent actually produced. One table, not two: a keep is a flag flip, so a card's id is stable from draft to schedule, and the hot query excludes drafts through a partial index rather than a second table |
 | D7 | Draft run state | **`flashcard_draft_runs`**, one sparse row per lesson (`lesson_id` PK), holding `state` / `started_at` / `error`. Claimed by insert-on-conflict, stale-recovered on the Phase 1 §5.4 timings | *Generating* has no card rows yet, so the state cannot live on the drafts themselves. Three nullable columns on `lessons` (the Phase 2B `revision_instruction` precedent) would be wide for every lesson forever; most lessons are never completed, so a row that exists only once drafting is triggered is the smaller thing. It also gives the abandoned-drafts answer for free (§14 Q4): the run stays `generated`, the unkept drafts stay, and revisiting the lesson re-serves them |
 | D8 | The lapse | **Derived, unbounded.** A queue card is *satisfied* when its most recent review today is `got_it`; `again` leaves it unsatisfied and it is re-served after every never-attempted card. No cap on re-shows | PRD §4.7 — the cap counts distinct cards, so a lapse cannot cost a slot, and that falls out of the derivation rather than needing a rule. Unbounded is the owner's call: the day's set is done when all ten have been answered once, the learner can always stop by leaving, and the card is demoted and rescheduled either way. Durable across a reload because it is read from the log, not held in the client |
@@ -98,7 +98,7 @@ The two paths, end to end:
 ```
 POST /lessons/{id}/flashcard-drafts        → 202
   → require_flashcards_enabled             (404 if off, before any work)
-  → assert owned + completed                (404 / 409)
+  → assert owned + generated                (404 / 409)
   → rate limiter                            (429)
   → claim flashcard_draft_runs row          (insert-on-conflict; already generating → 202, no-op)
   → background: flashcard agent → N drafts → rows with kept_at IS NULL → run.state = generated
@@ -302,8 +302,10 @@ dimension of PRD §6's four that is honestly deterministic.
 
 **The service** claims, runs, persists:
 
-1. `POST` handler asserts the lesson is owned and `completed_at IS NOT NULL` (→ `409` otherwise),
-   then the rate limiter (→ `429`).
+1. `POST` handler asserts the lesson is owned and `generation_state = 'generated'` (→ `409
+   lesson_not_generated` otherwise), then the rate limiter (→ `429`). Fired from the client on
+   lesson *open* (AL-400), so this guard is load-bearing rather than defensive — the trigger reaches
+   an ungenerated lesson on a normal opening, not only on a stray/replayed request.
 2. Claim `flashcard_draft_runs` by `INSERT … ON CONFLICT (lesson_id) DO UPDATE … WHERE state = 'failed'
    OR started_at < :stale_cutoff`. An already-`generating` run is a no-op `202`; an already-`generated`
    run is a no-op `202` and the client's poll finds the existing drafts. **Drafting a lesson twice is
@@ -459,9 +461,9 @@ is today — which is what makes D10's kill switch honest.
 | --- | --- | --- |
 | Not signed in | `401 unauthenticated` | The login redirect, as everywhere |
 | `flashcards` flag off | `404 not_found`, before any work | Nothing — no pill, no drafts, no fetch (§8) |
-| Drafting a lesson that is not complete | `409 lesson_not_complete` | Nothing; the client only fires after a completion |
-| Drafting over the daily cap | `429` through the shared envelope | The completion stands; the drafts block says drafting is unavailable today |
-| Drafting fails (timeout, refusal, validation) | run `failed`; `GET` returns `{state: "failed"}` | A retry affordance in the existing `state-card` shape — never a dead spinner |
+| Drafting a lesson that is not generated | `409 lesson_not_generated` | Nothing routine — the client fires the trigger on open, so this is only reachable by a stray request against a lesson that has not finished generating yet |
+| Drafting over the daily cap | `429` through the shared envelope | Nothing at the time — the cap is now hit on *open*, so the refusal is silent until the learner completes the lesson, at which point the drafts block says drafting is unavailable today. The cap therefore bounds lessons **opened**, not lessons completed: a learner who skims many lessons can spend it before completing any (D13, §13) |
+| Drafting fails (timeout, refusal, validation) | run `failed`; `GET` returns `{state: "failed"}` | A retry affordance in the existing `state-card` shape — never a dead spinner. Since D5's open-time trigger, **reopening the lesson is itself a retry**: the open-time trigger re-claims a `failed` run through D7's `WHERE state = 'failed'` arm, so the manual affordance is the path for a run that fails *during* the visit. A reopen costs a fresh model call but no extra quota — the limiter counts distinct lessons, so a same-lesson retry is already counted |
 | Grading a card not in today's queue | `409 not_due` | Nothing; the client cannot construct the request |
 | Grading with a stale `rung_before` | `409 stale_rung` | Nothing — a double-tap is absorbed |
 | No cards due | `200`, `cards: []`, `total: 0` | *Nothing due today* — an invitation, not a debt (PRD §4.8) |
@@ -480,7 +482,7 @@ router-level flag gate, 404-never-403, the `errors.py` envelope). `docs/api.md` 
 
 | Endpoint | Purpose |
 | --- | --- |
-| `POST /api/v1/lessons/{lesson_id}/flashcard-drafts` | Trigger drafting for a completed lesson. `202`; idempotent (D7) |
+| `POST /api/v1/lessons/{lesson_id}/flashcard-drafts` | Trigger drafting for a generated lesson, fired on open (AL-400). `202`; idempotent (D7) |
 | `GET /api/v1/lessons/{lesson_id}/flashcard-drafts` | Poll: `{state, cards: [{id, front, back}]}` |
 | `POST /api/v1/lessons/{lesson_id}/flashcard-drafts/keep` | `{kept_ids: […]}` → keep those, delete the rest. `[]` is "Skip — keep none" |
 | `GET /api/v1/reviews/summary?tz_offset_minutes=` | `{today, due_count, estimated_minutes, paths: [{path_id, due_count}]}` — home's card, the app-bar pill, the per-path chips |
@@ -514,7 +516,7 @@ router-level flag gate, 404-never-403, the `errors.py` envelope). `docs/api.md` 
 }
 ```
 
-`401` unauthenticated · `404` flag off, or an unowned/unknown lesson or card · `409` not complete /
+`401` unauthenticated · `404` flag off, or an unowned/unknown lesson or card · `409` not generated /
 not due / stale rung · `422` out-of-range offset · `429` drafting over cap.
 
 DTOs (`dtos/flashcards.py`) reuse `TzOffsetMinutes` from `dtos/progress.py` rather than redeclaring
@@ -573,7 +575,9 @@ convention to be wrong.
   the one-line provenance breakdown, above the path list and below the streak line.
 - **`components/review/draft-list.tsx`** — the four drafts with per-card keep/discard, all keeping
   by default, the primary action naming its own count (`Keep 3 cards`) and `Skip — keep none`
-  equally reachable. Rendered below the completion state in `lessons.$lessonId.tsx`.
+  equally reachable. Rendered below the completion state in `lessons.$lessonId.tsx`, though the
+  trigger it depends on fires much earlier — a mount effect fires it as soon as the lesson reads
+  `generated` + unlocked (AL-400), well before the learner reaches this state.
 - **`components/review/review-card.tsx`** — front, tap to reveal, then `Again · later today` and
   `Got it · in {got_it_interval_days} days`. The interval text comes from the payload, never from
   a ladder constant duplicated in TypeScript — the ladder is config (§13) and the client must not
@@ -588,7 +592,14 @@ the summary's `paths` array by `path_id` (absent → no chip, exactly as the str
 behaves).
 
 **Gating** — `useFeatureFlag("flashcards")` feeds every options factory's `enabled`; off means
-`skipToken`, i.e. no request, no pill, no drafts block. No flag, no fetch.
+`skipToken`, i.e. no request, no pill, no drafts block. No flag, no fetch. The drafts poll and the
+drafts block split into two gates (AL-400): the **poll** is enabled once the lesson reads
+`generated` + unlocked — the same condition the trigger route now enforces server-side — while the
+**block itself** stays gated on `unlock_state === "complete"`, unchanged. A `useRef`-guarded mount
+effect fires the trigger exactly once per lesson visit, the first render where the poll gate turns
+on; the completion mutation keeps a belt-and-braces re-fire, conditional on the poll still reading
+`not_started`, for a lesson opened before this shipped or an open-time trigger that failed silently
+— idempotent (D7), so it costs nothing extra.
 
 **The two moments that must not wait for a round trip:**
 

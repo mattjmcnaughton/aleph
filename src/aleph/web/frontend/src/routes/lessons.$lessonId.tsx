@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   FLASHCARDS_QUERY_PREFIX,
   type FlashcardDrafts,
@@ -116,36 +116,81 @@ function LessonView() {
   // below has to no-op on.
   const progressSummaryKey = progressSummaryQueryOptions(true).queryKey;
 
-  // Flashcards (Phase 3 TDD §5.2/§8): the drafts block below the completion
-  // state. A drafting run only exists once triggered, so the poll is gated on
-  // the lesson actually being complete as well as the flag — polling before
-  // that would only ever 404.
+  // Flashcards (Phase 3 TDD §5.2/§8, AL-400): the drafts block below the
+  // completion state. Drafting now starts on lesson *open* rather than lesson
+  // *complete* (D5), so the poll and the render each need their own gate —
+  // one condition used to cover both, which conflated "is there a run to poll
+  // for" with "should the drafts block show":
+  //
+  // * poll gate: generated + unlocked. `generated` is the client's half of the
+  //   guard the trigger route enforces server-side (`409
+  //   lesson_not_generated`); `!== "locked"` is the client's alone — the route
+  //   does not check unlock state, so this gate is stricter than the server's,
+  //   not a mirror of it. Polling before that would only ever answer
+  //   `not_started`, since no run has been (or can be) claimed yet.
+  // * render gate: unchanged in effect — still `complete` only (mock screen 01:
+  //   the proposal is shown only once the learner has finished the lesson, even
+  //   though drafting itself has been running underneath since open). Written
+  //   as a narrowing of the poll gate so the two cannot drift: there is nothing
+  //   to render that the poll did not fetch.
   const flashcardsEnabled = useFeatureFlag("flashcards");
-  const draftsEnabled = flashcardsEnabled && detail?.unlock_state === "complete";
+  const draftsPollEnabled =
+    flashcardsEnabled &&
+    detail?.generation_state === "generated" &&
+    detail.unlock_state !== "locked";
+  const draftsEnabled = draftsPollEnabled && detail?.unlock_state === "complete";
   const draftsQuery = useQuery({
-    ...flashcardDraftsQueryOptions(lessonId, draftsEnabled),
+    ...flashcardDraftsQueryOptions(lessonId, draftsPollEnabled),
     refetchInterval: makePollingRefetchInterval({ isTerminal: isFlashcardDraftsTerminal }),
   });
 
   // Idempotent (D7 — a second `POST` while generating/generated is a no-op
-  // `202`), which is what makes it safe to fire from `completeMutation`'s own
-  // `onSuccess` below, a mutation React may run twice. Also the retry
-  // affordance the drafts block offers on a `failed` run (§5.6).
+  // `202`), which is what makes it safe to fire from a mount effect that may
+  // itself re-run (StrictMode's double-invoke) and from the belt-and-braces
+  // re-fire below. Also the retry affordance the drafts block offers on a
+  // `failed` run (§5.6).
   const triggerDraftsMutation = useMutation({
     mutationFn: () => triggerFlashcardDrafts(lessonId),
-    // A `failed` run is terminal to the poll's own `refetchInterval`
-    // (`isFlashcardDraftsTerminal`), so a retry has to kick it back into
-    // motion itself rather than waiting on a poll that has already stopped.
-    // The fresh-completion firing (below) needs no such nudge: `draftsEnabled`
-    // flips false -> true in the same render, and TanStack fetches a query
-    // that just became enabled on its own.
+    // The poll's first `GET` on a freshly-opened lesson reads `not_started`
+    // (no `flashcard_draft_runs` row yet), which `isFlashcardDraftsTerminal`
+    // treats as terminal — nothing to keep polling for until a run exists. A
+    // successful trigger is what creates one, so this invalidation is what
+    // kicks the poll back into motion to observe `generating` next. A
+    // `failed` run is separately terminal to the same `refetchInterval`, so a
+    // retry (the drafts block's own affordance, §5.6) needs this same nudge.
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: flashcardDraftsQueryKey(lessonId) });
     },
   });
 
+  // Fire the trigger once per lesson, the first time it reads generated +
+  // unlocked with the flag on (AL-400: drafting starts on open, not on
+  // completion).
+  //
+  // The ref holds the lesson id it last fired for, **not** a bare `true`:
+  // TanStack Router re-renders this route with new params rather than
+  // remounting it, so a per-instance flag would latch on the first lesson and
+  // never re-arm — every lesson reached through the prev/next footer or the
+  // sidebar outline would silently skip open-time drafting. Keying by
+  // `lessonId` keeps the StrictMode double-invoke protection (same instance,
+  // same id → one `POST`) while still re-arming across a navigation.
+  //
+  // The `reset()` is part of the same re-arm: `triggerRateLimited` /
+  // `triggerErrored` below read this one shared mutation, so without it a
+  // `429` on the previous lesson would still be rendering its notice under
+  // the next lesson's untouched `not_started`.
+  const draftsTriggeredForRef = useRef<string | null>(null);
+  const triggerDrafts = triggerDraftsMutation.mutate;
+  const resetTriggerDrafts = triggerDraftsMutation.reset;
+  useEffect(() => {
+    if (!draftsPollEnabled || draftsTriggeredForRef.current === lessonId) return;
+    draftsTriggeredForRef.current = lessonId;
+    resetTriggerDrafts();
+    triggerDrafts();
+  }, [draftsPollEnabled, lessonId, triggerDrafts, resetTriggerDrafts]);
+
   // TDD §5.6's two frontend-owned failure rows (ticket 3): a capped or
-  // not-yet-complete trigger never claims a run, so the poll it fired for is
+  // not-yet-generated trigger never claims a run, so the poll it fired for is
   // stuck at `not_started` with nothing else to distinguish it from silence.
   // `DraftList` renders one line beside that state off these two booleans.
   const triggerRateLimited =
@@ -233,13 +278,23 @@ function LessonView() {
       });
       void queryClient.invalidateQueries({ queryKey: PROGRESS_QUERY_PREFIX });
 
-      // Flashcards (Phase 3 TDD D5/§8, mock screen 01's pin: "drawn as
-      // non-blocking"): drafting is triggered off the completion that just
-      // happened, below everything above it — the streak has already
-      // advanced by the time this fires, so a failed draft never touches it.
-      // Idempotent (D7), so firing it here — a mutation `onSuccess` React may
-      // run twice in strict mode — costs nothing extra.
-      if (flashcardsEnabled) {
+      // Flashcards (Phase 3 TDD D5/§8, AL-400): drafting is triggered off
+      // lesson *open* now (the effect above), not off this completion — by the
+      // time a learner reaches Mark complete, drafting has usually been running
+      // for as long as the lesson took to read. This is a belt-and-braces
+      // re-fire, covering a lesson opened before this shipped and an open-time
+      // trigger that never landed.
+      //
+      // Phrased as "fire unless a run demonstrably exists" rather than "fire if
+      // the poll says `not_started`": `data` is `undefined` while the drafts
+      // `GET` has never succeeded, and a blip that drops the open-time `POST`
+      // tends to drop that `GET` with it (same connection). Keying on
+      // `not_started` alone would skip the re-fire in exactly the case it
+      // exists for, and `DraftList` renders nothing on `undefined`, so the
+      // learner would get silence. Idempotent (D7), so the happy-path `POST`
+      // this occasionally duplicates costs nothing.
+      const draftsState = draftsQuery.data?.state;
+      if (flashcardsEnabled && draftsState !== "generating" && draftsState !== "generated") {
         triggerDraftsMutation.mutate();
       }
     },

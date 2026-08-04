@@ -435,7 +435,7 @@ nothing at all.
 
 | Method | Path | Query / Body | Success | Notes |
 | ------ | ---- | ------------- | ------- | ----- |
-| `POST` | `/api/v1/lessons/{lesson_id}/flashcard-drafts` | — | `202 {id}` | Trigger drafting for a completed lesson (CONTEXT.md: *Draft*). Idempotent — a second `POST` while the run is `generating`, or once it is `generated`, is a structural no-op (D7): the claim wins at most once, so this is safe to fire from a mutation `onSuccess` React may run twice. `409 lesson_not_complete` if `completed_at IS NULL`; `429` over `FLASHCARD_DRAFTS_PER_DAY`; an unowned/unknown lesson is `404`. |
+| `POST` | `/api/v1/lessons/{lesson_id}/flashcard-drafts` | — | `202 {id}` | Trigger drafting for a generated lesson (CONTEXT.md: *Draft*) — the client fires this on lesson *open*, not on completion (AL-400), so the cards are usually ready by the time the learner finishes. Idempotent — a second `POST` while the run is `generating`, or once it is `generated`, is a structural no-op (D7): the claim wins at most once, so this is safe to fire from a mutation `onSuccess` React may run twice, or from a mount effect on a route React may also re-run. `409 lesson_not_generated` if `generation_state != 'generated'`; `429` over `FLASHCARD_DRAFTS_PER_DAY`; an unowned/unknown lesson is `404`. |
 | `GET` | `/api/v1/lessons/{lesson_id}/flashcard-drafts` | — | `200 {state, cards}` | Poll target. `state` is `"not_started"` (never triggered), `"generating"`, `"generated"` (with every pending draft, creation order), or `"failed"` — retryable by re-`POST`ing the trigger route, rendering the existing retry affordance rather than a dead spinner. Abandoned drafts wait: revisiting a lesson long after the run resolved still re-serves them. |
 | `POST` | `/api/v1/lessons/{lesson_id}/flashcard-drafts/keep` | `{kept_ids, tz_offset_minutes}` | `200 {kept_ids}` | Keep the listed drafts (`kept_at = now()`, `rung = 0`, `due_on = today + ladder[0]` — never today, D1); every other pending draft of this lesson is deleted in the same transaction (PRD §3: discarded, not soft-deleted). `kept_ids: []` is "Skip — keep none." A `kept_id` that is not a pending draft **of this lesson** is `404` and mutates nothing. `tz_offset_minutes` is the client's `getTimezoneOffset()` value, same band as everywhere else — the service is the sole owner of "today" for the `due_on` arithmetic. |
 
@@ -452,9 +452,9 @@ nothing at all.
 
 **Wire codes (drafting):** `401 unauthenticated` · `404 not_found` (flag off;
 an unowned/unknown lesson; or, on keep, a `kept_id` that is not a pending draft
-of this lesson) · `409 conflict` with `details.reason == "lesson_not_complete"`
-(drafting a lesson that is not yet complete) · `429` over the daily drafting
-cap.
+of this lesson) · `409 conflict` with `details.reason == "lesson_not_generated"`
+(drafting a lesson whose `generation_state` is not yet `generated`) · `429`
+over the daily drafting cap.
 
 ### Review (§5.3-§5.4)
 

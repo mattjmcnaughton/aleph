@@ -71,7 +71,9 @@ the code does on the same day — the same step 0 the streaks slice took):
 the streak has already advanced — and *below* that, a proposal: `Aleph drafted 4 cards`, each
 a front and a back, each with a keep/discard toggle, all keeping by default. The primary
 action names what it will do: `Keep 3 cards`. `Skip — keep none` is beside it, equally
-reachable. Discarded drafts are not saved anywhere.
+reachable. Discarded drafts are not saved anywhere. Drafting itself *starts* when the lesson
+opens, not when it completes, so the cards are usually ready by the time the learner finishes
+reading — the proposal is still shown only once the lesson is complete.
 
 **Home (`/`, "Your paths").** Above the path list, below the streak line: a *Due today* card
 reading `10 cards · ~4 min`, with a `Review` action and a one-line breakdown of where they

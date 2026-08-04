@@ -781,8 +781,10 @@ export interface GradeCardResult {
   due_on: string;
 }
 
-/** Trigger drafting for a completed lesson (D5). `202`; idempotent (D7) —
- *  re-firing from a mutation `onSuccess` that React may run twice is safe. */
+/** Trigger drafting for a generated lesson (D5) — fired when the lesson is
+ *  opened (AL-400), not when it completes. `202`; idempotent (D7) — re-firing
+ *  from a mount effect, or a mutation `onSuccess`, that React may run twice
+ *  is safe either way. */
 export function triggerFlashcardDrafts(lessonId: string): Promise<{ id: string }> {
   return apiFetch<{ id: string }>(apiV1Path(`/lessons/${lessonId}/flashcard-drafts`), {
     method: "POST",
@@ -800,10 +802,16 @@ export function getFlashcardDrafts(lessonId: string): Promise<FlashcardDrafts> {
  * `not_started` except a fresh `POST .../flashcard-drafts`, and that trigger
  * invalidates this very query key itself (`routes/lessons.$lessonId.tsx`), so
  * there is no event this poll could ever be waiting to observe. Missing this
- * case used to mean **every already-completed lesson with no draft run** —
- * every one, the moment the `flashcards` flag went live, plus any lesson whose
- * trigger was refused (`429`/`409`) or errored — polled `GET
- * .../flashcard-drafts` every 5s forever, for as long as the tab stayed open.
+ * case used to mean any lesson sitting at `not_started` — historically every
+ * already-completed lesson the moment the `flashcards` flag went live, and
+ * still today any lesson whose trigger was refused (`429`/`409`) or errored —
+ * polled `GET .../flashcard-drafts` every 5s forever, for as long as the tab
+ * stayed open.
+ *
+ * Since AL-400 the poll starts on lesson *open*, so `not_started` is now the
+ * ordinary first reading of a freshly-opened lesson rather than an edge case:
+ * the poll stops immediately and the trigger's own `invalidateQueries` is what
+ * restarts it once a run exists.
  */
 export function isFlashcardDraftsTerminal(drafts: FlashcardDrafts | undefined): boolean {
   if (drafts === undefined) return false;
@@ -926,9 +934,13 @@ export function reviewQueueQueryOptions(enabled: boolean, pathId: string | null)
 
 /**
  * THE drafting-poll query, for the block below a lesson's completion state.
- * `enabled` is the caller's own `flashcardsEnabled && unlock_state ===
- * "complete"` — a drafting run only ever exists for a completed lesson, so
- * polling before that would only ever 404.
+ * `enabled` is the caller's own `flashcardsEnabled && generation_state ===
+ * "generated" && unlock_state !== "locked"` (AL-400) — the same guard the
+ * trigger route now enforces server-side (`409 lesson_not_generated`), and
+ * looser than the block's own render gate (still `unlock_state ===
+ * "complete"`): a drafting run can exist for a generated-but-incomplete
+ * lesson now that the trigger fires on open, so this query starts polling
+ * well before the block is shown.
  */
 export function flashcardDraftsQueryOptions(lessonId: string, enabled: boolean) {
   return queryOptions({
