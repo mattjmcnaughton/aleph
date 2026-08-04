@@ -120,13 +120,12 @@ def test_e2e_backend_boots_with_the_shaper_slot_stubbed_and_the_flag_on(
     create_stub_app()
 
     assert restored_live_settings.model_shaper == STUB_MODEL_ID
-    # Every dark surface is opened, and the shaping message cap is lifted like
-    # the other per-account caps: the e2e projects share one backend + user and
-    # would otherwise exhaust it. ``streaks`` joined this pin in Phase 5
-    # (TDD D7): it ships dark and the harness's one learner is not an admin, so
-    # without this entry W22/W23 would 404 rather than exercise the surface.
-    # ``flashcards`` joined it in Phase 3 (D10) for exactly the same reason —
-    # it is admin-only until the launch flip, so W24-W27 would 404 without it.
+    # ``tutor``, ``streaks``, and ``flashcards`` have all since launched and
+    # default on in code, which would make an explicit entry here redundant on
+    # its own — but this pin is kept for all four rather than thinned to just
+    # ``shaping``: the suite asserts against surfaces that must exist, and a
+    # silent code-default flip should surface as a failure here before it turns
+    # into a confusing "every spec 404s on an absent surface" somewhere else.
     assert restored_live_settings.feature_flag_default_map == {
         str(FeatureFlag.TUTOR): True,
         str(FeatureFlag.SHAPING): True,

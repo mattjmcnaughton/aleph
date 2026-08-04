@@ -148,17 +148,20 @@ def test_a_launched_flag_is_still_killable_without_a_code_deploy() -> None:
     assert feature_flags.effective_defaults(config)["shaping"] is True
 
 
-def test_flashcards_is_registered_and_dark_by_default() -> None:
-    """Phase 3's one flag, registered the same way the other three were built.
+def test_flashcards_is_registered_and_launched_on_by_default() -> None:
+    """Phase 3's one flag, registered and launched the same way (TDD D10).
 
-    Unlike ``tutor``/``shaping``/``streaks`` (all launched, D10 recorded so a
-    fresh clone matches what a learner sees), ``flashcards`` has **not**
-    launched: it starts ``False`` here, the same dark posture the other three
-    spent their own build-out at, so every flashcards ticket merges and deploys
-    with zero learner exposure while admins dogfood it via the admin baseline.
+    It spent Phase 3's whole build-out at ``False`` — that dark posture is what
+    let every flashcards ticket, drafting through AL-410's card-management
+    surfaces, merge and deploy with zero learner exposure while admins
+    dogfooded it via the admin baseline. This flip is the launch itself: the
+    fourth flag to run the ``tutor``/``shaping``/``streaks`` playbook.
+    Membership in :data:`ADMIN_DEFAULT_FLAGS` is asserted still: it is
+    redundant while the default is ``True``, but it is what the flag falls
+    back to if this is ever flipped dark again.
     """
     assert feature_flags.FeatureFlag.FLASHCARDS == "flashcards"
-    assert feature_flags.FLAG_DEFAULTS[feature_flags.FeatureFlag.FLASHCARDS] is False
+    assert feature_flags.FLAG_DEFAULTS[feature_flags.FeatureFlag.FLASHCARDS] is True
     assert feature_flags.FeatureFlag.FLASHCARDS in feature_flags.ADMIN_DEFAULT_FLAGS
 
 

@@ -1,9 +1,17 @@
-"""Data access for flashcards: the queue read, grading, and drafting (TDD §5/§4).
+"""Data access for flashcards: the queue read, grading, drafting, and card
+management (TDD §5/§4; AL-410/issue #156 §2).
 
-Every query and write this phase needs lives here — downstream tickets (the
-scheduler, the read services, the routes) are forbidden from adding methods to
-this module, so the surface below is deliberately complete rather than grown
-incrementally.
+Every query and write **Phase 3** needed lived here, and downstream *Phase 3*
+tickets were forbidden from adding methods to this module — but that was a
+**within-phase** rule: the TDD's delivery plan wanted the surface complete
+before ticket 5 shipped, not grown piecemeal mid-phase, and once Phase 3
+shipped that rule had nothing left to enforce. AL-410 is a **post-phase
+amendment**, not a ticket squeezed inside the same window, and it adds methods
+here rather than working around the old wording or standing up a second
+module: ``list_cards_for_user``/``update_card_text``/``soft_delete_card`` are
+plain Flashcard-table access, exactly what every method above them already is,
+and centralizing every Flashcard-table read/write in one repository is the
+property worth keeping — not the closed-door framing that used to protect it.
 
 **This module must not import :mod:`aleph.domains.scheduling`.** The pure
 ladder and the daily selection are a concurrently-written module's business;
@@ -22,10 +30,12 @@ keep/discard (:meth:`FlashcardRepository.keep_drafts`) each be one atomic unit
 
 from __future__ import annotations
 
+import datetime
+import uuid
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Date, cast, delete, func, or_, select, update
+from sqlalchemy import Date, cast, delete, func, literal, or_, select, tuple_, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from aleph.config import settings
@@ -43,9 +53,12 @@ from aleph.repositories._generation import (
     effective_state_case,
 )
 
+# ``uuid``/``datetime`` are real (not ``TYPE_CHECKING``-only) imports: AL-410's
+# cursor codec (:func:`_parse_cursor`/:func:`_build_cursor`, below) parses and
+# formats both at runtime, unlike every other name in this module, which is
+# used in annotations alone under ``from __future__ import annotations``.
+
 if TYPE_CHECKING:
-    import datetime
-    import uuid
     from collections.abc import Sequence
     from datetime import date
 
@@ -74,7 +87,8 @@ class DueCandidate:
 
 @dataclass(frozen=True)
 class FlashcardRecord:
-    """One **kept** card's full detail — the queue's hydration read (§5.3).
+    """One **kept** card's full detail — the queue's hydration read (§5.3),
+    shared verbatim with AL-410's card list (§2).
 
     ``current_lesson_generated_at`` is the *live* value of the source lesson's
     ``generated_at`` (``None`` when ``source_lesson_id`` is ``None`` — the FK
@@ -82,6 +96,15 @@ class FlashcardRecord:
     Deciding "linked" vs "degraded" (D12) is a service-layer judgement — comparing
     this to ``source_generated_at`` — deliberately left undone here: a
     repository reports facts, not the citation's kind.
+
+    ``kept_at``/``edited_at`` (AL-410) ride along on every read of this shape,
+    not only the list's — one hydration shape for both reads beats a second,
+    near-identical dataclass that drifts from this one's field-for-field. The
+    queue simply ignores both; the list needs ``kept_at`` for its keyset
+    cursor and ``edited_at`` for display. Both are guaranteed non-``NULL``
+    (``kept_at``) or meaningfully ``NULL`` (``edited_at``, "never edited") by
+    every query that produces this record, since each one already filters to
+    ``kept_at IS NOT NULL``.
     """
 
     id: uuid.UUID
@@ -89,12 +112,81 @@ class FlashcardRecord:
     back: str
     rung: int
     due_on: date
+    kept_at: datetime.datetime
+    edited_at: datetime.datetime | None
     source_lesson_id: uuid.UUID | None
     source_path_id: uuid.UUID | None
     source_lesson_title: str
     source_path_title: str
     source_generated_at: datetime.datetime
     current_lesson_generated_at: datetime.datetime | None
+
+
+# --------------------------------------------------------------------------- #
+# AL-410 §2: the card list's page-size ceiling, the keyset cursor codec, and
+# the ``ILIKE`` escaper. Module-level because none of the three touches
+# ``self`` — the cursor codec in particular is reused nowhere near the ORM.
+# --------------------------------------------------------------------------- #
+
+# Enforced here as well as at the DTO/query-param layer
+# (``dtos/flashcards.py``'s ``Query(..., le=50)``) — defense in depth for a
+# caller that reaches this repository directly, bypassing the router.
+MAX_CARD_LIST_LIMIT = 50
+
+
+class InvalidCursorError(ValueError):
+    """Raised by :func:`_parse_cursor` on a ``cursor`` that does not decode as
+    ``"{kept_at_isoformat}|{card_id}"`` (§2) — opaque to the client by
+    construction, so any other shape is exactly as malformed as a
+    hand-crafted one. Caught by :mod:`aleph.services.reviews`, which turns it
+    into a ``422`` (never a ``500``): a stale or hand-edited cursor is bad
+    input, not a server failure.
+    """
+
+
+@dataclass(frozen=True)
+class CardPage:
+    """One page of :meth:`FlashcardRepository.list_cards_for_user`, plus its
+    cursor (§2). ``next_cursor`` is ``None`` once the last page is reached —
+    the client's own signal to stop offering "Load more" rather than firing a
+    request that would come back empty.
+    """
+
+    cards: list[FlashcardRecord]
+    next_cursor: str | None
+
+
+def _parse_cursor(cursor: str) -> tuple[datetime.datetime, uuid.UUID]:
+    """Decode ``"{kept_at_isoformat}|{card_id}"`` -> ``(kept_at, card_id)``.
+
+    Raises :class:`InvalidCursorError` on anything else — a missing
+    separator, an unparseable timestamp, or a non-UUID id — rather than
+    letting the underlying ``ValueError`` from ``datetime.fromisoformat``/
+    ``uuid.UUID`` propagate under its own name: every caller then has exactly
+    one exception type to catch for "this cursor is garbage."
+    """
+    try:
+        kept_at_raw, card_id_raw = cursor.split("|", 1)
+        return datetime.datetime.fromisoformat(kept_at_raw), uuid.UUID(card_id_raw)
+    except ValueError as exc:
+        raise InvalidCursorError(f"malformed cursor: {cursor!r}") from exc
+
+
+def _build_cursor(kept_at: datetime.datetime, card_id: uuid.UUID) -> str:
+    """The inverse of :func:`_parse_cursor` — opaque to the client either way."""
+    return f"{kept_at.isoformat()}|{card_id}"
+
+
+def _escape_like(needle: str) -> str:
+    """Escape ``%``/``_``/the escape character itself, for a literal ``ILIKE``.
+
+    Order matters: the escape character (``\\``) is escaped *first*, or
+    escaping ``%``/``_`` afterwards would double-escape the backslashes those
+    two steps just introduced. Without this, a learner searching for a card
+    containing a literal ``%`` would have it silently read as an ``ILIKE``
+    wildcard and match every card (§2's own stated risk).
+    """
+    return needle.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 class FlashcardRepository:
@@ -159,6 +251,10 @@ class FlashcardRepository:
         (§5.3): a card **kept** later in the day never joins today's set (it is
         due tomorrow — the desired behaviour), and nothing in this design
         writes ``due_on`` except a review.
+
+        **Excludes soft-deleted cards** (``deleted_at IS NOT NULL``, AL-410):
+        correctness-critical, not defensive — miss this and a deleted card
+        keeps appearing in the daily queue it was removed from.
         """
         # ``reviewed_at`` alone does not total-order two reviews of the same
         # card written in the same instant (a double-tap racing the
@@ -214,6 +310,7 @@ class FlashcardRepository:
             .where(
                 Flashcard.user_id == user_id,
                 Flashcard.kept_at.isnot(None),
+                Flashcard.deleted_at.is_(None),
                 or_(Flashcard.due_on <= today, first_today.c.card_id.isnot(None)),
             )
         )
@@ -243,6 +340,11 @@ class FlashcardRepository:
         in ``card_ids`` order — so a caller that needs a specific order (the
         queue's serve order, §5.3) must re-sort the result against the
         selection that produced ``card_ids`` in the first place.
+
+        **Excludes soft-deleted cards** (``deleted_at IS NOT NULL``, AL-410),
+        correctness-critical for the same reason :meth:`due_candidates` filters
+        it: a deleted id passed in here (e.g. hydrating a stale selection) must
+        not silently hydrate back into a queue.
         """
         if not card_ids:
             return []
@@ -253,6 +355,8 @@ class FlashcardRepository:
                 Flashcard.back,
                 Flashcard.rung,
                 Flashcard.due_on,
+                Flashcard.kept_at,
+                Flashcard.edited_at,
                 Flashcard.source_lesson_id,
                 Flashcard.source_path_id,
                 Flashcard.source_lesson_title,
@@ -266,6 +370,7 @@ class FlashcardRepository:
                 Flashcard.user_id == user_id,
                 Flashcard.id.in_(card_ids),
                 Flashcard.kept_at.isnot(None),
+                Flashcard.deleted_at.is_(None),
             )
         )
         return [
@@ -275,6 +380,8 @@ class FlashcardRepository:
                 back=row.back,
                 rung=row.rung,
                 due_on=row.due_on,
+                kept_at=row.kept_at,
+                edited_at=row.edited_at,
                 source_lesson_id=row.source_lesson_id,
                 source_path_id=row.source_path_id,
                 source_lesson_title=row.source_lesson_title,
@@ -297,10 +404,24 @@ class FlashcardRepository:
         (:mod:`aleph.services.reviews`, not this layer) race-free against a
         double-tapped grade. ``None`` for an unowned or unknown id — 404, never
         403 (§4 item 3, the same posture as every other ownership read here).
+
+        **Also excludes a soft-deleted card** (``deleted_at IS NOT NULL``,
+        AL-410) — deliberately, not incidentally. Without this filter, grading
+        a deleted card would still load the row here, fail the *next* guard
+        instead (:mod:`aleph.services.reviews`'s ``due_candidates`` re-derivation,
+        which already excludes deleted cards), and surface as ``409 not_due`` —
+        a misleading answer for a card that was never "not due today" but
+        simply gone. Filtering here makes it ``404`` instead, which is what the
+        acceptance criteria require and the only answer a deleted card should
+        ever produce.
         """
         result = await self.session.execute(
             select(Flashcard)
-            .where(Flashcard.id == card_id, Flashcard.user_id == user_id)
+            .where(
+                Flashcard.id == card_id,
+                Flashcard.user_id == user_id,
+                Flashcard.deleted_at.is_(None),
+            )
             .with_for_update()
         )
         return result.scalar_one_or_none()
@@ -683,3 +804,194 @@ class FlashcardRepository:
             )
         )
         return kept_count
+
+    # -- card management: list / edit / delete (AL-410 / issue #156, §2) ----- #
+
+    async def list_cards_for_user(
+        self,
+        *,
+        user_id: uuid.UUID,
+        limit: int,
+        cursor: str | None,
+        path_id: uuid.UUID | None,
+        query: str | None,
+    ) -> CardPage:
+        """The card list's browse read (§2): every **kept**, non-deleted card,
+        most-recently-kept first, cursor-paginated.
+
+        The base filter — ``user_id``, ``kept_at IS NOT NULL``, ``deleted_at
+        IS NULL`` — and the ``Lesson`` left-join mirror :meth:`cards_by_ids`
+        exactly, so the citation degrades identically here and on the queue
+        (D12): one join shape, reused, never re-derived.
+
+        ``path_id`` narrows to one path's cards (``source_path_id ==
+        path_id``). ``query`` is a case-insensitive substring match on
+        **either** ``front`` or ``back`` — the search bar looks at both sides
+        of a card, not just its prompt — with ``%``/``_``/the escape
+        character itself escaped by :func:`_escape_like` before reaching
+        ``ILIKE``; an unescaped ``%`` in a learner's search text would
+        otherwise be silently read as a wildcard and match every card.
+
+        **Cursor, not offset** (§2) — stable across a concurrent delete, which
+        an offset is not: deleting row 3 of a 20-row page shifts every row
+        after it up by one, so an offset-based "page 2" would skip or repeat a
+        row depending on which side of the delete it fell. ``cursor`` decodes
+        via :func:`_parse_cursor` to ``(kept_at, card_id)`` and is applied as
+        one row-comparison predicate — ``tuple_(kept_at, id) <
+        tuple_(cursor_kept_at, cursor_id)`` — matching the ``ORDER BY kept_at
+        DESC, id DESC`` below exactly, rather than a hand-expanded ``OR``
+        that is easy to get subtly wrong at the tie-break. A malformed
+        ``cursor`` propagates :class:`InvalidCursorError` to the caller
+        (``services/reviews.py`` turns it into a ``422``).
+
+        ``limit`` is capped at :data:`MAX_CARD_LIST_LIMIT` here too — defense
+        in depth alongside the DTO/query-param cap (§5) — and fetched as
+        ``capped_limit + 1``: when the extra row comes back, the page is the
+        first ``capped_limit`` rows and ``next_cursor`` is built from the last
+        *returned* row (:func:`_build_cursor`); otherwise there is no next
+        page and ``next_cursor`` is ``None``.
+
+        **Also floored at 1** (``max(1, min(limit, MAX_CARD_LIST_LIMIT))``),
+        not just capped from above — the router's own ``Query(20, ge=1,
+        le=50)`` never lets ``limit <= 0`` reach here, but this method's own
+        docstring (and :data:`MAX_CARD_LIST_LIMIT`'s) sell the repo-level cap
+        as protection "for a caller that reaches this repository directly,
+        bypassing the router," and for that caller a bare ``min()`` is a trap:
+        ``limit=0`` (or negative) would still fetch ``capped_limit + 1 == 1``
+        row, the lookahead row makes ``has_more`` true, ``page_rows`` (the
+        first ``0`` of those rows) is empty, and ``page_rows[-1]`` in the
+        ``next_cursor`` branch below raises ``IndexError`` — a ``500`` for
+        exactly the caller this cap claims to protect. Flooring at 1 makes the
+        clamp actually total for any integer input, matching the docstring's
+        claim instead of only defending the upper bound.
+        """
+        conditions = [
+            Flashcard.user_id == user_id,
+            Flashcard.kept_at.isnot(None),
+            Flashcard.deleted_at.is_(None),
+        ]
+        if path_id is not None:
+            conditions.append(Flashcard.source_path_id == path_id)
+        if query:
+            needle = f"%{_escape_like(query)}%"
+            conditions.append(
+                or_(
+                    Flashcard.front.ilike(needle, escape="\\"),
+                    Flashcard.back.ilike(needle, escape="\\"),
+                )
+            )
+        if cursor is not None:
+            cursor_kept_at, cursor_id = _parse_cursor(cursor)
+            conditions.append(
+                tuple_(Flashcard.kept_at, Flashcard.id)
+                < tuple_(literal(cursor_kept_at), literal(cursor_id))
+            )
+
+        capped_limit = max(1, min(limit, MAX_CARD_LIST_LIMIT))
+        result = await self.session.execute(
+            select(
+                Flashcard.id,
+                Flashcard.front,
+                Flashcard.back,
+                Flashcard.rung,
+                Flashcard.due_on,
+                Flashcard.kept_at,
+                Flashcard.edited_at,
+                Flashcard.source_lesson_id,
+                Flashcard.source_path_id,
+                Flashcard.source_lesson_title,
+                Flashcard.source_path_title,
+                Flashcard.source_generated_at,
+                Lesson.generated_at.label("current_lesson_generated_at"),
+            )
+            .select_from(Flashcard)
+            .outerjoin(Lesson, Lesson.id == Flashcard.source_lesson_id)
+            .where(*conditions)
+            .order_by(Flashcard.kept_at.desc(), Flashcard.id.desc())
+            .limit(capped_limit + 1)
+        )
+        rows = result.all()
+        has_more = len(rows) > capped_limit
+        page_rows = rows[:capped_limit]
+        cards = [
+            FlashcardRecord(
+                id=row.id,
+                front=row.front,
+                back=row.back,
+                rung=row.rung,
+                due_on=row.due_on,
+                kept_at=row.kept_at,
+                edited_at=row.edited_at,
+                source_lesson_id=row.source_lesson_id,
+                source_path_id=row.source_path_id,
+                source_lesson_title=row.source_lesson_title,
+                source_path_title=row.source_path_title,
+                source_generated_at=row.source_generated_at,
+                current_lesson_generated_at=row.current_lesson_generated_at,
+            )
+            for row in page_rows
+        ]
+        next_cursor = (
+            _build_cursor(page_rows[-1].kept_at, page_rows[-1].id) if has_more else None
+        )
+        return CardPage(cards=cards, next_cursor=next_cursor)
+
+    async def update_card_text(
+        self, *, user_id: uuid.UUID, card_id: uuid.UUID, front: str, back: str
+    ) -> FlashcardRecord | None:
+        """Rewrite a kept card's ``front``/``back`` (§3): ``UPDATE flashcards
+        SET front, back, edited_at = now(), updated_at = now() WHERE id = :id
+        AND user_id = :uid AND kept_at IS NOT NULL AND deleted_at IS NULL``.
+
+        **Never touches ``rung``/``due_on``** — fixing a typo does not reset
+        what the learner already knows; only a graded review moves those two
+        columns (§5.4's own transaction owns them exclusively). Returns
+        ``None`` for unowned / unknown / a draft (``kept_at IS NULL``) /
+        already-deleted — the caller (``services/reviews.py``) turns that into
+        a ``404``, never a ``403`` (§4 item 3's posture, held here too).
+
+        Re-reads through :meth:`cards_by_ids` rather than a ``RETURNING``
+        clause: the citation still needs the ``Lesson`` join (D12), which a
+        plain ``UPDATE ... RETURNING`` cannot express, and a second query on
+        exactly one id is cheap next to a hand-rolled join-returning
+        statement.
+        """
+        result = await self.session.execute(
+            update(Flashcard)
+            .where(
+                Flashcard.id == card_id,
+                Flashcard.user_id == user_id,
+                Flashcard.kept_at.isnot(None),
+                Flashcard.deleted_at.is_(None),
+            )
+            .values(front=front, back=back, edited_at=func.now(), updated_at=func.now())
+        )
+        if affected_rows(result) == 0:
+            return None
+        records = await self.cards_by_ids(user_id=user_id, card_ids=[card_id])
+        return records[0] if records else None
+
+    async def soft_delete_card(self, *, user_id: uuid.UUID, card_id: uuid.UUID) -> bool:
+        """Soft-delete a kept card (see ``Flashcard.deleted_at``'s docstring
+        for why it is soft): ``UPDATE flashcards SET deleted_at = now(),
+        updated_at = now() WHERE id = :id AND user_id = :uid AND kept_at IS
+        NOT NULL AND deleted_at IS NULL``.
+
+        ``False`` for unowned / unknown / a draft / **already-deleted** — the
+        last of those is deliberate, not a gap: a double-tapped delete finds
+        no row left matching its own ``deleted_at IS NULL`` predicate, so a
+        second call is an honest ``404`` (via the caller) rather than a silent
+        second success. The row and its ``flashcard_reviews`` are otherwise
+        untouched by this statement — no cascade, no data loss.
+        """
+        result = await self.session.execute(
+            update(Flashcard)
+            .where(
+                Flashcard.id == card_id,
+                Flashcard.user_id == user_id,
+                Flashcard.kept_at.isnot(None),
+                Flashcard.deleted_at.is_(None),
+            )
+            .values(deleted_at=func.now(), updated_at=func.now())
+        )
+        return affected_rows(result) > 0

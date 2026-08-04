@@ -3,7 +3,7 @@
 // component builds a URL or calls `fetch` directly. Resource routes live under
 // `/api/v1` (TDD §6); the OIDC flow lives at unversioned `/auth/*`.
 
-import { queryOptions, skipToken } from "@tanstack/react-query";
+import { infiniteQueryOptions, queryOptions, skipToken } from "@tanstack/react-query";
 
 const API_BASE = import.meta.env?.VITE_API_URL ?? "";
 
@@ -946,5 +946,136 @@ export function flashcardDraftsQueryOptions(lessonId: string, enabled: boolean) 
   return queryOptions({
     queryKey: flashcardDraftsQueryKey(lessonId),
     queryFn: enabled ? () => getFlashcardDrafts(lessonId) : skipToken,
+  });
+}
+
+// --- Card list (AL-410, docs/api.md ## Flashcards) --------------------------
+//
+// The browse/edit/delete surface a launched retention loop was missing: the
+// Daily queue is capped at ten (PRD §4.4) and shows only what happens to be
+// due *today*, so there was no way to find a specific kept card, fix a typo
+// in one, or drop one that stopped being useful (AL-410's own justification,
+// `docs/prds/phase-3-flashcards.md` §7). Same flag gate as every other route
+// in this file (`useFeatureFlag("flashcards")` -> `skipToken` when off), and
+// the same `FLASHCARDS_QUERY_PREFIX` every mutation here invalidates through
+// — one call reaches the queue, the summary/pill, and this list together.
+
+/**
+ * One card as `/cards` shows it (`CardListItemDTO`, docs/api.md). Carries
+ * `rung` — the DTO ships it (AL-410 plan §4) — but no renderer in this app
+ * reads it: CONTEXT.md's *rung* is scheduler vocabulary the learner is never
+ * shown, and this ticket is deliberately not the place to introduce it
+ * (AL-410 plan's product call #2). Only `due_on` reaches the screen.
+ */
+export interface CardListItem {
+  id: string;
+  front: string;
+  back: string;
+  rung: number;
+  due_on: string;
+  /** Null until a learner edits the card — the trust-boundary marker
+   *  ("edit provenance", AL-410 plan §1) that lets eval sampling keep
+   *  telling agent-written card text apart from learner-written text. */
+  edited_at: string | null;
+  /** Same discriminated shape the review session's `QueueCard.source` carries
+   *  (D12) — rendered by the same rule, `components/review/card-source.tsx`. */
+  source: FlashcardCitation;
+}
+
+/** `GET /api/v1/flashcards` body — one page, newest-kept-first (docs/api.md). */
+export interface CardList {
+  cards: CardListItem[];
+  /** Opaque `"{kept_at}|{id}"` keyset cursor (AL-410 plan §2) — never parsed
+   *  or built here, only round-tripped back as the next page's `cursor`. A
+   *  cursor (not an offset) is what keeps pagination stable across a card
+   *  another tab deletes mid-browse. */
+  next_cursor: string | null;
+}
+
+/** Query params for `GET /flashcards`, all optional (docs/api.md). */
+export interface CardListParams {
+  pathId?: string | null;
+  q?: string | null;
+  cursor?: string | null;
+  limit?: number;
+}
+
+/** One page of the learner's kept cards, filtered/paginated server-side. */
+export function getCards(params: CardListParams = {}): Promise<CardList> {
+  const query = new URLSearchParams();
+  if (params.limit !== undefined) query.set("limit", String(params.limit));
+  if (params.cursor) query.set("cursor", params.cursor);
+  if (params.pathId) query.set("path_id", params.pathId);
+  if (params.q) query.set("q", params.q);
+  const qs = query.toString();
+  return apiFetch<CardList>(apiV1Path(`/flashcards${qs ? `?${qs}` : ""}`));
+}
+
+/**
+ * Edit a kept card's text (docs/api.md `PATCH /flashcards/{id}`). Never
+ * touches `rung`/`due_on` server-side (AL-410 plan §2/§5 — fixing wording
+ * does not reset what the learner knows); the caller only ever sends
+ * `front`/`back`. Returns the full updated `CardListItemDTO` so `card-row.tsx`
+ * can render the server's own `edited_at` rather than guessing a timestamp.
+ */
+export function updateCard(input: {
+  cardId: string;
+  front: string;
+  back: string;
+}): Promise<CardListItem> {
+  return apiFetch<CardListItem>(apiV1Path(`/flashcards/${input.cardId}`), {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ front: input.front, back: input.back }),
+  });
+}
+
+/**
+ * Soft-delete a kept card (docs/api.md `DELETE /flashcards/{id}` -> `204`).
+ * `flashcard_reviews` survives underneath it (AL-410 plan §1's "why soft
+ * delete" — a hard delete would retroactively erase past Active days from the
+ * Daily streak), but that is entirely a backend concern: from here it reads
+ * exactly like `deletePath` — gone, not undoable, `404` on a repeat.
+ */
+export function deleteCard(cardId: string): Promise<void> {
+  return apiFetch<void>(apiV1Path(`/flashcards/${cardId}`), { method: "DELETE" });
+}
+
+/** TanStack query key for one filtered card list (mirrors `reviewQueueQueryKey`'s
+ *  offset+path scoping, minus the offset — the list carries no due/today
+ *  math, so there is nothing here a timezone crossing would ever invalidate). */
+export function cardsQueryKey(
+  pathId: string | null,
+  q: string | null,
+): readonly ["flashcards", "list", string | null, string | null] {
+  return [...FLASHCARDS_QUERY_PREFIX, "list", pathId, q] as const;
+}
+
+/**
+ * THE card-list query, for `/cards` (AL-410 plan §6) — an **infinite** query,
+ * unlike every other factory in this file, because "Load more" is the one
+ * place this phase paginates (a single page + `next_cursor`-driven button,
+ * never scroll-triggered auto-fetch — `routes/cards.tsx` calls
+ * `fetchNextPage()` from a button's `onClick` alone, per the plan's explicit
+ * "do not build infinite scroll"). `useInfiniteQuery` over hand-rolled
+ * page-appending state buys one thing that would otherwise have to be
+ * reinvented: `invalidateQueries({queryKey: FLASHCARDS_QUERY_PREFIX})` (the
+ * edit/delete mutations' own rule) refetches every page already loaded, each
+ * one keyed off the cursor the *previous* page's own refetch actually
+ * returned — so a page fetched before a delete still lines up with the
+ * server's post-delete rows rather than silently collapsing back to page one
+ * and discarding whatever "Load more" had already fetched.
+ */
+export function cardsQueryOptions(
+  enabled: boolean,
+  { pathId, q }: { pathId: string | null; q: string | null },
+) {
+  return infiniteQueryOptions({
+    queryKey: cardsQueryKey(pathId, q),
+    queryFn: enabled
+      ? ({ pageParam }: { pageParam: string | null }) => getCards({ pathId, q, cursor: pageParam })
+      : skipToken,
+    initialPageParam: null as string | null,
+    getNextPageParam: (lastPage: CardList) => lastPage.next_cursor,
   });
 }

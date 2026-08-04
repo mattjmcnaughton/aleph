@@ -261,6 +261,11 @@ class FlashcardCaps:
 
     count_min: int = 3
     count_max: int = 5
+    # `front_words_max`/`back_words_max` are hand-mirrored on the frontend —
+    # `src/aleph/web/frontend/src/lib/flashcard-caps.ts`'s `FRONT_WORDS_MAX`/
+    # `BACK_WORDS_MAX` — so the client can disable `/cards`' Save button before
+    # a doomed `PATCH` ever leaves the browser (AL-410). Lowering either
+    # default here without updating that file leaves the two caps disagreeing.
     front_words_max: int = 25
     back_words_max: int = 60
 

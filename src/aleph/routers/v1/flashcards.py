@@ -1,14 +1,17 @@
-"""Flashcards API: drafting, the review queue, its summary, and grading
-(Phase 3 TDD §5.2-6).
+"""Flashcards API: drafting, the review queue, its summary, grading, and
+(AL-410 / issue #156) the card list / edit / delete surface (Phase 3 TDD
+§5.2-6; AL-410 §5).
 
 Ticket 5 shipped `GET /reviews/summary`, `GET /reviews/queue`, `POST /reviews`.
-This ticket adds the three drafting routes — `POST
+Ticket 4 added the three drafting routes — `POST
 /lessons/{id}/flashcard-drafts`, `GET .../flashcard-drafts`, `POST
-.../flashcard-drafts/keep` — to the **same router**, following
-`routers/v1/progress.py`'s conventions verbatim: session-cookie auth
-(`get_current_user` -> `401` through the shared envelope), the router-level
-flag gate (inherited by construction, TDD D10's whole point), and
-404-never-403 everywhere ownership is at stake.
+.../flashcard-drafts/keep`. AL-410 adds a third section, `GET /flashcards`,
+`PATCH /flashcards/{card_id}`, `DELETE /flashcards/{card_id}` — to the **same
+router**, following `routers/v1/progress.py`'s conventions verbatim:
+session-cookie auth (`get_current_user` -> `401` through the shared envelope),
+the router-level flag gate (inherited by construction, TDD D10's whole point —
+AL-410 adds no gate of its own), and 404-never-403 everywhere ownership is at
+stake.
 
 **The flag gate lives here, not in `services/feature_flags.py`.** Every other
 flag gate (`require_tutor_enabled`, `require_shaping_enabled`,
@@ -16,16 +19,19 @@ flag gate (`require_tutor_enabled`, `require_shaping_enabled`,
 follows suit (TDD D10 — it was defined in `services/feature_flags.py` only as
 a placeholder until this file existed).
 
-**Read-only except two writes.** `GET /reviews/summary` and `GET
-/reviews/queue` hold no `session.commit()` — the derivation they read is a
-pure function of already-committed state (D3). `POST /reviews` and `POST
-.../flashcard-drafts/keep` are the two writes: each commits once, after its
-service function returns, so its two-statement transaction (review-append +
-projection-update, §5.4; keep-update + discard-delete, §5.2) lands atomically.
-`POST .../flashcard-drafts` triggers a **background** claim + run
+**Read-only except four writes.** `GET /reviews/summary`, `GET
+/reviews/queue`, and `GET /flashcards` hold no `session.commit()` — each reads
+a derivation of already-committed state (D3/§2). `POST /reviews`, `POST
+.../flashcard-drafts/keep`, `PATCH /flashcards/{card_id}`, and `DELETE
+/flashcards/{card_id}` are the four writes: each commits once, after its
+service function returns, so its transaction (review-append +
+projection-update, §5.4; keep-update + discard-delete, §5.2; the text/
+`edited_at` update, §3; the soft-delete update, §3) lands atomically. `POST
+.../flashcard-drafts` triggers a **background** claim + run
 (`FlashcardDraftingService.trigger_draft_run`) and returns `202` with no
 session write of its own — the claim commits inside the spawned task, not the
-request (§5.2).
+request (§5.2). **No rate limiting on any of AL-410's three routes** — unlike
+`POST .../flashcard-drafts`, none of them calls a model.
 """
 
 from __future__ import annotations
@@ -33,7 +39,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Annotated
 from uuid import UUID  # noqa: TC003 - FastAPI resolves query-param annotations.
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import (  # noqa: TC002 - FastAPI resolves annotations.
     AsyncSession,
 )
@@ -43,6 +49,8 @@ from aleph.config import settings
 from aleph.db import get_session
 from aleph.dependencies import get_current_user
 from aleph.dtos.flashcards import (
+    CardListItemDTO,
+    CardListResponse,
     DegradedCitationDTO,
     FlashcardDraftCardDTO,
     FlashcardDraftsResponse,
@@ -56,6 +64,7 @@ from aleph.dtos.flashcards import (
     ReviewQueueResponse,
     ReviewSummaryResponse,
     TriggerFlashcardDraftsResponse,
+    UpdateCardRequest,
 )
 from aleph.dtos.progress import TzOffsetMinutes  # noqa: TC001 - FastAPI resolves it.
 from aleph.models import (  # noqa: TC001 - FastAPI resolves annotations.
@@ -64,6 +73,7 @@ from aleph.models import (  # noqa: TC001 - FastAPI resolves annotations.
     User,
 )
 from aleph.repositories import LessonRepository
+from aleph.repositories.flashcards import MAX_CARD_LIST_LIMIT
 from aleph.services.feature_flags import FeatureFlag, FeatureFlagService
 from aleph.services.flashcard_drafting import (
     flashcard_drafting_service,
@@ -71,12 +81,21 @@ from aleph.services.flashcard_drafting import (
     load_flashcard_drafts,
 )
 from aleph.services.rate_limit import build_daily_rate_limiter
-from aleph.services.reviews import grade_card, load_review_queue, load_review_summary
+from aleph.services.reviews import (
+    delete_card,
+    edit_card,
+    grade_card,
+    load_card_list,
+    load_review_queue,
+    load_review_summary,
+)
 
 if TYPE_CHECKING:
     from aleph.dtos.flashcards import CitationDTO
     from aleph.services.flashcard_drafting import DraftsView, KeepResultView
     from aleph.services.reviews import (
+        CardListItemView,
+        CardListView,
         CitationView,
         QueueCardView,
         ReviewQueueView,
@@ -379,3 +398,91 @@ async def post_keep_flashcard_drafts(
     )
     await session.commit()
     return _keep_response(result)
+
+
+# --------------------------------------------------------------------------- #
+# Card management (AL-410 / issue #156, §5) — browse, edit, delete every kept
+# card. Same router, same flag gate (D10: one flag stays one flag) — no new
+# gate, no new rate limiter (none of the three routes below calls a model).
+# --------------------------------------------------------------------------- #
+
+
+def _card_list_item_dto(view: CardListItemView) -> CardListItemDTO:
+    """Explicit construction (not `model_validate(from_attributes=True)`),
+    the one chosen mapping style in this codebase, mirroring `_queue_card_dto`.
+    """
+    return CardListItemDTO(
+        id=view.id,
+        front=view.front,
+        back=view.back,
+        rung=view.rung,
+        due_on=view.due_on,
+        edited_at=view.edited_at,
+        source=_citation_dto(view.source),
+    )
+
+
+def _card_list_response(view: CardListView) -> CardListResponse:
+    return CardListResponse(
+        cards=[_card_list_item_dto(card) for card in view.cards],
+        next_cursor=view.next_cursor,
+    )
+
+
+@router.get("/flashcards")
+async def get_flashcards(
+    user: CurrentUser,
+    session: Session,
+    limit: int = Query(20, ge=1, le=MAX_CARD_LIST_LIMIT),
+    cursor: str | None = None,
+    path_id: UUID | None = None,
+    q: str | None = None,
+) -> CardListResponse:
+    """Browse every kept card (§2/§5): most-recently-kept first, cursor-paginated.
+
+    `path_id` and `q` filter **one** list, never two endpoints (§5) — `q` is a
+    case-insensitive substring match on either side of the card. A malformed
+    `cursor` is a `422` (`load_card_list` raises through the shared envelope),
+    never a `500`. `limit` is bounded `[1, MAX_CARD_LIST_LIMIT]` here at the
+    query-param layer, imported from the repository rather than a second
+    literal `50` — the docstrings on both sides call this one cap enforced
+    twice, which is only true so long as there is exactly one `50` for the two
+    layers to agree on — and again inside the repository (defense in depth for
+    a caller that reaches it directly).
+    """
+    view = await load_card_list(
+        session,
+        user_id=user.id,
+        limit=limit,
+        cursor=cursor,
+        path_id=path_id,
+        query=q,
+    )
+    return _card_list_response(view)
+
+
+@router.patch("/flashcards/{card_id}")
+async def patch_flashcard(
+    card_id: UUID, body: UpdateCardRequest, user: CurrentUser, session: Session
+) -> CardListItemDTO:
+    """Edit a kept card's text (§3/§5): `404` unowned/unknown/draft/deleted —
+    `UpdateCardRequest` itself already rejects an empty/over-cap/identical-sides
+    body as `422`, before this body ever runs. Never touches `rung`/`due_on` —
+    fixing wording does not reset what the learner knows. Commits once, after
+    the service returns.
+    """
+    view = await edit_card(
+        session, user_id=user.id, card_id=card_id, front=body.front, back=body.back
+    )
+    await session.commit()
+    return _card_list_item_dto(view)
+
+
+@router.delete("/flashcards/{card_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_flashcard(card_id: UUID, user: CurrentUser, session: Session) -> None:
+    """Soft-delete a kept card (§1/§3/§5): `404` unowned/unknown/already-deleted
+    — a double-tapped delete is an honest `404`, not a silent second success.
+    Commits once, after the service returns.
+    """
+    await delete_card(session, user_id=user.id, card_id=card_id)
+    await session.commit()

@@ -40,15 +40,16 @@ registered the same way — a separate flag, so either could ship dark or be kil
 without disturbing the other.
 
 ``streaks`` (Phase 5, D7) was registered the same way again, and rode the same
-playbook from dark to launched.
+playbook from dark to launched. ``flashcards`` (Phase 3, TDD D10) then did too —
+the fourth flag to make the same trip.
 
-**All three are now launched and default on** (AL-270, AL-370, and the streaks
-flip). Their entry in :data:`FLAG_DEFAULTS` is the whole of that: a clone with no
-``FEATURE_FLAG_DEFAULTS`` set — a laptop, a CI run, a fresh deploy — resolves them
-on and shows the product a learner actually sees. Nothing about the machinery
-changed, and the dark posture above is still exactly how the next phase ships:
-register the flag ``False``, add it to :data:`ADMIN_DEFAULT_FLAGS`, flip it here at
-launch.
+**All four are now launched and default on** (AL-270, AL-370, the streaks flip,
+and the flashcards flip). Their entry in :data:`FLAG_DEFAULTS` is the whole of
+that: a clone with no ``FEATURE_FLAG_DEFAULTS`` set — a laptop, a CI run, a fresh
+deploy — resolves them on and shows the product a learner actually sees. Nothing
+about the machinery changed, and the dark posture above is still exactly how the
+next phase ships: register the flag ``False``, add it to
+:data:`ADMIN_DEFAULT_FLAGS`, flip it here at launch.
 
 A launched flag is still a **kill switch**: ``FEATURE_FLAG_DEFAULTS=tutor:off``
 outranks this module's defaults with no code deploy, and reaches admins too (step
@@ -126,13 +127,13 @@ FLAG_DEFAULTS: dict[FeatureFlag, bool] = {
     # with zero learner exposure while admins dogfooded it — and this flip is
     # the launch itself, exactly the move AL-270/AL-370 made for the two above.
     FeatureFlag.STREAKS: True,
-    # Off: Phase 3 (flashcards) has not launched. Starts ``False`` here, the
-    # same dark posture ``tutor``/``shaping``/``streaks`` each spent their own
-    # build-out at (TDD D10) — every flashcards ticket merges and deploys with
-    # zero learner exposure while admins dogfood drafting and review, and this
-    # flag flips to ``True`` only at launch, the AL-270/AL-370/streaks playbook
-    # repeated a fourth time.
-    FeatureFlag.FLASHCARDS: False,
+    # On: Phase 3 (flashcards) is launched. It spent its whole build-out at
+    # ``False`` (TDD D10) — that dark posture is what let every flashcards
+    # ticket, drafting through AL-410's card-management surfaces, merge and
+    # deploy with zero learner exposure while admins dogfooded drafting and
+    # review. This flip is the launch itself: the AL-270/AL-370/streaks
+    # playbook, repeated a fourth time.
+    FeatureFlag.FLASHCARDS: True,
 }
 
 
@@ -143,15 +144,15 @@ FLAG_DEFAULTS: dict[FeatureFlag, bool] = {
 # ``tutor:off`` there turns the flag off for admins too (kill switch), and a
 # per-user override beats it for everyone, admins included.
 #
-# ``TUTOR``/``SHAPING``/``STREAKS`` are **currently redundant**: a flag whose
-# code default is already ``True`` is on for admins by that default alone, and
-# after a ``:off`` kill the settings map outranks this baseline anyway, so
-# membership changes no answer either way. They stay listed rather than dropped
-# because this is the seam the *next* dark phase uses, and re-deriving which
-# flags belong here is exactly the kind of thing that gets forgotten at the
-# moment a flag flips back off. ``FLASHCARDS`` is the live case right now: its
-# code default is ``False`` (TDD D10), so this membership is what lets admins
-# dogfood drafting and review while every learner still sees a ``404``.
+# All four members — ``TUTOR``, ``SHAPING``, ``STREAKS``, ``FLASHCARDS`` — are
+# **currently redundant**: a flag whose code default is already ``True`` is
+# on for admins by that default alone, and after a ``:off`` kill the settings
+# map outranks this baseline anyway, so membership changes no answer either
+# way for any of them. They stay listed rather than dropped because this is
+# the seam the *next* dark phase uses, and re-deriving which flags belong here
+# is exactly the kind of thing that gets forgotten at the moment a flag flips
+# back off — membership costs nothing while a flag is launched and saves a
+# forgotten step the day one isn't.
 ADMIN_DEFAULT_FLAGS: frozenset[FeatureFlag] = frozenset(
     {
         FeatureFlag.TUTOR,

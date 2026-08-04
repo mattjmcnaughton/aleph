@@ -374,6 +374,16 @@ how many cards each run drafts. Both figures are the same ones recorded in
 `flashcard_seed_set.yaml`'s own header comment, kept in sync with it rather
 than duplicated as a second source of truth that can drift.
 
+**Sampling excludes an edited card (AL-410).** `flashcards.edited_at` marks a
+kept card the learner has rewritten (Phase 3 TDD D17) — once card text is
+learner-writable, an edited card is no longer *what the agent produced*, which
+is exactly what D6 chose one table to be able to sample: the drafted rows are
+real production artifacts, not synthetic ones reconstructed from a request
+body. Any future sampling of `flashcards` toward `evals/human_labels.yaml`
+calibration labels or a production keep-rate audit must therefore filter
+`edited_at IS NULL`, or the sample would silently mix agent and learner
+authorship into a set meant to measure the agent alone.
+
 Everything else about this mode — the report table, the gate summary, the
 `--report` JSON shape, the GitHub Actions job summary — mirrors the
 outline/lesson seed-set mode exactly (`_run_flashcard_mode` in

@@ -5,6 +5,7 @@ from collections.abc import Mapping
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, status
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.sessions import SessionMiddleware
@@ -141,12 +142,23 @@ def _install_error_handlers(app: FastAPI) -> None:
     async def validation_exception_handler(
         request: Request, exc: RequestValidationError
     ):
+        # ``jsonable_encoder``, not ``exc.errors()`` raw (AL-410): a
+        # ``model_validator`` that rejects its input with a plain
+        # ``ValueError`` (``dtos/flashcards.py``'s ``UpdateCardRequest``,
+        # the first DTO in this codebase to expose one to an HTTP body) makes
+        # pydantic-core populate that error's ``ctx.error`` with the raw
+        # exception *instance* — which ``JSONResponse``'s bare ``json.dumps``
+        # cannot serialize, turning every such `422` into an unhandled `500`
+        # instead. FastAPI's own default handler already guards this exact
+        # case the same way (`fastapi.exception_handlers`); the human-readable
+        # ``msg`` field survives either way, so nothing about the message a
+        # client actually reads changes.
         return error_response(
             request,
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             code="validation_error",
             message="request validation failed",
-            details=exc.errors(),
+            details=jsonable_encoder(exc.errors()),
         )
 
     @app.exception_handler(Exception)

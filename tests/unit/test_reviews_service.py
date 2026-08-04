@@ -1,12 +1,21 @@
-"""Unit tests for `aleph.services.reviews` (Phase 3 TDD §11).
+"""Unit tests for `aleph.services.reviews` (Phase 3 TDD §11; AL-410 review
+finding 5).
 
-Against a fake repository behind `QueueReader`/`GradeStore` (CLAUDE.md: fakes
-over mocks) — no session, no Postgres. `InMemoryFlashcards.due_candidates`
-mirrors `FlashcardRepository.due_candidates`'s SQL invariant (§5.3: a card
-graded today is kept in the population at its *start-of-day* `due_on`, via an
-in-memory review log rather than a `COALESCE` over a CTE) — which is what
-makes "grade three through `_grade`, re-derive through `_load_queue`, same
-ten" an actual test of the derivation rather than an assumption about it.
+Against a fake repository behind `QueueReader`/`GradeStore`/`CardStore`
+(CLAUDE.md: fakes over mocks) — no session, no Postgres.
+`InMemoryFlashcards.due_candidates` mirrors `FlashcardRepository.due_candidates`'s
+SQL invariant (§5.3: a card graded today is kept in the population at its
+*start-of-day* `due_on`, via an in-memory review log rather than a `COALESCE`
+over a CTE) — which is what makes "grade three through `_grade`, re-derive
+through `_load_queue`, same ten" an actual test of the derivation rather than
+an assumption about it.
+
+`InMemoryFlashcards` also satisfies `CardStore` (AL-410 §2/§3) —
+`list_cards_for_user`/`update_card_text`/`soft_delete_card` mirror the
+repository's filters, ordering, cursor codec, and `limit` clamp closely enough
+that `_load_cards`/`_edit_card`/`_delete_card` can be unit-tested through the
+seam they were built for, rather than that seam sitting unused behind only
+integration coverage (the gap review finding 5 names).
 """
 
 from __future__ import annotations
@@ -20,8 +29,23 @@ import pytest
 from fastapi import HTTPException
 
 from aleph.models import Flashcard, FlashcardGrade
-from aleph.repositories.flashcards import DueCandidate, FlashcardRecord
-from aleph.services.reviews import PathDueView, _grade, _load_queue, _load_summary
+from aleph.repositories.flashcards import (
+    MAX_CARD_LIST_LIMIT,
+    CardPage,
+    DueCandidate,
+    FlashcardRecord,
+    _build_cursor,
+    _parse_cursor,
+)
+from aleph.services.reviews import (
+    PathDueView,
+    _delete_card,
+    _edit_card,
+    _grade,
+    _load_cards,
+    _load_queue,
+    _load_summary,
+)
 
 if TYPE_CHECKING:
     import uuid as _uuid
@@ -89,7 +113,14 @@ class InMemoryFlashcards:
 
         results: list[DueCandidate] = []
         for card in self.cards.values():
-            if card.user_id != user_id or card.kept_at is None:
+            # `deleted_at is not None` mirrors `FlashcardRepository.due_candidates`'s
+            # own `Flashcard.deleted_at.is_(None)` filter (AL-410) — a
+            # soft-deleted card must not re-enter the daily selection.
+            if (
+                card.user_id != user_id
+                or card.kept_at is None
+                or card.deleted_at is not None
+            ):
                 continue
             reviewed_today = card.id in first_today
             live_due_on = card.due_on
@@ -114,43 +145,63 @@ class InMemoryFlashcards:
             )
         return results
 
+    def _hydrate(self, card: Flashcard) -> FlashcardRecord:
+        """The `FlashcardRecord` hydration shared by `cards_by_ids` and
+        (AL-410 finding 5) `list_cards_for_user`/`update_card_text` — one
+        hydration shape for every read, mirroring
+        `FlashcardRepository`'s own single-hydration-shape rationale
+        (`repositories/flashcards.py`'s `FlashcardRecord` docstring). The
+        caller must already have proven `card` is a kept, non-deleted row —
+        this method only assembles the record, it does not filter.
+        """
+        assert card.rung is not None
+        assert card.due_on is not None
+        assert card.kept_at is not None
+        current = (
+            self.lesson_generated_at.get(card.source_lesson_id)
+            if card.source_lesson_id is not None
+            else None
+        )
+        return FlashcardRecord(
+            id=card.id,
+            front=card.front,
+            back=card.back,
+            rung=card.rung,
+            due_on=card.due_on,
+            kept_at=card.kept_at,
+            edited_at=card.edited_at,
+            source_lesson_id=card.source_lesson_id,
+            source_path_id=card.source_path_id,
+            source_lesson_title=card.source_lesson_title,
+            source_path_title=card.source_path_title,
+            source_generated_at=card.source_generated_at,
+            current_lesson_generated_at=current,
+        )
+
     async def cards_by_ids(
         self, *, user_id: _uuid.UUID, card_ids: Sequence[uuid.UUID]
     ) -> list[FlashcardRecord]:
         records: list[FlashcardRecord] = []
         for card_id in card_ids:
             card = self.cards.get(card_id)
-            if card is None or card.user_id != user_id or card.kept_at is None:
+            if (
+                card is None
+                or card.user_id != user_id
+                or card.kept_at is None
+                or card.deleted_at is not None
+            ):
                 continue
-            assert card.rung is not None
-            assert card.due_on is not None
-            current = (
-                self.lesson_generated_at.get(card.source_lesson_id)
-                if card.source_lesson_id is not None
-                else None
-            )
-            records.append(
-                FlashcardRecord(
-                    id=card.id,
-                    front=card.front,
-                    back=card.back,
-                    rung=card.rung,
-                    due_on=card.due_on,
-                    source_lesson_id=card.source_lesson_id,
-                    source_path_id=card.source_path_id,
-                    source_lesson_title=card.source_lesson_title,
-                    source_path_title=card.source_path_title,
-                    source_generated_at=card.source_generated_at,
-                    current_lesson_generated_at=current,
-                )
-            )
+            records.append(self._hydrate(card))
         return records
 
     async def get_card_for_update(
         self, *, user_id: _uuid.UUID, card_id: _uuid.UUID
     ) -> Flashcard | None:
         card = self.cards.get(card_id)
-        if card is None or card.user_id != user_id:
+        # `deleted_at is not None` mirrors the repository's own added filter
+        # (AL-410): grading a deleted card must be `404`, not fall through to
+        # `409 not_due`.
+        if card is None or card.user_id != user_id or card.deleted_at is not None:
             return None
         return card
 
@@ -184,6 +235,120 @@ class InMemoryFlashcards:
         # about that, rather than constructing a real (unpersisted) ORM row.
         return cast("FlashcardReview", object())
 
+    # --- AL-410 review finding 5: cashing in the `CardStore` seam ---------- #
+    #
+    # `CardStore` (`services/reviews.py`) existed with no fake behind it and
+    # no unit test through `_load_cards`/`_edit_card`/`_delete_card` — the
+    # one part of this module's private/public split that was never actually
+    # exercised at the unit level. These three methods make
+    # `InMemoryFlashcards` a `CardStore` too, reusing `_hydrate` (above) and
+    # the *production* cursor codec (`_parse_cursor`/`_build_cursor`,
+    # imported rather than reimplemented) so a malformed cursor here raises
+    # the very `InvalidCursorError` `_load_cards` catches by type — a fake
+    # with its own cursor format could not exercise that translation at all.
+
+    async def list_cards_for_user(
+        self,
+        *,
+        user_id: _uuid.UUID,
+        limit: int,
+        cursor: str | None,
+        path_id: _uuid.UUID | None,
+        query: str | None,
+    ) -> CardPage:
+        """Mirrors `FlashcardRepository.list_cards_for_user` (AL-410 §2): the
+        same base filter (kept, not deleted), the same `kept_at DESC, id
+        DESC` order, the same keyset-cursor predicate, and the same `max(1,
+        min(limit, MAX_CARD_LIST_LIMIT))` clamp (finding 4) — this is what
+        lets a unit test pin that clamp with no database.
+        """
+        # `(kept_at, id, card)` triples rather than sorting `Flashcard`
+        # objects directly: `Flashcard.kept_at` is typed `datetime | None` on
+        # the model (only `None` for a draft), and the `continue` guard below
+        # narrows it to `datetime` only *within this loop body* — capturing
+        # the narrowed value once here, the same "assert/narrow once" shape
+        # `due_candidates` uses for `card.due_on`, is what lets the sort/
+        # cursor comparisons below stay `datetime`-typed without re-asserting
+        # at every later use.
+        matches: list[tuple[datetime, uuid.UUID, Flashcard]] = []
+        for card in self.cards.values():
+            if (
+                card.user_id != user_id
+                or card.kept_at is None
+                or card.deleted_at is not None
+            ):
+                continue
+            if path_id is not None and card.source_path_id != path_id:
+                continue
+            if query is not None:
+                needle = query.lower()
+                if needle not in card.front.lower() and needle not in card.back.lower():
+                    continue
+            matches.append((card.kept_at, card.id, card))
+
+        # `kept_at DESC, id DESC` — the same order the real query's
+        # `ORDER BY` fixes.
+        matches.sort(key=lambda row: (row[0], row[1]), reverse=True)
+        if cursor is not None:
+            # Propagates `InvalidCursorError` on a malformed cursor, exactly
+            # like the real repository — `_load_cards` is what turns that
+            # into the `422`, and this is the seam that lets a unit test pin
+            # that translation without Postgres.
+            cursor_kept_at, cursor_id = _parse_cursor(cursor)
+            matches = [
+                row for row in matches if (row[0], row[1]) < (cursor_kept_at, cursor_id)
+            ]
+        capped_limit = max(1, min(limit, MAX_CARD_LIST_LIMIT))
+        window = matches[: capped_limit + 1]
+        has_more = len(window) > capped_limit
+        page_rows = window[:capped_limit]
+        next_cursor = (
+            _build_cursor(page_rows[-1][0], page_rows[-1][1]) if has_more else None
+        )
+        return CardPage(
+            cards=[self._hydrate(row[2]) for row in page_rows],
+            next_cursor=next_cursor,
+        )
+
+    async def update_card_text(
+        self, *, user_id: _uuid.UUID, card_id: _uuid.UUID, front: str, back: str
+    ) -> FlashcardRecord | None:
+        """Mirrors `FlashcardRepository.update_card_text`: `None` for
+        unowned / unknown / a draft / already-deleted. Never touches
+        `rung`/`due_on` — only `front`/`back`/`edited_at`, exactly the three
+        columns the real `UPDATE` sets.
+        """
+        card = self.cards.get(card_id)
+        if (
+            card is None
+            or card.user_id != user_id
+            or card.kept_at is None
+            or card.deleted_at is not None
+        ):
+            return None
+        card.front = front
+        card.back = back
+        card.edited_at = datetime.now(UTC)
+        return self._hydrate(card)
+
+    async def soft_delete_card(
+        self, *, user_id: _uuid.UUID, card_id: _uuid.UUID
+    ) -> bool:
+        """Mirrors `FlashcardRepository.soft_delete_card`: `False` for
+        unowned / unknown / a draft / **already-deleted** — a double-tapped
+        delete is an honest `False` (-> `404`), not a silent second success.
+        """
+        card = self.cards.get(card_id)
+        if (
+            card is None
+            or card.user_id != user_id
+            or card.kept_at is None
+            or card.deleted_at is not None
+        ):
+            return False
+        card.deleted_at = datetime.now(UTC)
+        return True
+
 
 def _conflict_reason(exc: HTTPException) -> object:
     """`_conflict`'s `details.reason`, narrowed from `HTTPException.detail`'s
@@ -210,6 +375,7 @@ def _card(
     source_lesson_id: uuid.UUID | None = None,
     source_generated_at: datetime = _NOW,
     front: str = "front",
+    deleted_at: datetime | None = None,
 ) -> Flashcard:
     return Flashcard(
         id=uuid.uuid4(),
@@ -224,6 +390,7 @@ def _card(
         source_lesson_title="A lesson",
         source_path_title="A path",
         source_generated_at=source_generated_at,
+        deleted_at=deleted_at,
     )
 
 
@@ -638,6 +805,53 @@ async def test_estimated_minutes_is_never_zero_when_a_card_is_due() -> None:
 
 
 # --------------------------------------------------------------------------- #
+# AL-410 (issue #156) §7: soft-deleted cards are excluded from the daily
+# selection, and grading one is 404 rather than 409 not_due.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.anyio
+async def test_a_soft_deleted_card_never_enters_the_daily_selection() -> None:
+    store = InMemoryFlashcards()
+    live = _card(due_on=_TODAY, source_path_id=None, front="live")
+    store.add_card(live)
+    deleted = _card(
+        due_on=_TODAY,
+        source_path_id=None,
+        front="deleted",
+        deleted_at=datetime.now(UTC),
+    )
+    store.add_card(deleted)
+
+    view = await _queue(store)
+
+    assert [card.front for card in view.cards] == ["live"]
+    assert view.total == 1
+
+
+@pytest.mark.anyio
+async def test_grading_a_soft_deleted_card_is_404_not_409() -> None:
+    store = InMemoryFlashcards()
+    deleted = _card(due_on=_TODAY, source_path_id=None, deleted_at=datetime.now(UTC))
+    store.add_card(deleted)
+
+    with pytest.raises(HTTPException) as excinfo:
+        await _grade(
+            store,
+            user_id=_USER,
+            card_id=deleted.id,
+            grade=FlashcardGrade.GOT_IT,
+            rung_before=_rung(deleted),
+            tz_offset_minutes=0,
+            now=_NOW,
+        )
+    # 404, never the 409 not_due a live-but-off-schedule card would get — a
+    # deleted card was never "not due today", it is simply gone (repository
+    # docstring: `FlashcardRepository.get_card_for_update`).
+    assert excinfo.value.status_code == 404
+
+
+# --------------------------------------------------------------------------- #
 # grade_card's guards: 404 unowned/unknown, 409 not_due, 409 stale_rung.
 # --------------------------------------------------------------------------- #
 
@@ -827,3 +1041,203 @@ async def test_the_pin_end_to_end_grade_three_then_re_derive() -> None:
     assert final.total == 10
     assert final.completed == 3  # the lapse is not satisfied
     assert [card.card_id for card in final.cards] == [*untouched_ids, lapsed_id]
+
+
+# --------------------------------------------------------------------------- #
+# AL-410 review finding 5: `_load_cards`/`_edit_card`/`_delete_card` through
+# the `CardStore` seam. Before this fix these three functions had no unit
+# test at all — only the integration suite (real Postgres) exercised them,
+# which is exactly what the `QueueReader`/`GradeStore` fakes above exist to
+# make unnecessary for logic that does not need a database to prove.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.anyio
+async def test_load_cards_lists_kept_cards_most_recently_kept_first() -> None:
+    store = InMemoryFlashcards()
+    older = _card(due_on=_TODAY, source_path_id=None, front="older")
+    older.kept_at = _NOW - timedelta(minutes=5)
+    newer = _card(due_on=_TODAY, source_path_id=None, front="newer")
+    newer.kept_at = _NOW
+    store.add_card(older)
+    store.add_card(newer)
+
+    view = await _load_cards(
+        store, user_id=_USER, limit=20, cursor=None, path_id=None, query=None
+    )
+
+    assert [card.front for card in view.cards] == ["newer", "older"]
+    assert view.next_cursor is None
+
+
+@pytest.mark.anyio
+async def test_load_cards_excludes_a_draft_and_a_soft_deleted_card() -> None:
+    store = InMemoryFlashcards()
+    kept = _card(due_on=_TODAY, source_path_id=None, front="kept")
+    store.add_card(kept)
+    draft = _card(due_on=_TODAY, source_path_id=None, front="draft")
+    draft.kept_at = None  # never kept — must never appear in the browse list
+    store.add_card(draft)
+    deleted = _card(
+        due_on=_TODAY, source_path_id=None, front="deleted", deleted_at=_NOW
+    )
+    store.add_card(deleted)
+
+    view = await _load_cards(
+        store, user_id=_USER, limit=20, cursor=None, path_id=None, query=None
+    )
+
+    assert [card.front for card in view.cards] == ["kept"]
+
+
+@pytest.mark.anyio
+async def test_load_cards_exact_multiple_page_boundary_has_no_phantom_last_page() -> (
+    None
+):
+    """Four cards, `limit=2`: page 1 is full with a `next_cursor`, and page 2
+    — the exact remainder — has `next_cursor is None`, not a phantom empty
+    third page. This is precisely what the `limit + 1` lookahead exists to
+    get right: a plain `limit`-sized fetch cannot tell "exactly two left" from
+    "two left, and maybe more" apart at an exact page-size multiple.
+    """
+    store = InMemoryFlashcards()
+    cards = []
+    for i in range(4):
+        card = _card(due_on=_TODAY, source_path_id=None, front=f"c{i}")
+        card.kept_at = _NOW + timedelta(minutes=i)
+        store.add_card(card)
+        cards.append(card)
+    expected_order = list(reversed(cards))  # most-recently-kept first
+
+    first = await _load_cards(
+        store, user_id=_USER, limit=2, cursor=None, path_id=None, query=None
+    )
+    assert [c.front for c in first.cards] == [
+        expected_order[0].front,
+        expected_order[1].front,
+    ]
+    assert first.next_cursor is not None
+
+    second = await _load_cards(
+        store,
+        user_id=_USER,
+        limit=2,
+        cursor=first.next_cursor,
+        path_id=None,
+        query=None,
+    )
+    assert [c.front for c in second.cards] == [
+        expected_order[2].front,
+        expected_order[3].front,
+    ]
+    assert second.next_cursor is None
+
+
+@pytest.mark.anyio
+async def test_load_cards_floors_a_non_positive_limit_to_one() -> None:
+    """The router's own `Query(20, ge=1, le=MAX_CARD_LIST_LIMIT)` never lets
+    `limit <= 0` reach this far, but `load_card_list`/`_load_cards` is called
+    directly by a caller that bypasses the router — finding 4's own stated
+    threat model. Before that fix, `limit=0` raised `IndexError` deep inside
+    the cursor build rather than degrading to "one row";
+    `InMemoryFlashcards.list_cards_for_user` mirrors the repository's
+    `max(1, min(limit, MAX_CARD_LIST_LIMIT))` clamp exactly, so this pins the
+    fixed behaviour with no database.
+    """
+    store = InMemoryFlashcards()
+    for i in range(2):
+        store.add_card(_card(due_on=_TODAY, source_path_id=None, front=f"c{i}"))
+
+    view = await _load_cards(
+        store, user_id=_USER, limit=0, cursor=None, path_id=None, query=None
+    )
+
+    assert len(view.cards) == 1
+    assert view.next_cursor is not None
+
+
+@pytest.mark.anyio
+async def test_load_cards_with_a_malformed_cursor_is_422() -> None:
+    store = InMemoryFlashcards()
+    store.add_card(_card(due_on=_TODAY, source_path_id=None))
+
+    with pytest.raises(HTTPException) as excinfo:
+        await _load_cards(
+            store,
+            user_id=_USER,
+            limit=20,
+            cursor="not-a-real-cursor",
+            path_id=None,
+            query=None,
+        )
+    assert excinfo.value.status_code == 422
+
+
+@pytest.mark.anyio
+async def test_edit_card_sets_edited_at_and_leaves_rung_and_due_on_untouched() -> None:
+    store = InMemoryFlashcards()
+    card = _card(due_on=_TODAY + timedelta(days=3), rung=2, source_path_id=None)
+    store.add_card(card)
+
+    view = await _edit_card(
+        store, user_id=_USER, card_id=card.id, front="fixed a typo", back="same answer"
+    )
+
+    assert view.front == "fixed a typo"
+    assert view.back == "same answer"
+    assert view.rung == 2  # untouched — an edit is not a review
+    assert view.due_on == _TODAY + timedelta(days=3)  # untouched
+    assert view.edited_at is not None
+
+
+@pytest.mark.anyio
+async def test_editing_an_unowned_unknown_or_deleted_card_is_404() -> None:
+    store = InMemoryFlashcards()
+    other_users_card = _card(due_on=_TODAY, source_path_id=None)
+    other_users_card.user_id = uuid.uuid4()
+    store.add_card(other_users_card)
+    deleted = _card(due_on=_TODAY, source_path_id=None, deleted_at=_NOW)
+    store.add_card(deleted)
+
+    for bad_card_id in (uuid.uuid4(), other_users_card.id, deleted.id):
+        with pytest.raises(HTTPException) as excinfo:
+            await _edit_card(
+                store, user_id=_USER, card_id=bad_card_id, front="a", back="b"
+            )
+        # 404-never-403 (§4 item 3's posture), held for AL-410 too — unowned,
+        # unknown, and already-deleted all read the same to the caller.
+        assert excinfo.value.status_code == 404
+
+
+@pytest.mark.anyio
+async def test_delete_card_removes_it_from_the_list_and_a_double_tap_is_404() -> None:
+    store = InMemoryFlashcards()
+    card = _card(due_on=_TODAY, source_path_id=None)
+    store.add_card(card)
+
+    await _delete_card(store, user_id=_USER, card_id=card.id)
+
+    view = await _load_cards(
+        store, user_id=_USER, limit=20, cursor=None, path_id=None, query=None
+    )
+    assert view.cards == []
+
+    # A second delete of the same (now-deleted) card is an honest `404`, not
+    # a silent second success (the same posture the repository docstring and
+    # the integration suite's own double-tap test pin).
+    with pytest.raises(HTTPException) as excinfo:
+        await _delete_card(store, user_id=_USER, card_id=card.id)
+    assert excinfo.value.status_code == 404
+
+
+@pytest.mark.anyio
+async def test_deleting_an_unowned_or_unknown_card_is_404() -> None:
+    store = InMemoryFlashcards()
+    other_users_card = _card(due_on=_TODAY, source_path_id=None)
+    other_users_card.user_id = uuid.uuid4()
+    store.add_card(other_users_card)
+
+    for bad_card_id in (uuid.uuid4(), other_users_card.id):
+        with pytest.raises(HTTPException) as excinfo:
+            await _delete_card(store, user_id=_USER, card_id=bad_card_id)
+        assert excinfo.value.status_code == 404

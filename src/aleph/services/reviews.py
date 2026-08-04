@@ -1,4 +1,5 @@
-"""The review queue read, its summary, and the grade write (Phase 3 TDD §5.3-§5.4).
+"""The review queue read, its summary, the grade write, and (AL-410/issue #156)
+the card list / edit / delete surface (Phase 3 TDD §5.3-§5.4; AL-410 §3).
 
 The `progress_read.py` shape, applied to Retention: module-level frozen views,
 one async public function per route taking `session` first, and the real logic
@@ -43,6 +44,18 @@ principle precede a commit that then fails. That is a structural consequence
 of not touching the router, not a choice made here; the same trade
 `services/flashcard_drafting.py::keep_flashcard_drafts` makes for
 `flashcards_kept`.
+
+**AL-410 extends this module rather than adding a new one.** The card list,
+its inline edit, and its (soft) delete are additions to the same
+repository/service pairing that already owns `CitationView`/`_citation`
+(D12), the `FlashcardRecord` hydration shape, and the `Protocol` seams — a
+separate module would either duplicate D12's judgement or import a private
+helper across a module boundary. `load_card_list`/`edit_card`/`delete_card`
+take the same posture `grade_card` does: they raise `HTTPException` for
+every domain condition (404 unowned/unknown/draft/deleted; 422 a malformed
+cursor) rather than a sentinel, so the router stays parse/translate, and they
+never commit — the router's `session.commit()` is what makes each one's
+single-statement write durable.
 """
 
 from __future__ import annotations
@@ -64,7 +77,7 @@ from aleph.domains.scheduling import (
     got_it_interval_days,
     select_daily_queue,
 )
-from aleph.repositories.flashcards import FlashcardRepository
+from aleph.repositories.flashcards import FlashcardRepository, InvalidCursorError
 
 if TYPE_CHECKING:
     import uuid
@@ -75,7 +88,7 @@ if TYPE_CHECKING:
 
     from aleph.domains.scheduling import LadderDays
     from aleph.models import Flashcard, FlashcardGrade, FlashcardReview
-    from aleph.repositories.flashcards import DueCandidate, FlashcardRecord
+    from aleph.repositories.flashcards import CardPage, DueCandidate, FlashcardRecord
 
 
 # --------------------------------------------------------------------------- #
@@ -124,6 +137,32 @@ class GradeStore(Protocol):
         due_on_before: date,
         due_on_after: date,
     ) -> FlashcardReview: ...
+
+
+class CardStore(Protocol):
+    """The repository capability the card list/edit/delete surface needs
+    (AL-410 §2/§3) — narrow, in the `QueueReader`/`GradeStore` style, so a
+    fake for the list surface does not also have to get grading or drafting
+    right.
+    """
+
+    async def list_cards_for_user(
+        self,
+        *,
+        user_id: uuid.UUID,
+        limit: int,
+        cursor: str | None,
+        path_id: uuid.UUID | None,
+        query: str | None,
+    ) -> CardPage: ...
+
+    async def update_card_text(
+        self, *, user_id: uuid.UUID, card_id: uuid.UUID, front: str, back: str
+    ) -> FlashcardRecord | None: ...
+
+    async def soft_delete_card(
+        self, *, user_id: uuid.UUID, card_id: uuid.UUID
+    ) -> bool: ...
 
 
 # --------------------------------------------------------------------------- #
@@ -225,6 +264,41 @@ class GradeResultView:
 
 
 @dataclass(frozen=True)
+class CardListItemView:
+    """One kept card on `GET /flashcards` (AL-410 §2).
+
+    `rung` rides along (the ticket's own field list requires it on the DTO)
+    but is a **service-layer output, not a rendering instruction**: the plan
+    this ticket implements is explicit that the frontend must not display it
+    — *rung* is scheduler vocabulary `docs/CONTEXT.md` never gives the
+    learner, and a row shows only its `due_on` (`Due in 3 days` / `Due today`
+    / `Due yesterday`). `edited_at` is `None` for a card whose text has never
+    been changed since it was kept.
+    """
+
+    id: uuid.UUID
+    front: str
+    back: str
+    rung: int
+    due_on: date
+    edited_at: datetime | None
+    source: CitationView
+
+
+@dataclass(frozen=True)
+class CardListView:
+    """`GET /flashcards`'s composed payload (§2): one page plus its cursor.
+
+    `next_cursor` is `None` once the last page is reached — the client's
+    "Load more" affordance disappears rather than firing a request that would
+    come back empty.
+    """
+
+    cards: list[CardListItemView]
+    next_cursor: str | None
+
+
+@dataclass(frozen=True)
 class _SelectedCard:
     """One card of today's selected set, hydrated, with its today-scoped
     grading facts riding along. Internal — never crosses the service boundary.
@@ -322,6 +396,21 @@ def _citation(record: FlashcardRecord) -> CitationView:
         lesson_id=None,
         lesson_title=record.source_lesson_title,
         path_title=record.source_path_title,
+    )
+
+
+def _card_list_item_view(record: FlashcardRecord) -> CardListItemView:
+    """One list row (AL-410 §2), reusing :func:`_citation` (D12) — the same
+    judgement the queue makes, applied to the same `FlashcardRecord` shape.
+    """
+    return CardListItemView(
+        id=record.id,
+        front=record.front,
+        back=record.back,
+        rung=record.rung,
+        due_on=record.due_on,
+        edited_at=record.edited_at,
+        source=_citation(record),
     )
 
 
@@ -628,6 +717,80 @@ async def _grade(
 
 
 # --------------------------------------------------------------------------- #
+# Card management (AL-410 / issue #156, §2/§3): browse, edit, delete.
+# --------------------------------------------------------------------------- #
+
+
+async def _load_cards(
+    store: CardStore,
+    *,
+    user_id: uuid.UUID,
+    limit: int,
+    cursor: str | None,
+    path_id: uuid.UUID | None,
+    query: str | None,
+) -> CardListView:
+    """`GET /flashcards`'s whole read (§2): delegate to the repository's page,
+    translate its `FlashcardRecord`s through :func:`_card_list_item_view`.
+
+    Catches :class:`~aleph.repositories.flashcards.InvalidCursorError` and
+    re-raises it as a `422` — never a `500` — so a stale or hand-edited
+    `cursor` reads as bad input, not a server failure. This is the one place
+    that translation happens: the repository only knows "this does not parse"
+    and the router only knows "parse the query params," so the service is
+    where a parsing failure becomes an HTTP status (the same posture `_grade`
+    takes turning a domain condition into `HTTPException`).
+    """
+    try:
+        page = await store.list_cards_for_user(
+            user_id=user_id, limit=limit, cursor=cursor, path_id=path_id, query=query
+        )
+    except InvalidCursorError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="cursor is malformed or has expired",
+        ) from exc
+    return CardListView(
+        cards=[_card_list_item_view(record) for record in page.cards],
+        next_cursor=page.next_cursor,
+    )
+
+
+async def _edit_card(
+    store: CardStore,
+    *,
+    user_id: uuid.UUID,
+    card_id: uuid.UUID,
+    front: str,
+    back: str,
+) -> CardListItemView:
+    """`PATCH /flashcards/{card_id}` (§3): `404` (`_not_found`) when the
+    repository's `update_card_text` returns `None` — unowned, unknown, a
+    draft, or already-deleted, the same four-way `404` every other ownership
+    read in this module gives. Does not commit; the router does, once.
+    """
+    record = await store.update_card_text(
+        user_id=user_id, card_id=card_id, front=front, back=back
+    )
+    if record is None:
+        raise _not_found()
+    return _card_list_item_view(record)
+
+
+async def _delete_card(
+    store: CardStore, *, user_id: uuid.UUID, card_id: uuid.UUID
+) -> None:
+    """`DELETE /flashcards/{card_id}` (§1/§3): `404` when the repository's
+    `soft_delete_card` returns `False` — including an already-deleted card,
+    which is what makes a double-tapped delete an honest `404` rather than a
+    silent second success. Does not commit; the router does, once.
+    """
+    deleted = await store.soft_delete_card(user_id=user_id, card_id=card_id)
+    if not deleted:
+        raise _not_found()
+
+
+# --------------------------------------------------------------------------- #
 # Production entry points — build the real repository, delegate the logic.
 # --------------------------------------------------------------------------- #
 
@@ -691,3 +854,57 @@ async def grade_card(
         tz_offset_minutes=tz_offset_minutes,
         now=now,
     )
+
+
+async def load_card_list(
+    session: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    limit: int,
+    cursor: str | None = None,
+    path_id: uuid.UUID | None = None,
+    query: str | None = None,
+) -> CardListView:
+    """`GET /flashcards`'s whole payload (AL-410 §2). Raises `HTTPException`
+    (422 malformed cursor) rather than returning a sentinel, the same posture
+    `grade_card` takes.
+    """
+    return await _load_cards(
+        FlashcardRepository(session),
+        user_id=user_id,
+        limit=limit,
+        cursor=cursor,
+        path_id=path_id,
+        query=query,
+    )
+
+
+async def edit_card(
+    session: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    card_id: uuid.UUID,
+    front: str,
+    back: str,
+) -> CardListItemView:
+    """`PATCH /flashcards/{card_id}`'s whole write (AL-410 §3): `404`
+    unowned/unknown/draft/deleted. Does not commit; the caller does, once,
+    after this returns.
+    """
+    return await _edit_card(
+        FlashcardRepository(session),
+        user_id=user_id,
+        card_id=card_id,
+        front=front,
+        back=back,
+    )
+
+
+async def delete_card(
+    session: AsyncSession, *, user_id: uuid.UUID, card_id: uuid.UUID
+) -> None:
+    """`DELETE /flashcards/{card_id}`'s whole write (AL-410 §1/§3): `404`
+    unowned/unknown/already-deleted. Does not commit; the caller does, once,
+    after this returns.
+    """
+    await _delete_card(FlashcardRepository(session), user_id=user_id, card_id=card_id)

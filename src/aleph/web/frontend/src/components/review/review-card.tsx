@@ -3,8 +3,8 @@
 // the reveal state (reset per card), and the grade mutation; this component
 // is purely presentational.
 
-import { Link } from "@tanstack/react-router";
 import type { QueueCard } from "../../lib/api";
+import { CardSource } from "./card-source";
 
 export function ReviewCard({
   card,
@@ -82,26 +82,10 @@ export function ReviewCard({
         </div>
       ) : null}
 
-      <p data-testid="review-card-source" className="text-xs text-slate">
-        {/* D12: both titles are copied onto the card at draft time, so the
-            *text* survives its source either way — only the link does not.
-            `kind === "linked"` is the one case a citation is safe to
-            dereference at all (docs/api.md: a `DegradedCitationDTO` carries no
-            `lesson_id` field to link to in the first place). */}
-        From{" "}
-        {card.source.kind === "linked" ? (
-          <Link
-            to="/lessons/$lessonId"
-            params={{ lessonId: card.source.lesson_id }}
-            className="text-teal"
-          >
-            {card.source.lesson_title}
-          </Link>
-        ) : (
-          card.source.lesson_title
-        )}{" "}
-        · {card.source.path_title}
-      </p>
+      {/* Extracted to `card-source.tsx` (AL-410) so `/cards` renders the
+          identical citation rule rather than re-deriving it — see that
+          file's own header for D12's reasoning. */}
+      <CardSource source={card.source} />
     </div>
   );
 }

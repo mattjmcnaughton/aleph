@@ -247,13 +247,21 @@ calibratable against real behavior later rather than judge-only.
 
 ## 7. Explicitly out of scope
 
-Manual card authoring · editing a kept card · un-discarding a draft · cards drafted by the
+Manual card authoring · ~~editing a kept card~~ · un-discarding a draft · cards drafted by the
 tutor or from a Quick check · ease factors and four-way grading (§4.6 — the phase's own
-follow-on) · cloze deletion, images, or any card type beyond front/back · a card-management
-or browse-all-cards page · leech detection and handling · "cards mastered" and the rest of
+follow-on) · cloze deletion, images, or any card type beyond front/back · ~~a card-management
+or browse-all-cards page~~ · leech detection and handling · "cards mastered" and the rest of
 Phase 5's stats view · notifications, email or reminders of any kind · sharing, exporting or
 importing decks · burying, suspending or rescheduling a card by hand · counting review toward
 the streak (§4.9) · any Phase 4 aggregation over lapse data (§5).
+
+**Reversed by AL-410.** Editing a kept card and a card-management/browse-all-cards page are no
+longer excluded. Through the first ten tickets the daily queue was the *entire* surface a kept
+card had — there was no way to find a specific card, fix a typo the agent wrote, or drop one
+that turned out not worth remembering. AL-410 adds that surface (`/cards`): browse every kept
+card, edit its front/back, delete it. Manual card authoring, un-discarding a draft, and
+suspend/leech handling remain out of scope — see the [TDD](../tdds/phase-3-flashcards.md) §1
+(D16, D17) and §2 for how.
 
 ## 8. Open questions
 

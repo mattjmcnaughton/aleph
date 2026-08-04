@@ -88,9 +88,9 @@ def flashcards_flag_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def flashcards_flag_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The mirror fixture: `flashcards` starts dark (D10), but a test that
-    wants to prove the `404` gate closes it explicitly rather than assuming a
-    default that could change out from under this file."""
+    """The mirror fixture: `flashcards` now launches on by default (D10), but a
+    test that wants to prove the `404` gate closes it explicitly rather than
+    assuming a default that could change out from under this file."""
     _disable_flag_globally(monkeypatch, "flashcards")
 
 

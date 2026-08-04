@@ -1,6 +1,15 @@
 // Home's *Due today* card (PRD §3, Phase 3 TDD §8): `10 cards · ~4 min`, the
 // `Review` action, and a one-line provenance breakdown. Rendered by
 // `routes/index.tsx` above the path list and below the streak line.
+//
+// Carries no `/cards` door of its own (unlike an earlier draft of this
+// component): this card hides outright at zero due (below), and a learner
+// with 200 kept cards and none due today is exactly the learner who most
+// wants to browse them — the one day this card renders nothing at all. That
+// door now lives on `routes/index.tsx` itself, gated only on the `flashcards`
+// flag rather than on `summary`/`due_count`, so it survives a quiet day (AL-410
+// review finding 1). One door, not two: a duplicate "Your cards" link here,
+// next to that one, would just be noise on the one screen where both showed.
 
 import { Link } from "@tanstack/react-router";
 import type { ReviewSummary } from "../../lib/api";

@@ -25,11 +25,13 @@ export const learnerUser: AuthUser = {
   email: "learner@example.com",
   is_admin: false,
   model_allowlist: [],
-  // Phase 2's flag ships dark (AL-203): the default fake learner sees the
-  // tutor off, so any surface gated on it must stay hidden unless a test
-  // deliberately serves a session with it on. `streaks` (Streaks TDD D7) and
-  // `flashcards` (Phase 3 TDD D10) follow the same rule — off by default in
-  // `FLAG_DEFAULTS`, on only for admins (`ADMIN_DEFAULT_FLAGS`) until launch.
+  // `tutor`, `streaks`, and `flashcards` all now default **on** in the real
+  // `FLAG_DEFAULTS` registry (AL-203/AL-270, Streaks TDD D7, Phase 3 TDD D10 —
+  // all four launched flags run the same dark-then-flip playbook). The fake
+  // learner ships them off anyway: this fixture's job is to make every gated
+  // surface opt in explicitly via `server.use(...)`, so a test proves the gate
+  // itself rather than inheriting an accident of whatever the backend default
+  // happens to be this week.
   feature_flags: { tutor: false, streaks: false, flashcards: false },
 };
 

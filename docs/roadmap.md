@@ -30,7 +30,7 @@ afterthought.
 | **1 — The generated path (MVP)** | ✅ Shipped & launched | [PRD](prds/phase-1-path-generation.md) · [TDD](tdds/phase-1-path-generation.md) |
 | **2 — The tutor** (2A, in-lesson) | ✅ Shipped & launched (`tutor` flag on, AL-270) | [PRD](prds/phase-2-tutor.md) · [TDD](tdds/phase-2-tutor.md) |
 | **2B — Shape your path** (learner-initiated) | ✅ Shipped & launched (`shaping` flag on, AL-370) | [PRD](prds/phase-2b-shape-your-path.md) · [TDD](tdds/phase-2b-shape-your-path.md) |
-| **3 — Flashcards and spaced repetition** | 🟡 Built, unlaunched — all ten TDD tickets shipped behind the dark `flashcards` flag | [PRD](prds/phase-3-flashcards.md) · [TDD](tdds/phase-3-flashcards.md) · [mock](mocks/aleph-phase-3-flashcards.html) |
+| **3 — Flashcards and spaced repetition** | ✅ Shipped & launched (`flashcards` flag on) — all ten TDD tickets plus AL-410's card-management surface | [PRD](prds/phase-3-flashcards.md) · [TDD](tdds/phase-3-flashcards.md) · [mock](mocks/aleph-phase-3-flashcards.html) |
 | **4 — Adaptive paths** | ⬜ Not started — **no PRD yet** (2B pre-built the proposal/apply machinery) | — |
 | **5 — Momentum** | 🟡 In progress — streaks shipped **and launched**; goal ring and daily minutes unbuilt | streaks: [PRD](prds/phase-5-streaks.md) · [TDD](tdds/phase-5-streaks.md) |
 | **Beyond** | ⬜ Unscoped, sequenced against real usage | — |
@@ -43,8 +43,8 @@ The Phase 2 and 2B epics (#82, #114) stay open until those close.
 
 So, concretely, what is left to build: **the rest of Phase 5** — the goal ring and
 the daily-minutes target, now that streaks are launched — then **all of Phase 4**,
-plus the Phase 2 slices listed as deferred below. Phase 3 is built but dark; what
-is left there is the launch flip, not the code.
+plus the Phase 2 slices listed as deferred below. Phase 3 has shipped and launched
+too, so no phase is waiting on a flag flip anymore — only on code not yet built.
 
 ## Phase 1 — The generated path (MVP)
 
@@ -117,17 +117,21 @@ are re-deferred to a later slice, sequenced against real usage.
 
 ## Phase 3 — Flashcards and spaced repetition
 
-> 🟡 **Status:** built, not launched. Both specs are accepted — the product boundary
-> ([PRD](prds/phase-3-flashcards.md), drawn in the
+> ✅ **Status:** shipped and launched — the `flashcards` flag defaults on. Both specs
+> are accepted — the product boundary ([PRD](prds/phase-3-flashcards.md), drawn in the
 > [mock](mocks/aleph-phase-3-flashcards.html)) and the technical design
 > ([TDD](tdds/phase-3-flashcards.md)) — and all ten tickets of the TDD's delivery plan (§16)
 > have shipped: the cards and reviews tables, the pure ladder and daily selection, the
 > drafting agent, every route, the streak union, the `/review` surface, the eval kind, the
-> events, and the W24–W27 journeys. **Every route `404`s for everyone but admins**:
-> `FeatureFlag.FLASHCARDS` defaults off, and launch is a separate `FEATURE_FLAG_DEFAULTS`
-> flip after dogfooding, per the flagged-phase runbook in [`deploy.md`](deploy.md). Until
-> that flip, the retention loop Phase 5 is waiting on is built but not yet earning anything —
-> the streak slice is explicitly instrumentation for a return metric *this* phase has to earn
+> events, and the W24–W27 journeys. A post-phase ticket, **AL-410**, then added the one
+> surface the daily queue never offered — browse every kept card, edit its text, delete it
+> (`/cards`) — reversing two of PRD §7's original exclusions for reasons the TDD records (D16
+> soft delete, D17 edit provenance); it shipped behind the same `flashcards` flag and launched
+> with it. **Every route is live for every learner**: `FeatureFlag.FLASHCARDS` now defaults
+> on, the fourth flag to run the `tutor`/`shaping`/`streaks` dark-then-flip playbook, per the
+> flagged-phase runbook in [`deploy.md`](deploy.md); the flag stays registered as a kill
+> switch. The retention loop Phase 5 was waiting on is now earning its keep — the streak
+> slice's second signal is exactly the return metric this phase exists to feed
 > ([streaks PRD §2](prds/phase-5-streaks.md)).
 > 📄 **Full spec:** [Phase 3 PRD — Flashcards and spaced repetition](prds/phase-3-flashcards.md) ·
 > [Phase 3 TDD](tdds/phase-3-flashcards.md) ·
@@ -152,6 +156,11 @@ data to tune. The four-way grading is deferred to a follow-on slice rather than 
 The PRD also adds a daily cap this paragraph never mentioned — ten cards a day, the seven
 most overdue plus three at random — so a backlog after an absence is a bounded session
 rather than a wall.
+
+A later ticket, **AL-410**, rounds out the loop with the one thing the daily queue never
+gave a learner: a way to see every kept card at once, fix one the agent got wrong, or drop
+one that turned out not worth remembering — `/cards`, gated behind the same `flashcards`
+flag and launched alongside everything else behind it.
 
 ## Phase 4 — Adaptive paths
 

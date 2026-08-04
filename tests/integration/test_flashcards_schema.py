@@ -120,6 +120,10 @@ async def test_the_due_on_index_is_declared_on_both_model_and_migration() -> Non
     migration that actually creates the index in a real database must agree,
     and the index must genuinely be partial — that partiality *is* "excludes
     drafts" (§4 item 1): a draft's ``kept_at`` is ``NULL`` by definition (D6).
+
+    ``deleted_at IS NULL`` (AL-410, migration ``0011``) is asserted here too —
+    the predicate was **rewritten**, not left alone, so the hot path a
+    soft-deleted card must never sit in actually excludes it.
     """
     flashcards_table = cast("Table", Flashcard.__table__)
     model_index = next(
@@ -143,6 +147,39 @@ async def test_the_due_on_index_is_declared_on_both_model_and_migration() -> Non
     assert "user_id" in indexdef
     assert "due_on" in indexdef
     assert "kept_at IS NOT NULL" in indexdef
+    assert "deleted_at IS NULL" in indexdef
+
+
+@pytest.mark.anyio
+async def test_the_kept_at_index_is_declared_on_both_model_and_migration() -> None:
+    """The card list's own ordering index (AL-410 §2), the same shape as
+    :func:`test_the_due_on_index_is_declared_on_both_model_and_migration`
+    above: model and migration must agree, the index must be partial, and it
+    must genuinely sort ``kept_at`` descending (``ORDER BY kept_at DESC, id
+    DESC`` — the list's most-recently-kept-first order)."""
+    flashcards_table = cast("Table", Flashcard.__table__)
+    model_index = next(
+        index
+        for index in flashcards_table.indexes
+        if index.name == "ix_flashcards_user_id_kept_at"
+    )
+    assert model_index.dialect_options["postgresql"]["where"] is not None
+
+    async with db.async_session() as session:
+        indexdef = await session.scalar(
+            text(
+                "SELECT indexdef FROM pg_indexes "
+                "WHERE tablename = 'flashcards' AND indexname = :name"
+            ),
+            {"name": "ix_flashcards_user_id_kept_at"},
+        )
+
+    assert indexdef is not None
+    assert "user_id" in indexdef
+    assert "kept_at" in indexdef
+    assert "DESC" in indexdef
+    assert "kept_at IS NOT NULL" in indexdef
+    assert "deleted_at IS NULL" in indexdef
 
 
 # --------------------------------------------------------------------------- #
@@ -797,3 +834,52 @@ async def test_a_stale_generating_run_is_reclaimable() -> None:
     assert run is not None
     assert run.state == FlashcardDraftRunState.GENERATING
     assert run.started_at == reclaim
+
+
+# --------------------------------------------------------------------------- #
+# AL-410 review finding 4: ``list_cards_for_user``'s ``limit`` clamp against
+# the real repository (not the unit-test fake — that pins the fake's own
+# mirror of this clamp, this pins the SQL). The router's own ``Query(20, ge=1,
+# le=...)`` never lets ``limit <= 0`` reach this method, but the docstring
+# sells the repo-level cap as protection "for a caller that reaches this
+# repository directly, bypassing the router" — this test *is* that caller.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.anyio
+async def test_list_cards_for_user_floors_a_non_positive_limit_instead_of_500ing() -> (
+    None
+):
+    """Before the fix, ``capped_limit = min(limit, MAX_CARD_LIST_LIMIT)`` left
+    ``limit=0`` uncapped from below: the lookahead fetch (``capped_limit + 1
+    == 1``) still returns a row, ``has_more`` is ``True``, ``page_rows`` (the
+    first ``0`` of those rows) is empty, and ``page_rows[-1]`` in the
+    ``next_cursor`` branch raises ``IndexError`` — a bare-caller ``500``, not
+    the clamp the docstring promises. ``max(1, min(...))`` floors it instead:
+    a non-positive ``limit`` degrades to "give me one row", never a crash.
+    """
+    async with db.async_session() as session:
+        user = await create_user(session)
+        path, lesson = await _build_path_and_lesson(session, user=user)
+        await _kept_card(
+            session, user=user, lesson=lesson, path=path, due_on=date(2026, 8, 5)
+        )
+        await _kept_card(
+            session, user=user, lesson=lesson, path=path, due_on=date(2026, 8, 5)
+        )
+        await session.commit()
+        user_id = user.id
+
+    async with db.async_session() as session:
+        zero_page = await FlashcardRepository(session).list_cards_for_user(
+            user_id=user_id, limit=0, cursor=None, path_id=None, query=None
+        )
+    assert len(zero_page.cards) == 1  # floored to 1, not 0
+    assert zero_page.next_cursor is not None  # a second card is still waiting
+
+    async with db.async_session() as session:
+        negative_page = await FlashcardRepository(session).list_cards_for_user(
+            user_id=user_id, limit=-5, cursor=None, path_id=None, query=None
+        )
+    assert len(negative_page.cards) == 1
+    assert negative_page.next_cursor is not None
