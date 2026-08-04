@@ -58,7 +58,11 @@ from aleph.dtos.flashcards import (
     TriggerFlashcardDraftsResponse,
 )
 from aleph.dtos.progress import TzOffsetMinutes  # noqa: TC001 - FastAPI resolves it.
-from aleph.models import Lesson, User  # noqa: TC001 - FastAPI resolves annotations.
+from aleph.models import (  # noqa: TC001 - FastAPI resolves annotations.
+    Lesson,
+    LessonGenerationState,
+    User,
+)
 from aleph.repositories import LessonRepository
 from aleph.services.feature_flags import FeatureFlag, FeatureFlagService
 from aleph.services.flashcard_drafting import (
@@ -289,17 +293,21 @@ def _keep_response(view: KeepResultView) -> KeepFlashcardDraftsResponse:
 async def trigger_flashcard_drafts(
     lesson: OwnedLessonForDrafts, user: CurrentUser, session: Session
 ) -> TriggerFlashcardDraftsResponse:
-    """Trigger drafting for a completed lesson -> `202`, idempotent (D5/D7/§6).
+    """Trigger drafting for a generated lesson -> `202`, idempotent (D5/D7/§6).
 
     Ownership via `OwnedLessonForDrafts` (`404` otherwise, never `403` —
     §5.2 #1). Guards, in order:
 
-    * not `completed_at IS NOT NULL` -> `409 lesson_not_complete` (§5.6): the
-      client only ever fires this after a completion, so this is a defensive
-      guard against a stray/replayed request, not a path a normal session
-      takes.
+    * not `generation_state IS GENERATED` -> `409 lesson_not_generated`
+      (§5.6). This is now **load-bearing**, not defensive: the client fires
+      this route as soon as the learner *opens* a generated, unlocked lesson
+      (not on completion — AL-400), so an ungenerated lesson is a real,
+      reachable case, not just a stray/replayed request. Without this guard
+      an ungenerated lesson would claim a run and burn it on
+      `_run_claimed`'s context-missing branch, which emits no event and
+      resolves the run `failed` silently.
     * over `flashcard_drafts_per_day` -> `429` through the shared envelope
-      (D13), checked *after* the completion guard and *before* the claim, so a
+      (D13), checked *after* the generation guard and *before* the claim, so a
       breach never spends a claim attempt.
 
     On pass, `FlashcardDraftingService.trigger_draft_run` fires the whole
@@ -310,10 +318,10 @@ async def trigger_flashcard_drafts(
     is the same `202 {id}` either way; the client polls `GET
     .../flashcard-drafts` for the outcome.
     """
-    if lesson.completed_at is None:
+    if lesson.generation_state is not LessonGenerationState.GENERATED:
         raise _conflict(
-            "lesson_not_complete",
-            "complete this lesson before drafting flashcards from it.",
+            "lesson_not_generated",
+            "this lesson has no content to draft flashcards from yet.",
         )
     limiter = build_daily_rate_limiter(session)
     await limiter.check_flashcard_draft_generation(

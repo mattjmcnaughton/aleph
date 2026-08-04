@@ -65,6 +65,7 @@ import {
 } from "../fixtures/shaping";
 import {
   askTutor,
+  backToPathAboveRail,
   fetchConversation,
   fetchLesson,
   openLessonId,
@@ -137,7 +138,11 @@ test.describe("W21 shaping is never on the critical path", { tag: "@w21" }, () =
     // nothing is dismissed to reach the end of the lesson).
     await tapAboveRail(page, page.locator('label[for="quick-check-option-0"]'));
     await submitAndCompleteWithRailOpen(page);
-    await backToPath(page);
+    // Aimed past the sheet like every other tap in this stretch: the rail stays
+    // open through the whole loop (W9's posture), and since AL-400 the drafts
+    // block renders below the completion state by the time we get here, so the
+    // "Back to your path" link is no longer the last thing on the page.
+    await backToPathAboveRail(page);
 
     // --- and shaping wrote nothing while the learner worked ------------------
     await expectProgressInPlace(page.getByTestId("path-progress"), 2, total);

@@ -220,7 +220,7 @@ describe("DraftList", () => {
       expect(screen.queryByTestId("flashcard-drafts-trigger-retry-error")).toBeNull();
     });
 
-    it("a non-429 trigger failure (e.g. a 409 lesson_not_complete race) shows the generic notice", () => {
+    it("a non-429 trigger failure (e.g. a 409 lesson_not_generated race) shows the generic notice", () => {
       render(
         <DraftList
           drafts={drafts({ state: "not_started", cards: [] })}

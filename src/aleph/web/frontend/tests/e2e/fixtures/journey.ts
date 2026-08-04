@@ -592,10 +592,13 @@ async function keepDrafts(page: Page, keepCount: number): Promise<string[]> {
  * through the real drafting + keep flow (D6), never fabricated the way only
  * `shiftFlashcardDue` is allowed to backdate it (D15).
  *
- * Drafting is triggered automatically off the completion
- * (`routes/lessons.$lessonId.tsx`'s `completeMutation.onSuccess`), so there is
- * no separate trigger step here — the same reason `completeLessonAt` needs
- * none for generation.
+ * Drafting is triggered automatically off the lesson *opening*
+ * (`routes/lessons.$lessonId.tsx`'s mount effect, AL-400 — no longer off this
+ * completion), so there is no separate trigger step here — the same reason
+ * `completeLessonAt` needs none for generation. By the time this helper marks
+ * the lesson complete, drafting has typically already been running for as
+ * long as the lesson took to work through, which is why `keepDrafts` below
+ * still finds the block ready with time to spare inside `GENERATION_TIMEOUT`.
  */
 export async function completeLessonAndKeepDrafts(
   page: Page,

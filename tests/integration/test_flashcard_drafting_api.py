@@ -134,11 +134,16 @@ async def _seed_lesson(
     *,
     topic: str = "Rust ownership",
     completed: bool = True,
+    generated: bool = True,
 ) -> tuple[uuid.UUID, uuid.UUID]:
-    """Commit a `ready` path + one generated lesson (+ its Quick check).
+    """Commit a `ready` path + one lesson (+ its Quick check, if generated).
 
-    Returns `(path_id, lesson_id)`. `completed=False` seeds an available (not
-    yet completed) lesson — the `409 lesson_not_complete` fixture.
+    Returns `(path_id, lesson_id)`. `completed=False` seeds a generated but
+    not-yet-completed lesson — AL-400's headline fixture, now the *normal*
+    case a trigger fires against (drafting starts on open, not completion).
+    `generated=False` seeds an `UNGENERATED` lesson — no `read_passage`, no
+    `generated_at`, and (kept coherent with an ungenerated lesson) no Quick
+    check either — the `409 lesson_not_generated` fixture.
     """
     async with db.async_session() as session:
         path = Path(
@@ -154,19 +159,29 @@ async def _seed_lesson(
             position_in_path=1,
             position_in_unit=1,
             title=f"{topic} — lesson 1",
-            generation_state=LessonGenerationState.GENERATED,
-            read_passage="Ownership tracks who is responsible for a value. " * 10,
-            generated_at=datetime.now(UTC),
+            generation_state=(
+                LessonGenerationState.GENERATED
+                if generated
+                else LessonGenerationState.UNGENERATED
+            ),
+            read_passage=(
+                "Ownership tracks who is responsible for a value. " * 10
+                if generated
+                else None
+            ),
+            generated_at=datetime.now(UTC) if generated else None,
             completed_at=datetime.now(UTC) if completed else None,
         )
-        quick_check = QuickCheck(
-            lesson=lesson,
-            stem="What keyword declares a mutable binding?",
-            options=["let", "mut", "const", "var"],
-            correct_index=1,
-            explanation="`mut` marks a binding mutable; `let` alone is immutable.",
-        )
-        session.add_all([path, unit, lesson, quick_check])
+        session.add_all([path, unit, lesson])
+        if generated:
+            quick_check = QuickCheck(
+                lesson=lesson,
+                stem="What keyword declares a mutable binding?",
+                options=["let", "mut", "const", "var"],
+                correct_index=1,
+                explanation="`mut` marks a binding mutable; `let` alone is immutable.",
+            )
+            session.add(quick_check)
         await session.commit()
         return path.id, lesson.id
 
@@ -283,12 +298,46 @@ async def test_trigger_poll_keep_two_leaves_exactly_two_kept_rows(
 
 
 # --------------------------------------------------------------------------- #
-# 409: drafting an incomplete lesson.
+# AL-400: drafting a generated-but-incomplete lesson is the headline case now
+# — the client fires this on lesson *open*, well before completion.
 # --------------------------------------------------------------------------- #
 
 
 @pytest.mark.anyio
-async def test_drafting_an_incomplete_lesson_is_409(
+async def test_drafting_a_generated_but_incomplete_lesson_claims_a_run(
+    app: FastAPI,
+    spawn: CollectingSpawn,
+    monkeypatch: pytest.MonkeyPatch,
+    flashcards_flag_enabled: None,
+) -> None:
+    """AL-400's whole point: a lesson that is generated but not yet complete
+    is no longer a `409` — it is exactly the case the client's mount-effect
+    trigger fires against every time a learner opens a generated, unlocked
+    lesson. `DraftContext` reads only `read_passage` + `quick_check_stem`
+    (unchanged — both present at `generated`), so nothing about the claim or
+    the agent moves; only the router's guard does.
+    """
+    async with _client(app) as client:
+        user_id = await _sign_in(client, monkeypatch, OWNER)
+        _path_id, lesson_id = await _seed_lesson(user_id, completed=False)
+
+        response = await client.post(TRIGGER_URL.format(lesson_id=lesson_id))
+        assert response.status_code == 202, response.text
+        await spawn.drain()
+
+    row = await _draft_run_row(lesson_id)
+    assert row is not None
+    assert row.state == FlashcardDraftRunState.GENERATED
+    assert len(await _drafts_for_lesson(lesson_id)) >= 1
+
+
+# --------------------------------------------------------------------------- #
+# 409: drafting an ungenerated lesson.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.anyio
+async def test_drafting_an_ungenerated_lesson_is_409(
     app: FastAPI,
     spawn: CollectingSpawn,
     monkeypatch: pytest.MonkeyPatch,
@@ -296,14 +345,14 @@ async def test_drafting_an_incomplete_lesson_is_409(
 ) -> None:
     async with _client(app) as client:
         user_id = await _sign_in(client, monkeypatch, OWNER)
-        _path_id, lesson_id = await _seed_lesson(user_id, completed=False)
+        _path_id, lesson_id = await _seed_lesson(user_id, generated=False)
 
         response = await client.post(TRIGGER_URL.format(lesson_id=lesson_id))
 
     assert response.status_code == 409, response.text
     body = response.json()
     assert body["error"]["code"] == "conflict"
-    assert body["error"]["details"]["reason"] == "lesson_not_complete"
+    assert body["error"]["details"]["reason"] == "lesson_not_generated"
     assert await _draft_run_row(lesson_id) is None  # no claim was ever attempted
 
 

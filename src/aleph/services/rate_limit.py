@@ -71,7 +71,7 @@ still consumes one quota unit, the same accepted MVP shape
 ``count_path_outline_generations_since``'s docstring already names. Call before
 :meth:`~aleph.services.flashcard_drafting.FlashcardDraftingService.trigger_draft_run`
 (``routers/v1/flashcards.py``'s `POST .../flashcard-drafts`), **after** the
-ownership/`409 lesson_not_complete` checks and **before** the claim (§5.6: a
+ownership/`409 lesson_not_generated` checks and **before** the claim (§5.6: a
 breach must not spend a claim attempt). Ships **enabled** (default 50, not 0) —
 unlike the tutor/shaping caps, drafting is this phase's one learner-triggered
 model call (D13), so there is no "cap is 0 so this is never queried" posture
@@ -292,7 +292,7 @@ class DailyRateLimiter:
 
         Call before triggering a drafting run (``POST
         /lessons/{id}/flashcard-drafts``, TDD §5.2/§5.6), after the
-        ownership/completion checks and before the claim — see this module's
+        ownership/generation checks and before the claim — see this module's
         docstring for what the count actually bounds (distinct lessons with a
         drafting attempt today, same-lesson retries counted once).
         """

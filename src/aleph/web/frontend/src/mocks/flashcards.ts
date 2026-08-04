@@ -51,13 +51,15 @@ interface FlashcardsConfig {
   keepFails: boolean;
   /**
    * When set, `POST .../flashcard-drafts` (trigger) fails instead of claiming
-   * a run — TDD §5.6's two frontend-owned rows (ticket 3): `"rate_limited"` →
-   * `429` (over `FLASHCARD_DRAFTS_PER_DAY`), `"not_complete"` → `409
-   * lesson_not_complete`. The run stays absent either way — the poll never
-   * leaves `not_started` — which is exactly what made both cases silent
-   * before ticket 3's fix.
+   * a run — TDD §5.6's two frontend-owned rows (ticket 3, reasons updated for
+   * AL-400): `"rate_limited"` → `429` (over `FLASHCARD_DRAFTS_PER_DAY`),
+   * `"not_generated"` → `409 lesson_not_generated` (the guard is load-bearing
+   * now that the trigger fires on lesson open rather than completion — an
+   * ungenerated lesson is a real, reachable case). The run stays absent
+   * either way — the poll never leaves `not_started` — which is exactly what
+   * made both cases silent before ticket 3's fix.
    */
-  triggerDraftsError: "rate_limited" | "not_complete" | null;
+  triggerDraftsError: "rate_limited" | "not_generated" | null;
 }
 
 const defaultConfig: FlashcardsConfig = {
@@ -227,20 +229,20 @@ export const flashcardHandlers = [
     triggerRequests.push(lessonId);
     // TDD §5.6's two frontend-owned failure rows (ticket 3): neither claims a
     // run, so the poll stays at `not_started` either way — this is the exact
-    // shape a capped or not-yet-complete trigger produces on the wire.
+    // shape a capped or not-yet-generated trigger produces on the wire.
     if (config.triggerDraftsError === "rate_limited") {
       return HttpResponse.json(
         { error: { code: "rate_limited", message: "Daily drafting limit reached." } },
         { status: 429 },
       );
     }
-    if (config.triggerDraftsError === "not_complete") {
+    if (config.triggerDraftsError === "not_generated") {
       return HttpResponse.json(
         {
           error: {
             code: "conflict",
-            message: "This lesson isn't complete yet.",
-            details: { reason: "lesson_not_complete" },
+            message: "This lesson has no content yet.",
+            details: { reason: "lesson_not_generated" },
           },
         },
         { status: 409 },

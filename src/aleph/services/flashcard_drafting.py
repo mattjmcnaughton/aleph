@@ -552,10 +552,16 @@ class _RepoDraftContextLoader:
 
     A `None` return covers every "cannot draft this" case in one place: the
     lesson (or its unit/path) vanished since the claim won, or the lesson's
-    content was never actually generated (`read_passage`/`generated_at` unset
-    — reachable in principle because lesson completion is gated on *unlock*
-    state, not generation state, CONTEXT.md) — every one of these maps to
-    `_run_claimed`'s `failed` branch rather than a crash.
+    content was never actually generated (`read_passage`/`generated_at` unset)
+    — every one of these maps to `_run_claimed`'s `failed` branch rather than a
+    crash.
+
+    The ungenerated case is kept out by the trigger route's `409
+    lesson_not_generated` guard, which since AL-400 is the *only* thing keeping
+    it out: the client now fires that route when a lesson is opened rather than
+    when it is completed, so an ungenerated lesson is a request the route
+    genuinely receives. This branch stays as the backstop for the race the
+    guard cannot close — content that vanished between the guard and the claim.
     """
 
     def __init__(self, session_factory: SessionFactory) -> None:

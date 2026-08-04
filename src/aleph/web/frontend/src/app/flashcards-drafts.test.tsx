@@ -54,6 +54,39 @@ function seedJourney(): void {
   seedLesson({ id: LESSON_ID, path_id: PATH_ID, correctIndex: 0 });
 }
 
+/** The second lesson of the two-lesson path `seedNeighbourJourney` builds. */
+const LESSON_2_ID = "l9700000-0000-4000-8000-000000000002";
+
+/**
+ * A path with two unlocked, generated lessons — the fixture for the desktop
+ * prev/next footer (`LessonNav`), which is how a learner moves lesson→lesson
+ * without going back through the path view.
+ */
+function seedNeighbourJourney(): void {
+  seedPath({
+    id: PATH_ID,
+    topic: "TypeScript",
+    level: "new_to_it",
+    units: [
+      {
+        ...UNITS[0],
+        lessons: [
+          ...UNITS[0].lessons,
+          {
+            id: LESSON_2_ID,
+            title: "Conditional types",
+            position_in_path: 1,
+            generation_state: "generated",
+            unlock_state: "available",
+          },
+        ],
+      },
+    ],
+  });
+  seedLesson({ id: LESSON_ID, path_id: PATH_ID, correctIndex: 0 });
+  seedLesson({ id: LESSON_2_ID, path_id: PATH_ID, position_in_path: 1, correctIndex: 0 });
+}
+
 /** Answer the Quick check and mark the lesson complete (`completion-refresh.test.tsx`'s `workTheLesson`). */
 async function completeTheLesson(): Promise<void> {
   window.history.pushState({}, "", `/lessons/${LESSON_ID}`);
@@ -81,9 +114,72 @@ describe("Flashcards — drafting below a lesson's completion (PRD §3, Phase 3 
     await screen.findByTestId("draft-list");
     expect(screen.getAllByTestId("draft-card")).toHaveLength(2);
     expect(screen.getByTestId("draft-keep-button").textContent).toBe("Keep 2 cards");
-    // Fired off the completion itself (D5 — non-blocking, below the already-
-    // recorded completion, mock screen 01's own pin).
+    // Fired off the lesson *opening* now (AL-400 — the mount effect in
+    // `routes/lessons.$lessonId.tsx`), not off the completion below it: by the
+    // time this learner reaches Mark complete, drafting has already been
+    // running for as long as the lesson took to read (D5 — still
+    // non-blocking, mock screen 01's own pin, just earlier).
     expect(flashcardTriggerRequests()).toContain(LESSON_ID);
+  });
+
+  it("[AL-400] opening a generated, incomplete lesson fires the trigger, but the drafts block waits for completion", async () => {
+    useFlashcardsSession();
+    seedJourney();
+    // Seeded as already `generated` so a trigger fired at open is a D7 no-op
+    // on the backend — this test is about *when* the client fires, not about
+    // drafting's own state machine.
+    seedFlashcardDraftRun(LESSON_ID, {
+      state: "generated",
+      cards: [{ id: "d1", front: "What does `extends` mean?", back: "It constrains T." }],
+    });
+
+    window.history.pushState({}, "", `/lessons/${LESSON_ID}`);
+    render(<App />);
+
+    // The open-time effect (AL-400) fires exactly once — the lesson is
+    // generated and unlocked, even though it is not complete yet. The ref
+    // holding the lesson id it last fired for is what keeps this at one
+    // across re-renders (and StrictMode's double-invoke).
+    await screen.findByTestId("lesson-read-passage");
+    await waitFor(() =>
+      expect(flashcardTriggerRequests().filter((id) => id === LESSON_ID)).toHaveLength(1),
+    );
+
+    // The trigger having fired is not the same as the proposal being shown —
+    // that still waits for completion (mock screen 01), even though drafting
+    // has been running underneath since the lesson opened.
+    expect(screen.queryByTestId("draft-list")).toBeNull();
+
+    fireEvent.click((await screen.findAllByTestId("quick-check-option"))[0]);
+    fireEvent.click(screen.getByTestId("quick-check-submit"));
+    fireEvent.click(await screen.findByTestId("lesson-complete-button"));
+    await screen.findByTestId("lesson-completed");
+
+    await screen.findByTestId("draft-list");
+  });
+
+  it("[AL-400] moving lesson→lesson through the prev/next footer fires the trigger for the lesson arrived at", async () => {
+    useFlashcardsSession();
+    seedNeighbourJourney();
+
+    window.history.pushState({}, "", `/lessons/${LESSON_ID}`);
+    render(<App />);
+
+    await screen.findByTestId("lesson-read-passage");
+    await waitFor(() => expect(flashcardTriggerRequests()).toContain(LESSON_ID));
+
+    // TanStack Router re-renders this route with new params rather than
+    // remounting it, so the open-time trigger's guard has to be keyed by
+    // lesson id — a per-instance `useRef(false)` latches on the first lesson
+    // and every lesson reached this way (the desktop footer and the sidebar
+    // outline, the main way through a path) silently skips open-time
+    // drafting. Worse, an already-complete lesson reached this way could
+    // never draft at all: the poll goes terminal on `not_started` and the
+    // completion re-fire can never run for a lesson already complete.
+    fireEvent.click(await screen.findByTestId("lesson-nav-next"));
+
+    await waitFor(() => expect(screen.getByTestId("lesson-view-id").textContent).toBe(LESSON_2_ID));
+    await waitFor(() => expect(flashcardTriggerRequests()).toContain(LESSON_2_ID));
   });
 
   it("keeping some of the drafts posts exactly those ids and the block clears", async () => {
@@ -128,10 +224,15 @@ describe("Flashcards — drafting below a lesson's completion (PRD §3, Phase 3 
     ]);
   });
 
-  it("[D7] a lesson already complete before this visit resumes its drafts, no new trigger needed", async () => {
+  it("[D7] a lesson already complete before this visit resumes its drafts", async () => {
     useFlashcardsSession();
     seedPath({ id: PATH_ID, topic: "TypeScript", level: "new_to_it", units: UNITS });
-    // Already complete server-side, as if an earlier session finished it.
+    // Already complete server-side, as if an earlier session finished it. The
+    // mount effect (AL-400) still fires a trigger on this open — the lesson
+    // reads generated + unlocked regardless of completion — but the seeded
+    // run is already `generated`, so D7 makes that fire a structural no-op:
+    // this is a "resumes without re-drafting" test, not a "no trigger sent"
+    // one.
     seedLesson({ id: LESSON_ID, path_id: PATH_ID, correctIndex: 0, unlock_state: "complete" });
     seedFlashcardDraftRun(LESSON_ID, {
       state: "generated",
@@ -142,9 +243,15 @@ describe("Flashcards — drafting below a lesson's completion (PRD §3, Phase 3 
     render(<App />);
 
     await screen.findByTestId("draft-list");
+    // The property the title names, actually asserted: the open-time trigger
+    // did fire, and D7 made it a no-op — the seeded card is still the one on
+    // screen, not a re-drafted replacement, and exactly one `POST` was sent.
+    expect(flashcardTriggerRequests().filter((id) => id === LESSON_ID)).toHaveLength(1);
+    expect(screen.getAllByTestId("draft-card")).toHaveLength(1);
+    expect(screen.getByTestId("draft-list").textContent).toContain("Card one");
   });
 
-  it("[§5.6] a failed run offers a retry, not a dead spinner", async () => {
+  it("[§5.6] a failed run is retried automatically when the lesson is reopened", async () => {
     useFlashcardsSession();
     seedPath({ id: PATH_ID, topic: "TypeScript", level: "new_to_it", units: UNITS });
     // Already complete, with a prior drafting attempt that failed — the state
@@ -154,24 +261,65 @@ describe("Flashcards — drafting below a lesson's completion (PRD §3, Phase 3 
 
     window.history.pushState({}, "", `/lessons/${LESSON_ID}`);
     render(<App />);
-    await screen.findByTestId("flashcard-drafts-failed");
 
-    fireEvent.click(screen.getByTestId("flashcard-drafts-retry"));
-
-    // The re-claim (D7's `WHERE state = 'failed'` arm) — a genuine retry, not
-    // a dead spinner: the failed card is gone, replaced by the generating one.
+    // AL-400: the mount effect fires on every generated+unlocked open
+    // regardless of the run's prior state — D7 makes a `failed` run
+    // re-claimable, so simply reopening this lesson is itself the retry; the
+    // learner never has to see the failed card, let alone tap anything.
+    // (`DraftList`'s own manual retry button — the affordance for a failure
+    // *during* the current visit, §5.6 — is untouched and covered directly
+    // in `draft-list.test.tsx`.)
     await screen.findByTestId("flashcard-drafts-generating");
     expect(flashcardTriggerRequests()).toContain(LESSON_ID);
   });
 
-  it("[BLOCKER, finding 1] a completed lesson with no draft run ever triggered stops polling at `not_started`", async () => {
+  it("[§5.6] a run that fails during the visit offers a manual retry that restarts the stopped poll", async () => {
+    useFlashcardsSession();
+    seedPath({ id: PATH_ID, topic: "TypeScript", level: "new_to_it", units: UNITS });
+    // Complete, with no run yet: the open-time trigger claims one, and it is
+    // that in-visit run which then fails. This is the one route the mount
+    // effect cannot rescue — it already fired for this lesson — so the
+    // manual affordance is the only way out, and the chain it depends on
+    // lives here in the route, not in `DraftList`: retry button →
+    // `triggerDraftsMutation.mutate()` → `onSuccess` →
+    // `invalidateQueries(flashcardDraftsQueryKey)` → a poll that had gone
+    // *terminal* on `failed` starts again and reaches `generating`.
+    // `draft-list.test.tsx` only asserts the button calls its `onRetry`
+    // prop; it cannot catch a dropped `invalidateQueries` nudge, which is
+    // the dead-spinner regression this pins.
+    seedLesson({ id: LESSON_ID, path_id: PATH_ID, correctIndex: 0, unlock_state: "complete" });
+
+    window.history.pushState({}, "", `/lessons/${LESSON_ID}`);
+    render(<App />);
+
+    await screen.findByTestId("flashcard-drafts-generating", undefined, { timeout: 10_000 });
+    expect(flashcardTriggerRequests().filter((id) => id === LESSON_ID)).toHaveLength(1);
+
+    // The claimed run fails while the learner is sitting on the page; the
+    // still-live poll is what surfaces it.
+    seedFlashcardDraftRun(LESSON_ID, { state: "failed", cards: [] });
+    await screen.findByTestId("flashcard-drafts-failed", undefined, { timeout: 10_000 });
+
+    fireEvent.click(screen.getByTestId("flashcard-drafts-retry"));
+
+    await screen.findByTestId("flashcard-drafts-generating", undefined, { timeout: 10_000 });
+    expect(flashcardTriggerRequests().filter((id) => id === LESSON_ID)).toHaveLength(2);
+  }, 30_000);
+
+  it("[BLOCKER, finding 1] a trigger that claims no run stops polling at `not_started`", async () => {
     useFlashcardsSession();
     seedPath({ id: PATH_ID, topic: "TypeScript", level: "new_to_it", units: UNITS });
     // Already complete, and — deliberately — no `seedFlashcardDraftRun` call:
-    // the run row is sparse (D7), so an unseeded lesson is exactly "never
-    // triggered", the real backend's `200 {state: "not_started", cards: []}`.
-    // This is the state of *every* already-completed lesson the moment the
-    // flag flips on (finding 1's own framing) — not an edge case.
+    // the run row is sparse (D7), so an untriggered lesson is exactly "never
+    // claimed a run", the real backend's `200 {state: "not_started", cards:
+    // []}`. Before AL-400, a completed lesson landed here just by being
+    // unseeded; now the mount effect fires a trigger on every generated,
+    // unlocked open, so this scenario needs a trigger that genuinely claims
+    // nothing — a capped (`429`) one is the honest way to reach it: the
+    // learner did everything right, but the daily cap denies the claim, and
+    // the poll is left exactly where finding 1's regression pins it — stuck
+    // at `not_started`, not looping forever.
+    configureFlashcards({ triggerDraftsError: "rate_limited" });
     seedLesson({ id: LESSON_ID, path_id: PATH_ID, correctIndex: 0, unlock_state: "complete" });
 
     vi.useFakeTimers();

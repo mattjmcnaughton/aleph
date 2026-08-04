@@ -42,8 +42,9 @@ export function DraftList({
    */
   triggerRateLimited: boolean;
   /** The trigger mutation failed for any other reason (e.g. a `409
-   *  lesson_not_complete` race) — the same swallow, a generic notice instead
-   *  of the daily-cap one. */
+   *  lesson_not_generated` race — a lesson opened before it finished
+   *  generating) — the same swallow, a generic notice instead of the
+   *  daily-cap one. */
   triggerErrored: boolean;
 }) {
   if (drafts === undefined) return null;

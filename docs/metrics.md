@@ -247,6 +247,30 @@ number hiding inside a healthy pooled average is exactly the failure mode both
 queries exist to catch early (PRD §5, TDD §10's "keep rate is the production
 proxy" for the `flashcard_draft` eval).
 
+**AL-400 changed what `flashcards_drafted` counts — but not keep rate.** The
+trigger moved from the lesson's completion to its *opening* (TDD D5), so
+`flashcards_drafted` now fires once per generated, unlocked lesson whose open
+actually **won a claim**, rather than once per lesson completed. It is a claim
+count, not an open count: revisiting a lesson whose run is already `generated`
+is a D7 no-op that emits nothing, so a learner reopening the same lesson ten
+times still contributes one event.
+
+**Keep rate is unaffected**, and by construction rather than luck:
+`flashcard_keep_rate.sql` reads `flashcards_kept` alone, and a
+`flashcards_kept` record only exists where a learner reached a keep screen —
+which still requires completing the lesson. The same "both counts on one row"
+design that makes the metric immune to drafting-retry timing makes it immune
+to this change.
+
+What is genuinely new is the **gap between the two streams**: `flashcards_drafted`
+now counts drafting runs that were never offered to anybody, because the
+learner opened the lesson and never came back to finish it. That population did
+not exist before — every drafted run used to belong to a completed lesson — and
+it is real spend (a model call, and a unit of `flashcard_drafts_per_day`, which
+since AL-400 bounds lessons **opened** rather than lessons completed). Read
+`cost_per_path.sql` and any drafting-failure rate with that in mind: their
+denominators grew, and the growth is concentrated in lessons nobody finished.
+
 **The Phase 4 seam, named and not built** (PRD §5, TDD §9): lapses are
 queryable per learner and per source lesson directly from
 `flashcard_reviews JOIN flashcards ON flashcard_reviews.card_id =
