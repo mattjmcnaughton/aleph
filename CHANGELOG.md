@@ -1,3 +1,10 @@
+# [1.22.0](https://github.com/mattjmcnaughton/aleph/compare/v1.21.2...v1.22.0) (2026-08-04)
+
+
+### Features
+
+* **flashcards:** flashcards and spaced repetition (Phase 3) ([#154](https://github.com/mattjmcnaughton/aleph/issues/154)) ([aca3e83](https://github.com/mattjmcnaughton/aleph/commit/aca3e83d56fd297eaa384b709920edbfc2260dfc))
+
 ## [1.21.2](https://github.com/mattjmcnaughton/aleph/compare/v1.21.1...v1.21.2) (2026-08-02)
 
 
