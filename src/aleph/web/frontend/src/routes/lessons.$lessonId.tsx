@@ -2,6 +2,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import {
+  FLASHCARDS_QUERY_PREFIX,
+  type FlashcardDrafts,
   type LessonAttempt,
   type LessonDetail,
   type PathDetail,
@@ -11,16 +13,23 @@ import {
   type QuickCheck,
   attemptLesson,
   completeLesson,
+  flashcardDraftsQueryKey,
+  flashcardDraftsQueryOptions,
   generateLesson,
+  isFlashcardDraftsTerminal,
   isLessonViewTerminal,
   isNotFound,
+  isRateLimited,
+  keepFlashcardDrafts,
   lessonQueryKey,
   lessonQueryOptions,
   pathQueryOptions,
   progressSummaryQueryOptions,
+  triggerFlashcardDrafts,
 } from "../lib/api";
 import { Breadcrumbs } from "../components/breadcrumbs";
 import { Markdown } from "../components/markdown";
+import { DraftList } from "../components/review/draft-list";
 import { Sidebar, SwitcherSection, OutlineSection } from "../components/sidebar";
 import {
   CheckIcon,
@@ -35,6 +44,7 @@ import {
 import { TutorMark, TutorRail } from "../components/tutor/tutor-rail";
 import { useTutorRail } from "../components/tutor/use-tutor-rail";
 import { Workspace } from "../components/workspace";
+import { useFeatureFlag } from "../lib/feature-flags";
 import { makePollingRefetchInterval } from "../lib/polling";
 import { useRetryGeneration } from "../lib/use-retry-generation";
 
@@ -106,6 +116,55 @@ function LessonView() {
   // below has to no-op on.
   const progressSummaryKey = progressSummaryQueryOptions(true).queryKey;
 
+  // Flashcards (Phase 3 TDD §5.2/§8): the drafts block below the completion
+  // state. A drafting run only exists once triggered, so the poll is gated on
+  // the lesson actually being complete as well as the flag — polling before
+  // that would only ever 404.
+  const flashcardsEnabled = useFeatureFlag("flashcards");
+  const draftsEnabled = flashcardsEnabled && detail?.unlock_state === "complete";
+  const draftsQuery = useQuery({
+    ...flashcardDraftsQueryOptions(lessonId, draftsEnabled),
+    refetchInterval: makePollingRefetchInterval({ isTerminal: isFlashcardDraftsTerminal }),
+  });
+
+  // Idempotent (D7 — a second `POST` while generating/generated is a no-op
+  // `202`), which is what makes it safe to fire from `completeMutation`'s own
+  // `onSuccess` below, a mutation React may run twice. Also the retry
+  // affordance the drafts block offers on a `failed` run (§5.6).
+  const triggerDraftsMutation = useMutation({
+    mutationFn: () => triggerFlashcardDrafts(lessonId),
+    // A `failed` run is terminal to the poll's own `refetchInterval`
+    // (`isFlashcardDraftsTerminal`), so a retry has to kick it back into
+    // motion itself rather than waiting on a poll that has already stopped.
+    // The fresh-completion firing (below) needs no such nudge: `draftsEnabled`
+    // flips false -> true in the same render, and TanStack fetches a query
+    // that just became enabled on its own.
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: flashcardDraftsQueryKey(lessonId) });
+    },
+  });
+
+  // TDD §5.6's two frontend-owned failure rows (ticket 3): a capped or
+  // not-yet-complete trigger never claims a run, so the poll it fired for is
+  // stuck at `not_started` with nothing else to distinguish it from silence.
+  // `DraftList` renders one line beside that state off these two booleans.
+  const triggerRateLimited =
+    triggerDraftsMutation.isError && isRateLimited(triggerDraftsMutation.error);
+  const triggerErrored = triggerDraftsMutation.isError && !triggerRateLimited;
+
+  const keepDraftsMutation = useMutation({
+    mutationFn: (keptIds: string[]) => keepFlashcardDrafts(lessonId, keptIds),
+    onSuccess: () => {
+      // Every draft is gone from the poll's own payload after a keep (D6) —
+      // kept ones moved into the schedule, the rest deleted outright — so the
+      // block disappears without waiting on a refetch.
+      queryClient.setQueryData<FlashcardDrafts>(flashcardDraftsQueryKey(lessonId), (old) =>
+        old ? { ...old, cards: [] } : old,
+      );
+      void queryClient.invalidateQueries({ queryKey: FLASHCARDS_QUERY_PREFIX });
+    },
+  });
+
   const attemptMutation = useMutation({
     mutationFn: ({ id, index }: { id: string; index: number }) => attemptLesson(id, index),
     // Fold the reveal into the cached detail so everything derives from one
@@ -173,6 +232,16 @@ function LessonView() {
         };
       });
       void queryClient.invalidateQueries({ queryKey: PROGRESS_QUERY_PREFIX });
+
+      // Flashcards (Phase 3 TDD D5/§8, mock screen 01's pin: "drawn as
+      // non-blocking"): drafting is triggered off the completion that just
+      // happened, below everything above it — the streak has already
+      // advanced by the time this fires, so a failed draft never touches it.
+      // Idempotent (D7), so firing it here — a mutation `onSuccess` React may
+      // run twice in strict mode — costs nothing extra.
+      if (flashcardsEnabled) {
+        triggerDraftsMutation.mutate();
+      }
     },
   });
 
@@ -262,6 +331,25 @@ function LessonView() {
           completeErrored={completeMutation.isError}
         />
       )}
+
+      {/* Below the completion state (PRD §3, mock screen 01) — never above
+          it, so a failed draft never reads as the lesson itself having gone
+          wrong. `DraftList` returns null on every non-actionable state
+          (undefined, `generating`, `failed` with no retry yet pressed, or
+          `generated` with nothing left to keep), so this costs nothing when
+          there is nothing to show. */}
+      {draftsEnabled ? (
+        <DraftList
+          drafts={draftsQuery.data}
+          onKeep={(keptIds) => keepDraftsMutation.mutate(keptIds)}
+          keeping={keepDraftsMutation.isPending}
+          keepErrored={keepDraftsMutation.isError}
+          onRetry={() => triggerDraftsMutation.mutate()}
+          retrying={triggerDraftsMutation.isPending}
+          triggerRateLimited={triggerRateLimited}
+          triggerErrored={triggerErrored}
+        />
+      ) : null}
 
       {detail && readyPathDetail ? (
         <LessonNav pathDetail={readyPathDetail} currentPosition={detail.position_in_path} />

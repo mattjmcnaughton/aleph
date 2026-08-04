@@ -12,6 +12,8 @@ from aleph.models.attempt import Attempt
 from aleph.models.conversation import Conversation
 from aleph.models.enums import (
     ConversationKind,
+    FlashcardDraftRunState,
+    FlashcardGrade,
     LessonGenerationState,
     Level,
     MessageRole,
@@ -21,6 +23,7 @@ from aleph.models.enums import (
     PathStatus,
 )
 from aleph.models.feature_flags import UserFeatureOverride
+from aleph.models.flashcard import Flashcard, FlashcardDraftRun, FlashcardReview
 from aleph.models.lesson import Lesson
 from aleph.models.message import Message
 from aleph.models.path import Path
@@ -33,6 +36,11 @@ __all__ = [
     "Attempt",
     "Conversation",
     "ConversationKind",
+    "Flashcard",
+    "FlashcardDraftRun",
+    "FlashcardDraftRunState",
+    "FlashcardGrade",
+    "FlashcardReview",
     "Lesson",
     "LessonGenerationState",
     "Level",

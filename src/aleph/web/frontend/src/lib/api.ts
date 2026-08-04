@@ -641,24 +641,298 @@ export function progressSummaryQueryKey(
 }
 
 /**
+ * THE call site for `Date.prototype.getTimezoneOffset` in the whole app
+ * (Streaks TDD §8/§15, Phase 3 TDD §8): minutes to *subtract* from UTC to
+ * reach local time, so a zone ahead of UTC reports negative. Every
+ * query-options factory that needs the client's offset — this one and the two
+ * Phase 3 adds below — calls this function rather than the browser API
+ * directly, and the grade mutation (`routes/review.tsx`) does the same when it
+ * builds a request body. That is what keeps the sign convention's one place to
+ * be wrong a single function rather than "every call site that remembered to
+ * copy it correctly" — `api.test.ts` is the test that says it stayed that way.
+ */
+export function clientTimezoneOffsetMinutes(): number {
+  return new Date().getTimezoneOffset();
+}
+
+/**
  * THE progress-summary query — key + fetcher paired in one place (the
- * `sessionQueryOptions` house rule), and **the one call site** for
- * `getTimezoneOffset()` in the whole app (Streaks TDD §8/§15): the sign
- * convention (D3) has exactly one place to be wrong, and `api.test.ts` is the
- * one test that says it isn't. `enabled` comes from `useFeatureFlag("streaks")`
- * (Streaks TDD §8) — off means `skipToken`, i.e. no request and no rendered
- * surface, matching every other flag-gated query in this file.
+ * `sessionQueryOptions` house rule). `enabled` comes from
+ * `useFeatureFlag("streaks")` (Streaks TDD §8) — off means `skipToken`, i.e.
+ * no request and no rendered surface, matching every other flag-gated query in
+ * this file.
  *
  * The completion mutation's optimistic bump (`routes/lessons.$lessonId.tsx`,
- * D10) needs this same key to patch the right cache entry. It gets it by
- * calling this factory too and reading `.queryKey` back off it, rather than
- * calling `getTimezoneOffset()` a second time anywhere — which is what keeps
- * this the *only* site, not merely the first one.
+ * D10) and the review mutation's cross-domain patch (`routes/review.tsx`,
+ * Phase 3 TDD §8) both need this same key to patch the right cache entry.
+ * They get it by calling this factory too and reading `.queryKey` back off
+ * it, rather than hand-spelling `progressSummaryQueryKey` a second time
+ * anywhere.
  */
 export function progressSummaryQueryOptions(enabled: boolean) {
-  const tzOffsetMinutes = new Date().getTimezoneOffset();
+  const tzOffsetMinutes = clientTimezoneOffsetMinutes();
   return queryOptions({
     queryKey: progressSummaryQueryKey(tzOffsetMinutes),
     queryFn: enabled ? () => getProgressSummary(tzOffsetMinutes) : skipToken,
+  });
+}
+
+// --- Flashcards API (Phase 3 TDD §6-8, docs/api.md ## Flashcards) -----------
+//
+// The retention loop's wire seam: the drafting trigger+poll (D5, mirroring
+// paths/lessons verbatim), the daily queue and its summary (D3 — derived,
+// never stored, so there is nothing here to create or delete), and grading
+// (§5.4). Every route sits behind the `flashcards` flag server-side (D10);
+// every factory below is fed `enabled` from `useFeatureFlag("flashcards")` and
+// goes to `skipToken` when it is off — no flag, no fetch, matching every other
+// gated query in this file.
+
+/** A lesson's drafting-run state (D7). `"not_started"` is the sparse-row case
+ *  — `flashcard_draft_runs` holds one row per lesson **drafting was actually
+ *  triggered for** (dtos/flashcards.py), so "no row yet" is a real, distinct
+ *  wire value the backend sends for every completed lesson the instant the
+ *  flag flips on, not an absence the client can treat as "still generating". */
+export type FlashcardDraftRunState = "not_started" | "generating" | "generated" | "failed";
+
+/** One proposed card, pre-keep — front/back only (docs/api.md). */
+export interface FlashcardDraftCard {
+  id: string;
+  front: string;
+  back: string;
+}
+
+/** `GET /lessons/{id}/flashcard-drafts` body — the drafting poll target. */
+export interface FlashcardDrafts {
+  state: FlashcardDraftRunState;
+  cards: FlashcardDraftCard[];
+}
+
+/** The fixed two-outcome ladder (CONTEXT.md: *Review*) — never a third value. */
+export type FlashcardGrade = "again" | "got_it";
+
+/**
+ * A card's source line (D12, docs/api.md): discriminated on `kind`, so a
+ * `degraded` citation genuinely carries no `lesson_id` to dereference rather
+ * than a nullable one a careless render could still link.
+ */
+export type FlashcardCitation =
+  | { kind: "linked"; lesson_id: string; lesson_title: string; path_title: string }
+  | { kind: "degraded"; lesson_title: string; path_title: string };
+
+/** One card as the review session shows it (docs/api.md `GET /reviews/queue`). */
+export interface QueueCard {
+  card_id: string;
+  front: string;
+  back: string;
+  rung: number;
+  /** What the *Got it* button previews — server-derived from the ladder
+   *  (`FLASHCARD_LADDER_DAYS`); the client holds no second copy of it. */
+  got_it_interval_days: number;
+  path_id: string | null;
+  source: FlashcardCitation;
+}
+
+/** `GET /api/v1/reviews/queue` body (§5.3/§6). */
+export interface ReviewQueue {
+  today: string;
+  /** The day's selected set's size — always the **global** count, even in a
+   *  filtered (`path_id`) session (§5.3's invariant). */
+  total: number;
+  /** Distinct cards already answered *Got it*, today. */
+  completed: number;
+  scope_path_id: string | null;
+  /** Non-zero only when `scope_path_id` is set — the widen offer (PRD §4.10). */
+  other_due_count: number;
+  /** Unsatisfied only, in serve order. */
+  cards: QueueCard[];
+}
+
+/** One path's share of the global selected set (sums to `due_count`, §5.3). */
+export interface PathDue {
+  path_id: string;
+  due_count: number;
+}
+
+/** `GET /api/v1/reviews/summary` body (D9/§6): home's card, the app-bar pill,
+ *  and the per-path chips — one payload, deliberately not folded into
+ *  `ProgressSummary` (D9). */
+export interface ReviewSummary {
+  today: string;
+  due_count: number;
+  estimated_minutes: number;
+  /** Paths with at least one due card; absent means zero, same as `PathStreak`. */
+  paths: PathDue[];
+}
+
+/** `POST /api/v1/reviews` body (§5.4/§6). */
+export interface GradeCardInput {
+  card_id: string;
+  grade: FlashcardGrade;
+  /** Optimistic-concurrency token — the client already holds it (it rendered
+   *  `got_it_interval_days` from it), so a mismatch is `409 stale_rung`. */
+  rung_before: number;
+  tz_offset_minutes: number;
+}
+
+/** `POST /api/v1/reviews`'s `200` body: the card's new projected state. */
+export interface GradeCardResult {
+  card_id: string;
+  rung: number;
+  due_on: string;
+}
+
+/** Trigger drafting for a completed lesson (D5). `202`; idempotent (D7) —
+ *  re-firing from a mutation `onSuccess` that React may run twice is safe. */
+export function triggerFlashcardDrafts(lessonId: string): Promise<{ id: string }> {
+  return apiFetch<{ id: string }>(apiV1Path(`/lessons/${lessonId}/flashcard-drafts`), {
+    method: "POST",
+  });
+}
+
+/** Poll a lesson's drafting run. */
+export function getFlashcardDrafts(lessonId: string): Promise<FlashcardDrafts> {
+  return apiFetch<FlashcardDrafts>(apiV1Path(`/lessons/${lessonId}/flashcard-drafts`));
+}
+
+/**
+ * A drafting poll can stop once the run is `generated` or `failed` (D7) — or
+ * is `not_started`, which is terminal too: nothing moves a lesson out of
+ * `not_started` except a fresh `POST .../flashcard-drafts`, and that trigger
+ * invalidates this very query key itself (`routes/lessons.$lessonId.tsx`), so
+ * there is no event this poll could ever be waiting to observe. Missing this
+ * case used to mean **every already-completed lesson with no draft run** —
+ * every one, the moment the `flashcards` flag went live, plus any lesson whose
+ * trigger was refused (`429`/`409`) or errored — polled `GET
+ * .../flashcard-drafts` every 5s forever, for as long as the tab stayed open.
+ */
+export function isFlashcardDraftsTerminal(drafts: FlashcardDrafts | undefined): boolean {
+  if (drafts === undefined) return false;
+  return (
+    drafts.state === "generated" || drafts.state === "failed" || drafts.state === "not_started"
+  );
+}
+
+/**
+ * Keep some drafts, discard the rest (D6). `[]` is "Skip — keep none".
+ *
+ * The offset rides in the body because a keep *writes a due date*: the service
+ * owns "today" and sets `due_on = today + ladder[0]` (D4), so this request is
+ * the one place that arithmetic needs an offset to resolve against. It is the
+ * same `getTimezoneOffset()`-verbatim value every other flashcards call sends,
+ * read through the one wrapped call site — never a second `getTimezoneOffset()`.
+ * The field is required server-side; omitting it is a 422.
+ *
+ * The `200 {kept_ids}` body (docs/api.md) is the ids the server actually kept
+ * — nobody reads it today (the caller patches its own cache from the ids it
+ * just sent, `routes/lessons.$lessonId.tsx`), but the return type still names
+ * the real shape rather than `Promise<void>`, which would silently agree with
+ * a fake that answered `204` instead.
+ */
+export function keepFlashcardDrafts(
+  lessonId: string,
+  keptIds: string[],
+): Promise<{ kept_ids: string[] }> {
+  return apiFetch<{ kept_ids: string[] }>(apiV1Path(`/lessons/${lessonId}/flashcard-drafts/keep`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      kept_ids: keptIds,
+      tz_offset_minutes: clientTimezoneOffsetMinutes(),
+    }),
+  });
+}
+
+/** The summary for one instant's offset — always called through the options
+ *  factory below (mirrors `getProgressSummary`). */
+export function getReviewSummary(tzOffsetMinutes: number): Promise<ReviewSummary> {
+  return apiFetch<ReviewSummary>(
+    apiV1Path(`/reviews/summary?tz_offset_minutes=${tzOffsetMinutes}`),
+  );
+}
+
+/** The day's queue, optionally filtered to one path for display only (§5.3). */
+export function getReviewQueue(
+  tzOffsetMinutes: number,
+  pathId: string | null,
+): Promise<ReviewQueue> {
+  const params = new URLSearchParams({ tz_offset_minutes: String(tzOffsetMinutes) });
+  if (pathId !== null) params.set("path_id", pathId);
+  return apiFetch<ReviewQueue>(apiV1Path(`/reviews/queue?${params.toString()}`));
+}
+
+/** Grade one card (§5.4). */
+export function gradeCard(input: GradeCardInput): Promise<GradeCardResult> {
+  return apiFetch<GradeCardResult>(apiV1Path("/reviews"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+}
+
+/**
+ * The prefix every flashcards query sits under (§7). One
+ * `invalidateQueries({ queryKey: FLASHCARDS_QUERY_PREFIX })` reaches the
+ * summary, every cached queue (any `path_id`), and every cached drafts poll —
+ * the grade mutation's authoritative refetch (§8) and the keep mutation both
+ * invalidate through this single prefix rather than three hand-spelled keys.
+ */
+export const FLASHCARDS_QUERY_PREFIX: readonly ["flashcards"] = ["flashcards"] as const;
+
+/** TanStack query key for the due summary (§7's exact shape). */
+export function reviewSummaryQueryKey(
+  tzOffsetMinutes: number,
+): readonly ["flashcards", "summary", number] {
+  return [...FLASHCARDS_QUERY_PREFIX, "summary", tzOffsetMinutes] as const;
+}
+
+/** TanStack query key for one day's queue, scoped by offset + path (§7). */
+export function reviewQueueQueryKey(
+  tzOffsetMinutes: number,
+  pathId: string | null,
+): readonly ["flashcards", "queue", number, string | null] {
+  return [...FLASHCARDS_QUERY_PREFIX, "queue", tzOffsetMinutes, pathId ?? null] as const;
+}
+
+/** TanStack query key for one lesson's drafting poll (§7). */
+export function flashcardDraftsQueryKey(
+  lessonId: string,
+): readonly ["flashcards", "drafts", string] {
+  return [...FLASHCARDS_QUERY_PREFIX, "drafts", lessonId] as const;
+}
+
+/**
+ * THE due-summary query. `enabled` comes from `useFeatureFlag("flashcards")`
+ * — off means `skipToken`: no request, no pill, no *Due today* card (§8).
+ */
+export function reviewSummaryQueryOptions(enabled: boolean) {
+  const tzOffsetMinutes = clientTimezoneOffsetMinutes();
+  return queryOptions({
+    queryKey: reviewSummaryQueryKey(tzOffsetMinutes),
+    queryFn: enabled ? () => getReviewSummary(tzOffsetMinutes) : skipToken,
+  });
+}
+
+/**
+ * THE daily-queue query, for `/review?path=…` (§8). `pathId` is `null` for
+ * "All paths" — a display filter only (§5.3), never a second selection.
+ */
+export function reviewQueueQueryOptions(enabled: boolean, pathId: string | null) {
+  const tzOffsetMinutes = clientTimezoneOffsetMinutes();
+  return queryOptions({
+    queryKey: reviewQueueQueryKey(tzOffsetMinutes, pathId),
+    queryFn: enabled ? () => getReviewQueue(tzOffsetMinutes, pathId) : skipToken,
+  });
+}
+
+/**
+ * THE drafting-poll query, for the block below a lesson's completion state.
+ * `enabled` is the caller's own `flashcardsEnabled && unlock_state ===
+ * "complete"` — a drafting run only ever exists for a completed lesson, so
+ * polling before that would only ever 404.
+ */
+export function flashcardDraftsQueryOptions(lessonId: string, enabled: boolean) {
+  return queryOptions({
+    queryKey: flashcardDraftsQueryKey(lessonId),
+    queryFn: enabled ? () => getFlashcardDrafts(lessonId) : skipToken,
   });
 }

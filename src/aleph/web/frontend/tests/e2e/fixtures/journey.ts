@@ -431,15 +431,31 @@ export async function backToPath(page: Page): Promise<void> {
 }
 
 /**
- * Work a whole lesson: open it, answer the Quick check, mark it complete, and
- * return to the path view. `answer` defaults to the first option — the learner
- * cannot know which is keyed (W6), and the Outcome is non-gating either way.
+ * Open the lesson at `index`, answer its Quick check and mark it complete —
+ * the four moves every completion journey shares before it diverges: straight
+ * back to the path view (`completeLessonAt`), or into the drafts screen that
+ * appears first (`completeLessonAndKeepDrafts`, TDD §5.2). `answer` defaults
+ * to the first option — the learner cannot know which is keyed (W6), and the
+ * Outcome is non-gating either way. Not exported: every caller wants one of
+ * the two functions below, never this fragment on its own.
  */
-export async function completeLessonAt(page: Page, index: number, answer = 0): Promise<void> {
+async function completeLessonUpToMarkingComplete(
+  page: Page,
+  index: number,
+  answer = 0,
+): Promise<void> {
   await openLessonAt(page, index);
   await expectLessonContent(page);
   await answerQuickCheck(page, answer);
   await markComplete(page);
+}
+
+/**
+ * Work a whole lesson: open it, answer the Quick check, mark it complete, and
+ * return to the path view.
+ */
+export async function completeLessonAt(page: Page, index: number, answer = 0): Promise<void> {
+  await completeLessonUpToMarkingComplete(page, index, answer);
   await backToPath(page);
 }
 
@@ -467,6 +483,36 @@ export async function shiftCompletions(
 ): Promise<void> {
   const response = await page.request.post(`${BACKEND_URL}/__e2e__/shift-completions`, {
     data: { path_id: pathId, days },
+  });
+  expect(response.ok()).toBe(true);
+}
+
+/**
+ * Backdate every kept card the signed-in learner owns by `days` whole days —
+ * the flashcards sibling of `shiftCompletions` (Phase 3 TDD D15, §11).
+ *
+ * Scoped by the learner's own account id rather than a path id: a kept card
+ * outlives its source path (D12 — W27 shifts a card and then deletes the very
+ * path it names), so there is no path to shift *through* the way completions
+ * are. The id comes off the real session (`GET /api/v1/auth/session`, proxied
+ * like every other `/api` call — never a harness invention), so this still
+ * only ever touches rows the signed-in learner actually owns.
+ *
+ * A **shift**, not a seeder (D15): it fabricates no cards, so a journey must
+ * earn its kept cards through the real drafting + keep flow
+ * (`completeLessonAndKeepDrafts` below) before shifting them due. Mounted
+ * only on `create_stub_app` (`scripts/e2e_backend.py`) — production never
+ * sees the route, pinned by `tests/unit/test_smoke.py`.
+ */
+export async function shiftFlashcardDue(page: Page, { days }: { days: number }): Promise<void> {
+  const session = await page.request.get("/api/v1/auth/session");
+  expect(session.ok()).toBe(true);
+  const body = await session.json();
+  if (!body.authenticated) {
+    throw new Error("shiftFlashcardDue: no signed-in session to scope the shift to");
+  }
+  const response = await page.request.post(`${BACKEND_URL}/__e2e__/shift-flashcard-due`, {
+    data: { user_id: body.user.id, days },
   });
   expect(response.ok()).toBe(true);
 }
@@ -505,4 +551,126 @@ export async function fetchProgressSummary(page: Page): Promise<ProgressSummary>
     }
     return response.json();
   });
+}
+
+// --- Flashcards: drafting + keep (Phase 3 TDD §5.2/§8, W24-W27) -------------
+
+/**
+ * Keep exactly `keepCount` of the open lesson's drafts, discarding the tail
+ * (all keeping by default, PRD §3, so "keep the first two" and "keep all
+ * four" both read as the natural thing to do with one loop) and wait for the
+ * block to clear. Assumes `DraftList` is already reachable — its one caller,
+ * `completeLessonAndKeepDrafts` below, gets there straight off a completion.
+ *
+ * Returns the fronts of the cards actually kept, in draft order — the one
+ * identifying detail a journey needs to find *this* card again later (W27
+ * finds its card by front text once its source path, and so its `path_id`
+ * filter, is gone).
+ */
+async function keepDrafts(page: Page, keepCount: number): Promise<string[]> {
+  await waitForSurface(page, "draft-list", GENERATION_TIMEOUT);
+  const cards = page.getByTestId("draft-card");
+  const total = await cards.count();
+  const keptFronts: string[] = [];
+  for (let index = 0; index < total; index += 1) {
+    if (index < keepCount) {
+      keptFronts.push((await cards.nth(index).locator("p").first().innerText()).trim());
+    } else {
+      await cards.nth(index).getByTestId("draft-toggle").click();
+    }
+  }
+  await expect(page.getByTestId("draft-keep-count")).toHaveText(`${keepCount} kept`);
+  await page.getByTestId("draft-keep-button").click();
+  await expect(page.getByTestId("draft-list")).toHaveCount(0, { timeout: ACTION_TIMEOUT });
+  return keptFronts;
+}
+
+/**
+ * Complete the lesson at `index`, keep `keepCount` of its drafts (discarding
+ * the rest) and return to the path view — the one unit of work every
+ * W24-W27 journey is built from: a kept card these specs can trust came
+ * through the real drafting + keep flow (D6), never fabricated the way only
+ * `shiftFlashcardDue` is allowed to backdate it (D15).
+ *
+ * Drafting is triggered automatically off the completion
+ * (`routes/lessons.$lessonId.tsx`'s `completeMutation.onSuccess`), so there is
+ * no separate trigger step here — the same reason `completeLessonAt` needs
+ * none for generation.
+ */
+export async function completeLessonAndKeepDrafts(
+  page: Page,
+  index: number,
+  keepCount: number,
+  answer = 0,
+): Promise<string[]> {
+  await completeLessonUpToMarkingComplete(page, index, answer);
+  const keptFronts = await keepDrafts(page, keepCount);
+  await backToPath(page);
+  return keptFronts;
+}
+
+// --- Flashcards: the review session (Phase 3 TDD §5.3/§8, W24-W27) ---------
+
+/** One card in `GET /api/v1/reviews/queue`'s `cards`, as far as W24-W27 need. */
+export interface ReviewQueueCard {
+  card_id: string;
+  front: string;
+  back: string;
+}
+
+/** `GET /api/v1/reviews/queue` body, as far as W24-W27 need to reach into it. */
+export interface ReviewQueueSnapshot {
+  today: string;
+  total: number;
+  completed: number;
+  scope_path_id: string | null;
+  other_due_count: number;
+  cards: ReviewQueueCard[];
+}
+
+/**
+ * The day's queue off the wire — the D3 pin's own payload, read the same way
+ * `fetchProgressSummary` reads the streak's (inside the page, so
+ * `tz_offset_minutes` is the exact same `getTimezoneOffset()` call `lib/api.ts`
+ * makes). W25 uses this to compare the selected set across a reload without
+ * walking the whole session; W25/W26 also use it to read the actual serve
+ * order their shared account (`ADMIN_USER`, `playwright.config.ts`'s
+ * flashcards project) produced, never an assumed one — that account can
+ * carry due residue from whichever of W24/W25/W26 ran earlier the same day,
+ * and the cap makes exactly ten hold regardless of whose cards they are.
+ * W27 runs on its own account with nothing else on it, so it does not need
+ * this for residue, but reads it too — `bringToFront` bounds its search by
+ * the real `total` rather than an assumed one.
+ */
+export async function fetchReviewQueue(
+  page: Page,
+  pathId: string | null = null,
+): Promise<ReviewQueueSnapshot> {
+  return page.evaluate(async (scopedPathId) => {
+    const offset = new Date().getTimezoneOffset();
+    const params = new URLSearchParams({ tz_offset_minutes: String(offset) });
+    if (scopedPathId !== null) {
+      params.set("path_id", scopedPathId);
+    }
+    const response = await fetch(`/api/v1/reviews/queue?${params.toString()}`);
+    if (!response.ok) {
+      throw new Error(`review queue fetch failed: ${response.status}`);
+    }
+    return response.json();
+  }, pathId);
+}
+
+/** The open review session's current card front, as the learner reads it. */
+export async function currentReviewFront(page: Page): Promise<string> {
+  return (await page.getByTestId("review-card-front").innerText()).trim();
+}
+
+/**
+ * Flip the current review card and grade it — the one reveal-then-grade round
+ * trip every beat in W24-W27 makes. Assumes a card is already showing.
+ */
+export async function gradeCurrentCard(page: Page, grade: "again" | "got_it"): Promise<void> {
+  await page.getByTestId("review-card-flip").click();
+  await expect(page.getByTestId("review-card-back")).toBeVisible({ timeout: ACTION_TIMEOUT });
+  await page.getByTestId(grade === "again" ? "review-grade-again" : "review-grade-got-it").click();
 }

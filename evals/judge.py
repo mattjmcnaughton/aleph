@@ -39,7 +39,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.messages import ModelResponse, ToolCallPart, UserPromptPart
@@ -71,8 +71,9 @@ if TYPE_CHECKING:
 
 SYSTEM_PROMPT = """\
 You are the quality gate for a self-directed adult learning app. You are given \
-one generated artifact — either a path OUTLINE or a single LESSON (a Read \
-passage plus a Quick check) — together with the context it was generated in, \
+one generated artifact — a path OUTLINE, a single LESSON (a Read passage plus a \
+Quick check), or a single drafted FLASHCARD (a front and a back, drafted from \
+one lesson's Read passage) — together with the context it was generated in, \
 and you score it against a fixed rubric.
 
 Every rubric item is BINARY: it passes or it fails, with no middle grade. The \
@@ -136,15 +137,23 @@ def build_judge_agent() -> Agent[JudgeDeps, JudgeVerdict]:
         """
         kind = ctx.deps.artifact
         items = APPLICABLE_ITEMS[kind]
-        return (
+        prompt = (
             f"The artifact under review is a {kind.upper()}.\n\n"
             f"RUBRIC — score exactly these {len(items)} items, once each, using "
             f"these ids: {list(items)}\n"
-            f"{rubric_block(kind)}\n\n"
-            "Worked examples of correctly calibrated verdicts follow. Their "
-            "artifacts are abridged; judge the real one on its own terms.\n\n"
-            f"{calibration_block(kind)}"
+            f"{rubric_block(kind)}"
         )
+        # No calibration examples exist yet for every kind (``flashcard_draft``
+        # has none, TDD §16's `for-human` follow-up) — the "worked examples
+        # follow" line must not appear when there are none to show.
+        examples = calibration_block(kind)
+        if examples:
+            prompt += (
+                "\n\nWorked examples of correctly calibrated verdicts follow. "
+                "Their artifacts are abridged; judge the real one on its own "
+                f"terms.\n\n{examples}"
+            )
+        return prompt
 
     @agent.output_validator
     def _validate(ctx: RunContext[JudgeDeps], verdict: JudgeVerdict) -> JudgeVerdict:
@@ -158,7 +167,9 @@ def build_judge_agent() -> Agent[JudgeDeps, JudgeVerdict]:
 # read): the stub sees only text, so this is how it knows which item set to
 # emit. First line, exactly once, ahead of any free text.
 _ARTIFACT_TOKEN = "artifact"
-_ARTIFACT_RE = re.compile(rf"{_ARTIFACT_TOKEN}\s*=\s*(outline|lesson)", re.IGNORECASE)
+_ARTIFACT_RE = re.compile(
+    rf"{_ARTIFACT_TOKEN}\s*=\s*(outline|lesson|flashcard_draft)", re.IGNORECASE
+)
 
 
 def _serialize_outline(outline: PathOutline, *, with_summaries: bool) -> str:
@@ -255,6 +266,43 @@ def build_lesson_judge_prompt(
     return "\n\n".join(sections)
 
 
+def build_flashcard_judge_prompt(
+    *,
+    topic: str,
+    level: Level,
+    unit_title: str,
+    lesson_title: str,
+    read_passage: str,
+    front: str,
+    back: str,
+) -> str:
+    """The judge's user prompt for one drafted flashcard (Phase 3 TDD §10).
+
+    Carries the source lesson's Read passage **verbatim** — PRD §6's *grounding*
+    dimension (the ``accurate`` item's flashcard reading, ``rubric.py``) is
+    unfalsifiable without it, exactly as the lesson prompt's prior passages are
+    what makes *continuous* falsifiable. No Quick check and no prior lessons: a
+    card is judged against its one source passage alone, never against a path
+    position it does not have (``rubric.py``'s module docstring explains why
+    ``continuous``/``check_validity`` are not in its item set at all).
+    """
+    return "\n\n".join(
+        [
+            f"{_ARTIFACT_TOKEN}=flashcard_draft",
+            f"Topic the learner asked for: {topic}",
+            f"Learner level: {level}",
+            f"Drafted from unit {unit_title!r}, lesson {lesson_title!r}.",
+            "Read passage the card was drafted from (verbatim — this is the "
+            "evidence for the accurate/grounding item; nothing on the card may "
+            "go beyond it):",
+            read_passage,
+            "FLASHCARD UNDER REVIEW:",
+            f"Front: {front}",
+            f"Back: {back}",
+        ]
+    )
+
+
 # --- the runner ----------------------------------------------------------------
 
 
@@ -308,6 +356,33 @@ class Judge:
                 prior_passages=prior_passages,
             ),
             deps=JudgeDeps(artifact="lesson"),
+            model=self.model,
+        )
+        return run.output
+
+    async def judge_flashcard_draft(
+        self,
+        *,
+        topic: str,
+        level: Level,
+        unit_title: str,
+        lesson_title: str,
+        read_passage: str,
+        front: str,
+        back: str,
+    ) -> JudgeVerdict:
+        """Score one drafted flashcard against its four applicable rubric items."""
+        run = await self.agent.run(
+            build_flashcard_judge_prompt(
+                topic=topic,
+                level=level,
+                unit_title=unit_title,
+                lesson_title=lesson_title,
+                read_passage=read_passage,
+                front=front,
+                back=back,
+            ),
+            deps=JudgeDeps(artifact="flashcard_draft"),
             model=self.model,
         )
         return run.output
@@ -371,10 +446,11 @@ def _stub_judge_respond(
     match = _ARTIFACT_RE.search(text)
     if match is None:
         raise StubJudgeError(
-            "judge prompt is missing its 'artifact=<outline|lesson>' token, so "
-            "the stub judge cannot tell which rubric item set to score"
+            "judge prompt is missing its "
+            "'artifact=<outline|lesson|flashcard_draft>' token, so the stub "
+            "judge cannot tell which rubric item set to score"
         )
-    kind: ArtifactKind = "outline" if match.group(1).lower() == "outline" else "lesson"
+    kind: ArtifactKind = cast("ArtifactKind", match.group(1).lower())
     applicable = APPLICABLE_ITEMS[kind]
 
     forced = {found.lower() for found in _JUDGE_FAIL_RE.findall(text)}

@@ -59,6 +59,25 @@ their own — the lessons they add are ordinary generations under
 ``RATE_LIMIT_LESSON_GENERATIONS_PER_DAY``, and ``MAX_LESSONS_PER_PATH`` bounds
 path size at proposal *and* apply time.
 
+**Flashcard drafting (``check_flashcard_draft_generation``, Phase 3 TDD §5.2/
+D13).** ``FLASHCARD_DRAFTS_PER_DAY`` counts ``user_id``'s **drafting attempts**
+today — ``UsageRepository.count_flashcard_draft_runs_since``, keyed on
+``flashcard_draft_runs.started_at``, the stamp a claim (re-)writes. This is the
+same shape as ``check_outline_generation``'s cap, not
+``count_lesson_generations_since``'s: drafting inserts no new row on a retry (a
+sparse, one-row-per-lesson claim, TDD D7), so only the *stamp* moves, and only
+the row's **latest** claim is counted — a same-lesson `failed` -> retry loop
+still consumes one quota unit, the same accepted MVP shape
+``count_path_outline_generations_since``'s docstring already names. Call before
+:meth:`~aleph.services.flashcard_drafting.FlashcardDraftingService.trigger_draft_run`
+(``routers/v1/flashcards.py``'s `POST .../flashcard-drafts`), **after** the
+ownership/`409 lesson_not_complete` checks and **before** the claim (§5.6: a
+breach must not spend a claim attempt). Ships **enabled** (default 50, not 0) —
+unlike the tutor/shaping caps, drafting is this phase's one learner-triggered
+model call (D13), so there is no "cap is 0 so this is never queried" posture
+here; the family's own off-switch (``cap <= 0``) is still honoured, per
+:class:`DailyRateLimiter`'s own docstring.
+
 The check is called *before* the billed work, and admins are exempt via an
 injected ``is_admin`` flag (decoupled from ``authz`` on purpose — AL-050 wires
 the two together). On refusal it raises ``HTTPException(429, ...)`` with a
@@ -110,6 +129,10 @@ class UsageCounter(Protocol):
         self, *, user_id: uuid.UUID, since: datetime
     ) -> int: ...
 
+    async def count_flashcard_draft_runs_since(
+        self, *, user_id: uuid.UUID, since: datetime
+    ) -> int: ...
+
 
 def _utc_now() -> datetime:
     return datetime.now(UTC)
@@ -136,6 +159,7 @@ class DailyRateLimiter:
         lesson_generations_per_day: int,
         tutor_messages_per_day: int,
         shaping_messages_per_day: int = 0,
+        flashcard_drafts_per_day: int = 0,
         now: Callable[[], datetime] = _utc_now,
     ) -> None:
         self._usage = usage
@@ -143,6 +167,7 @@ class DailyRateLimiter:
         self._lesson_generations_per_day = lesson_generations_per_day
         self._tutor_messages_per_day = tutor_messages_per_day
         self._shaping_messages_per_day = shaping_messages_per_day
+        self._flashcard_drafts_per_day = flashcard_drafts_per_day
         self._now = now
 
     async def check_path_creation(self, *, user_id: uuid.UUID, is_admin: bool) -> None:
@@ -260,6 +285,29 @@ class DailyRateLimiter:
             ),
         )
 
+    async def check_flashcard_draft_generation(
+        self, *, user_id: uuid.UUID, is_admin: bool
+    ) -> None:
+        """Raise ``HTTPException(429)`` if ``user_id`` is at the daily drafting cap.
+
+        Call before triggering a drafting run (``POST
+        /lessons/{id}/flashcard-drafts``, TDD §5.2/§5.6), after the
+        ownership/completion checks and before the claim — see this module's
+        docstring for what the count actually bounds (distinct lessons with a
+        drafting attempt today, same-lesson retries counted once).
+        """
+        await self._check(
+            self._usage.count_flashcard_draft_runs_since,
+            cap=self._flashcard_drafts_per_day,
+            user_id=user_id,
+            is_admin=is_admin,
+            message=(
+                f"You've reached today's limit of "
+                f"{self._flashcard_drafts_per_day} flashcard drafting requests. "
+                "Please try again tomorrow."
+            ),
+        )
+
     async def _check(
         self,
         count_since: Callable[..., Awaitable[int]],
@@ -306,4 +354,5 @@ def build_daily_rate_limiter(session: AsyncSession) -> DailyRateLimiter:
         lesson_generations_per_day=settings.rate_limit_lesson_generations_per_day,
         tutor_messages_per_day=settings.rate_limit_tutor_messages_per_day,
         shaping_messages_per_day=settings.rate_limit_shaping_messages_per_day,
+        flashcard_drafts_per_day=settings.flashcard_drafts_per_day,
     )

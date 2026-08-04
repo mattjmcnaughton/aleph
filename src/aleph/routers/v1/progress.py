@@ -54,7 +54,32 @@ CurrentUser = Annotated[User, Depends(get_current_user)]
 Session = Annotated[AsyncSession, Depends(get_session)]
 
 
-async def require_streaks_enabled(user: CurrentUser, session: Session) -> None:
+async def _resolve_feature_flags(
+    user: CurrentUser, session: Session
+) -> dict[str, bool]:
+    """Resolve every feature flag for the caller — once per request.
+
+    The one place ``FeatureFlagService(session).resolve_for_user(user)`` is
+    called in this router. FastAPI caches a dependency's result for the
+    lifetime of one request when the same callable is depended on more than
+    once (the default ``use_cache=True``), so mounting *this* function as a
+    sub-dependency of both :func:`require_streaks_enabled` (the router-level
+    gate) and :func:`get_progress_summary` (the route body, which also needs
+    the ``flashcards`` bit for D11's union) means the real query underneath —
+    ``overrides_for_user`` — runs exactly once per request rather than twice.
+    Before this split, the gate and the body each called
+    ``resolve_for_user`` independently, doubling the query on
+    ``/progress/summary`` — the hottest read in the app (refetched on every
+    home remount/refocus and after every grade, §7) — for no reason beyond the
+    two call sites not sharing a dependency.
+    """
+    return await FeatureFlagService(session).resolve_for_user(user)
+
+
+FeatureFlags = Annotated[dict[str, bool], Depends(_resolve_feature_flags)]
+
+
+async def require_streaks_enabled(flags: FeatureFlags) -> None:
     """Hide the entire Progress surface unless the ``streaks`` flag resolves on.
 
     Mounted as a **router-level** dependency (see the module docstring).
@@ -64,7 +89,6 @@ async def require_streaks_enabled(user: CurrentUser, session: Session) -> None:
     before launch; ``streaks`` followed the identical playbook (D7) and is now
     launched too, which makes this gate a kill switch rather than a curtain.
     """
-    flags = await FeatureFlagService(session).resolve_for_user(user)
     if not flags.get(FeatureFlag.STREAKS, False):
         raise _not_found()
 
@@ -108,6 +132,7 @@ def _progress_summary_response(view: ProgressSummaryView) -> ProgressSummaryResp
 async def get_progress_summary(
     user: CurrentUser,
     session: Session,
+    flags: FeatureFlags,
     tz_offset_minutes: TzOffsetMinutes = 0,
 ) -> ProgressSummaryResponse:
     """The global streak, the activity window and the per-path breakdown (§6).
@@ -120,8 +145,24 @@ async def get_progress_summary(
 
     No caching, no rate limiting (§7): the cost is bounded by the caller's own
     completion history, and there is no model call to guard against.
+
+    **The streak union's flag gate (Phase 3 TDD D10/D11).** ``streaks`` gates
+    this whole route (the router-level dependency above); ``flashcards`` gates
+    only the *second* signal folded into the global streak. ``flags`` is the
+    same :func:`_resolve_feature_flags` result ``require_streaks_enabled``
+    already consumed for this request — FastAPI's dependency cache means the
+    ``overrides_for_user`` query underneath ran exactly once, not once per
+    consumer — and this body reads the ``flashcards`` bit out of it and hands
+    it to ``load_progress_summary`` as a plain, required boolean;
+    ``progress_read.py`` never imports the flag service itself (its module
+    docstring). Off -> ``review_days_for_user`` is never called and this
+    payload is exactly what it was before Phase 3 shipped.
     """
+    flashcards_enabled = flags.get(FeatureFlag.FLASHCARDS, False)
     view = await load_progress_summary(
-        session, user_id=user.id, tz_offset_minutes=tz_offset_minutes
+        session,
+        user_id=user.id,
+        tz_offset_minutes=tz_offset_minutes,
+        flashcards_enabled=flashcards_enabled,
     )
     return _progress_summary_response(view)

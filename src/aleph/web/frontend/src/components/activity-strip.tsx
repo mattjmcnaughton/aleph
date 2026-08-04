@@ -43,12 +43,20 @@ function localDateFromISO(iso: string): Date {
 const WEEKDAY_LABEL = new Intl.DateTimeFormat(undefined, { weekday: "long" });
 const DATE_LABEL = new Intl.DateTimeFormat(undefined, { month: "long", day: "numeric" });
 
+/**
+ * `count` is no longer lesson-specific (Phase 3 TDD D11): a review-only day is
+ * marked `count = 1` too, so a per-cell readout of "1 lesson" would misname a
+ * day the learner spent reviewing, not completing anything. Neither signal is
+ * distinguishable from `count` alone — nor should a caller need to reach past
+ * this component to explain that — so the label states plainly whether the
+ * day was active, which is what the count is actually *for*, and states no
+ * more than that. The summary `aria-label` above already reads "N active
+ * days"; this brings the per-cell copy into line with it, keeping the date.
+ */
 function cellLabel(cell: ActivityCell): string {
   const date = localDateFromISO(cell.date);
   const when = `${WEEKDAY_LABEL.format(date)}, ${DATE_LABEL.format(date)}`;
-  return cell.count === 0
-    ? `${when}: no lessons`
-    : `${when}: ${cell.count} ${cell.count === 1 ? "lesson" : "lessons"}`;
+  return cell.count === 0 ? `${when}: no activity` : `${when}: active`;
 }
 
 /**

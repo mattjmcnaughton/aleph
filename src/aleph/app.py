@@ -15,6 +15,7 @@ from aleph.errors import error_response
 from aleph.logging import configure_logging
 from aleph.routers import auth, health
 from aleph.routers.v1 import feature_flags as v1_feature_flags
+from aleph.routers.v1 import flashcards as v1_flashcards
 from aleph.routers.v1 import lessons as v1_lessons
 from aleph.routers.v1 import paths as v1_paths
 from aleph.routers.v1 import progress as v1_progress
@@ -93,6 +94,11 @@ def create_app() -> FastAPI:
     # this slice can ship dark and be killed without disturbing either
     # already-launched surface above.
     app.include_router(v1_progress.router)
+    # Likewise behind the ``flashcards`` flag (Phase 3 TDD D10) — its own key,
+    # so this slice can ship dark (drafting, the queue, review, and the due
+    # pill all 404 by default) and be dogfooded by admins without disturbing
+    # any already-launched surface above.
+    app.include_router(v1_flashcards.router)
 
     # Mount frontend static files (only serves if dist/ exists)
     mount_frontend(app)

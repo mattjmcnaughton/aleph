@@ -1,12 +1,17 @@
 """Eval harness CLI: ``uv run python -m evals`` (or ``just evals``).
 
-Two modes:
+Three modes:
 
 - **seed set** (default) — runs ``evals/seed_set.yaml`` through the outline and
   lesson agents against one or more model bindings, scores each case with the
   Layer 1 deterministic pre-filters and (unless disabled) the Layer 2 binary
   judge, and prints a pydantic-evals report table plus a gate summary per
   binding.
+- **flashcard drafting** (``--flashcards``) — runs ``evals/
+  flashcard_seed_set.yaml`` through the outline, lesson, and flashcard agents
+  in sequence (a card is drafted from a freshly generated lesson, TDD D14/§10),
+  scored the same two-layer way against the ``flashcard_draft`` rubric
+  (``evals/rubric.py``). One binding, not a sweep — see ``--flashcards``' help.
 - **calibration** (``--agreement``) — runs the judge over
   ``evals/human_labels.yaml`` and reports judge↔human agreement. No generation
   happens; this mode measures the measuring instrument.
@@ -15,21 +20,24 @@ See docs/evals.md for the strategy and docs/ci.md for the GitHub Actions wiring.
 
 Exit codes:
     0  ran; every hard floor held and the ≥ 90% pass-rate gate was met
-    1  a case failed a hard floor (branch / outline caps / lesson bands / the
-       safety rubric item), the judged pass rate fell below the gate, judge↔human
-       agreement fell below the trust threshold, or a case errored outright
+    1  a case failed a hard floor (branch / outline caps / lesson bands / a
+       flashcard's structural or non-triviality check / the safety rubric
+       item), the judged pass rate fell below the gate, judge↔human agreement
+       fell below the trust threshold, or a case errored outright
     2  misconfiguration (no OPENROUTER_API_KEY and not --smoke; --models
-       combined with --smoke or --agreement; --agreement with --no-judge; bad
-       arguments; a ``seed_set.yaml`` / ``human_labels.yaml`` that does not
-       parse or validate — a broken data file says nothing about the models
-       under evaluation, so it must not be reported as a failed gate)
+       combined with --smoke, --agreement, or --flashcards; --agreement with
+       --no-judge or --flashcards; bad arguments; a ``seed_set.yaml`` /
+       ``flashcard_seed_set.yaml`` / ``human_labels.yaml`` that does not parse
+       or validate — a broken data file says nothing about the models under
+       evaluation, so it must not be reported as a failed gate)
 
 Reads ``OPENROUTER_API_KEY`` and the ``MODEL_OUTLINE`` / ``MODEL_LESSON`` /
-``MODEL_JUDGE`` slots via ``aleph.config.settings`` (environment or ``.env``) —
-imported lazily, so ``--smoke`` needs no configuration at all. ``MODEL_JUDGE`` is
-read *here and nowhere else in the repo*: the judge is eval-only and never
-touches the request path. When ``$GITHUB_STEP_SUMMARY`` is set (GitHub Actions),
-the same tables are appended there as the job summary.
+``MODEL_JUDGE`` / ``MODEL_FLASHCARD`` slots via ``aleph.config.settings``
+(environment or ``.env``) — imported lazily, so ``--smoke`` needs no
+configuration at all. ``MODEL_JUDGE`` is read *here and nowhere else in the
+repo*: the judge is eval-only and never touches the request path. When
+``$GITHUB_STEP_SUMMARY`` is set (GitHub Actions), the same tables are appended
+there as the job summary.
 """
 
 from __future__ import annotations
@@ -54,15 +62,24 @@ from evals.agreement import (
 )
 from evals.generation import (
     EVALUATOR_ASSERTIONS,
+    FLASHCARD_EVALUATOR_ASSERTIONS,
+    FLASHCARD_HARD_FLOOR_EVALUATORS,
+    FLASHCARD_JUDGE_ASSERTIONS,
+    FLASHCARD_JUDGE_HARD_FLOOR,
+    FLASHCARD_SEED_SET_PATH,
     FULL_PATH_LESSONS,
     HARD_FLOOR_EVALUATORS,
     JUDGE_ASSERTIONS,
+    JUDGE_FLASHCARD_SAFETY,
     JUDGE_HARD_FLOOR,
     JUDGE_SAFETY,
     SEED_SET_PASS_RATE_GATE,
     SEED_SET_PATH,
+    FlashcardRubricJudge,
     RubricJudge,
+    build_flashcard_generation_task,
     build_generation_task,
+    load_flashcard_seed_set,
     load_seed_set,
     smoke_model,
 )
@@ -75,13 +92,27 @@ if TYPE_CHECKING:
     from pydantic_evals.reporting import EvaluationReport, ReportCase
 
     from evals.agreement import AgreementSummary
-    from evals.generation import GenerationSample, SeedInputs, SeedMeta
+    from evals.generation import (
+        FlashcardSample,
+        FlashcardSeedInputs,
+        GenerationSample,
+        SeedInputs,
+        SeedMeta,
+    )
 
     # The concrete report a seed-set run produces. Spelled out rather than left
     # as ``Any`` so the payload builder is type-checked against the sample
     # (``case.output.lesson_slot``) instead of guessing at run time.
     SeedReport = EvaluationReport[SeedInputs, GenerationSample, SeedMeta]
-    SeedCase = ReportCase[SeedInputs, GenerationSample, SeedMeta]
+    FlashcardReport = EvaluationReport[FlashcardSeedInputs, FlashcardSample, SeedMeta]
+    #: Both report shapes share ``SeedMeta``, and every gate-arithmetic helper
+    #: below only ever reads ``case.name``/``case.assertions``/
+    #: ``case.evaluator_failures``/``report.failures``/``report.cases`` — none of
+    #: which depend on the inputs/output type parameters — so the shared gate
+    #: machinery is typed once, generically, rather than duplicated per report
+    #: shape.
+    AnyEvalReport = EvaluationReport[Any, Any, SeedMeta]
+    AnyEvalCase = ReportCase[Any, Any, SeedMeta]
 
 # Wide enough that the report table never wraps mid-cell in CI logs.
 _REPORT_WIDTH = 140
@@ -202,6 +233,58 @@ def _resolve_bindings(args: argparse.Namespace) -> list[ModelBinding] | None:
     ]
 
 
+@dataclass(frozen=True)
+class FlashcardModelBinding:
+    """One evaluated configuration for the ``flashcard_draft`` harness.
+
+    A single binding, not a sweep list like :class:`ModelBinding`: ``--models``
+    is rejected alongside ``--flashcards`` (``main``) because the flashcard
+    harness's whole point is scoring *drafting* quality against the configured
+    ``model_flashcard`` slot, and a sweep of the outline/lesson models would be
+    answering a question this mode does not ask.
+    """
+
+    label: str
+    outline: Model
+    lesson: Model
+    flashcard: Model
+    judge: Judge | None = None
+
+
+def _resolve_flashcard_binding(
+    args: argparse.Namespace,
+) -> FlashcardModelBinding | None:
+    """The flashcard model binding to evaluate, or None on misconfiguration."""
+    judging = _judging_enabled(args)
+
+    if args.smoke:
+        stub = smoke_model()
+        return FlashcardModelBinding(
+            label="smoke",
+            outline=stub,
+            lesson=stub,
+            flashcard=stub,
+            judge=build_stub_judge() if judging else None,
+        )
+
+    from aleph.config import settings
+
+    if not settings.openrouter_api_key:
+        _missing_key_message()
+        return None
+
+    from aleph.services.openrouter import resolve_model
+
+    judge = _live_judge(settings.model_judge) if judging else None
+    return FlashcardModelBinding(
+        label=settings.model_flashcard,
+        outline=resolve_model(settings.model_outline),
+        lesson=resolve_model(settings.model_lesson),
+        flashcard=resolve_model(settings.model_flashcard),
+        judge=judge,
+    )
+
+
 def _case_payload(report: SeedReport) -> dict[str, Any]:
     """JSON-friendly per-case results for the --report artifact."""
     return {
@@ -221,6 +304,38 @@ def _case_payload(report: SeedReport) -> dict[str, Any]:
                 },
                 # A crashed evaluator produces *no* assertion, so without this
                 # the artifact would render an unscored case as a clean pass.
+                "evaluator_failures": [
+                    {"name": failure.name, "error": failure.error_message}
+                    for failure in case.evaluator_failures
+                ],
+                "metrics": dict(case.metrics),
+                "task_duration": case.task_duration,
+            }
+            for case in report.cases
+        ],
+        "errors": [failure.name for failure in report.failures],
+    }
+
+
+def _flashcard_case_payload(report: FlashcardReport) -> dict[str, Any]:
+    """JSON-friendly per-case results for the --report artifact (flashcard mode).
+
+    Mirrors :func:`_case_payload`'s shape; ``cards`` replaces ``lessons`` since a
+    flashcard case's output is a drafted card set, not a generated lesson.
+    """
+    return {
+        "cases": [
+            {
+                "name": case.name,
+                "lesson_slot": f"{case.output.unit_title} / {case.output.lesson_title}",
+                "cards": [
+                    {"front": card.front, "back": card.back}
+                    for card in case.output.drafts.cards
+                ],
+                "assertions": {
+                    name: {"value": result.value, "reason": result.reason}
+                    for name, result in case.assertions.items()
+                },
                 "evaluator_failures": [
                     {"name": failure.name, "error": failure.error_message}
                     for failure in case.evaluator_failures
@@ -262,7 +377,12 @@ class CheckOutcome:
         return f"{self.name} ({self.state})"
 
 
-def _case_checks(case: SeedCase, gating: Collection[str]) -> tuple[CheckOutcome, ...]:
+def _case_checks(
+    case: AnyEvalCase,
+    gating: Collection[str],
+    *,
+    assertions_map: dict[str, frozenset[str]] = EVALUATOR_ASSERTIONS,
+) -> tuple[CheckOutcome, ...]:
     """Resolve every ``gating`` assertion on one case to a single outcome.
 
     The one walk both report views are derived from (:func:`_hard_floor_failures`
@@ -297,7 +417,7 @@ def _case_checks(case: SeedCase, gating: Collection[str]) -> tuple[CheckOutcome,
     crashed: dict[str, str] = {}
     unowned: list[CheckOutcome] = []
     for failure in case.evaluator_failures:
-        owned = EVALUATOR_ASSERTIONS.get(failure.name, frozenset({failure.name}))
+        owned = assertions_map.get(failure.name, frozenset({failure.name}))
         crashed.update(dict.fromkeys(owned, failure.error_message))
         if not owned & set(gating):
             unowned.append(
@@ -326,7 +446,10 @@ def _case_checks(case: SeedCase, gating: Collection[str]) -> tuple[CheckOutcome,
 
 
 def _hard_floor_failures(
-    report: SeedReport, hard_floor: Collection[str] = HARD_FLOOR_EVALUATORS
+    report: AnyEvalReport,
+    hard_floor: Collection[str] = HARD_FLOOR_EVALUATORS,
+    *,
+    assertions_map: dict[str, frozenset[str]] = EVALUATOR_ASSERTIONS,
 ) -> list[str]:
     """``case/check: reason`` strings for every hard-floor violation or error.
 
@@ -344,7 +467,7 @@ def _hard_floor_failures(
     return [f"{failure.name}: errored" for failure in report.failures] + [
         f"{case.name}/{check.name}: {check.detail}"
         for case in report.cases
-        for check in _case_checks(case, hard_floor)
+        for check in _case_checks(case, hard_floor, assertions_map=assertions_map)
         if not check.ok
     ]
 
@@ -406,11 +529,26 @@ class GateSummary:
         )
 
 
-def _gate_summary(report: SeedReport, *, judged: bool) -> GateSummary:
-    """Compute the gate figures for one binding's report."""
-    gating: set[str] = set(HARD_FLOOR_EVALUATORS)
+def _gate_summary(
+    report: AnyEvalReport,
+    *,
+    judged: bool,
+    hard_floor_evaluators: Collection[str] = HARD_FLOOR_EVALUATORS,
+    judge_assertions: Collection[str] = JUDGE_ASSERTIONS,
+    assertions_map: dict[str, frozenset[str]] = EVALUATOR_ASSERTIONS,
+    safety_assertion: str = JUDGE_SAFETY,
+) -> GateSummary:
+    """Compute the gate figures for one binding's report.
+
+    ``hard_floor_evaluators``/``judge_assertions``/``assertions_map``/
+    ``safety_assertion`` default to the outline/lesson seed set's names; the
+    flashcard CLI mode passes the ``FLASHCARD_*`` equivalents
+    (``evals/generation.py``) so this one function computes both kinds' gates
+    rather than each kind carrying its own copy.
+    """
+    gating: set[str] = set(hard_floor_evaluators)
     if judged:
-        gating |= JUDGE_ASSERTIONS
+        gating |= set(judge_assertions)
 
     rows: list[CaseGateRow] = []
     safety_failures: list[str] = []
@@ -423,7 +561,7 @@ def _gate_summary(report: SeedReport, *, judged: bool) -> GateSummary:
         )
 
     for case in report.cases:
-        checks = _case_checks(case, gating)
+        checks = _case_checks(case, gating, assertions_map=assertions_map)
         failed_checks = [check.label() for check in checks if not check.ok]
         # Only a real verdict of "unsafe" is a safety *failure*; a safety check
         # that never ran fails the case (above) and the hard floor, but claiming
@@ -431,7 +569,7 @@ def _gate_summary(report: SeedReport, *, judged: bool) -> GateSummary:
         safety_failures.extend(
             f"{case.name}: {check.detail}"
             for check in checks
-            if check.name == JUDGE_SAFETY and check.state == "fail"
+            if check.name == safety_assertion and check.state == "fail"
         )
         rows.append(
             CaseGateRow(
@@ -494,7 +632,7 @@ def _gate_payload(summary: GateSummary) -> dict[str, Any]:
     }
 
 
-def _append_step_summary(label: str, report: SeedReport, gate: GateSummary) -> None:
+def _append_step_summary(label: str, report: AnyEvalReport, gate: GateSummary) -> None:
     """Mirror the report table and the gate block into the Actions job summary."""
     summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
     if not summary_path:
@@ -747,6 +885,83 @@ def _run_seed_set_mode(args: argparse.Namespace) -> int:
     return 1 if (hard_failures or gate_failures) else 0
 
 
+def _run_flashcard_mode(args: argparse.Namespace) -> int:
+    """``--flashcards``: run the ``flashcard_draft`` seed set and gate on it.
+
+    The third eval kind's own mode (TDD D14/§10) — mirrors
+    :func:`_run_seed_set_mode` structurally, but over one binding rather than a
+    sweep (``--models`` is rejected alongside ``--flashcards``, ``main`` below)
+    and reusing the same generic gate machinery (:func:`_gate_summary`,
+    :func:`_hard_floor_failures`) with the flashcard evaluator names.
+    """
+    binding = _resolve_flashcard_binding(args)
+    if binding is None:
+        return 2
+
+    try:
+        dataset = load_flashcard_seed_set()
+    except _DATA_FILE_ERRORS as error:
+        _unreadable_data_file(FLASHCARD_SEED_SET_PATH, error)
+        return 2
+
+    judged = binding.judge is not None
+    if binding.judge is not None:
+        dataset.add_evaluator(FlashcardRubricJudge(judge=binding.judge))
+
+    report = asyncio.run(
+        dataset.evaluate(
+            build_flashcard_generation_task(
+                binding.outline, binding.lesson, binding.flashcard
+            ),
+            name=f"flashcard-seed-set ({binding.label})",
+            max_concurrency=args.max_concurrency,
+        )
+    )
+    report.print(width=_REPORT_WIDTH, include_reasons=True)
+
+    gate = _gate_summary(
+        report,
+        judged=judged,
+        hard_floor_evaluators=FLASHCARD_HARD_FLOOR_EVALUATORS,
+        judge_assertions=FLASHCARD_JUDGE_ASSERTIONS,
+        assertions_map=FLASHCARD_EVALUATOR_ASSERTIONS,
+        safety_assertion=JUDGE_FLASHCARD_SAFETY,
+    )
+    print()
+    print(_render_gate_summary(binding.label, gate))
+    _append_step_summary(f"flashcard_draft — {binding.label}", report, gate)
+
+    if args.report is not None:
+        payload = _flashcard_case_payload(report)
+        payload["gate"] = _gate_payload(gate)
+        payload["judge"] = binding.judge.label if binding.judge else None
+        _write_report(args.report, {"flashcard_seed_set": {binding.label: payload}})
+
+    hard_floor = set(FLASHCARD_HARD_FLOOR_EVALUATORS)
+    if judged:
+        hard_floor |= FLASHCARD_JUDGE_HARD_FLOOR
+    failed_cases = _hard_floor_failures(
+        report, hard_floor, assertions_map=FLASHCARD_EVALUATOR_ASSERTIONS
+    )
+    if failed_cases:
+        print(f"HARD FLOOR FAILED [{binding.label}]:", file=sys.stderr)
+        for failure in failed_cases:
+            print(f"  - {failure}", file=sys.stderr)
+
+    # Same rule as the outline/lesson gate: the rate only means anything once
+    # the judge has run.
+    gate_failed = judged and not gate.meets_gate
+    if gate_failed:
+        print("SHIP GATE FAILED:", file=sys.stderr)
+        print(
+            f"  - {binding.label}: pass rate {gate.pass_rate:.1%} "
+            f"(gate {SEED_SET_PASS_RATE_GATE:.0%}), "
+            f"{len(gate.safety_failures)} safety failure(s)",
+            file=sys.stderr,
+        )
+    return 1 if (failed_cases or gate_failed) else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="evals", description="Run the Aleph agent eval harness."
@@ -777,6 +992,14 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="calibration mode: judge evals/human_labels.yaml and report "
         "judge↔human agreement instead of running the seed set",
+    )
+    parser.add_argument(
+        "--flashcards",
+        action="store_true",
+        help="flashcard_draft mode: run evals/flashcard_seed_set.yaml (draft "
+        "cards from a freshly generated lesson per case) instead of the "
+        "outline/lesson seed set. The judge stays MODEL_JUDGE, generation "
+        "stays the configured MODEL_OUTLINE/MODEL_LESSON/MODEL_FLASHCARD.",
     )
     parser.add_argument(
         "--full-path-lessons",
@@ -819,9 +1042,23 @@ def main(argv: list[str] | None = None) -> int:
         )
     if args.full_path_lessons < 1:
         parser.error("--full-path-lessons must be at least 1.")
+    if args.flashcards and args.agreement:
+        parser.error(
+            "--flashcards cannot be combined with --agreement: they are two "
+            "different modes, and each already replaces the default seed-set "
+            "run on its own."
+        )
+    if args.flashcards and args.models:
+        parser.error(
+            "--models cannot be combined with --flashcards: the flashcard "
+            "harness always scores drafting quality against the configured "
+            "MODEL_OUTLINE/MODEL_LESSON/MODEL_FLASHCARD, not a swept model."
+        )
 
     if args.agreement:
         return _run_agreement_mode(args)
+    if args.flashcards:
+        return _run_flashcard_mode(args)
     return _run_seed_set_mode(args)
 
 

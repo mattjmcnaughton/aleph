@@ -148,11 +148,27 @@ def test_a_launched_flag_is_still_killable_without_a_code_deploy() -> None:
     assert feature_flags.effective_defaults(config)["shaping"] is True
 
 
-def test_the_registry_is_exactly_the_three_phase_flags() -> None:
+def test_flashcards_is_registered_and_dark_by_default() -> None:
+    """Phase 3's one flag, registered the same way the other three were built.
+
+    Unlike ``tutor``/``shaping``/``streaks`` (all launched, D10 recorded so a
+    fresh clone matches what a learner sees), ``flashcards`` has **not**
+    launched: it starts ``False`` here, the same dark posture the other three
+    spent their own build-out at, so every flashcards ticket merges and deploys
+    with zero learner exposure while admins dogfood it via the admin baseline.
+    """
+    assert feature_flags.FeatureFlag.FLASHCARDS == "flashcards"
+    assert feature_flags.FLAG_DEFAULTS[feature_flags.FeatureFlag.FLASHCARDS] is False
+    assert feature_flags.FeatureFlag.FLASHCARDS in feature_flags.ADMIN_DEFAULT_FLAGS
+
+
+def test_the_registry_is_exactly_the_four_phase_flags() -> None:
     # The whole registry in one assertion: a flag added to the enum but missed by
     # ``FLAG_DEFAULTS`` does not exist as far as resolution is concerned, and
     # would silently resolve off everywhere.
-    assert feature_flags.known_flag_keys() == frozenset({"tutor", "shaping", "streaks"})
+    assert feature_flags.known_flag_keys() == frozenset(
+        {"tutor", "shaping", "streaks", "flashcards"}
+    )
 
 
 def test_effective_defaults_applies_settings_over_code_defaults(
@@ -293,3 +309,13 @@ async def test_list_flags_sorted_with_counts(
         ("alpha", False, 0),
         ("beta", True, 3),
     ]
+
+
+# ``require_flashcards_enabled`` (TDD D10, 404-never-403) has moved to
+# ``routers/v1/flashcards.py`` (Phase 3 TDD ticket 5), matching where every
+# other flag gate (``require_tutor_enabled``, ``require_shaping_enabled``,
+# ``require_streaks_enabled``) already lives — its own router module, not this
+# one. Its ``404``/pass-through behaviour is covered there, and end to end by
+# ``tests/integration/test_reviews_api.py``'s flag-off/flag-on cases, the same
+# posture the three precedent gates take (none of them has a unit test here
+# either).

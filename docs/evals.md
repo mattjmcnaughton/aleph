@@ -290,6 +290,97 @@ the gate, and the safety failures listed individually. The same block goes into
 the GitHub Actions job summary and, as structured figures, into the `--report`
 JSON under `gate`.
 
+### The `flashcard_draft` mode (`--flashcards`)
+
+> Phase 3 TDD D14/§10; PRD §6. The **first actual extension** of the kind
+> axis: `evals/rubric.py`'s `ArtifactKind` still reads
+> `Literal["outline", "lesson", "flashcard_draft"]`, but `tutor_reply` (Phase 2
+> D11) and `path_proposal` (Phase 2B D13) were specified, never shipped — this
+> is the one that actually landed, and is sized in the TDD (§16) as real work
+> rather than a one-liner riding two existing extensions.
+
+```
+just evals --flashcards          # live: MODEL_OUTLINE/MODEL_LESSON/MODEL_FLASHCARD + the judge
+just evals --flashcards --no-judge
+just evals --smoke --flashcards  # offline plumbing check, no key
+just evals --smoke --flashcards --judge
+```
+
+A parallel, smaller harness rather than a branch inside the outline/lesson one:
+a card is drafted from a **completed lesson**, not from a bare topic, so each
+case in `evals/flashcard_seed_set.yaml` runs the outline agent, then the lesson
+agent for the path's first slot (the same probe-lesson generation
+`build_generation_task` already does), and finally the flashcard agent
+(`aleph.agents.flashcard`) on that lesson's real, freshly-generated Read
+passage and Quick-check stem. `--models` is rejected alongside `--flashcards`
+(one binding, not a sweep): the mode's whole point is scoring drafting quality
+against the configured `MODEL_FLASHCARD` slot, not comparing models in it.
+
+**There is no refusal branch to score.** Every case in
+`flashcard_seed_set.yaml` is a topic that generates — a refused topic has no
+completed lesson to draft a card from — so unlike the outline/lesson set there
+is no `RefusalBranch`-equivalent check here.
+
+**The seed set (`evals/flashcard_seed_set.yaml`)** reuses eight cases
+**verbatim** from `seed_set.yaml` (same name, topic, level — "the passages
+under test are the ones the lesson evals already judge"), spanning the same
+three `generate`-side buckets — technical, non-technical, and
+sensitive-but-legitimate — rather than the full twenty: three generation calls
+per case (outline, lesson, draft) plus up to five judge calls per drafted card
+is already double the cost per case of the outline/lesson set, so this file
+stays a representative subset, not a second full copy of it.
+
+**Layer 1 — two hard floors**, both delegating to the *same* predicates
+`aleph.agents.flashcard`'s own output validator composes (shared, not
+duplicated — TDD §5.2/§10):
+
+| Check | What it verifies | Gates? |
+| ----- | ---------------- | ------ |
+| `FlashcardInvariants` | Every drafted card is structurally usable: the count is within `FlashcardCaps`' band, every front/back is non-empty and within its word cap, and a card's two sides differ | **Yes — hard floor** |
+| `FlashcardNonTriviality` | No card's front restates the lesson's Quick-check stem (`aleph.agents.flashcard.restates_stem`) | **Yes — hard floor** |
+
+These are PRD §6's four dimensions split the same way the outline/lesson set
+splits its rubric: `FlashcardNonTriviality` is the *only* one of the four that
+is honestly deterministic (§5.2/§10) — and it inherits that check's own
+documented limitation (`aleph.agents.flashcard._RESTATEMENT_OVERLAP_THRESHOLD`):
+below five content words in a stem (the common case), a light rephrasing that
+changes even one content word already slips under the 0.8 bar undetected. Its
+false negatives are not a harness bug; they are the same bias the production
+validator accepts, for the same reason (that module's docstring). `Scope`,
+`grounding`, and `independence` — PRD §6's other three — are Layer 2 only, via
+the rubric items below.
+
+**Layer 2 — the `flashcard_draft` rubric kind.** `APPLICABLE_ITEMS["flashcard_draft"]
+= ("accurate", "level_appropriate", "in_scope", "safe")` — four of the shared
+six-item rubric, not six: `continuous` does not apply (a flashcard has no
+predecessor lesson to build on) and `check_valid` does not apply (a card is
+not a Quick check). Judged by `FlashcardRubricJudge` (`evals/generation.py`),
+which produces the same three-assertion shape the outline/lesson judge does:
+
+| Assertion | What it says | Gates? |
+| --------- | ------------ | ------ |
+| `JudgeFlashcards` | Every drafted card passed every applicable rubric item | Counts towards the ≥ 90% rate |
+| `JudgeFlashcardSafety` | No `safe` item failed on any drafted card | **Yes — hard block, whatever the rate** |
+
+Both gates (PRD §9) apply exactly as they do for the outline/lesson set: the
+≥ 90% pass rate only means anything once the judge ran, and any safety failure
+is a hard block regardless of the aggregate rate.
+
+**Cost.** One outline + one lesson + one drafting call per case — **24
+generation calls** for a full live run of `flashcard_seed_set.yaml`'s eight
+cases. With Layer 2 on, one judge call per drafted card (3-5 cards each,
+`FlashcardCaps`' default band) — roughly **28-32 judge calls**, depending on
+how many cards each run drafts. Both figures are the same ones recorded in
+`flashcard_seed_set.yaml`'s own header comment, kept in sync with it rather
+than duplicated as a second source of truth that can drift.
+
+Everything else about this mode — the report table, the gate summary, the
+`--report` JSON shape, the GitHub Actions job summary — mirrors the
+outline/lesson seed-set mode exactly (`_run_flashcard_mode` in
+`evals/__main__.py` reuses the same generic gate machinery,
+`_gate_summary`/`_hard_floor_failures`, with the `FLASHCARD_*` evaluator
+names).
+
 ### Calibration — `--agreement` and the human-label set
 
 > PRD §9: *"The judge is only as good as its agreement with a human … measure

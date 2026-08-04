@@ -590,6 +590,148 @@ def test_change_undone(recorder: _Recorder) -> None:
     ]
 
 
+CARD = uuid.UUID("66666666-6666-4666-8666-666666666666")
+
+
+# --------------------------------------------------------------------------- #
+# Flashcards & spaced repetition (Phase 3, AL-070 / TDD §9)
+#
+# No session events anywhere below: a session started is an account's first
+# grade of a day and one finished is a grade with `queue_remaining = 0`, both
+# derivable from `review_graded` alone (TDD §9).
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    ("outcome", "success", "workflow"),
+    [("generated", True, "W24"), ("failed", False, "W8")],
+)
+def test_flashcards_drafted_outcomes(
+    recorder: _Recorder, outcome: str, success: bool, workflow: str
+) -> None:
+    """`failed` reuses W8, `lesson_generated`'s own generic failure tag —
+    the flashcard agent has no refusal branch (TDD §5.2), so there is no
+    third outcome to carry."""
+    events.emit_flashcards_drafted(
+        account_id=ACCOUNT,
+        path_id=PATH,
+        lesson_id=LESSON,
+        position_in_path=2,
+        drafted_count=4 if outcome == "generated" else 0,
+        outcome=outcome,
+        duration_ms=850,
+        prompt_tokens=300,
+        completion_tokens=120,
+        total_tokens=420,
+    )
+    name, fields = recorder.records[0]
+    assert name == "flashcards_drafted"
+    assert fields == {
+        "account_id": str(ACCOUNT),
+        "path_id": str(PATH),
+        "lesson_id": str(LESSON),
+        "position_in_path": 2,
+        "drafted_count": 4 if outcome == "generated" else 0,
+        "outcome": outcome,
+        "success": success,
+        "duration_ms": 850,
+        "prompt_tokens": 300,
+        "completion_tokens": 120,
+        "total_tokens": 420,
+        "workflow": workflow,
+    }
+
+
+def test_flashcards_drafted_carries_no_path_id_for_an_orphaned_draft(
+    recorder: _Recorder,
+) -> None:
+    """`path_id` is nullable (D12): a source path can be deleted mid-run."""
+    events.emit_flashcards_drafted(
+        account_id=ACCOUNT,
+        path_id=None,
+        lesson_id=LESSON,
+        position_in_path=1,
+        drafted_count=0,
+        outcome="failed",
+        duration_ms=10,
+    )
+    _name, fields = recorder.records[0]
+    assert fields["path_id"] is None
+
+
+def test_flashcards_kept(recorder: _Recorder) -> None:
+    """Both counts ride one record (TDD §9): the keep-rate ratio lives inside
+    a row rather than a join between two event streams."""
+    events.emit_flashcards_kept(
+        account_id=ACCOUNT,
+        path_id=PATH,
+        lesson_id=LESSON,
+        drafted_count=4,
+        kept_count=3,
+    )
+    assert recorder.records == [
+        (
+            "flashcards_kept",
+            {
+                "account_id": str(ACCOUNT),
+                "path_id": str(PATH),
+                "lesson_id": str(LESSON),
+                "drafted_count": 4,
+                "kept_count": 3,
+                "workflow": "W24",
+            },
+        )
+    ]
+
+
+@pytest.mark.parametrize(("grade", "workflow"), [("got_it", "W25"), ("again", "W26")])
+def test_review_graded_workflow_follows_the_grade(
+    recorder: _Recorder, grade: str, workflow: str
+) -> None:
+    """`grade` doubles as the workflow selector: `again` is a lapse
+    resurfacing (W26), `got_it` is the ordinary queue-draining case (W25)."""
+    events.emit_review_graded(
+        account_id=ACCOUNT,
+        card_id=CARD,
+        path_id=PATH,
+        grade=grade,
+        rung_before=2,
+        queue_size=10,
+        queue_remaining=6,
+    )
+    name, fields = recorder.records[0]
+    assert name == "review_graded"
+    assert fields == {
+        "account_id": str(ACCOUNT),
+        "card_id": str(CARD),
+        "path_id": str(PATH),
+        "grade": grade,
+        "rung_before": 2,
+        "queue_size": 10,
+        "queue_remaining": 6,
+        "workflow": workflow,
+    }
+
+
+def test_review_graded_carries_no_path_id_for_an_orphaned_card(
+    recorder: _Recorder,
+) -> None:
+    """`path_id` is nullable: an orphaned card (its source path deleted, D12)
+    still reviews, with `None` rather than a stale or placeholder id — W27's
+    "a card survives its source lesson" in action."""
+    events.emit_review_graded(
+        account_id=ACCOUNT,
+        card_id=CARD,
+        path_id=None,
+        grade="got_it",
+        rung_before=1,
+        queue_size=10,
+        queue_remaining=9,
+    )
+    _name, fields = recorder.records[0]
+    assert fields["path_id"] is None
+
+
 def test_a_failing_shaping_emitter_never_breaks_the_request_path(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -598,9 +740,8 @@ def test_a_failing_shaping_emitter_never_breaks_the_request_path(
     The shaping stamps sit *after* their commit (``change_applied``,
     ``change_undone``, ``shaping_conversation_started``) or beside a held
     reservation (``shaping_message_sent``), so a raising sink would turn a
-    landed change into a 500 or wedge a conversation. The guard is on this
-    phase's emitters only: retro-fitting it to 2A's would be a behaviour change
-    W21 forbids (see ``events._emit_guarded``).
+    landed change into a 500 or wedge a conversation. See
+    ``events._emit_guarded`` for the full list of emitters this guard covers.
     """
 
     def _explode(_name: str) -> object:
@@ -611,6 +752,45 @@ def test_a_failing_shaping_emitter_never_breaks_the_request_path(
     events.emit_shaping_conversation_started(account_id=ACCOUNT, path_id=PATH)
     events.emit_change_undone(
         account_id=ACCOUNT, path_id=PATH, change_id=CHANGE, minutes_since_apply=1.0
+    )
+
+
+def test_a_failing_flashcards_request_path_emitter_never_breaks_the_write(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Neither of Phase 3's two request-path emitters may turn a valid write
+    into a 500 (Phase 3 TDD §5.2/§5.4).
+
+    ``review_graded`` (``services/reviews.py::grade_card``) and
+    ``flashcards_kept`` (``services/flashcard_drafting.py::
+    keep_flashcard_drafts``) both fire **inside an open write transaction**,
+    ahead of the router's own commit — a raising sink there is a stronger
+    case than 2B's own (the commit has not even landed yet), so both are
+    routed through ``_emit_guarded`` too. ``flashcards_drafted`` is
+    deliberately excluded: it runs from the background drafting task, so a
+    raising sink there has no request and no in-flight write to break.
+    """
+
+    def _explode(_name: str) -> object:
+        raise RuntimeError("logfire sink is down")
+
+    monkeypatch.setattr(events.structlog, "get_logger", _explode)
+
+    events.emit_review_graded(
+        account_id=ACCOUNT,
+        card_id=CARD,
+        path_id=PATH,
+        grade="got_it",
+        rung_before=1,
+        queue_size=10,
+        queue_remaining=9,
+    )
+    events.emit_flashcards_kept(
+        account_id=ACCOUNT,
+        path_id=PATH,
+        lesson_id=LESSON,
+        drafted_count=4,
+        kept_count=3,
     )
 
 
@@ -704,6 +884,31 @@ def _drive_every_emitter() -> None:
     )
     events.emit_change_undone(
         account_id=ACCOUNT, path_id=PATH, change_id=CHANGE, minutes_since_apply=1.0
+    )
+    events.emit_flashcards_drafted(
+        account_id=ACCOUNT,
+        path_id=PATH,
+        lesson_id=LESSON,
+        position_in_path=1,
+        drafted_count=4,
+        outcome="generated",
+        duration_ms=1,
+    )
+    events.emit_flashcards_kept(
+        account_id=ACCOUNT,
+        path_id=PATH,
+        lesson_id=LESSON,
+        drafted_count=4,
+        kept_count=3,
+    )
+    events.emit_review_graded(
+        account_id=ACCOUNT,
+        card_id=CARD,
+        path_id=PATH,
+        grade="got_it",
+        rung_before=1,
+        queue_size=10,
+        queue_remaining=9,
     )
 
 

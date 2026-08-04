@@ -22,7 +22,24 @@ MODEL_SLOTS: tuple[str, ...] = (
     "model_judge",
     "model_tutor",
     "model_shaper",
+    "model_flashcard",
 )
+
+
+def _parse_flashcard_ladder(value: str) -> tuple[int, ...]:
+    """Parse ``FLASHCARD_LADDER_DAYS`` into a tuple of day-counts (TDD §13/D2).
+
+    Comma-separated, stripped, empties dropped — the ``model_allowlist`` idiom
+    — except each entry must parse as an ``int``. A non-numeric entry raises
+    ``ValueError`` here, which ``_check_flashcard_config`` catches and turns
+    into a startup failure naming the offending setting, rather than a lazy
+    ``property`` explosion the first time a request touches the ladder.
+    Module-level (not a ``Settings`` method) so both the validator and the
+    :attr:`Settings.flashcard_ladder` property share one parse with no risk of
+    drifting apart.
+    """
+    return tuple(int(part.strip()) for part in value.split(",") if part.strip())
+
 
 # The convenient dev default for ``session_secret_key``. It is published in this
 # repo, so signing production cookies with it yields forgeable sessions; the
@@ -493,6 +510,122 @@ class Settings(BaseSettings):
     # history. The grid is exactly full, which is what makes "one column is one
     # week" true by construction rather than by a pad that happens to be right.
     streak_activity_window_days: int = Field(default=49, ge=1)
+
+    # --- Phase 3: flashcards (TDD §13, D2/D10/D13) ----------------------------
+    # Appended as this phase's self-contained block at the END of Settings
+    # (every phase branch appends its own; keep them separate to avoid merge
+    # conflicts). §5.1's ladder arithmetic and §5.1's daily selection
+    # (``domains/scheduling.py``) take every one of these numbers as an
+    # explicit parameter — the domain owns no constant of its own (D2's
+    # "a parameter a function does not need is a parameter that can drift").
+
+    # The day's cap and the overdue/random split (§4.4, open Q3). The random
+    # count is **derived** as ``flashcard_daily_cap - flashcard_overdue_slots``
+    # (never its own setting), so the three numbers cannot be configured into
+    # disagreement — validated ``0 <= overdue_slots <= cap`` below. Unlike the
+    # ``rate_limit_*``/``flashcard_drafts_per_day`` family, 0 here is not "cap
+    # disabled" — it is a permanently empty queue (nothing due, ever), so it is
+    # rejected at construction (``ge=1``) rather than treated as a valid toggle.
+    flashcard_daily_cap: int = Field(default=10, ge=1)
+    flashcard_overdue_slots: int = 7
+
+    # habagou's shipped ladder (§5.1): rung *r*'s interval is ``ladder[r]``
+    # days. Parsed like ``model_allowlist`` (comma-separated, stripped, empties
+    # dropped) via :attr:`flashcard_ladder`; validated non-empty and strictly
+    # positive below — a ladder a card could index out of range, or one with a
+    # zero/negative interval, is a startup failure, not a runtime one.
+    flashcard_ladder_days: str = "1,3,7,14,30"
+
+    @property
+    def flashcard_ladder(self) -> tuple[int, ...]:
+        """Parsed ``flashcard_ladder_days`` — passed to ``domains.scheduling`` (D2)."""
+        return _parse_flashcard_ladder(self.flashcard_ladder_days)
+
+    # The drafted-card count band the prompt targets and the agent's validator
+    # gates (PRD open Q5); validated ``min <= max``, both positive, below.
+    flashcard_drafts_min: int = 3
+    flashcard_drafts_max: int = 5
+
+    # Feeds ``estimated_minutes`` only (the mock's "10 cards ~4 min") — no
+    # scheduling behaviour reads this. Must be positive (``gt=0``): zero or
+    # negative seconds-per-card would render a nonsensical (zero/negative)
+    # minutes estimate rather than the honest "no scheduling impact" this
+    # setting is documented to have.
+    flashcard_seconds_per_card: int = Field(default=25, gt=0)
+
+    # The drafting rate-limiter cap (D13): drafting is this phase's one
+    # learner-triggered model call, so — unlike the queue/summary/grade reads —
+    # it gets a ``DailyRateLimiter`` knob, joining
+    # ``rate_limit_lesson_generations_per_day`` and the message caps.
+    #
+    # Deliberately **no** ``Field`` lower bound: it joins the
+    # ``rate_limit_*``/``DailyRateLimiter`` family (``rate_limit_paths_per_day``,
+    # ``rate_limit_lesson_generations_per_day``, ``rate_limit_tutor_messages_per_day``,
+    # ``rate_limit_shaping_messages_per_day``), none of which are bounded either
+    # — the shared convention there is "0 or negative disables the cap"
+    # (``DailyRateLimiter``'s own docstring), so rejecting a non-positive value
+    # here would take away the one way an operator has to turn drafting's rate
+    # limit off. This ships enabled (default 50), not disabled, but the knob
+    # still has to accept the family's off-switch value.
+    flashcard_drafts_per_day: int = 50
+
+    # The sixth model slot, resolved through ``services/openrouter.py`` like
+    # the rest. Starts on the same strong model as every other slot (the
+    # uniform-start discipline) — D13 answers PRD open Q4 ("its own model
+    # slot?") with yes, so this is the one thing that makes "this is a haiku
+    # job" an env var rather than a code change once evals (§10) justify moving
+    # it down. **It is also listed in ``MODEL_SLOTS``** — the production stub
+    # guard iterates that constant, so a slot missing from it would let the
+    # deterministic stub draft production flashcards.
+    model_flashcard: str = "anthropic/claude-sonnet-5"
+
+    @model_validator(mode="after")
+    def _check_flashcard_config(self) -> Self:
+        """Fail fast at startup on any flashcard config that scheduling could
+        not safely run with (TDD §13) — matching the existing validator idiom
+        (``_check_generation_timings``, the shaping proposal-cap guard).
+        """
+        if not 0 <= self.flashcard_overdue_slots <= self.flashcard_daily_cap:
+            msg = (
+                "flashcard_overdue_slots must be between 0 and "
+                "flashcard_daily_cap so the random count "
+                "(cap - overdue_slots) never goes negative; got "
+                f"overdue_slots={self.flashcard_overdue_slots}, "
+                f"daily_cap={self.flashcard_daily_cap} (TDD §13)."
+            )
+            raise ValueError(msg)
+
+        try:
+            ladder = _parse_flashcard_ladder(self.flashcard_ladder_days)
+        except ValueError as exc:
+            msg = (
+                "flashcard_ladder_days must be a comma-separated list of "
+                f"integers; got {self.flashcard_ladder_days!r}."
+            )
+            raise ValueError(msg) from exc
+        if not ladder or any(day <= 0 for day in ladder):
+            msg = (
+                "flashcard_ladder_days must be non-empty with every interval "
+                f"strictly positive; got {ladder!r} (TDD §5.1 — the top rung "
+                "must be a real fixed point, and a card must never index out "
+                "of range)."
+            )
+            raise ValueError(msg)
+
+        if self.flashcard_drafts_min <= 0 or self.flashcard_drafts_max <= 0:
+            msg = (
+                "flashcard_drafts_min and flashcard_drafts_max must both be "
+                f"positive; got min={self.flashcard_drafts_min}, "
+                f"max={self.flashcard_drafts_max}."
+            )
+            raise ValueError(msg)
+        if self.flashcard_drafts_min > self.flashcard_drafts_max:
+            msg = (
+                "flashcard_drafts_min must be <= flashcard_drafts_max; got "
+                f"min={self.flashcard_drafts_min} > max={self.flashcard_drafts_max}."
+            )
+            raise ValueError(msg)
+        return self
 
 
 settings = Settings()

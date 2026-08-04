@@ -33,6 +33,7 @@ from pydantic import ValidationError
 from pydantic_ai import ModelRetry
 from pydantic_evals import Case, Dataset
 
+from aleph.agents.flashcard import FlashcardDraft, FlashcardDrafts
 from aleph.agents.lesson import LessonContent, QuickCheck
 from aleph.agents.outline import LessonOutline, PathOutline, Refusal, UnitOutline
 from evals.__main__ import (
@@ -57,13 +58,23 @@ from evals.agreement import (
 )
 from evals.calibration import CALIBRATION_EXAMPLES, calibration_block
 from evals.generation import (
+    FLASHCARD_EVALUATOR_ASSERTIONS,
+    FLASHCARD_HARD_FLOOR_EVALUATORS,
+    FLASHCARD_JUDGE_ASSERTIONS,
+    FLASHCARD_JUDGE_HARD_FLOOR,
+    FLASHCARD_PREFILTERS,
     JUDGE_ASSERTIONS,
+    JUDGE_FLASHCARD_SAFETY,
+    JUDGE_FLASHCARDS,
     JUDGE_HARD_FLOOR,
     JUDGE_LESSONS,
     JUDGE_OUTLINE,
     JUDGE_SAFETY,
     PREFILTERS,
     SEED_SET_PASS_RATE_GATE,
+    FlashcardRubricJudge,
+    FlashcardSample,
+    FlashcardSeedInputs,
     GeneratedLesson,
     GenerationSample,
     RubricJudge,
@@ -71,6 +82,7 @@ from evals.generation import (
     SeedMeta,
 )
 from evals.judge import (
+    build_flashcard_judge_prompt,
     build_judge_agent,
     build_lesson_judge_prompt,
     build_outline_judge_prompt,
@@ -81,6 +93,7 @@ from evals.judge import (
 from evals.rubric import (
     ALL_ITEMS,
     APPLICABLE_ITEMS,
+    ARTIFACT_NOTES,
     RUBRIC,
     SAFETY_ITEM,
     JudgeVerdict,
@@ -899,6 +912,301 @@ async def test_the_judge_never_sees_the_human_label() -> None:
     assert "overall" not in payload
 
 
+# =================================================================================
+# 6. `flashcard_draft` — the third eval kind (Phase 3 TDD D14/§10; PRD §6)
+# =================================================================================
+
+
+def _flashcard_drafts(count: int = 3) -> FlashcardDrafts:
+    """``count`` distinct, cap-respecting cards — the ``FlashcardInvariants``
+    Layer 1 floor needs at least ``FLASHCARD_CAPS.count_min`` (3) to pass, and
+    the judge-evaluator tests below run Layer 1 alongside Layer 2."""
+    return FlashcardDrafts(
+        cards=[
+            FlashcardDraft(front=f"A front ({i}).", back=f"A back ({i}).")
+            for i in range(count)
+        ]
+    )
+
+
+_FLASHCARD_SAMPLE = FlashcardSample(
+    unit_title="Unit 1",
+    lesson_title="Lesson 1",
+    read_passage="A passage a card was drafted from.",
+    quick_check_stem="A stem.",
+    drafts=_flashcard_drafts(),
+)
+_FLASHCARD_INPUTS = FlashcardSeedInputs(topic="TypeScript", level="beginner")
+
+
+# --- 6a. the rubric --------------------------------------------------------------
+
+
+def test_flashcard_draft_is_judged_on_four_items() -> None:
+    """No `continuous` (no path position) and no `check_validity` (not a Quick
+    check) — see the module docstring in ``evals/rubric.py``."""
+    assert set(APPLICABLE_ITEMS["flashcard_draft"]) == {
+        "accurate",
+        "level_appropriate",
+        "in_scope",
+        "safe",
+    }
+    assert "continuous" not in APPLICABLE_ITEMS["flashcard_draft"]
+    assert "check_validity" not in APPLICABLE_ITEMS["flashcard_draft"]
+    assert SAFETY_ITEM in APPLICABLE_ITEMS["flashcard_draft"]
+
+
+def test_every_rubric_item_is_covered_by_some_artifact() -> None:
+    """Adding the third kind must not quietly drop an item from every kind."""
+    covered = (
+        set(APPLICABLE_ITEMS["outline"])
+        | set(APPLICABLE_ITEMS["lesson"])
+        | set(APPLICABLE_ITEMS["flashcard_draft"])
+    )
+    assert covered == set(ALL_ITEMS)
+    # No seventh item was added for the new kind — the Literal is unchanged.
+    assert set(ALL_ITEMS) == {
+        "accurate",
+        "level_appropriate",
+        "in_scope",
+        "continuous",
+        "check_validity",
+        "safe",
+    }
+
+
+def test_flashcard_draft_notes_carry_grounding_scope_and_independence() -> None:
+    """PRD §6's four dimensions land on exactly two items via ARTIFACT_NOTES:
+    grounding on `accurate`, scope + independence together on `in_scope`
+    (non-triviality is Layer 1 only, evals/generation.py: FlashcardNonTriviality)."""
+    notes = ARTIFACT_NOTES["flashcard_draft"]
+    assert set(notes) == {"accurate", "in_scope"}
+    assert "passage" in notes["accurate"]
+    assert "One fact per card" in notes["in_scope"]
+    assert "stand on its own" in notes["in_scope"]
+
+
+def test_validate_verdict_accepts_flashcard_draft_items() -> None:
+    verdict = _verdict("flashcard_draft")
+    assert validate_verdict(APPLICABLE_ITEMS["flashcard_draft"], verdict) is verdict
+
+
+def test_rubric_block_for_flashcard_draft_excludes_continuity_and_check_validity() -> (
+    None
+):
+    block = rubric_block("flashcard_draft")
+    for item in APPLICABLE_ITEMS["flashcard_draft"]:
+        assert f"[{item}]" in block
+    for item in ("continuous", "check_validity"):
+        assert f"[{item}]" not in block
+
+
+# --- 6b. prompt assembly ----------------------------------------------------------
+
+
+def test_flashcard_judge_prompt_carries_the_passage_and_the_card() -> None:
+    """PRD §6 grounding is unfalsifiable without the source Read passage; TDD
+    §10: "the judge must see the passage and the card"."""
+    prompt = build_flashcard_judge_prompt(
+        topic="TypeScript for JavaScript developers",
+        level="beginner",
+        unit_title="Type checking basics",
+        lesson_title="Type annotations",
+        read_passage="An annotation is a colon and a type after a name.",
+        front="What syntax marks a type annotation?",
+        back="A colon and a type after the name.",
+    )
+    assert prompt.startswith("artifact=flashcard_draft")
+    assert "TypeScript for JavaScript developers" in prompt
+    assert "beginner" in prompt
+    assert "Type checking basics" in prompt
+    assert "Type annotations" in prompt
+    assert "An annotation is a colon and a type after a name." in prompt
+    assert "What syntax marks a type annotation?" in prompt
+    assert "A colon and a type after the name." in prompt
+
+
+# --- 6c. the stub judge and the evaluator -----------------------------------------
+
+
+@pytest.mark.anyio
+async def test_stub_judge_scores_a_flashcard_draft_on_its_four_items() -> None:
+    judge = build_stub_judge()
+    verdict = await judge.judge_flashcard_draft(
+        topic="Anything",
+        level="beginner",
+        unit_title="Unit 1",
+        lesson_title="Lesson 1",
+        read_passage="A passage.",
+        front="A front.",
+        back="A back.",
+    )
+    assert verdict.overall
+    assert {entry.item for entry in verdict.items} == set(
+        APPLICABLE_ITEMS["flashcard_draft"]
+    )
+
+
+@pytest.mark.anyio
+async def test_stub_judge_fails_the_flashcard_item_a_sentinel_names() -> None:
+    judge = build_stub_judge()
+    verdict = await judge.judge_flashcard_draft(
+        topic=f"Anything {judge_fail_sentinel('accurate')}",
+        level="beginner",
+        unit_title="Unit 1",
+        lesson_title="Lesson 1",
+        read_passage="A passage.",
+        front="A front.",
+        back="A back.",
+    )
+    assert verdict.overall is False
+    assert verdict.failed_items == ("accurate",)
+
+
+@pytest.mark.anyio
+async def test_stub_judge_rejects_a_sentinel_a_flashcard_is_not_judged_on() -> None:
+    judge = build_stub_judge()
+    with pytest.raises(Exception, match="continuous"):
+        await judge.judge_flashcard_draft(
+            topic=f"Anything {judge_fail_sentinel('continuous')}",
+            level="beginner",
+            unit_title="Unit 1",
+            lesson_title="Lesson 1",
+            read_passage="A passage.",
+            front="A front.",
+            back="A back.",
+        )
+
+
+async def _flashcard_judged_report(
+    inputs: FlashcardSeedInputs, sample: FlashcardSample
+) -> EvaluationReport[FlashcardSeedInputs, FlashcardSample, SeedMeta]:
+    """Score one hand-built flashcard sample through Layer 1 + Layer 2, as a
+    real run does — mirrors ``_judged_report`` above for the ``flashcard_draft``
+    kind's own inputs/output types."""
+
+    async def task(_inputs: FlashcardSeedInputs) -> FlashcardSample:
+        return sample
+
+    dataset = Dataset[FlashcardSeedInputs, FlashcardSample, SeedMeta](
+        name="flashcard-judge-probe",
+        cases=[
+            Case(
+                name="probe",
+                inputs=inputs,
+                metadata=SeedMeta(category="technical", note="unit-test probe"),
+            )
+        ],
+        evaluators=[
+            *(prefilter() for prefilter in FLASHCARD_PREFILTERS),
+            FlashcardRubricJudge(judge=build_stub_judge()),
+        ],
+    )
+    return await dataset.evaluate(task, progress=False)
+
+
+def _flashcard_assertions(
+    report: EvaluationReport[FlashcardSeedInputs, FlashcardSample, SeedMeta],
+) -> dict[str, tuple[bool, str | None]]:
+    assert not report.failures
+    assert not report.cases[0].evaluator_failures, report.cases[0].evaluator_failures
+    return {
+        name: (result.value, result.reason)
+        for name, result in report.cases[0].assertions.items()
+    }
+
+
+@pytest.mark.anyio
+async def test_flashcard_judge_evaluator_passes_a_clean_case() -> None:
+    report = await _flashcard_judged_report(_FLASHCARD_INPUTS, _FLASHCARD_SAMPLE)
+    assertions = _flashcard_assertions(report)
+    assert set(assertions) >= FLASHCARD_JUDGE_ASSERTIONS
+    assert all(assertions[name][0] for name in FLASHCARD_JUDGE_ASSERTIONS), assertions
+    gate = _gate_summary(
+        report,
+        judged=True,
+        hard_floor_evaluators=FLASHCARD_HARD_FLOOR_EVALUATORS,
+        judge_assertions=FLASHCARD_JUDGE_ASSERTIONS,
+        assertions_map=FLASHCARD_EVALUATOR_ASSERTIONS,
+        safety_assertion=JUDGE_FLASHCARD_SAFETY,
+    )
+    assert gate.meets_gate
+
+
+@pytest.mark.anyio
+async def test_flashcard_judge_evaluator_fails_a_case_on_one_rubric_item() -> None:
+    """One failed item fails the card set, but is not the safety hard block."""
+    inputs = FlashcardSeedInputs(
+        topic=f"TypeScript {judge_fail_sentinel('level_appropriate')}", level="beginner"
+    )
+    report = await _flashcard_judged_report(inputs, _FLASHCARD_SAMPLE)
+    assertions = _flashcard_assertions(report)
+    assert assertions[JUDGE_FLASHCARDS][0] is False
+    assert "level_appropriate" in str(assertions[JUDGE_FLASHCARDS][1])
+    assert assertions[JUDGE_FLASHCARD_SAFETY][0] is True
+    assert (
+        _hard_floor_failures(
+            report,
+            FLASHCARD_JUDGE_HARD_FLOOR,
+            assertions_map=FLASHCARD_EVALUATOR_ASSERTIONS,
+        )
+        == []
+    )
+
+
+@pytest.mark.anyio
+async def test_flashcard_judge_evaluator_hard_blocks_a_safety_failure() -> None:
+    """PRD §9/§10: any safety-rubric failure is a hard block, exit 1 — applies to
+    a drafted card exactly as it applies to an outline or a lesson."""
+    inputs = FlashcardSeedInputs(
+        topic=f"Fireworks {judge_fail_sentinel('safe')}", level="beginner"
+    )
+    report = await _flashcard_judged_report(inputs, _FLASHCARD_SAMPLE)
+    assertions = _flashcard_assertions(report)
+    assert assertions[JUDGE_FLASHCARD_SAFETY][0] is False
+    assert "SAFETY FAILURE" in str(assertions[JUDGE_FLASHCARD_SAFETY][1])
+
+    failures = _hard_floor_failures(
+        report,
+        FLASHCARD_JUDGE_HARD_FLOOR,
+        assertions_map=FLASHCARD_EVALUATOR_ASSERTIONS,
+    )
+    assert any(JUDGE_FLASHCARD_SAFETY in failure for failure in failures), failures
+
+    gate = _gate_summary(
+        report,
+        judged=True,
+        hard_floor_evaluators=FLASHCARD_HARD_FLOOR_EVALUATORS,
+        judge_assertions=FLASHCARD_JUDGE_ASSERTIONS,
+        assertions_map=FLASHCARD_EVALUATOR_ASSERTIONS,
+        safety_assertion=JUDGE_FLASHCARD_SAFETY,
+    )
+    assert gate.safety_failures
+    assert gate.meets_gate is False
+
+
+@pytest.mark.anyio
+async def test_flashcard_judge_scores_every_card_in_the_draft() -> None:
+    """The continuity item has no analogue here, but every card must still be
+    scored — judging only the first card would miss the rest of the set."""
+    sample = FlashcardSample(
+        unit_title="Unit 1",
+        lesson_title="Lesson 1",
+        read_passage="A passage.",
+        quick_check_stem="A stem.",
+        drafts=FlashcardDrafts(
+            cards=[
+                FlashcardDraft(front="Front one.", back="Back one."),
+                FlashcardDraft(front="Front two.", back="Back two."),
+            ]
+        ),
+    )
+    report = await _flashcard_judged_report(_FLASHCARD_INPUTS, sample)
+    passed, reason = _flashcard_assertions(report)[JUDGE_FLASHCARDS]
+    assert passed
+    assert "2 card(s)" in str(reason)
+
+
 # --- the CLI surface -----------------------------------------------------------
 
 
@@ -908,6 +1216,8 @@ async def test_the_judge_never_sees_the_human_label() -> None:
         ["--agreement", "--models", "anthropic/claude-haiku-4-5"],
         ["--agreement", "--no-judge"],
         ["--full-path-lessons", "0"],
+        ["--flashcards", "--agreement"],
+        ["--flashcards", "--models", "anthropic/claude-haiku-4-5"],
     ],
 )
 def test_incoherent_flag_combinations_exit_two(argv: list[str]) -> None:
@@ -919,6 +1229,45 @@ def test_incoherent_flag_combinations_exit_two(argv: list[str]) -> None:
 def test_smoke_agreement_runs_offline_and_exits_zero() -> None:
     """``just evals --smoke --agreement`` — no key, no network, never gated."""
     assert main(["--smoke", "--agreement"]) == 0
+
+
+def test_smoke_flashcards_run_exits_zero() -> None:
+    """``just evals --smoke --flashcards`` — Layer 1 only (judge off by default
+    under --smoke), the whole flashcard_draft path, offline."""
+    assert main(["--smoke", "--flashcards"]) == 0
+
+
+def test_smoke_flashcards_judge_run_exits_zero() -> None:
+    """``just evals --smoke --flashcards --judge`` — the whole Layer 2 path too."""
+    assert main(["--smoke", "--flashcards", "--judge"]) == 0
+
+
+def test_a_flashcard_safety_failure_exits_one_end_to_end(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The hard block, proved through ``main`` for the third kind — mirrors
+    ``test_a_safety_failure_exits_one_end_to_end`` above."""
+
+    def one_unsafe_case() -> Dataset[FlashcardSeedInputs, FlashcardSample, SeedMeta]:
+        return Dataset[FlashcardSeedInputs, FlashcardSample, SeedMeta](
+            name="one-case",
+            cases=[
+                Case(
+                    name="unsafe",
+                    inputs=FlashcardSeedInputs(
+                        topic=f"Fireworks {judge_fail_sentinel('safe')}",
+                        level="beginner",
+                    ),
+                    metadata=SeedMeta(category="sensitive", note="unit-test probe"),
+                )
+            ],
+            evaluators=[prefilter() for prefilter in FLASHCARD_PREFILTERS],
+        )
+
+    monkeypatch.setattr("evals.__main__.load_flashcard_seed_set", one_unsafe_case)
+    assert main(["--smoke", "--flashcards", "--judge"]) == 1
+    # And the same dataset without the judge is green: the block is Layer 2's.
+    assert main(["--smoke", "--flashcards", "--no-judge"]) == 0
 
 
 def test_smoke_judge_run_exits_zero_on_the_real_seed_set() -> None:
