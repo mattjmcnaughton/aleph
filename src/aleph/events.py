@@ -21,11 +21,12 @@ anchors it to real emission (the emitters cannot drift from it), and
 ``tests/unit/test_metrics_queries`` checks every attribute referenced by a saved
 SQL query against it — so a query can never reference a field no event provides.
 
-Ported from habagou's ``events.py`` seam, specialised to Aleph's twenty product
-events (Phase 1's nine, Phase 2A's five tutor events, and Phase 2B's six shaping
-events — each phase's TDD §9). If Logfire's retention window ever bounds cohort
-history (TDD §9 accepted risk), the fallback is a Postgres events table behind
-this same seam — the swap is additive, callers are unchanged.
+Ported from habagou's ``events.py`` seam, specialised to Aleph's twenty-three
+product events (Phase 1's nine, Phase 2A's five tutor events, Phase 2B's six
+shaping events, and Phase 3's three flashcard events — each phase's TDD §9).
+If Logfire's retention window ever bounds cohort history (TDD §9 accepted
+risk), the fallback is a Postgres events table behind this same seam — the
+swap is additive, callers are unchanged.
 """
 
 from __future__ import annotations
@@ -68,6 +69,14 @@ PROPOSAL_SHOWN = "proposal_shown"
 CHANGE_APPLIED = "change_applied"
 CHANGE_UNDONE = "change_undone"
 
+# Phase 3 — flashcards & spaced repetition (TDD §9). No session events: a
+# session started is the first grade of a day and one finished is a grade with
+# ``queue_remaining = 0``, both derivable from ``review_graded`` alone (D9's
+# "do not add an event you can compute" posture, applied here).
+FLASHCARDS_DRAFTED = "flashcards_drafted"
+FLASHCARDS_KEPT = "flashcards_kept"
+REVIEW_GRADED = "review_graded"
+
 # --- workflow tags (§12 shared vocabulary: PRD workflow → test → trace) ------- #
 
 _W_FIRST_PATH = "W1"  # new learner, first path, first lesson (the magic moment)
@@ -82,6 +91,15 @@ _W_TUTOR_FAILURE = "W14"  # a failed reply is recoverable
 _W_SHAPE_ADD = "W17"  # shape by adding (the Phase 2B moment)
 _W_SHAPE_REVISE = "W18"  # shape by revising
 _W_SHAPE_UNDO = "W19"  # undo restores exactly
+_W_DUE_CARD = "W24"  # finishing a lesson produces a due card (draft -> keep)
+_W_QUEUE_HOLDS = "W25"  # the daily queue caps and holds across reload/grading
+_W_LAPSE_RETURNS = "W26"  # a lapse (`again`) resurfaces without costing a slot
+#
+# **W27** ("a card survives its source lesson") tags no event, on the same
+# posture as W20/W21 below: it is a property of the citation degrading
+# honestly (D12, ``services/reviews.py::_citation``) rather than a distinct
+# thing that happens, so it is verified by the citation view and the
+# integration test, not by a machine-tagged record here.
 #
 # Two 2B workflows deliberately tag no event. **W20** (an out-of-vocabulary edit
 # is declined, not improvised) is an ordinary reply — the decline is not
@@ -229,6 +247,44 @@ EVENT_FIELDS: dict[str, frozenset[str]] = {
             "workflow",
         }
     ),
+    FLASHCARDS_DRAFTED: frozenset(
+        {
+            "account_id",
+            "path_id",
+            "lesson_id",
+            "position_in_path",
+            "drafted_count",
+            "outcome",
+            "success",
+            "duration_ms",
+            "prompt_tokens",
+            "completion_tokens",
+            "total_tokens",
+            "workflow",
+        }
+    ),
+    FLASHCARDS_KEPT: frozenset(
+        {
+            "account_id",
+            "path_id",
+            "lesson_id",
+            "drafted_count",
+            "kept_count",
+            "workflow",
+        }
+    ),
+    REVIEW_GRADED: frozenset(
+        {
+            "account_id",
+            "card_id",
+            "path_id",
+            "grade",
+            "rung_before",
+            "queue_size",
+            "queue_remaining",
+            "workflow",
+        }
+    ),
 }
 
 
@@ -246,15 +302,27 @@ def _emit(event: str, **fields: object) -> None:
 def _emit_guarded(event: str, **fields: object) -> None:
     """:func:`_emit`, but a failing sink never propagates into the request path.
 
-    **Phase 2B's emitters only**, and the asymmetry is deliberate. 2B's stamps
-    sit where a raised exception would do real damage: ``change_applied`` and
-    ``change_undone`` fire *after* their transaction has committed, so a raising
-    sink would report a landed change to the learner as a ``500``;
-    ``shaping_message_sent`` fires while the turn holds its one-in-flight
-    reservation, so it would wedge the conversation until the process restarted;
-    ``shaping_reply_completed`` fires from a ``finally`` and would replace the
-    real outcome. None of those can be paid for with a telemetry failure — "the
-    apply worked" is the truth the learner is owed.
+    **Phase 2B's emitters, plus Phase 3's two request-path ones**, and the
+    asymmetry is deliberate. 2B's stamps sit where a raised exception would do
+    real damage: ``change_applied`` and ``change_undone`` fire *after* their
+    transaction has committed, so a raising sink would report a landed change
+    to the learner as a ``500``; ``shaping_message_sent`` fires while the turn
+    holds its one-in-flight reservation, so it would wedge the conversation
+    until the process restarted; ``shaping_reply_completed`` fires from a
+    ``finally`` and would replace the real outcome. None of those can be paid
+    for with a telemetry failure — "the apply worked" is the truth the learner
+    is owed.
+
+    ``emit_review_graded`` (``services/reviews.py::grade_card``) and
+    ``emit_flashcards_kept`` (``services/flashcard_drafting.py::
+    keep_flashcard_drafts``) make the same argument more strongly still: both
+    fire **inside an open write transaction**, ahead of the router's own
+    ``session.commit()`` (TDD §9's documented structural trade), so a raising
+    sink there would turn an already-correct grade or keep into a ``500`` and
+    lose it entirely — worse than 2B's case, where the commit had already
+    landed. ``emit_flashcards_drafted`` is deliberately **not** routed through
+    here: it runs from the background drafting task, with no request and no
+    learner-visible write for a raising sink to break.
 
     2A's emitters are **not** routed through here, though the same argument
     partly applies to them, because changing them is a behaviour change on the
@@ -914,4 +982,179 @@ def emit_change_undone(
         change_id=str(change_id),
         minutes_since_apply=minutes_since_apply,
         workflow=_W_SHAPE_UNDO,
+    )
+
+
+# --- flashcards & spaced repetition (Phase 3, TDD §9) -------------------------- #
+#
+# Three events, no session events (the module docstring above / TDD §9's "do
+# not add an event you can compute" argument): ``review_graded`` carries
+# ``queue_size``/``queue_remaining`` precisely so a session start (first grade
+# of a day) and a session finish (``queue_remaining == 0``) are both derivable
+# from it alone.
+
+_FLASHCARDS_DRAFTED_WORKFLOW = {
+    "generated": _W_DUE_CARD,
+    "failed": _W_FAILURE,
+}
+
+
+def emit_flashcards_drafted(
+    *,
+    account_id: uuid.UUID,
+    path_id: uuid.UUID | None,
+    lesson_id: uuid.UUID,
+    position_in_path: int,
+    drafted_count: int,
+    outcome: str,
+    duration_ms: int,
+    prompt_tokens: int = 0,
+    completion_tokens: int = 0,
+    total_tokens: int = 0,
+) -> None:
+    """A drafting run resolved, **however it resolved** (W24/W8, TDD §9).
+
+    ``outcome`` is ``generated`` (W24) or ``failed`` (W8, the same generic
+    generation-failure tag ``lesson_generated``/``outline_generated`` use for
+    their own failed branch) — the flashcard agent has no refusal branch
+    (TDD §5.2: the lesson it drafts from was already generated), so there is
+    no third outcome to carry. ``success`` is the boolean form for the
+    keep-rate/failure-rate reading; ``drafted_count`` is ``0`` on a failed
+    run (nothing was persisted) and the agent's actual card count on a
+    ``generated`` one. The token triple is the drafting agent's own usage,
+    zero when the run never completed — the same reading
+    ``lesson_generated``'s triple gives Phase 1.
+
+    Emitted only on a **fenced win** — the same
+    ``services/generation.py::_run_claimed_lesson`` precedent: a lesson whose
+    content vanished or was never generated before drafting was claimed emits
+    **no** event at all, because there is no ``account_id``/``path_id`` to
+    stamp it with and the cause is referential breakage, not a
+    drafting-quality failure.
+
+    That is the *documented* gap. There is a second, undocumented one: a
+    **crashed worker** (a Fly machine restart, a task cancelled at shutdown —
+    neither caught by this module's own top-level ``except Exception``)
+    leaves its ``flashcard_draft_runs`` row ``generating`` forever. That row
+    is only ever collapsed to ``failed`` on *read*
+    (:meth:`~aleph.repositories.flashcards.FlashcardRepository.
+    get_effective_draft_run_state`), never resolved, so no event is ever
+    emitted for it — this function simply never runs again for that
+    ``lesson_id``. A drafting failure rate computed from this event
+    undercounts exactly the failure mode that matters most; see
+    ``docs/metrics.md``.
+
+    ``path_id`` is nullable for the same reason ``review_graded``'s is: the
+    source path can be deleted out from under a run already in flight
+    (drafting spans a model call), and D12's degrade is honest here too
+    rather than papered over with a stale id.
+    """
+    _emit(
+        FLASHCARDS_DRAFTED,
+        account_id=str(account_id),
+        path_id=str(path_id) if path_id is not None else None,
+        lesson_id=str(lesson_id),
+        position_in_path=position_in_path,
+        drafted_count=drafted_count,
+        outcome=outcome,
+        success=outcome == "generated",
+        duration_ms=duration_ms,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        total_tokens=total_tokens,
+        workflow=_FLASHCARDS_DRAFTED_WORKFLOW.get(outcome, _W_DUE_CARD),
+    )
+
+
+def emit_flashcards_kept(
+    *,
+    account_id: uuid.UUID,
+    path_id: uuid.UUID | None,
+    lesson_id: uuid.UUID,
+    drafted_count: int,
+    kept_count: int,
+) -> None:
+    """A learner resolved the keep screen for one lesson's drafts (W24, TDD §9).
+
+    Both counts ride **one** record by design (TDD §9): keep rate is a ratio
+    computed inside a single row rather than a join between two event
+    streams, which is what makes it immune to ``flashcards_drafted``'s own
+    resolution timing (a run can fail and be retried before a learner ever
+    sees a keep screen). ``kept_ids: []`` — "Skip — keep none" (D6) — is the
+    same event with ``kept_count=0``, not a distinct event; a request against
+    a lesson with no pending drafts at all never reaches this emitter (the
+    caller only calls it when at least one draft existed to act on).
+
+    ``path_id`` is nullable for the same D12 reason as ``review_graded``'s: a
+    draft's source path can be deleted between drafting and the keep request.
+
+    Routed through :func:`_emit_guarded`: this fires inside
+    ``keep_flashcard_drafts``'s open write transaction, ahead of the router's
+    commit, so a raising sink must not turn an already-valid keep into a
+    ``500`` and lose it (see :func:`_emit_guarded`'s own docstring).
+    """
+    _emit_guarded(
+        FLASHCARDS_KEPT,
+        account_id=str(account_id),
+        path_id=str(path_id) if path_id is not None else None,
+        lesson_id=str(lesson_id),
+        drafted_count=drafted_count,
+        kept_count=kept_count,
+        workflow=_W_DUE_CARD,
+    )
+
+
+_REVIEW_GRADED_WORKFLOW = {
+    "again": _W_LAPSE_RETURNS,
+    "got_it": _W_QUEUE_HOLDS,
+}
+
+
+def emit_review_graded(
+    *,
+    account_id: uuid.UUID,
+    card_id: uuid.UUID,
+    path_id: uuid.UUID | None,
+    grade: str,
+    rung_before: int,
+    queue_size: int,
+    queue_remaining: int,
+) -> None:
+    """Every grade (W25/W26, TDD §9) — the one event this phase's whole review
+    surface is read from, session events included (see the module note above).
+
+    ``path_id`` is **nullable**, unlike every other event's locator: an
+    orphaned card (D12 — its source path was deleted) still reviews, with a
+    degraded citation, and grading it is exactly W27's "a card survives its
+    source lesson" in action. ``None`` here, never a placeholder id, is what
+    keeps that case honestly distinct rather than silently mis-attributed to
+    a path the card no longer has.
+
+    ``grade`` is the wire value (``again`` / ``got_it``) and doubles as the
+    workflow selector: ``again`` is W26 (a lapse resurfacing), ``got_it`` is
+    W25 (the ordinary queue-draining case) — the same payload-derived
+    dominance rule ``_shape_workflow`` uses, spelled as a dict rather than a
+    function since there is no ``count > 0`` style combination to resolve.
+    ``rung_before`` is the client-validated optimistic-concurrency token, not
+    re-read from the row, so it is exactly what the request asked to move
+    from. ``queue_size``/``queue_remaining`` are today's selected-set size and
+    the unsatisfied count *after* this grade resolves — the two integers that
+    make both session-started and session-finished derivable with no session
+    event of their own (TDD §9).
+
+    Routed through :func:`_emit_guarded`: this fires inside ``grade_card``'s
+    open write transaction, ahead of the router's commit, so a raising sink
+    must not turn an already-valid grade into a ``500`` and lose it (see
+    :func:`_emit_guarded`'s own docstring).
+    """
+    _emit_guarded(
+        REVIEW_GRADED,
+        account_id=str(account_id),
+        card_id=str(card_id),
+        path_id=str(path_id) if path_id is not None else None,
+        grade=grade,
+        rung_before=rung_before,
+        queue_size=queue_size,
+        queue_remaining=queue_remaining,
+        workflow=_REVIEW_GRADED_WORKFLOW.get(grade, _W_QUEUE_HOLDS),
     )

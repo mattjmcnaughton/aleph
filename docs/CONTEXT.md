@@ -9,7 +9,7 @@ synonym (say **path**, not "course"; **Quick check**, not "quiz question").
 > (the tutor model slot, reply transport), **the Phase 2B PRD** (shaping), **the Phase 5
 > streaks PRD** (Daily streak, Path streak, Active day, Best streak — pulled forward, see the
 > phase-boundary note below), **and the Phase 3 PRD** (which widened **Active day** to count a
-> review, and owns the retention vocabulary that arrives with it). References:
+> review, and owns the Retention section below). References:
 > [`README.md`](../README.md) · [`roadmap.md`](roadmap.md) ·
 > [Phase 1 PRD](prds/phase-1-path-generation.md) · [Phase 1 TDD](tdds/phase-1-path-generation.md) ·
 > [Phase 2 PRD](prds/phase-2-tutor.md) · [Phase 2 TDD](tdds/phase-2-tutor.md) ·
@@ -112,6 +112,23 @@ Phase 2B vocabulary — the tutor that changes the path, on instruction only. Sp
 | **Change history** | The read-only, plain-language record of every Change on a path, visible from the shaping rail. |
 | **Declined edit** | The tutor's graceful reply to an out-of-vocabulary ask (remove, reorder, revise engaged work, touch progress): names what shaping can do. Distinct wording from both failure and safety refusal. |
 
+## Retention (Phase 3)
+
+Phase 3 vocabulary — the loop that turns a read lesson into something remembered: draft, keep,
+schedule, review. Built and behind the dark `flashcards` flag; see the phase-boundary note at the
+foot of this document. Spec: [Phase 3 PRD](prds/phase-3-flashcards.md) ·
+[Phase 3 TDD](tdds/phase-3-flashcards.md).
+
+| Term | Meaning |
+| --- | --- |
+| **Flashcard** | A front/back pair generated from a lesson's Read passage. Owned by the learner, not the lesson that produced it (Phase 3 PRD §4.1) — the source lesson is kept only as a citation, so shaping, a Revision, or deletion never takes the card down with it. Not a Quick check: no options, no explanation, and it enters a review schedule instead of ending a lesson. |
+| **Draft** | One of 3–5 AI-proposed cards offered when a lesson completes — front and back, kept by default with a per-card discard toggle (`Aleph drafted 4 cards`). A row in `flashcards` with `kept_at IS NULL` (Phase 3 TDD D6); unsaved until kept — a discarded Draft is deleted outright, never archived (Phase 3 PRD §3, §4.2). |
+| **Kept card** | A Draft the learner explicitly kept, via `Keep N cards`. Enters the spaced-repetition ladder at **rung 0**, due **tomorrow** — never today, which falls out of entering at rung 0 with no case coded to say so (Phase 3 TDD §5.1). `Got it` promotes it a rung; `Again` demotes it (see **Lapse**); the top rung is a fixed point, so a mature card settles at a wide interval rather than growing without bound. |
+| **Due** | A Kept card whose `due_on` has arrived: on or before the end of the learner's local day. The candidate pool the Daily queue draws from — being Due is necessary to be reviewed today, not sufficient, since the cap can leave it waiting. |
+| **Daily queue** | The learner's capped set of cards to review today, spanning every path — a path is a filter on it, never a second queue (Phase 3 PRD §4.3). All Due cards when there are 10 or fewer; otherwise the **7 most overdue plus 3 drawn at random** from the rest — anti-starvation, not top-up, since a not-yet-due card is never pulled forward (Phase 3 PRD §4.4). Derived, never stored: decided once, on the first request of the learner's local day, and stable for the rest of it — grading and reloading never re-roll it (Phase 3 PRD §4.5, TDD D3). Home and the app bar show only its size; the true backlog is never displayed (Phase 3 PRD §4.8). |
+| **Review** | The learner grading a Kept card in the review session: front, reveal, then one of two grades — **Again** or **Got it** — the fixed ladder this phase ships instead of the four-way Again/Hard/Good/Easy grading the roadmap once promised (Phase 3 PRD §4.6). Not an **Attempt** — that term stays a Quick check's. **Streak union:** a Review counts toward the **Daily streak**, the global one, and never toward the **Path streak** (Phase 3 PRD §4.9 — see both above). |
+| **Lapse** | An **Again** grade: demotes the card one rung (floor 0) and sets `due_on` to **today**, so the card re-shows later the **same day** rather than tomorrow. Never costs the Daily queue a slot — the cap counts distinct cards, and a re-shown Lapse is not a new one (Phase 3 PRD §4.7, TDD D8). |
+
 ## Quality, safety & measurement
 
 | Term | Meaning |
@@ -159,15 +176,18 @@ phase:
 - **Summarized carried context** — Phase 2 carries a bounded window of the most recent turns and
   **drops** what falls out of it; summarizing older turns instead is a later upgrade behind the same
   context seam (Phase 2 TDD D6).
-- **Flashcard** / **Draft** / **Kept card** / **Daily queue** / **Review** / **Lapse** — the
-  retention loop (**Phase 3**): **specified, not built**
-  ([PRD](prds/phase-3-flashcards.md) · mock: [phase-3 flashcards](mocks/aleph-phase-3-flashcards.html)).
+- **Flashcard** / **Draft** / **Kept card** / **Due** / **Daily queue** / **Review** / **Lapse** —
+  the retention loop (**Phase 3**), defined in the Retention section above: **built, not
+  launched** ([PRD](prds/phase-3-flashcards.md) · [TDD](tdds/phase-3-flashcards.md) · mock:
+  [phase-3 flashcards](mocks/aleph-phase-3-flashcards.html)). All ten tickets of the TDD's
+  delivery plan (§16) have shipped, gated by `FeatureFlag.FLASHCARDS`, which defaults off —
+  so every flashcards route `404`s for everyone but admins until the launch flip.
   Grading ships as **two outcomes on a fixed ladder** — *Again* / *Got it* — not the
   Again/Hard/Good/Easy this list used to promise; that needs ease factors and is deferred to a
   follow-on slice (Phase 3 PRD §4.6). **Active day above is already widened to count a review**
   (§4.9): the definition changed the day it was decided rather than the day it ships, because the
-  vocabulary is authoritative — and because no review exists yet, so no past day and no live streak
-  moves when it does.
+  vocabulary is authoritative. The union is now built (TDD D11) but gated — with the flag off the
+  review reader is never called, so no past day and no live streak moves until the launch flip.
 - **System-proposed path edits** — Aleph proposing changes unprompted from miss data, plus the
   destructive edit shapes (remove, reorder, touching engaged work): **Phase 4**, building on 2B's
   Proposal/Apply machinery.

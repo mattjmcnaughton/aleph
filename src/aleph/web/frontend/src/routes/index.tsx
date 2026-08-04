@@ -10,8 +10,11 @@ import {
   isPathListTerminal,
   pathsListQueryOptions,
   progressSummaryQueryOptions,
+  reviewSummaryQueryOptions,
 } from "../lib/api";
 import { ActivityStrip } from "../components/activity-strip";
+import { DueTodayCard } from "../components/review/due-today-card";
+import { ReviewChip } from "../components/review/review-chip";
 import { PRIMARY_CTA, PRIMARY_CTA_BASE, StateCard } from "../components/state-card";
 import { StreakChip } from "../components/streak-chip";
 import { StreakLine } from "../components/streak-line";
@@ -82,6 +85,23 @@ function Home() {
   const progressQuery = useQuery(progressSummaryQueryOptions(streaksEnabled));
   const pathStreaks = new Map<string, PathStreak>(
     (progressQuery.data?.paths ?? []).map((streak) => [streak.path_id, streak]),
+  );
+
+  // The retention loop's home surfaces (Phase 3 TDD §8): the *Due today* card
+  // and each row's `Review N` chip, both decoration on this route the same
+  // way the streak line is — `enabled` off means `skipToken` (no flag, no
+  // fetch), and both read `reviewSummaryQuery.data` with no `isError` branch
+  // here, so a failed `GET /reviews/summary` fails as decoration rather than
+  // taking the paths list down with it (TDD §5.6's last row).
+  const flashcardsEnabled = useFeatureFlag("flashcards");
+  const reviewSummaryQuery = useQuery(reviewSummaryQueryOptions(flashcardsEnabled));
+  // `ReviewSummaryResponse.paths` carries counts only, never titles (TDD §6) —
+  // this is what lets `DueTodayCard`'s provenance line name them anyway.
+  const pathTitles = new Map<string, string>(
+    (pathsQuery.data?.paths ?? []).map((path) => [path.id, path.title]),
+  );
+  const reviewDueByPath = new Map<string, number>(
+    (reviewSummaryQuery.data?.paths ?? []).map((path) => [path.path_id, path.due_count]),
   );
 
   // Armed only while some row is still non-terminal; a poll that resolves the
@@ -174,6 +194,8 @@ function Home() {
         </div>
       ) : null}
 
+      <DueTodayCard summary={reviewSummaryQuery.data} pathTitles={pathTitles} />
+
       {paths === undefined ? (
         pathsQuery.isError ? (
           <UnavailableState />
@@ -189,7 +211,12 @@ function Home() {
         >
           {paths.map((path) => (
             <li key={path.id}>
-              <PathRow path={path} deletion={deletion} streak={pathStreaks.get(path.id)} />
+              <PathRow
+                path={path}
+                deletion={deletion}
+                streak={pathStreaks.get(path.id)}
+                reviewDue={reviewDueByPath.get(path.id)}
+              />
             </li>
           ))}
         </ul>
@@ -270,6 +297,7 @@ function PathRow({
   path,
   deletion,
   streak,
+  reviewDue,
 }: {
   path: PathSummary;
   deletion: DeletePath;
@@ -277,6 +305,9 @@ function PathRow({
    *  zero (D5) — the caller (`Home`) already resolved the lookup, so this
    *  component never sees `path.id` and the summary side by side. */
   streak: PathStreak | undefined;
+  /** This path's share of today's global queue (Phase 3 TDD §6/§8); absent
+   *  means zero (D5), resolved by the caller the same way `streak` is. */
+  reviewDue: number | undefined;
 }) {
   // One lookup: `variant` drives the styling, and the raw (possibly undefined)
   // value is what `data-variant` exposes to tests — a neutral row carries none.
@@ -338,6 +369,14 @@ function PathRow({
           {statusLabel(path)}
         </p>
       </Link>
+
+      {/* A sibling of the row's own link, not nested inside it (a link inside
+          a link is invalid HTML and would race the row's own navigation) —
+          this one's destination is a filtered review session, Door 3 (PRD's
+          navigation map), not the path view. `ReviewChip` owns its own
+          visibility guard and layout wrapper (absent/zero means no chip, D5) —
+          not spelled a second time here. */}
+      <ReviewChip pathId={path.id} dueCount={reviewDue} />
 
       {deletion.confirmingId === path.id ? (
         <DeleteConfirm

@@ -30,7 +30,7 @@ afterthought.
 | **1 — The generated path (MVP)** | ✅ Shipped & launched | [PRD](prds/phase-1-path-generation.md) · [TDD](tdds/phase-1-path-generation.md) |
 | **2 — The tutor** (2A, in-lesson) | ✅ Shipped & launched (`tutor` flag on, AL-270) | [PRD](prds/phase-2-tutor.md) · [TDD](tdds/phase-2-tutor.md) |
 | **2B — Shape your path** (learner-initiated) | ✅ Shipped & launched (`shaping` flag on, AL-370) | [PRD](prds/phase-2b-shape-your-path.md) · [TDD](tdds/phase-2b-shape-your-path.md) |
-| **3 — Flashcards and spaced repetition** | 📝 Specified, unbuilt — PRD proposed, **no TDD yet** | [PRD](prds/phase-3-flashcards.md) · [mock](mocks/aleph-phase-3-flashcards.html) |
+| **3 — Flashcards and spaced repetition** | 🟡 Built, unlaunched — all ten TDD tickets shipped behind the dark `flashcards` flag | [PRD](prds/phase-3-flashcards.md) · [TDD](tdds/phase-3-flashcards.md) · [mock](mocks/aleph-phase-3-flashcards.html) |
 | **4 — Adaptive paths** | ⬜ Not started — **no PRD yet** (2B pre-built the proposal/apply machinery) | — |
 | **5 — Momentum** | 🟡 In progress — streaks shipped **and launched**; goal ring and daily minutes unbuilt | streaks: [PRD](prds/phase-5-streaks.md) · [TDD](tdds/phase-5-streaks.md) |
 | **Beyond** | ⬜ Unscoped, sequenced against real usage | — |
@@ -42,8 +42,9 @@ for Phase 1, AL-250/AL-251 for Phase 2, AL-350/AL-351 for Phase 2B) and the
 The Phase 2 and 2B epics (#82, #114) stay open until those close.
 
 So, concretely, what is left to build: **the rest of Phase 5** — the goal ring and
-the daily-minutes target, now that streaks are launched — then **all of Phase 3**,
-then **all of Phase 4**, plus the Phase 2 slices listed as deferred below.
+the daily-minutes target, now that streaks are launched — then **all of Phase 4**,
+plus the Phase 2 slices listed as deferred below. Phase 3 is built but dark; what
+is left there is the launch flip, not the code.
 
 ## Phase 1 — The generated path (MVP)
 
@@ -116,13 +117,17 @@ are re-deferred to a later slice, sequenced against real usage.
 
 ## Phase 3 — Flashcards and spaced repetition
 
-> 📝 **Status:** specified, unbuilt. Nothing of this exists in the code — no card model,
-> no scheduler, no drafting agent — but both specs are now written: the product boundary
+> 🟡 **Status:** built, not launched. Both specs are accepted — the product boundary
 > ([PRD](prds/phase-3-flashcards.md), drawn in the
 > [mock](mocks/aleph-phase-3-flashcards.html)) and the technical design
-> ([TDD](tdds/phase-3-flashcards.md), which cuts to AL-5xx tickets). This is the largest
-> unbuilt thing on the roadmap, and the one Phase 5 is already waiting on: the streak slice
-> is explicitly instrumentation for a return metric *this* phase has to earn
+> ([TDD](tdds/phase-3-flashcards.md)) — and all ten tickets of the TDD's delivery plan (§16)
+> have shipped: the cards and reviews tables, the pure ladder and daily selection, the
+> drafting agent, every route, the streak union, the `/review` surface, the eval kind, the
+> events, and the W24–W27 journeys. **Every route `404`s for everyone but admins**:
+> `FeatureFlag.FLASHCARDS` defaults off, and launch is a separate `FEATURE_FLAG_DEFAULTS`
+> flip after dogfooding, per the flagged-phase runbook in [`deploy.md`](deploy.md). Until
+> that flip, the retention loop Phase 5 is waiting on is built but not yet earning anything —
+> the streak slice is explicitly instrumentation for a return metric *this* phase has to earn
 > ([streaks PRD §2](prds/phase-5-streaks.md)).
 > 📄 **Full spec:** [Phase 3 PRD — Flashcards and spaced repetition](prds/phase-3-flashcards.md) ·
 > [Phase 3 TDD](tdds/phase-3-flashcards.md) ·

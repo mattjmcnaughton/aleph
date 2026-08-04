@@ -416,6 +416,120 @@ accepted cost of storing nothing new for this feature (PRD §4.6): there is no
 warning on delete, and the behavior is pinned by a test rather than left to be
 discovered.
 
+## Flashcards (`/api/v1`, Phase 3 TDD §5.3-§5.6/§6)
+
+Session-cookie protected (`401` via the shared envelope when anonymous). Two
+halves of one router: drafting (trigger, poll, keep — CONTEXT.md: *Draft*,
+*Kept card*) and review (the queue, its summary, and grading — CONTEXT.md:
+*Due*, *Daily queue*, *Review*, *Lapse*).
+
+**The whole surface is feature-flagged, router-level.** Every route here sits
+behind a single `flashcards` flag gate (TDD D10): off (the code default —
+Phase 3 has not launched) → `404` on every route, before any work, and the
+Progress summary's streak silently loses its second signal (§5.5). It ships
+the same dark-then-flip playbook `tutor`/`shaping`/`streaks` each took —
+admins dogfood it via the admin baseline while every other learner sees
+nothing at all.
+
+### Drafting (§5.2)
+
+| Method | Path | Query / Body | Success | Notes |
+| ------ | ---- | ------------- | ------- | ----- |
+| `POST` | `/api/v1/lessons/{lesson_id}/flashcard-drafts` | — | `202 {id}` | Trigger drafting for a completed lesson (CONTEXT.md: *Draft*). Idempotent — a second `POST` while the run is `generating`, or once it is `generated`, is a structural no-op (D7): the claim wins at most once, so this is safe to fire from a mutation `onSuccess` React may run twice. `409 lesson_not_complete` if `completed_at IS NULL`; `429` over `FLASHCARD_DRAFTS_PER_DAY`; an unowned/unknown lesson is `404`. |
+| `GET` | `/api/v1/lessons/{lesson_id}/flashcard-drafts` | — | `200 {state, cards}` | Poll target. `state` is `"not_started"` (never triggered), `"generating"`, `"generated"` (with every pending draft, creation order), or `"failed"` — retryable by re-`POST`ing the trigger route, rendering the existing retry affordance rather than a dead spinner. Abandoned drafts wait: revisiting a lesson long after the run resolved still re-serves them. |
+| `POST` | `/api/v1/lessons/{lesson_id}/flashcard-drafts/keep` | `{kept_ids, tz_offset_minutes}` | `200 {kept_ids}` | Keep the listed drafts (`kept_at = now()`, `rung = 0`, `due_on = today + ladder[0]` — never today, D1); every other pending draft of this lesson is deleted in the same transaction (PRD §3: discarded, not soft-deleted). `kept_ids: []` is "Skip — keep none." A `kept_id` that is not a pending draft **of this lesson** is `404` and mutates nothing. `tz_offset_minutes` is the client's `getTimezoneOffset()` value, same band as everywhere else — the service is the sole owner of "today" for the `due_on` arithmetic. |
+
+```jsonc
+// GET /api/v1/lessons/{lesson_id}/flashcard-drafts
+{
+  "state": "generated",
+  "cards": [
+    { "id": "…", "front": "What does `extends` mean in `<T extends X>`?",
+      "back": "It constrains T — T must be assignable to X." }
+  ]
+}
+```
+
+**Wire codes (drafting):** `401 unauthenticated` · `404 not_found` (flag off;
+an unowned/unknown lesson; or, on keep, a `kept_id` that is not a pending draft
+of this lesson) · `409 conflict` with `details.reason == "lesson_not_complete"`
+(drafting a lesson that is not yet complete) · `429` over the daily drafting
+cap.
+
+### Review (§5.3-§5.4)
+
+| Method | Path | Query / Body | Success | Notes |
+| ------ | ---- | ------------- | ------- | ----- |
+| `GET` | `/api/v1/reviews/summary` | `tz_offset_minutes` (optional, default `0`, `-900..900`) | `200 {today, due_count, estimated_minutes, paths}` | Home's *Due today* card, the app-bar pill, and the per-path chips — one route, its own kill switch, deliberately not folded into `/progress/summary` (D9). `paths` omits any path with no due cards; an orphaned card (D12) counts toward `due_count` but no `paths` row. |
+| `GET` | `/api/v1/reviews/queue` | `tz_offset_minutes` (optional, default `0`), `path_id` (optional) | `200 {today, total, completed, scope_path_id, other_due_count, cards}` | The day's cards in serve order. `path_id` filters **display only** — `total`/`completed` are always the **global** selected set's numbers, even in a filtered session (§5.3's invariant); `other_due_count` is non-zero only when `path_id` is set. |
+| `POST` | `/api/v1/reviews` | `{card_id, grade, rung_before, tz_offset_minutes}` | `200 {card_id, rung, due_on}` | Grade one card. `grade` is `"again"` \| `"got_it"` — the fixed two-outcome ladder (CONTEXT.md: *Review*). `rung_before` is optimistic concurrency: the client already holds it (it rendered `got_it_interval_days` from it), so a mismatch is `409 stale_rung` rather than a round trip to re-fetch first. |
+
+```jsonc
+// GET /api/v1/reviews/queue
+{
+  "today": "2026-08-04",
+  "total": 10,                          // the day's selected set — the `of 10` denominator
+  "completed": 3,                       // distinct cards already answered Got it, today
+  "scope_path_id": null,
+  "other_due_count": 0,                 // > 0 only when scope_path_id is set
+  "cards": [                            // unsatisfied only, in serve order
+    {
+      "card_id": "…",
+      "front": "What does `extends` mean in `<T extends X>`?",
+      "back": "It constrains T — T must be assignable to X. It is not class inheritance.",
+      "rung": 2,
+      "got_it_interval_days": 14,       // what the Got it button previews — the *promoted*
+                                         // rung's interval (ladder[min(rung + 1, len - 1)]),
+                                         // not ladder[rung]
+      "path_id": "…",
+      "source": {                       // D12 — a discriminated object, never three flat fields
+        "kind": "linked",               // "linked" | "degraded"
+        "lesson_id": "…",               // absent entirely (not null) when kind == "degraded"
+        "lesson_title": "Generic constraints",
+        "path_title": "Learn TypeScript"
+      }
+    }
+  ]
+}
+```
+
+**The queue is derived, never stored** (D3). The day's ten are decided once,
+on the first request of the learner's local day, and held stable for the rest
+of it: grading a card moves its *live* `due_on` into the future, but the
+candidate the `GET` reads is pinned to its **start-of-day** value, so a reload
+mid-session never reshuffles the set. `total`/`completed`/`other_due_count`
+all derive from that same pinned selection — `GET /reviews/summary` reads the
+identical population, reduced to counts, so the pill and the queue can never
+disagree about how many cards today holds.
+
+**A lapse (`grade: "again"`) never costs the set a slot** (D8, CONTEXT.md:
+*Lapse*): it demotes the card one rung (floor 0) and sets its `due_on` to
+**today**, so it re-shows later the same session rather than tomorrow — and
+because the selection counts distinct cards, not attempts, a re-shown lapse
+is not a new one. Serve order is never-attempted first, then lapses
+least-recently-seen first. `got_it_interval_days` (a *Got it* preview) and the
+returned `due_on` (after grading) always come from the server's
+`FLASHCARD_LADDER_DAYS` — the client holds no second copy of the ladder.
+
+**The citation degrades honestly** (D12, CONTEXT.md: the source line under a
+card). `source.kind` is `"linked"` iff the source lesson row still exists
+*and* its live `generated_at` still equals the stamp taken when the card was
+drafted; otherwise `"degraded"`, carrying only the two titles copied at draft
+time. The shapes are genuinely different on the wire — `LinkedCitationDTO`
+carries `lesson_id`, `DegradedCitationDTO` has no such field at all — so a
+client can never dereference a citation link that does not exist. A path
+delete, a Revision, or any regeneration of the source lesson each degrade the
+citation the same way; the card itself is untouched and stays fully
+reviewable either way.
+
+**Wire codes (review):** `401 unauthenticated` (anonymous) · `404 not_found`
+(flag off, before any work; or an unowned/unknown card) · `409 conflict` with
+`details.reason == "not_due"` (the card is not part of today's set, or was
+already satisfied today) · `409 conflict` with `details.reason ==
+"stale_rung"` (a double-tapped grade, or a retry of a request that already
+succeeded — absorbed as a no-op rather than a double promotion) · `422
+validation_error` (`tz_offset_minutes` out of `[-900, 900]`).
+
 ## Feature flags (admin) (`/api/v1/admin`, AL-203)
 
 Flags are **defined in code** (`services/feature_flags.py`); the database stores
@@ -458,6 +572,7 @@ costs no extra request. The frontend reads it through `useFeatureFlag(key)`
 | `tutor` | **on** | on (redundantly — the code default already carries it) | The Phase 2 in-lesson tutor — the rail, its API, and its stream. Shipped **dark** at `off` through Phase 2's build-out (epic #82 amendment 1) while admins dogfooded it; **launched at AL-270**, which flipped this code default on. Kill it without a code deploy with `FEATURE_FLAG_DEFAULTS=tutor:off`. |
 | `shaping` | **on** | on (redundantly, as above) | Phase 2B shaping — the shaping rail, its API and its stream, and the apply/undo endpoints. Same history on its own key (epic #114, adopted convention 1): dark through 2B's build-out, **launched at AL-370**. Independent of `tutor`, so either can be killed without disturbing the other. |
 | `streaks` | **on** | on (redundantly, as above) | Phase 5 streaks — `GET /progress/summary` and everything under it (see [Progress](#progress-apiv1-phase-5-tdd-546)). Same history again on its own key (TDD D7): dark at `off` through the slice's build-out while admins dogfooded it, then **launched** by flipping this code default on, exactly as AL-270/AL-370 did. Kill it with `FEATURE_FLAG_DEFAULTS=streaks:off`. |
+| `flashcards` | **off** | on | Phase 3 flashcards — every route under [Flashcards](#flashcards-apiv1-phase-3-tdd-53-56-6) (drafting, the daily queue, grading) and the progress summary's second streak signal (§5.5). This phase's **only** kill switch: one flag gates drafting, the queue, review and the due pill together (TDD D10), because a queue with no drafting is an empty queue and drafting with no queue is a card sink. Dark at `off` through the build-out while admins dogfood it via the admin baseline; launch is a separate `FEATURE_FLAG_DEFAULTS=flashcards:on` change after dogfooding, the same playbook `tutor`/`shaping`/`streaks` each took. |
 
 **Operating it.** `FEATURE_FLAG_DEFAULTS` is a comma-separated list of
 `key:on` / `key:off` entries (`FEATURE_FLAG_DEFAULTS="tutor:on"`). Malformed and

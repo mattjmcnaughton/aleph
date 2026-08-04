@@ -22,7 +22,7 @@ two Playwright projects sharing one backend never trip a cap.
 
 from __future__ import annotations
 
-import uuid  # noqa: TC003 - pydantic resolves ShiftRequest's annotations at class-definition time.
+import uuid  # noqa: TC003 - pydantic resolves the Shift*Request classes' annotations at class-definition time.
 from typing import TYPE_CHECKING, Annotated
 
 from fastapi import APIRouter, Depends
@@ -34,7 +34,7 @@ from sqlalchemy.ext.asyncio import (  # noqa: TC002 - FastAPI resolves annotatio
 
 from aleph.config import MODEL_SLOTS, STUB_MODEL_ID, settings
 from aleph.db import get_session
-from aleph.models import Lesson
+from aleph.models import Flashcard, Lesson
 
 if TYPE_CHECKING:
     from fastapi import FastAPI
@@ -56,6 +56,21 @@ class ShiftRequest(BaseModel):
     """
 
     path_id: uuid.UUID
+    days: int
+
+
+class FlashcardShiftRequest(BaseModel):
+    """Body for ``POST /__e2e__/shift-flashcard-due``: which learner, how far back.
+
+    Test-only, same reasoning as :class:`ShiftRequest`. Scoped by ``user_id``
+    rather than ``path_id``: a kept card outlives its source path (Phase 3 TDD
+    D12), so there is no path to shift *through* the way completions are —
+    the shift has to name the learner directly, the same column the real
+    ``flashcards`` row is scoped by (TDD §4 item 3). No bound on ``days`` for
+    the same reason ``ShiftRequest`` has none.
+    """
+
+    user_id: uuid.UUID
     days: int
 
 
@@ -101,6 +116,35 @@ async def shift_completions(body: ShiftRequest, session: Session) -> None:
     await session.commit()
 
 
+@e2e_router.post("/__e2e__/shift-flashcard-due")
+async def shift_flashcard_due(body: FlashcardShiftRequest, session: Session) -> None:
+    """Backdate a learner's kept cards so a journey can observe a due queue.
+
+    Phase 3 TDD D15, its own paragraph beside D11 above: a **shift**, not a
+    seeder. It fabricates no cards, so W24-W27 have to earn every card they
+    shift through the real drafting + keep flow (D6) — the same discipline
+    that makes ``shift-completions`` safe, applied to a table this phase adds
+    rather than one Phase 5 already owned. Moving only ``due_on`` backwards
+    cannot put the database into a state the real app could not reach on its
+    own: a learner who kept a card a few days ago and let it sit looks
+    identical on every read.
+
+    Scoped to kept cards only (``kept_at IS NOT NULL``, TDD D6) — a draft has
+    no ``due_on`` to shift, and shifting one into existence would be exactly
+    the seeded state this primitive exists to refuse.
+
+    No ownership check and no auth dependency, same as ``shift-completions``:
+    unreachable in production (never mounted by ``create_app``), and the
+    harness's one learner account is the only caller that will ever exist.
+    """
+    await session.execute(
+        update(Flashcard)
+        .where(Flashcard.user_id == body.user_id, Flashcard.kept_at.isnot(None))
+        .values(due_on=Flashcard.due_on - func.make_interval(0, 0, 0, body.days))
+    )
+    await session.commit()
+
+
 def create_stub_app() -> FastAPI:
     """Assemble the real app with the stub model wired into every slot.
 
@@ -124,6 +168,15 @@ def create_stub_app() -> FastAPI:
     settings.rate_limit_lesson_generations_per_day = 0
     settings.rate_limit_tutor_messages_per_day = 0
     settings.rate_limit_shaping_messages_per_day = 0
+    # `flashcards` (Phase 3 TDD D13) drafts on *every* completion once the flag
+    # is on (`feature_flag_defaults` below) — W1-W23's ~30 lessons per run,
+    # plus W24-W27's own, all trigger a drafting run and would otherwise
+    # exhaust `FLASHCARD_DRAFTS_PER_DAY`'s default of 50 on a same-day local
+    # re-run (`reuseExistingServer: !CI` keeps `aleph_e2e` warm across runs).
+    # A 429 there leaves the poll at `not_started` forever and the keep
+    # helper's `waitForSurface("draft-list")` times out — the same failure
+    # mode the four caps above exist to prevent, just one cap late.
+    settings.flashcard_drafts_per_day = 0
     # ``tutor`` (AL-203/AL-270), ``shaping`` (AL-301/AL-370) and ``streaks``
     # (Phase 5 D7) are all launched and default on in
     # ``services/feature_flags.py``, so the browser suite's plain learner —
@@ -133,7 +186,14 @@ def create_stub_app() -> FastAPI:
     # the suite asserts against surfaces that must exist, and "every tutor spec
     # failed on an absent rail" is a confusing way to discover someone flipped a
     # code default.
-    settings.feature_flag_defaults = "tutor:on,shaping:on,streaks:on"
+    #
+    # ``flashcards`` (Phase 3 TDD D10) is still admin-only in
+    # ``ADMIN_DEFAULT_FLAGS`` — launch is a separate flag flip after
+    # dogfooding (TDD §16) — so it *needs* an explicit entry here, unlike the
+    # three above: without it ``DEV_USER`` never sees the pill, the drafts
+    # block or ``/review`` at all, and W24-W27 (TDD §11) would 404 on every
+    # route before a single assertion ran.
+    settings.feature_flag_defaults = "tutor:on,shaping:on,streaks:on,flashcards:on"
 
     # Imported lazily so mutating settings above lands before app assembly.
     from aleph.app import create_app

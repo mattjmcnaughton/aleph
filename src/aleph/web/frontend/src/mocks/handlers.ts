@@ -1,5 +1,6 @@
 import { HttpResponse, http } from "msw";
 import { API_V1_BASE, AUTH_LOGOUT_PATH, type AuthSession, type AuthUser } from "../lib/api";
+import { flashcardHandlers } from "./flashcards";
 import { lessonsHandlers } from "./lessons";
 import { ADMIN_MODEL_ALLOWLIST } from "./models";
 import { pathsHandlers } from "./paths";
@@ -26,10 +27,10 @@ export const learnerUser: AuthUser = {
   model_allowlist: [],
   // Phase 2's flag ships dark (AL-203): the default fake learner sees the
   // tutor off, so any surface gated on it must stay hidden unless a test
-  // deliberately serves a session with it on. `streaks` (Streaks TDD D7)
-  // follows the same rule — off by default in `FLAG_DEFAULTS`, on only for
-  // admins (`ADMIN_DEFAULT_FLAGS`) until launch.
-  feature_flags: { tutor: false, streaks: false },
+  // deliberately serves a session with it on. `streaks` (Streaks TDD D7) and
+  // `flashcards` (Phase 3 TDD D10) follow the same rule — off by default in
+  // `FLAG_DEFAULTS`, on only for admins (`ADMIN_DEFAULT_FLAGS`) until launch.
+  feature_flags: { tutor: false, streaks: false, flashcards: false },
 };
 
 export const authenticatedSession: AuthSession = {
@@ -88,4 +89,5 @@ export const handlers = [
   ...tutorHandlers,
   ...shapingHandlers,
   ...progressHandlers,
+  ...flashcardHandlers,
 ];

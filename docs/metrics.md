@@ -41,6 +41,9 @@ tag (§12), plus the ids that apply. The record's own timestamp is the event tim
 | `proposal_shown` | `services/shaping.py` — `propose_path_edit` observed mid-stream | `path_id`, `n_add_lessons`, `n_revisions`, `new_unit` | W17 / W18 |
 | `change_applied` | `services/shaping.py` `apply_change` — after the commit | `path_id`, `change_id`, `n_add_lessons`, `n_revisions`, `new_unit`, `lesson_ids` | W17 / W18 |
 | `change_undone` | `services/shaping.py` `undo_change` — after the commit | `path_id`, `change_id`, `minutes_since_apply` | W19 |
+| `flashcards_drafted` | `services/flashcard_drafting.py` — every drafting run resolution *except* a missing-context run and a crashed worker (see below) | `path_id`, `lesson_id`, `position_in_path`, `drafted_count`, `outcome` (generated/failed), `success`, `duration_ms`, `prompt_tokens`, `completion_tokens`, `total_tokens` | W24 / W8 |
+| `flashcards_kept` | `services/flashcard_drafting.py` `keep_flashcard_drafts` — the keep request | `path_id`, `lesson_id`, `drafted_count`, `kept_count` | W24 |
+| `review_graded` | `services/reviews.py` `grade_card` — every grade | `card_id`, `path_id`, `grade`, `rung_before`, `queue_size`, `queue_remaining` | W25 / W26 |
 
 `outline_generated` / `lesson_generated` are emitted **only on a fenced-win mark**
 (a lost claim's mark is a silent no-op), so each generation resolves the metric
@@ -71,6 +74,36 @@ revises — the same dominance rule the `path_changes.kind` column uses, so one
 Apply carrying both shapes is tagged the same way in the events and in the row.
 W20 (a declined edit) deliberately tags nothing: a decline is an ordinary
 successful reply, and W21 tags the guardrail *queries* rather than any record.
+
+Phase 3's three (flashcards & spaced repetition, TDD §9) have **no session
+events**: `review_session_started` / `_completed` are each derivable from
+`review_graded` alone — a session started is an account's first grade of a
+day, one finished is a grade with `queue_remaining = 0` — so `review_graded`
+carries `queue_size`/`queue_remaining` and no separate event exists for
+either. `flashcards_drafted` is emitted only on a **fenced win** (the
+`lesson_generated` precedent), and **two** resolutions emit nothing at all —
+read the row count against a failure-rate computed from this event with both
+gaps in mind. The first is documented and intentional: a lesson whose content
+vanished or was never generated before drafting was claimed emits nothing,
+since there is no `account_id`/`path_id` to stamp it with. The second is not
+a design choice — a **crashed worker** (a Fly machine restart, a task
+cancelled at shutdown) leaves its `flashcard_draft_runs` row `generating`
+forever; the row is only ever collapsed to `failed` on *read*
+(`FlashcardRepository.get_effective_draft_run_state`), and nothing ever
+resolves it, so no `flashcards_drafted` event is ever emitted for that run.
+A drafting failure rate computed from this event therefore undercounts
+exactly the failure mode that matters most. Two workflow tags are **derived from
+the payload**, the same dominance style as `proposal_shown`/`change_applied`:
+`flashcards_drafted`'s `outcome` picks `W24` (generated) or `W8` (failed, the
+same generic tag `lesson_generated`'s own failed branch uses), and
+`review_graded`'s `grade` picks `W26` (`again` — a lapse resurfacing) or `W25`
+(`got_it` — the ordinary queue-draining case). `path_id` is **nullable** on
+`flashcards_drafted` and `review_graded` alone among every event in this
+document: an orphaned card (its source path deleted, D12) still drafts or
+reviews, and `None` here is what keeps that case honest rather than
+mis-attributed to a path the card no longer has. `flashcards_kept` carries
+**both** `drafted_count` and `kept_count` on one record — the keep-rate ratio
+lives inside a row rather than a join between two event streams (TDD §9).
 
 ## Metric → query
 
@@ -185,6 +218,44 @@ precision than a comment that says when to update it.
 If Return does not move for the "after" cohort, this slice is decoration and
 the rest of Phase 5's scope should be re-argued rather than built — the one
 sentence in the TDD that could stop the phase.
+
+### Phase 3 — flashcards & spaced repetition (PRD §5, TDD §9)
+
+Phase 3 gets no north star of its own either: the one question worth asking
+(PRD §5) is the same shape as Phase 5's — does the retention loop move the
+existing **Return** metric — stated so it can fail the same way.
+
+| Metric (PRD §5) | Query | Events consumed |
+| --- | --- | --- |
+| **Keep rate** — kept ÷ drafted | [`flashcard_keep_rate.sql`](../queries/logfire/flashcard_keep_rate.sql) | `flashcards_kept` |
+| **Queue completion** — sessions finished ÷ started | [`review_queue_completion.sql`](../queries/logfire/review_queue_completion.sql) | `review_graded` |
+| **Recall rate by rung** — Got it ÷ reviews, by ladder rung | [`review_recall_by_rung.sql`](../queries/logfire/review_recall_by_rung.sql) | `review_graded` |
+| **Does the retention loop move Return?** — the existing Return metric, split into before/after cohorts by the `flashcards` flag flip date | [`flashcard_return.sql`](../queries/logfire/flashcard_return.sql) | `account_created`, `lesson_completed`, `quick_check_attempted`, `lesson_viewed` |
+
+`flashcard_return.sql` is `streak_return.sql` with a **different flip-date
+constant** in its header — deliberately a copy rather than a parameter (TDD
+§9): the streak cohort split and the flashcards cohort split are different
+questions about different flags, and a shared, parameterised query would make
+it easy to answer one while reading the other. It inherits the same stated
+caveat `streak_return.sql` carries: it buckets **UTC** days while the feature
+itself counts learner-local days (`tz_offset_minutes`, D4), so the two can
+disagree by one at the margins.
+
+**Keep rate** and **recall rate by rung** are read per-lesson-run and
+per-rung respectively, never pooled across the whole cohort at once — a low
+number hiding inside a healthy pooled average is exactly the failure mode both
+queries exist to catch early (PRD §5, TDD §10's "keep rate is the production
+proxy" for the `flashcard_draft` eval).
+
+**The Phase 4 seam, named and not built** (PRD §5, TDD §9): lapses are
+queryable per learner and per source lesson directly from
+`flashcard_reviews JOIN flashcards ON flashcard_reviews.card_id =
+flashcards.id WHERE grade = 'again'` — the append-only review log already
+carries every fact Phase 4's "what does this learner keep getting wrong"
+needs, keyed to the card's `source_lesson_id`. No aggregation, no surface, no
+API, and no query file in this phase: the schema alone is the commitment PRD
+§5 makes, and building anything on top of it now would be work with no
+consumer.
 
 ## Importing the queries into Logfire
 

@@ -65,14 +65,23 @@ describe("ActivityStrip", () => {
     expect(live[5].getAttribute("data-intensity")).toBe("bright");
   });
 
-  it("carries a per-cell aria-label with the date and count", () => {
-    render(<ActivityStrip activity={buildActivity([2], "2026-08-02")} />);
-
+  it("[Phase 3 TDD D11] carries a per-cell aria-label with the date and active state, never a lesson count", () => {
     // A single-cell window still renders (defensive; the real contract is
     // always `STREAK_ACTIVITY_WINDOW_DAYS`) — the label is what's under test.
+    render(<ActivityStrip activity={buildActivity([2], "2026-08-02")} />);
     const cell = screen.getByTestId("activity-cell");
     expect(cell.getAttribute("aria-label")).toMatch(/august 2/i);
-    expect(cell.getAttribute("aria-label")).toMatch(/2 lessons/);
+    // "active", not "2 lessons": a review-only day is also `count > 0` (D11),
+    // and this label cannot tell the two apart, so it must not claim to.
+    expect(cell.getAttribute("aria-label")).toMatch(/active$/i);
+    expect(cell.getAttribute("aria-label")).not.toMatch(/lesson/i);
+  });
+
+  it("[Phase 3 TDD D11] a zero-count cell reads 'no activity', not 'no lessons'", () => {
+    render(<ActivityStrip activity={buildActivity([0], "2026-08-02")} />);
+    const cell = screen.getByTestId("activity-cell");
+    expect(cell.getAttribute("aria-label")).toMatch(/no activity$/i);
+    expect(cell.getAttribute("aria-label")).not.toMatch(/lesson/i);
   });
 
   it("[TDD §8] is a single role=img with a summary label — not 49 announced cells", () => {

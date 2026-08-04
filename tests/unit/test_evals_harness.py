@@ -33,6 +33,7 @@ import pytest
 from pydantic_evals import Case, Dataset
 from pydantic_evals.evaluators import EvaluationReason, Evaluator
 
+from aleph.agents.flashcard import FlashcardDraft, FlashcardDrafts
 from aleph.agents.lesson import LessonCaps, LessonContent, QuickCheck
 from aleph.agents.outline import (
     LessonOutline,
@@ -46,17 +47,25 @@ from aleph.config import Settings
 from aleph.services.generation import _lesson_caps_from, _outline_caps_from
 from evals.__main__ import _case_payload, _hard_floor_failures, main
 from evals.generation import (
+    FLASHCARD_CAPS,
+    FLASHCARD_HARD_FLOOR_EVALUATORS,
+    FLASHCARD_PREFILTERS,
+    FLASHCARD_SEED_SET_PATH,
     FULL_PATH_LESSONS,
     HARD_FLOOR_EVALUATORS,
     LESSON_CAPS,
     OUTLINE_CAPS,
     PREFILTERS,
+    FlashcardSample,
+    FlashcardSeedInputs,
     GeneratedLesson,
     GenerationSample,
     RefusalBranch,
     SeedInputs,
     SeedMeta,
+    build_flashcard_generation_task,
     build_generation_task,
+    load_flashcard_seed_set,
     load_seed_set,
     smoke_model,
 )
@@ -611,4 +620,265 @@ def test_smoke_refuses_a_model_sweep() -> None:
     """``--smoke --models …`` would look like an offline sweep of those models."""
     with pytest.raises(SystemExit) as exit_info:
         main(["--smoke", "--models", "anthropic/claude-haiku-4-5"])
+    assert exit_info.value.code == 2
+
+
+# =================================================================================
+# The `flashcard_draft` eval kind (Phase 3 TDD D14/§10; PRD §6)
+# =================================================================================
+
+
+def _valid_flashcards(count: int = 4) -> list[FlashcardDraft]:
+    """``count`` distinct, cap-respecting drafts, none restating any stem below."""
+    return [
+        FlashcardDraft(
+            front=f"Name the fact {i} this lesson teaches.", back=f"Fact {i}."
+        )
+        for i in range(count)
+    ]
+
+
+def _flashcard_sample(
+    cards: list[FlashcardDraft],
+    *,
+    stem: str = "Which statement is correct?",
+    unit_title: str = "Unit 1",
+    lesson_title: str = "Lesson 1",
+    read_passage: str = " ".join(["word"] * 250),
+) -> FlashcardSample:
+    return FlashcardSample(
+        unit_title=unit_title,
+        lesson_title=lesson_title,
+        read_passage=read_passage,
+        quick_check_stem=stem,
+        drafts=FlashcardDrafts(cards=cards),
+    )
+
+
+_FLASHCARD_INPUTS = FlashcardSeedInputs(topic="anything", level="beginner")
+
+
+async def _flashcard_probe_report(
+    inputs: FlashcardSeedInputs,
+    sample: FlashcardSample,
+    evaluators: list[Evaluator[FlashcardSeedInputs, FlashcardSample, SeedMeta]]
+    | None = None,
+) -> EvaluationReport[FlashcardSeedInputs, FlashcardSample, SeedMeta]:
+    """Score one hand-built flashcard sample through the real pydantic-evals path.
+
+    Mirrors :func:`_probe_report` above, for the ``flashcard_draft`` kind's own
+    inputs/output types.
+    """
+
+    async def task(_inputs: FlashcardSeedInputs) -> FlashcardSample:
+        return sample
+
+    dataset = Dataset[FlashcardSeedInputs, FlashcardSample, SeedMeta](
+        name="flashcard-prefilter-probe",
+        cases=[
+            Case(
+                name="probe",
+                inputs=inputs,
+                metadata=SeedMeta(category="technical", note="unit-test probe"),
+            )
+        ],
+        evaluators=(
+            evaluators
+            if evaluators is not None
+            else [prefilter() for prefilter in FLASHCARD_PREFILTERS]
+        ),
+    )
+    return await dataset.evaluate(task, progress=False)
+
+
+async def _flashcard_assess(
+    inputs: FlashcardSeedInputs, sample: FlashcardSample
+) -> dict[str, tuple[bool, str | None]]:
+    """Run both flashcard Layer 1 pre-filters: ``{name: (passed, reason)}``."""
+    report = await _flashcard_probe_report(inputs, sample)
+    assert not report.failures, "the probe task itself errored"
+    return {
+        name: (result.value, result.reason)
+        for name, result in report.cases[0].assertions.items()
+    }
+
+
+# --- the flashcard_draft seed set ------------------------------------------------
+
+
+def test_flashcard_seed_set_loads_and_every_case_is_complete() -> None:
+    dataset = load_flashcard_seed_set()
+    # A representative subset of seed_set.yaml's `generate` cases, not a second
+    # copy of the full twenty (see the file's own header on cost).
+    assert 5 <= len(dataset.cases) <= 12, f"{len(dataset.cases)} cases"
+
+    names = [case.name for case in dataset.cases]
+    assert len(names) == len(set(names)), "case names must be unique"
+
+    valid_levels = set(get_args(Level))
+    for case in dataset.cases:
+        assert case.name, "every case needs a name (it is the report's row id)"
+        assert case.inputs.topic.strip(), f"{case.name}: empty topic"
+        assert case.inputs.level in valid_levels, f"{case.name}: bad level"
+        assert case.metadata is not None, f"{case.name}: missing metadata"
+        assert case.metadata.note.strip(), f"{case.name}: empty curation note"
+
+
+def test_flashcard_seed_set_reuses_the_phase_one_seed_topics() -> None:
+    """TDD §10: "the passages under test are the ones the lesson evals already
+    judge" — every flashcard case must be the *same* (topic, level) as a
+    `generate` case in seed_set.yaml, under the same name."""
+    outline_lesson_cases = {case.name: case.inputs for case in load_seed_set().cases}
+    for case in load_flashcard_seed_set().cases:
+        reused = outline_lesson_cases.get(case.name)
+        assert reused is not None, f"{case.name}: not a seed_set.yaml case name"
+        assert reused.topic == case.inputs.topic, case.name
+        assert reused.level == case.inputs.level, case.name
+        # A refused topic has no lesson to draft a card from.
+        assert reused.expected_branch == "generate", case.name
+
+
+def test_flashcard_seed_set_registers_both_hard_floor_prefilters() -> None:
+    dataset = load_flashcard_seed_set()
+    registered = {type(evaluator).__name__ for evaluator in dataset.evaluators}
+    assert registered >= {cls.__name__ for cls in FLASHCARD_PREFILTERS}
+    assert registered >= FLASHCARD_HARD_FLOOR_EVALUATORS
+    assert "MaxDuration" in registered
+
+
+def test_flashcard_seed_set_path_matches_the_file_on_disk() -> None:
+    assert FLASHCARD_SEED_SET_PATH.name == "flashcard_seed_set.yaml"
+    assert FLASHCARD_SEED_SET_PATH.is_file()
+
+
+# --- Layer 1: FlashcardInvariants (structural bands, PRD §6 scope pre-filter) ---
+
+
+@pytest.mark.anyio
+async def test_flashcard_invariants_rejects_a_count_violation() -> None:
+    too_many = _valid_flashcards(FLASHCARD_CAPS.count_max + 1)
+    assertions = await _flashcard_assess(_FLASHCARD_INPUTS, _flashcard_sample(too_many))
+    passed, reason = assertions["FlashcardInvariants"]
+    assert not passed
+    assert reason is not None and "band" in reason
+    # The shared validator is the only source of the rule: an over-count draft
+    # must not also trip the non-triviality pre-filter.
+    assert assertions["FlashcardNonTriviality"][0]
+
+
+@pytest.mark.anyio
+async def test_flashcard_invariants_rejects_an_empty_side() -> None:
+    cards = _valid_flashcards(3)
+    cards[1] = FlashcardDraft(front="   ", back="An answer.")
+    assertions = await _flashcard_assess(_FLASHCARD_INPUTS, _flashcard_sample(cards))
+    passed, reason = assertions["FlashcardInvariants"]
+    assert not passed
+    assert reason is not None and "empty front" in reason
+
+
+@pytest.mark.anyio
+async def test_flashcard_invariants_rejects_a_word_cap_violation() -> None:
+    cards = _valid_flashcards(3)
+    cards[0] = FlashcardDraft(
+        front=" ".join(["word"] * (FLASHCARD_CAPS.front_words_max + 5)),
+        back="An answer.",
+    )
+    assertions = await _flashcard_assess(_FLASHCARD_INPUTS, _flashcard_sample(cards))
+    passed, reason = assertions["FlashcardInvariants"]
+    assert not passed
+    assert reason is not None and "front" in reason and "words" in reason
+
+
+@pytest.mark.anyio
+async def test_flashcard_invariants_rejects_a_back_that_repeats_the_front() -> None:
+    cards = _valid_flashcards(3)
+    cards[2] = FlashcardDraft(front="The same text.", back="The same text.")
+    assertions = await _flashcard_assess(_FLASHCARD_INPUTS, _flashcard_sample(cards))
+    passed, reason = assertions["FlashcardInvariants"]
+    assert not passed
+    assert reason is not None and "repeats the front" in reason
+
+
+@pytest.mark.anyio
+async def test_flashcard_invariants_accepts_cards_within_caps() -> None:
+    assertions = await _flashcard_assess(
+        _FLASHCARD_INPUTS, _flashcard_sample(_valid_flashcards(4))
+    )
+    assert assertions["FlashcardInvariants"][0]
+
+
+# --- Layer 1: FlashcardNonTriviality (PRD §6 non-triviality, shared with the ---
+# --- agent's own restates_stem validator) ---------------------------------------
+
+
+@pytest.mark.anyio
+async def test_flashcard_non_triviality_rejects_a_restated_stem() -> None:
+    stem = "What does the extends keyword constrain in a generic type parameter?"
+    cards = _valid_flashcards(3)
+    cards[0] = FlashcardDraft(front=stem, back="It constrains T to the bound.")
+    assertions = await _flashcard_assess(
+        _FLASHCARD_INPUTS, _flashcard_sample(cards, stem=stem)
+    )
+    passed, reason = assertions["FlashcardNonTriviality"]
+    assert not passed
+    assert reason is not None and "restate" in reason
+    # Not a structural violation: the card set is otherwise well-formed.
+    assert assertions["FlashcardInvariants"][0]
+
+
+@pytest.mark.anyio
+async def test_flashcard_non_triviality_accepts_distinct_cards() -> None:
+    assertions = await _flashcard_assess(
+        _FLASHCARD_INPUTS, _flashcard_sample(_valid_flashcards(4))
+    )
+    assert assertions["FlashcardNonTriviality"][0]
+
+
+# --- the flashcard smoke run ------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_flashcard_smoke_run_passes_every_assertion() -> None:
+    """The same path ``just evals --smoke --flashcards`` takes, in the gate."""
+    dataset = load_flashcard_seed_set()
+    stub = smoke_model()
+    report = await dataset.evaluate(
+        build_flashcard_generation_task(stub, stub, stub),
+        name="flashcard-smoke-unit",
+        progress=False,
+    )
+    assert not report.failures
+    assert len(report.cases) == len(dataset.cases)
+    for case in report.cases:
+        for name, result in case.assertions.items():
+            assert result.value, f"{case.name} / {name}: {result.reason}"
+        # outline + lesson + drafting: at least 3 requests for a clean case.
+        assert case.metrics["model_requests"] >= 3
+
+
+@pytest.mark.anyio
+async def test_flashcard_generation_task_drafts_from_a_freshly_generated_lesson() -> (
+    None
+):
+    """The task's output carries the real generated passage/stem, not a fixture."""
+    dataset = load_flashcard_seed_set()
+    stub = smoke_model()
+    task = build_flashcard_generation_task(stub, stub, stub)
+
+    case = dataset.cases[0]
+    sample = await task(case.inputs)
+    assert sample.unit_title and sample.lesson_title
+    assert sample.read_passage.strip()
+    assert sample.quick_check_stem.strip()
+    assert (
+        FLASHCARD_CAPS.count_min <= len(sample.drafts.cards) <= FLASHCARD_CAPS.count_max
+    )
+    for card in sample.drafts.cards:
+        assert card.front.strip()
+        assert card.back.strip()
+
+
+def test_flashcard_smoke_refuses_a_model_sweep() -> None:
+    with pytest.raises(SystemExit) as exit_info:
+        main(["--smoke", "--flashcards", "--models", "anthropic/claude-haiku-4-5"])
     assert exit_info.value.code == 2  # misconfiguration, same as a missing key

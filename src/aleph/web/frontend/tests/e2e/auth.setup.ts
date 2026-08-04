@@ -15,6 +15,8 @@ import {
   ADMIN_USER,
   DEV_STORAGE_STATE,
   DEV_USER,
+  UNVERIFIED_STORAGE_STATE,
+  UNVERIFIED_USER,
   signIn,
 } from "./fixtures/auth";
 
@@ -26,4 +28,13 @@ setup("sign in as the dev learner", async ({ page }) => {
 setup("sign in as the admin learner", async ({ page }) => {
   await signIn(page, ADMIN_USER);
   await page.context().storageState({ path: ADMIN_STORAGE_STATE });
+});
+
+// The flashcards journeys' isolated account (Phase 3 TDD D15, §11 — see
+// `fixtures/auth.ts`'s own note on `UNVERIFIED_USER`): W27 alone runs as this
+// learner, so its one kept card never competes for a shared account's ten
+// review slots against anything another spec created.
+setup("sign in as the unverified learner", async ({ page }) => {
+  await signIn(page, UNVERIFIED_USER);
+  await page.context().storageState({ path: UNVERIFIED_STORAGE_STATE });
 });

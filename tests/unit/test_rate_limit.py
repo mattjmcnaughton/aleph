@@ -39,6 +39,7 @@ class _FakeUsage:
         self.lessons: dict[uuid.UUID, list[datetime]] = {}
         self.tutor_messages: dict[uuid.UUID, list[datetime]] = {}
         self.shaping_messages: dict[uuid.UUID, list[datetime]] = {}
+        self.flashcard_draft_runs: dict[uuid.UUID, list[datetime]] = {}
 
     def add_path(self, user_id: uuid.UUID, when: datetime) -> None:
         self.paths.setdefault(user_id, []).append(when)
@@ -54,6 +55,9 @@ class _FakeUsage:
 
     def add_lesson(self, user_id: uuid.UUID, when: datetime) -> None:
         self.lessons.setdefault(user_id, []).append(when)
+
+    def add_flashcard_draft_run(self, user_id: uuid.UUID, when: datetime) -> None:
+        self.flashcard_draft_runs.setdefault(user_id, []).append(when)
 
     async def count_paths_created_since(
         self, *, user_id: uuid.UUID, since: datetime
@@ -79,6 +83,11 @@ class _FakeUsage:
         self, *, user_id: uuid.UUID, since: datetime
     ) -> int:
         return sum(1 for t in self.shaping_messages.get(user_id, []) if t >= since)
+
+    async def count_flashcard_draft_runs_since(
+        self, *, user_id: uuid.UUID, since: datetime
+    ) -> int:
+        return sum(1 for t in self.flashcard_draft_runs.get(user_id, []) if t >= since)
 
 
 def _limiter(

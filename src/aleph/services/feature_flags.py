@@ -65,18 +65,20 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
+from sqlalchemy.ext.asyncio import (  # noqa: TC002 - FastAPI resolves annotations.
+    AsyncSession,
+)
+
 from aleph.authz import is_admin
 from aleph.config import settings as global_settings
 from aleph.dtos.feature_flags import FeatureFlagDTO
+from aleph.models import User  # noqa: TC001 - FastAPI resolves annotations.
 from aleph.repositories import FeatureFlagRepository, UserRepository
 
 if TYPE_CHECKING:
     import uuid
 
-    from sqlalchemy.ext.asyncio import AsyncSession
-
     from aleph.config import Settings
-    from aleph.models import User
 
 
 class FeatureFlag(StrEnum):
@@ -100,6 +102,12 @@ class FeatureFlag(StrEnum):
     # independent of each other — a kill switch that only kills the surface it
     # names.
     STREAKS = "streaks"
+    # Phase 3's one flag (TDD D10): drafting, the daily queue, review and the
+    # due pill — every flashcards route, gated router-level. Off -> ``404`` on
+    # every route, and the streak union (TDD §5.5) silently loses its second
+    # signal. Its own key, independent of the three above, for the same reason
+    # they are independent of each other.
+    FLASHCARDS = "flashcards"
 
 
 # Code defaults per flag. Every FeatureFlag member gets an entry here; a flag
@@ -118,6 +126,13 @@ FLAG_DEFAULTS: dict[FeatureFlag, bool] = {
     # with zero learner exposure while admins dogfooded it — and this flip is
     # the launch itself, exactly the move AL-270/AL-370 made for the two above.
     FeatureFlag.STREAKS: True,
+    # Off: Phase 3 (flashcards) has not launched. Starts ``False`` here, the
+    # same dark posture ``tutor``/``shaping``/``streaks`` each spent their own
+    # build-out at (TDD D10) — every flashcards ticket merges and deploys with
+    # zero learner exposure while admins dogfood drafting and review, and this
+    # flag flips to ``True`` only at launch, the AL-270/AL-370/streaks playbook
+    # repeated a fourth time.
+    FeatureFlag.FLASHCARDS: False,
 }
 
 
@@ -128,14 +143,22 @@ FLAG_DEFAULTS: dict[FeatureFlag, bool] = {
 # ``tutor:off`` there turns the flag off for admins too (kill switch), and a
 # per-user override beats it for everyone, admins included.
 #
-# All three members are **currently redundant**: a flag whose code default is
-# already ``True`` is on for admins by that default alone, and after a ``:off`` kill the
-# settings map outranks this baseline anyway, so membership changes no answer
-# either way. They stay listed rather than dropped because this is the seam the
-# *next* dark phase uses, and re-deriving which flags belong here is exactly the
-# kind of thing that gets forgotten at the moment a flag flips back off.
+# ``TUTOR``/``SHAPING``/``STREAKS`` are **currently redundant**: a flag whose
+# code default is already ``True`` is on for admins by that default alone, and
+# after a ``:off`` kill the settings map outranks this baseline anyway, so
+# membership changes no answer either way. They stay listed rather than dropped
+# because this is the seam the *next* dark phase uses, and re-deriving which
+# flags belong here is exactly the kind of thing that gets forgotten at the
+# moment a flag flips back off. ``FLASHCARDS`` is the live case right now: its
+# code default is ``False`` (TDD D10), so this membership is what lets admins
+# dogfood drafting and review while every learner still sees a ``404``.
 ADMIN_DEFAULT_FLAGS: frozenset[FeatureFlag] = frozenset(
-    {FeatureFlag.TUTOR, FeatureFlag.SHAPING, FeatureFlag.STREAKS}
+    {
+        FeatureFlag.TUTOR,
+        FeatureFlag.SHAPING,
+        FeatureFlag.STREAKS,
+        FeatureFlag.FLASHCARDS,
+    }
 )
 
 

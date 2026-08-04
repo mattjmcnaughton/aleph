@@ -21,6 +21,11 @@ from aleph.repositories.conversations import (
     ThreadMessage,
 )
 from aleph.repositories.feature_flags import FeatureFlagRepository
+from aleph.repositories.flashcards import (
+    DueCandidate,
+    FlashcardRecord,
+    FlashcardRepository,
+)
 from aleph.repositories.lessons import (
     CompletionDay,
     LessonRepository,
@@ -37,7 +42,10 @@ __all__ = [
     "ChangeRepository",
     "CompletionDay",
     "ConversationRepository",
+    "DueCandidate",
     "FeatureFlagRepository",
+    "FlashcardRecord",
+    "FlashcardRepository",
     "LessonAnswer",
     "LessonRepository",
     "LocatedMessage",

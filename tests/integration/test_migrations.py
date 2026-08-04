@@ -945,3 +945,133 @@ def test_earlier_tables_are_unchanged_by_the_streak_index_migration(
     after = {table: asyncio.run(_columns(database_url, table)) for table in tracked}
 
     assert before == after
+
+
+# --------------------------------------------------------------------------- #
+# Phase 3: flashcards (migration 0010)
+#
+# Three new tables — D1's two (``flashcards``, ``flashcard_reviews``) plus the
+# sparse ``flashcard_draft_runs`` claim row (D7) — and two new enum types.
+# ``0010`` is the only migration in the repo whose downgrade drops enum types
+# alongside its tables (TDD §4), which is exactly the failure a reapply test
+# catches: an enum type left behind (or a drop that races the tables using it)
+# would collide with, or break, the next upgrade. Mirrors the tutor branch's
+# own enum-drop assertions (``0003``).
+# --------------------------------------------------------------------------- #
+
+FLASHCARDS_HEAD = "0010_flashcards"
+FLASHCARDS_TABLES = ("flashcards", "flashcard_reviews", "flashcard_draft_runs")
+FLASHCARDS_ENUM_TYPES = ("flashcard_grade", "flashcard_draft_run_state")
+
+
+def test_flashcards_migration_downgrades_and_reapplies_cleanly(
+    isolated_database: str,
+) -> None:
+    database_url = isolated_database
+
+    at_head = asyncio.run(_tables(database_url))
+    assert set(FLASHCARDS_TABLES) <= at_head
+
+    username = asyncio.run(_seed_phase_1_row(database_url))
+
+    run_alembic(database_url, STREAK_INDEX_HEAD, downgrade=True)
+
+    after_downgrade = asyncio.run(_tables(database_url))
+    assert set(FLASHCARDS_TABLES) & after_downgrade == set()
+    # Everything before Phase 3 survives the reversal, rows included.
+    assert set(PHASE_1_TABLES) <= after_downgrade
+    assert set(PHASE_2_TABLES) <= after_downgrade
+    assert FLAGS_TABLE in after_downgrade
+    assert CHANGES_TABLE in after_downgrade
+    assert asyncio.run(_count(database_url, "users")) == 1
+    # The two Phase 3 enum types go with the step — no orphan type left behind
+    # to collide with a re-upgrade. This is the property this test exists for.
+    assert set(FLASHCARDS_ENUM_TYPES) & asyncio.run(_enum_types(database_url)) == set()
+    # Earlier phases' enums are not collateral damage.
+    assert {
+        "message_role",
+        "message_source",
+        "level",
+        "path_status",
+        "conversation_kind",
+        "path_change_kind",
+        "path_change_status",
+    } <= asyncio.run(_enum_types(database_url))
+
+    run_alembic(database_url, FLASHCARDS_HEAD)
+
+    reapplied = asyncio.run(_tables(database_url))
+    assert set(FLASHCARDS_TABLES) <= reapplied
+    assert set(PHASE_1_TABLES) <= reapplied
+    assert asyncio.run(_count(database_url, "users")) == 1
+    assert username == "migration-user"
+    # The tables come back empty — a migration reapply is schema-only.
+    for table in FLASHCARDS_TABLES:
+        assert asyncio.run(_count(database_url, table)) == 0
+    assert set(FLASHCARDS_ENUM_TYPES) <= asyncio.run(_enum_types(database_url))
+
+
+def test_flashcards_migration_creates_the_documented_columns(
+    isolated_database: str,
+) -> None:
+    database_url = isolated_database
+
+    assert asyncio.run(_columns(database_url, "flashcards")) == {
+        "id",
+        "user_id",
+        "front",
+        "back",
+        "kept_at",
+        "rung",
+        "due_on",
+        "source_lesson_id",
+        "source_path_id",
+        "source_lesson_title",
+        "source_path_title",
+        "source_generated_at",
+        "created_at",
+        "updated_at",
+    }
+    assert asyncio.run(_columns(database_url, "flashcard_reviews")) == {
+        "id",
+        "card_id",
+        "user_id",
+        "grade",
+        "reviewed_at",
+        "local_day",
+        "rung_before",
+        "rung_after",
+        "due_on_before",
+        "due_on_after",
+        "created_at",
+        "updated_at",
+    }
+    assert asyncio.run(_columns(database_url, "flashcard_draft_runs")) == {
+        "lesson_id",
+        "state",
+        "started_at",
+        "error",
+        "created_at",
+        "updated_at",
+    }
+
+
+def test_earlier_tables_are_unchanged_by_the_flashcards_migration(
+    isolated_database: str,
+) -> None:
+    """The Phase 3 branch adds three tables; it alters none of the existing ones."""
+    database_url = isolated_database
+    tracked = (
+        *PHASE_1_TABLES,
+        *PHASE_2_TABLES,
+        FLAGS_TABLE,
+        CHANGES_TABLE,
+        "lessons",
+        "paths",
+    )
+
+    before = {table: asyncio.run(_columns(database_url, table)) for table in tracked}
+    run_alembic(database_url, STREAK_INDEX_HEAD, downgrade=True)
+    after = {table: asyncio.run(_columns(database_url, table)) for table in tracked}
+
+    assert before == after
