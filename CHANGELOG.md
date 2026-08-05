@@ -1,3 +1,10 @@
+# [1.24.0](https://github.com/mattjmcnaughton/aleph/compare/v1.23.0...v1.24.0) (2026-08-05)
+
+
+### Features
+
+* **flashcards:** browse, edit and delete every kept card, and launch Phase 3 ([#158](https://github.com/mattjmcnaughton/aleph/issues/158)) ([e095ca1](https://github.com/mattjmcnaughton/aleph/commit/e095ca10cec9310c0be47ef9010c90691216cc4d)), closes [#156](https://github.com/mattjmcnaughton/aleph/issues/156)
+
 # [1.23.0](https://github.com/mattjmcnaughton/aleph/compare/v1.22.0...v1.23.0) (2026-08-04)
 
 
