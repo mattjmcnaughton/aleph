@@ -45,14 +45,14 @@ function units(first: "available" | "complete", second: "locked" | "available"):
         {
           id: FIRST_LESSON,
           title: "What TypeScript adds",
-          position_in_path: 0,
+          position_in_path: 1,
           generation_state: "generated",
           unlock_state: first,
         },
         {
           id: SECOND_LESSON,
           title: "Primitive types",
-          position_in_path: 1,
+          position_in_path: 2,
           // Generated in both payloads so the path view's poll is terminal
           // either way (`isPathViewTerminal`): a still-resolving lesson would
           // keep the poll running and refresh the rail on its own, which would
@@ -205,7 +205,7 @@ function seedStreakPath(): void {
           {
             id: STREAK_LESSON_ID,
             title: "What TypeScript adds",
-            position_in_path: 0,
+            position_in_path: 1,
             generation_state: "generated",
             unlock_state: "available",
           },

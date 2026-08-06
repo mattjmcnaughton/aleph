@@ -62,5 +62,22 @@ test.describe("W2 resume across sessions", { tag: "@w2" }, () => {
     if (total > 2) {
       await expectRailState(page, 2, "data-unlock-state", "locked");
     }
+
+    // --- and the continue card counts the same lesson the rail does ------------
+    //
+    // The card is the one surface that renders `position_in_path` as a number a
+    // learner reads, so it is the one that can disagree with the rail. It does
+    // so only against the **real** backend's numbering: `position_in_path` is
+    // 1-based (services/generation.py increments before each insert), and a
+    // component written against a 0-based fake compensates with a `+ 1` that
+    // reads one lesson ahead — the rail resuming at lesson 2 while the card
+    // says "lesson 3 of N". Unit fixtures cannot catch that; only this can.
+    //
+    // Desktop-only (`lg:flex`), so widen past the journeys' phone viewport for
+    // this beat alone.
+    await page.setViewportSize({ width: 1280, height: 900 });
+    const card = page.getByTestId("path-continue");
+    await expect(card).toBeVisible();
+    await expect(card).toContainText(`lesson 2 of ${total}`);
   });
 });

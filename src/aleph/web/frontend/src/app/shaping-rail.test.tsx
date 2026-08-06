@@ -61,7 +61,7 @@ const PROPOSAL: Proposal = {
   summary: "Adds 2 lessons on `unknown` before Utility Types (≈ 10 min).",
   operations: [
     {
-      insert_at_position: 3,
+      insert_at_position: 4,
       new_unit: null,
       lessons: [{ title: "`unknown` vs `any`" }, { title: "Narrowing `unknown`" }],
       rationale: "You missed the narrowing check, and Utility Types assumes it.",

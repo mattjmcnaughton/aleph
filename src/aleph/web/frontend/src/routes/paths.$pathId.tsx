@@ -431,7 +431,7 @@ function ContinueCard({
         </p>
         <p className="mt-1.5 text-lg font-semibold leading-snug">{lesson.title}</p>
         <p className="mt-1 text-sm text-mist">
-          {unit.title} — lesson {lesson.position_in_path + 1} of {total}
+          {unit.title} — lesson {lesson.position_in_path} of {total}
         </p>
       </div>
       <Link
