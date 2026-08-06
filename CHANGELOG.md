@@ -1,3 +1,10 @@
+## [1.24.1](https://github.com/mattjmcnaughton/aleph/compare/v1.24.0...v1.24.1) (2026-08-06)
+
+
+### Bug Fixes
+
+* **web:** count the continue card's lesson from 1, not 0 ([#159](https://github.com/mattjmcnaughton/aleph/issues/159)) ([a1e5d2a](https://github.com/mattjmcnaughton/aleph/commit/a1e5d2aea8721ac36de7dbc15cc9717f09e10894))
+
 # [1.24.0](https://github.com/mattjmcnaughton/aleph/compare/v1.23.0...v1.24.0) (2026-08-05)
 
 
