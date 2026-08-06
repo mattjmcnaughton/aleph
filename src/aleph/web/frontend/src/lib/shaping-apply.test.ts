@@ -27,7 +27,7 @@ import type { Proposal } from "./tutor-stream";
 
 // --- Fixtures ----------------------------------------------------------------
 
-/** Two units, four lessons, positions 0..3 — `MID_PATH_UNITS`' shape. */
+/** Two units, four lessons, positions 1..4 — `MID_PATH_UNITS`' shape. */
 const UNITS: PathUnit[] = [
   {
     id: "unit-1",
@@ -36,14 +36,14 @@ const UNITS: PathUnit[] = [
       {
         id: "lesson-0",
         title: "What TypeScript adds",
-        position_in_path: 0,
+        position_in_path: 1,
         generation_state: "generated",
         unlock_state: "complete",
       },
       {
         id: "lesson-1",
         title: "Primitive types",
-        position_in_path: 1,
+        position_in_path: 2,
         generation_state: "generated",
         unlock_state: "complete",
       },
@@ -56,14 +56,14 @@ const UNITS: PathUnit[] = [
       {
         id: "lesson-2",
         title: "Function types",
-        position_in_path: 2,
+        position_in_path: 3,
         generation_state: "generated",
         unlock_state: "available",
       },
       {
         id: "lesson-3",
         title: "Narrowing",
-        position_in_path: 3,
+        position_in_path: 4,
         generation_state: "ungenerated",
         unlock_state: "locked",
       },
@@ -76,7 +76,7 @@ function addition(overrides: Partial<Proposal["operations"][number]> = {}): Prop
     summary: "Adds 2 lessons on `unknown` before Narrowing.",
     operations: [
       {
-        insert_at_position: 3,
+        insert_at_position: 4,
         new_unit: null,
         lessons: [{ title: "`unknown` vs `any`" }, { title: "Narrowing `unknown`" }],
         rationale: "You missed the narrowing check.",
@@ -272,7 +272,7 @@ describe("mergeProposalIntoOutline", () => {
   });
 
   it("[AL-331] an Addition previews in place, before the slot it names", () => {
-    // `insert_at_position: 3` is Narrowing's `position_in_path`, so the ghosts
+    // `insert_at_position: 4` is Narrowing's `position_in_path`, so the ghosts
     // land where the applied lessons will: pushing Narrowing down.
     expect(railShape(mergeProposalIntoOutline(UNITS, addition()))).toEqual([
       "unit: Foundations & types",
@@ -287,7 +287,7 @@ describe("mergeProposalIntoOutline", () => {
   });
 
   it("[AL-331] an Addition past the end of the path previews at the end", () => {
-    const merged = mergeProposalIntoOutline(UNITS, addition({ insert_at_position: 4 }));
+    const merged = mergeProposalIntoOutline(UNITS, addition({ insert_at_position: 5 }));
     expect(railShape(merged).slice(-3)).toEqual([
       "  real: Narrowing",
       "  ghost: `unknown` vs `any`",
@@ -299,7 +299,7 @@ describe("mergeProposalIntoOutline", () => {
     const merged = mergeProposalIntoOutline(
       UNITS,
       addition({
-        insert_at_position: 2,
+        insert_at_position: 3,
         new_unit: { title: "Unknown & narrowing", summary: "The gap." },
       }),
     );
@@ -317,7 +317,7 @@ describe("mergeProposalIntoOutline", () => {
   });
 
   it("[AL-331] a new unit naming a mid-unit slot previews after the unit it splits", () => {
-    // `insert_at_position: 3` is Narrowing — unit-2's *second* row, so there is
+    // `insert_at_position: 4` is Narrowing — unit-2's *second* row, so there is
     // no unit boundary to land on. The backend re-derives unit order from lesson
     // order afterwards (`services/shaping.py::_apply_additions`), which puts the
     // new unit *after* the one it split; the preview says the same thing rather
@@ -325,7 +325,7 @@ describe("mergeProposalIntoOutline", () => {
     const merged = mergeProposalIntoOutline(
       UNITS,
       addition({
-        insert_at_position: 3,
+        insert_at_position: 4,
         new_unit: { title: "Unknown & narrowing", summary: "The gap." },
       }),
     );
@@ -346,7 +346,7 @@ describe("mergeProposalIntoOutline", () => {
     const merged = mergeProposalIntoOutline(
       UNITS,
       addition({
-        insert_at_position: 9,
+        insert_at_position: 10,
         new_unit: { title: "Unknown & narrowing", summary: "The gap." },
       }),
     );

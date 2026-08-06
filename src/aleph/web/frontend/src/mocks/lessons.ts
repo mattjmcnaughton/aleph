@@ -113,8 +113,12 @@ export function seedLesson(input: SeedLessonInput): void {
     id: input.id,
     path_id: input.path_id,
     title: input.title ?? "What TypeScript adds",
-    position_in_path: input.position_in_path ?? 0,
-    position_in_unit: input.position_in_unit ?? 0,
+    // Both positions are **1-based**, as the backend writes them
+    // (`services/generation.py` numbers from 1; `docs/api.md`'s payload shows
+    // `position_in_path: 1`). A 0-based fake invites a caller to compensate
+    // with an off-by-one that only shows up against the real API.
+    position_in_path: input.position_in_path ?? 1,
+    position_in_unit: input.position_in_unit ?? 1,
     unlock_state: input.unlock_state ?? "available",
     resolution: input.resolution ?? "generated",
     pollsRemaining: input.pollsRemaining ?? 0,

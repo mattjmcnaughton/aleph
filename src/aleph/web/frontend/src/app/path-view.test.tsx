@@ -232,7 +232,7 @@ describe("Path view — /paths/$pathId", () => {
           {
             id: "l7000000-0000-4000-8000-000000000001",
             title: "What TypeScript adds",
-            position_in_path: 0,
+            position_in_path: 1,
             generation_state: "generating",
             unlock_state: "available",
           },

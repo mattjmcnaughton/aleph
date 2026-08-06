@@ -33,6 +33,13 @@ import { ADMIN_MODEL_ALLOWLIST } from "./models";
 // specific lesson. The path view derives its `n of m complete` readout straight
 // from each payload's `unlock_state`s, so the fixtures stay the single source of
 // truth and the `progress` roll-up is computed from the same units.
+//
+// `position_in_path` is **1-based**, because that is what the backend writes:
+// `services/generation.py` increments the counter *before* each insert, so a
+// path's first lesson is position 1 (`docs/api.md`'s payload agrees, and
+// `domains/engagement.py` puts an empty path's first insertable slot at 1). A
+// 0-based fixture is not a harmless relabelling — it silently licenses a `+ 1`
+// in a component that then reads one lesson ahead against the real API.
 
 /** Fresh path: first lesson available (generated), the rest locked. */
 export const FRESH_PATH_UNITS: PathUnit[] = [
@@ -43,21 +50,21 @@ export const FRESH_PATH_UNITS: PathUnit[] = [
       {
         id: "l1000000-0000-4000-8000-000000000001",
         title: "What TypeScript adds",
-        position_in_path: 0,
+        position_in_path: 1,
         generation_state: "generated",
         unlock_state: "available",
       },
       {
         id: "l1000000-0000-4000-8000-000000000002",
         title: "Primitive types",
-        position_in_path: 1,
+        position_in_path: 2,
         generation_state: "ungenerated",
         unlock_state: "locked",
       },
       {
         id: "l1000000-0000-4000-8000-000000000003",
         title: "Type inference",
-        position_in_path: 2,
+        position_in_path: 3,
         generation_state: "ungenerated",
         unlock_state: "locked",
       },
@@ -74,14 +81,14 @@ export const MID_PATH_UNITS: PathUnit[] = [
       {
         id: "l2000000-0000-4000-8000-000000000001",
         title: "What TypeScript adds",
-        position_in_path: 0,
+        position_in_path: 1,
         generation_state: "generated",
         unlock_state: "complete",
       },
       {
         id: "l2000000-0000-4000-8000-000000000002",
         title: "Primitive types",
-        position_in_path: 1,
+        position_in_path: 2,
         generation_state: "generated",
         unlock_state: "complete",
       },
@@ -94,14 +101,14 @@ export const MID_PATH_UNITS: PathUnit[] = [
       {
         id: "l2000000-0000-4000-8000-000000000003",
         title: "Function types",
-        position_in_path: 2,
+        position_in_path: 3,
         generation_state: "generated",
         unlock_state: "available",
       },
       {
         id: "l2000000-0000-4000-8000-000000000004",
         title: "Narrowing",
-        position_in_path: 3,
+        position_in_path: 4,
         generation_state: "ungenerated",
         unlock_state: "locked",
       },
@@ -118,21 +125,21 @@ export const COMPLETE_PATH_UNITS: PathUnit[] = [
       {
         id: "l3000000-0000-4000-8000-000000000001",
         title: "What TypeScript adds",
-        position_in_path: 0,
+        position_in_path: 1,
         generation_state: "generated",
         unlock_state: "complete",
       },
       {
         id: "l3000000-0000-4000-8000-000000000002",
         title: "Primitive types",
-        position_in_path: 1,
+        position_in_path: 2,
         generation_state: "generated",
         unlock_state: "complete",
       },
       {
         id: "l3000000-0000-4000-8000-000000000003",
         title: "Type inference",
-        position_in_path: 2,
+        position_in_path: 3,
         generation_state: "generated",
         unlock_state: "complete",
       },
@@ -347,7 +354,7 @@ const READY_UNITS: PathUnit[] = [
       {
         id: "22222222-2222-4222-8222-222222222222",
         title: "Getting started",
-        position_in_path: 0,
+        position_in_path: 1,
         // `generated` (not `ungenerated`): a `ready` outline whose available
         // lesson still has no content is a *non-terminal* path-view state
         // (`isPathViewTerminal`), so the poll would never stop with the old
@@ -398,7 +405,7 @@ function mutableUnits(path: StoredPath): PathUnit[] {
  * and the rail's whole continue affordance reads off exactly that state.
  */
 function renumber(units: PathUnit[]): void {
-  let position = 0;
+  let position = 1;
   let availableTaken = false;
   for (const unit of units) {
     unit.lessons = unit.lessons.map((lesson) => {

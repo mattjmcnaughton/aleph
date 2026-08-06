@@ -55,7 +55,7 @@ const shapingOffSession: AuthSession = {
 };
 
 /**
- * An Addition at `position_in_path: 3` — `MID_PATH_UNITS`' "Narrowing", the
+ * An Addition at `position_in_path: 4` — `MID_PATH_UNITS`' "Narrowing", the
  * first locked lesson, so it is at-or-after the learner's first non-engaged
  * position exactly as the predicates require.
  */
@@ -63,7 +63,7 @@ const ADDITION: Proposal = {
   summary: "Adds 2 lessons on `unknown` before Narrowing.",
   operations: [
     {
-      insert_at_position: 3,
+      insert_at_position: 4,
       new_unit: null,
       lessons: [{ title: "`unknown` vs `any`" }, { title: "Narrowing `unknown`" }],
       rationale: "You missed the narrowing check, and Narrowing assumes it.",
@@ -243,7 +243,7 @@ describe("Ghost rows", () => {
       summary: "Adds a unit on `unknown`.",
       operations: [
         {
-          insert_at_position: 2,
+          insert_at_position: 3,
           new_unit: { title: "Unknown & narrowing", summary: "The gap." },
           lessons: [{ title: "`unknown` vs `any`" }],
           rationale: "It is a unit's worth of work.",
@@ -267,7 +267,7 @@ describe("Ghost rows", () => {
       summary: "Adds a unit on `unknown`.",
       operations: [
         {
-          insert_at_position: 2,
+          insert_at_position: 3,
           new_unit: { title: "Unknown & narrowing", summary: "The gap." },
           lessons: [{ title: "`unknown` vs `any`" }],
           rationale: "It is a unit's worth of work.",
@@ -411,7 +411,7 @@ describe("Apply", () => {
       summary: "Adds 1 lesson before Function types.",
       operations: [
         {
-          insert_at_position: 2,
+          insert_at_position: 3,
           new_unit: null,
           lessons: [{ title: "Type predicates" }],
           rationale: "It has to come first.",

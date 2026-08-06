@@ -41,7 +41,7 @@ const UNITS: PathUnit[] = [
       {
         id: LESSON_ID,
         title: "Generic constraints",
-        position_in_path: 0,
+        position_in_path: 1,
         generation_state: "generated",
         unlock_state: "available",
       },
@@ -75,7 +75,7 @@ function seedNeighbourJourney(): void {
           {
             id: LESSON_2_ID,
             title: "Conditional types",
-            position_in_path: 1,
+            position_in_path: 2,
             generation_state: "generated",
             unlock_state: "available",
           },
@@ -84,7 +84,7 @@ function seedNeighbourJourney(): void {
     ],
   });
   seedLesson({ id: LESSON_ID, path_id: PATH_ID, correctIndex: 0 });
-  seedLesson({ id: LESSON_2_ID, path_id: PATH_ID, position_in_path: 1, correctIndex: 0 });
+  seedLesson({ id: LESSON_2_ID, path_id: PATH_ID, position_in_path: 2, correctIndex: 0 });
 }
 
 /** Answer the Quick check and mark the lesson complete (`completion-refresh.test.tsx`'s `workTheLesson`). */
