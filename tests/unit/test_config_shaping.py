@@ -42,11 +42,13 @@ def default_settings(monkeypatch: pytest.MonkeyPatch) -> Settings:
 
 
 def test_shaping_defaults_match_tdd_section_13(default_settings: Settings) -> None:
-    # Phase 2B TDD §13, verbatim. The shaper slot starts on the same strong model
-    # as every other slot (the uniform-start discipline, D10); the cap knob ships
-    # disabled, the 2A posture.
+    # Phase 2B TDD §13, with one deliberate departure. The shaper slot starts on
+    # the same strong model as every other slot (the uniform-start discipline,
+    # D10); the cap knob ships disabled, the 2A posture. The per-Proposal lesson
+    # cap is the departure: §13's provisional 5 could not express one coherent
+    # unit-sized edit, so it is 12 (see ``config.py``'s note on what that costs).
     assert default_settings.model_shaper == "anthropic/claude-sonnet-5"
-    assert default_settings.max_lessons_per_proposal == 5
+    assert default_settings.max_lessons_per_proposal == 12  # noqa: PLR2004 - the shipped cap
     assert default_settings.rate_limit_shaping_messages_per_day == 0
 
 

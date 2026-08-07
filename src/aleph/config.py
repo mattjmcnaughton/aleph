@@ -478,7 +478,27 @@ class Settings(BaseSettings):
     # and legible (PRD §5.4) — a bigger ask becomes two Proposals rather than one
     # unreadable card. Must be positive (``ge=1``): a zero cap would reject every
     # Proposal the shaper could make.
-    max_lessons_per_proposal: int = Field(default=5, ge=1)
+    #
+    # Raised from §13's provisional 5 to **12**, so one Proposal can carry a whole
+    # unit: ``lessons_per_unit_max`` is 8, and an Addition that brings a new unit
+    # commonly revises a lesson or two either side of it, which a cap of 5 could
+    # not express at all — the learner had to ask twice for one coherent edit.
+    # Still a *legibility* cap and not a safety ceiling (contrast
+    # ``max_lessons_per_path``, which is the ceiling), so it stays far below what
+    # the apply transaction could take. Two costs are accepted at 12 rather than
+    # designed away, both bounded by the card and by D2:
+    #
+    # - **Undo is all-or-nothing and LIFO**, and ``_require_undo_open`` closes it
+    #   for the whole Change once the learner engages with any one lesson it
+    #   touched. A bigger Change is therefore a bigger thing to lose the undo
+    #   window on. 12 is chosen to stay near one unit for that reason — the point
+    #   where a Proposal is still one decision the learner can hold in their head.
+    # - **The shaper's shared retry budget** (``_SHAPER_RETRIES``) is 2 and a
+    #   rejected payload is re-emitted whole, so a larger payload spends the
+    #   budget faster. Watch ``shaping_reply_completed``'s ``upstream_error`` rate
+    #   after this lands; the knob is env-overridable, so backing it out is a
+    #   config change and not a deploy.
+    max_lessons_per_proposal: int = Field(default=12, ge=1)
 
     # PRD §7's cap knob for shaping messages, counted over live learner-message
     # rows by the Phase 1 limiter like the other ``rate_limit_*`` settings. Ships
