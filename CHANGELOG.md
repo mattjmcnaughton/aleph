@@ -1,3 +1,10 @@
+# [1.25.0](https://github.com/mattjmcnaughton/aleph/compare/v1.24.1...v1.25.0) (2026-08-07)
+
+
+### Features
+
+* **shaping:** raise the per-Proposal lesson cap to 12 ([#160](https://github.com/mattjmcnaughton/aleph/issues/160)) ([39a56a0](https://github.com/mattjmcnaughton/aleph/commit/39a56a065b0eb14ec55530ed9bc00503acda63f0))
+
 ## [1.24.1](https://github.com/mattjmcnaughton/aleph/compare/v1.24.0...v1.24.1) (2026-08-06)
 
 
