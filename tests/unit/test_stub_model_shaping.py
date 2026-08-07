@@ -90,7 +90,7 @@ _MIN_DELTAS = 3
 # TDD §13: one proposal stays legible. The cap is config's (AL-301); the stub
 # imports no config, so the number is restated here as the bound the deterministic
 # payloads must sit under.
-_MAX_LESSONS_PER_PROPOSAL = 5
+_MAX_LESSONS_PER_PROPOSAL = 12
 # The deterministic Addition's size, per the sentinel table (§11).
 _ADDITION_LESSON_COUNT = 2
 

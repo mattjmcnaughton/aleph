@@ -951,8 +951,8 @@ class PathProposalPayload(TypedDict):
 
 
 # The sentinel Addition's size: "a couple of lessons", well under
-# `MAX_LESSONS_PER_PROPOSAL` (5, TDD §13 — config's number, not the stub's; this
-# module reads no config).
+# `MAX_LESSONS_PER_PROPOSAL` (12 — config's number, not the stub's; this module
+# reads no config).
 _ADDITION_LESSON_COUNT = 2
 # Its cost line, in the Proposal card's "adds 2 lessons ≈ 10 min" shape.
 _ADDITION_MINUTES_PER_LESSON = 5
