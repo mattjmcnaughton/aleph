@@ -28,10 +28,11 @@ Three surfaces, all deliberately rhyming with the path surfaces a learner alread
 
 - **Deploying a Beat** — topic, level, the day it reports, optional guidance. The path
   onboarding flow with one field added.
-- **The Beat view** — the Brief list in a rail, newest first, grouped by period. The path view
+- **The Beat view** — the Brief list in a rail, newest first, each row dated. The path view
   with the ordering reversed and the lock semantics dropped.
 - **A Brief** — a Markdown reading surface, exactly a lesson's, plus the one thing a lesson
-  never has: **Sources**, cited inline and listed at the foot.
+  never has: **Sources**, attributed in the prose and listed at the foot. Appendix A is a
+  worked example.
 
 This is a **new pillar, not a deepening of the existing one.** Phases 1–5 make Aleph a tutor
 for what is known. This makes it a tutor for what is happening, and it is the first feature
@@ -76,7 +77,7 @@ learner should not have to learn a second app.
 | Reused verbatim | Why it fits unchanged |
 | --- | --- |
 | **Trigger + poll** and the generation lifecycle — claim, stale recovery, reconciler, `TaskRegistry`, the concurrency semaphore | Built for work that must survive a restart and be driven by whoever shows up. §4.2 is that model applied to a clock instead of a position. |
-| **Prefetch (+N)**, on the time axis (§4.2) | The same idea — generate ahead of where the learner is, to hide latency — with "ahead" measured in hours rather than lesson positions. |
+| **Prefetch (+N)**, on the time axis (§4.2) | The same idea — generate ahead of where the learner is, to hide latency — with "ahead" measured in hours rather than lesson positions. **Deferred from the first slice** (§7.1): at current scale the warm moment it exploits does not exist. |
 | The Markdown pipeline (`markdown.tsx`) | It is the security boundary for model-written text. A Brief is model-written text, and it must not get its own renderer. |
 | **Topic**, **Level**, **Guidance**, **Refused** | A Beat takes the same three generation inputs, frozen the same way, with the same safety branch. No new vocabulary where the old vocabulary is right. |
 | The flag playbook (dark → dogfood → flip, kill switch retained) | Fifth flag, same runbook ([`deploy.md`](../deploy.md)). |
@@ -131,27 +132,40 @@ what makes §4.2's arrival-triggered model acceptable rather than merely cheap. 
 clear your due cards, come back to a finished Brief.
 
 **The Beat view.** This is the path view, and it should be recognisably so. The **Beat rail**
-occupies the path rail's position and shape — an ordered list of Briefs, **newest first**,
-grouped by period (*August · July · June*) where a path groups by unit. Read/unread replaces
-locked/available/complete; nothing is ever locked. At the head of the rail, the analyst's
+occupies the path rail's position and shape — an ordered list of Briefs, **newest first**, each
+row carrying its own date (`Brief #7 · 3 Aug`). Read/unread replaces locked/available/complete;
+nothing is ever locked.
+
+**Flat, not grouped.** A path rail groups lessons under **units**, which are semantic groupings
+the outline agent chose. A Beat has no units, and the nearest visual analog — month subheadings
+— would group nothing (§7.1): at weekly cadence the first month's rail is a single *August*
+header over the whole list. The resemblance to the path rail comes from the rail's shape and
+position, not from subheadings, and a calendar month is a weaker analog to a unit than it first
+looks — a unit means something, a month is where the weeks happened to fall. At the head of the rail, the analyst's
 standing orders in one line: `Weekly · EU AI regulation · policy and enforcement`.
 
 **A Brief.** The lesson reading surface, near-identically: a title, a date, a Markdown body
 that renders through the same component and may draw a ```mermaid diagram where one earns its
 place. Two things a lesson does not have:
 
-- **Inline citations.** Claims that came from a Source carry a numbered marker to it. A
-  sentence about the world should be traceable to the thing that said so, in one tap.
 - **A Sources list** at the foot: publisher, title, date, link. This is the part a learner
   should be able to check us on, so it is a first-class region of the page, not a footnote
   block in small grey type.
+- **Attribution in the prose** — *"Northlake published"*, *"the agency's own July update
+  reports"* — so a reader can tell which sentences are sourced and which are the analyst's
+  read. This is what carries §4.4's provenance rule; **numbered inline markers are the
+  upgrade, deferred to a later slice** (§7.1). Appendix A shows what the prose form has to
+  achieve to stand in for them.
 
-Above the body, one line of continuity: `Builds on Brief #4 (Jul 28)` — a link. This is the
+Above the body, one line of continuity: `Builds on Brief #4 (Mon 27 Jul)` — a link. This is the
 product claim of the whole feature made visible.
+
+**Appendix A is a worked example of all of this** — a Brief on *AI in healthcare*, annotated
+with why it is good, and set beside what the same week looks like when it goes wrong.
 
 **A quiet period.** Sometimes the honest answer is that nothing material happened. The Beat
 rail shows that as a **Skipped** entry — dated, one line, *"Nothing material since Brief #4 —
-the Commission's consultation is still open, closing Sept 12"* — not a hole in the list, and
+the Commission's consultation is still open, closing 11 Sept"* — not a hole in the list, and
 not a padded Brief. It is a first-class outcome (§4.6), the way **Refused** is a first-class
 path status.
 
@@ -165,8 +179,7 @@ not that.
 
 **4.1 A Beat is a standing assignment; a Brief is a dated, immutable record of it.** The Beat
 holds the orders (Topic, Level, Anchor day, Guidance) and the state (when it is next
-claimable).
-Each Brief is a published artifact with a publication date and a Source list, and it is
+claimable). Each Brief is a published artifact with a publication date and a Source list, and it is
 **immutable, full stop** — not "immutable once engaged" as a lesson is. A lesson can be revised
 because it teaches something timeless and the learner has not reached it yet; a Brief is a
 claim about the world on a date, and rewriting it retroactively would make **Brief continuity**
@@ -190,11 +203,13 @@ and the claim is driven by three triggers, in order — all of which already exi
    and at current scale it is the trigger that will almost always fire.
 2. **The reconciler.** It already ticks every `RECONCILER_INTERVAL` whenever the process is
    alive for any reason. One more scan drains claimable Beats for free during any warm moment.
-3. **Brief prefetch.** A Beat becomes claimable a little *before* its Anchor day opens, so a
-   warm moment on Sunday evening produces Monday's Brief and it is genuinely waiting. This is
-   **Prefetch (+N)** on the time axis: the same trick, hiding the same latency, for the same
-   reason. Early by hours is a feature; the Brief's period is *since the last Brief* (§4.1), so
-   nothing about it depends on the exact moment it was written.
+3. **Brief prefetch** — **specified, and deferred from the first slice** (§7.1). A Beat becomes
+   claimable a little *before* its Anchor day opens, so a warm moment on Sunday evening produces
+   Monday's Brief and it is genuinely waiting. This is **Prefetch (+N)** on the time axis: the
+   same trick, hiding the same latency, for the same reason. Early by hours is a feature; the
+   Brief's period is *since the last Brief* (§4.1), so nothing about it depends on the exact
+   moment it was written. It waits because the warm moment it exploits does not exist at current
+   scale — which means **the first slice runs on triggers 1 and 2 alone**, and in practice on 1.
 
 **The learner's local time comes from the arrival, so nothing has to be stored.** "Is it Monday
 for this learner" is only ever asked at the moment a request arrives, and a request already
@@ -203,7 +218,16 @@ carries `tz_offset_minutes` — the same value `services/progress_read.py` uses 
 time (§7) to honour an Anchor day, which is a second thing arrival-triggering buys and a
 scheduler would have had to pay for. The reconciler (trigger 2) has no request and no offset,
 so it is a **backstop that may run a Beat late and never early** — which is exactly §4.2's
-promise, not an exception to it. The TDD owns how it stays on the safe side of that.
+promise, not an exception to it.
+
+**So the reconciler does not deliver anchored Beats at all**, and that is the first slice's
+answer rather than a limitation to engineer around: it would need either a stored timezone
+(which §7 excludes) or a conservative "wait until the Anchor day has opened everywhere" lag,
+and at current scale it is the trigger that barely fires. Arrival is therefore the sole trigger
+that evaluates an Anchor day. The learner-visible consequence is worth stating plainly: **a
+Brief appears the first time you open the app on or after your day**, and never before you show
+up. This becomes a real decision only on a move to always-on (§4.2), where the reconciler is
+the primary trigger and a stored timezone is wanted anyway.
 
 **Nothing is ever silently skipped for infrastructural reasons.** **Skipped** (§4.6) means *the
 analyst found nothing*, and it must never become a laundry slot for *we failed to run*. Those
@@ -361,7 +385,7 @@ than deepened.
 | **Brief read rate** — Briefs opened ÷ Briefs published | The blunt one. Below some floor, nothing else matters. |
 | **Depth of read** — share of opened Briefs where the learner reaches the Sources | Is it being read, or glanced at? A feature about provenance should be able to show that provenance gets used. |
 | **Skip rate** — Skipped ÷ research runs, per Beat | Calibrates §4.6 in both directions. Near zero means the novelty gate is not gating and we are shipping filler; consistently high on one Beat means weekly is faster than that subject moves (§8 Q7), and high across all of them means the gate is too strict. It is also the number that has to look healthy before a daily cadence is trusted (§4.11). |
-| **Wait tolerance** (guardrail, §4.2) — share of researching Beats the learner is still present for when the Brief lands, and what they did in between | The direct measurement of the tradeoff §4.2 accepts. If learners consistently leave and never come back to the finished Brief, arrival-triggering is not working and always-on is the answer. |
+| **Wait tolerance** (guardrail, §4.2) — share of researching Beats the learner is still present for when the Brief lands, and what they did in between | The direct measurement of the tradeoff §4.2 accepts, and the **first** metric to read: with Brief prefetch deferred (§7.1) the first slice waits every time, so this is measured at its worst case rather than an average. If learners consistently leave and never come back to the finished Brief, the fix is prefetch first and always-on second. |
 | **Beat survival** — Beats with a read Brief in the last 30 days | The honest verdict on whether an analyst is a thing people keep. |
 | **Cost per read Brief** (guardrail) | The number that decides whether this is viable at all. §4.8 makes it structurally bounded; this confirms it. |
 
@@ -405,7 +429,8 @@ constraint the harness has never faced.**
 - **Recency** — findings fall inside the period since the prior Brief, and are dated correctly.
 - **Novelty** — nothing restates a claim already made in a prior Brief of the same Beat.
 
-**`brief`** (the written artifact) is judged on:
+**`brief`** (the written artifact) is judged on — with **Appendix A as the concrete rubric**,
+the artifact to argue with when these dimensions are turned into judge prompts:
 
 - **Grounded** — every claim about the world traces to a cited Source, and none exceeds what
   that Source supports. This is [`CONTEXT.md`](../CONTEXT.md)'s existing **Grounded**, pointed
@@ -437,6 +462,39 @@ only one this slice ships) · a delivery *time* of day, and any stored per-learn
 highlights or annotations on a Brief · any aggregation of Brief content across learners ·
 counting a read Brief toward **Activated learner** (§4.9, a standing rule rather than a slice
 boundary) · always-on hosting and the hibernation rule it would require (§4.2, §4.8).
+
+### 7.1 The MVP boundary — in the phase, but not the first slice
+
+Everything above is out of the *phase*. These are in it, and deliberately not in the **first
+slice**. Recorded here with the reasoning so the TDD does not rediscover the argument, and so
+adding one back later is a decision rather than a drift.
+
+| Deferred | Why it waits |
+| --- | --- |
+| **Brief prefetch** — the third trigger (§4.2) | Speculative optimization for traffic that does not exist. With the machine asleep most of the time the warm-moment window essentially never fires, so arrival + reconciler are behaviourally identical today. Costs nothing to cut, costs nothing to add back. |
+| **Inline citations** (§3) | Numbered markers mean the agent emits them, the renderer resolves them, and something validates that every marker points at a real Source — and that means extending `markdown.tsx`, the security boundary for model-written text and the last place to churn early. **The Sources list is not deferred**: §4.4's provenance rule holds in full, carried by prose attribution in the body plus the Sources block at the foot (Appendix A shows exactly this). Inline markers are the upgrade once Briefs are worth checking line by line. |
+| **The streak union** (§4.9) | The vocabulary amendment already landed and is the part that had to happen now; the wiring can wait. Read-tracking itself is **not** deferred — §5's north-star metric needs it, and it is a column plus an event. This defers only feeding Brief reads into **Active day**, exactly the split [`CONTEXT.md`](../CONTEXT.md) already describes when it says nothing reads the third signal yet. |
+| **The `brief_findings` eval kind** (§6) | Ship `brief` alone. Novelty against prior Briefs is mostly a *deterministic* check — Source-URL overlap plus claim dedup — which belongs as a layer-1 predicate rather than judge spend. **Recorded retrieval fixtures are not deferred**: without them the phase cannot be evaluated *or* booted by `scripts/e2e_backend.py`. |
+| **Period grouping in the Beat rail** (§3) | Month subheadings would group nothing for the entire window in which the phase is being judged — at weekly cadence, month one is a single *August* header over one to four Briefs, and grouping starts earning its keep somewhere past ten. A flat dated list carries the same information, and there is an obvious trigger to revisit: when a Beat's rail no longer fits on one screen. |
+| **W29, W31, W32** (§5) | W28 (a cited Brief) and W30 (Skipped, not padded) carry the phase's two load-bearing claims as browser journeys. W29 needs two Briefs to set up, and W31/W32 are edge cases that test better as integration cases than as Playwright runs. |
+
+**Considered and kept.** *Multiple Beats* (§4.7) stays in the first slice by owner decision —
+the cap is what bounds it. The *research/write split* (§4.4) stays: one tool-using agent that
+searches and writes is simpler, but it makes "never cite what you did not read" very hard to
+enforce, and that rule is the whole difference between this phase and asking a chatbot what is
+new.
+
+**Considered and rejected as a smaller MVP.** Dropping cadence entirely — one Beat, a manual
+`Research now` button, no triggers — tests whether a cited, continuous Brief is worth reading
+without any scheduling machinery. It saves very little, because arrival-triggering is a due
+column plus one more scan in a claim protocol that already exists, and it costs the whole of
+§5's north-star question: whether a Brief brings a learner back on a day nothing else would
+have. That question is the reason to build a pillar rather than a report generator.
+
+**Not cuttable at any size.** **Brief continuity** (§4.5) and **Skipped** (§4.6). Making each
+Brief independent would remove more work than everything in the table combined and would leave
+an RSS reader with extra steps — §4.5's own words. Skipped will read as scope ("just always
+publish something"); it is the rule that keeps Brief #7 from quietly killing the Beat.
 
 ## 8. Open questions
 
@@ -483,3 +541,94 @@ are load-bearing and the alternatives will be re-proposed by someone eventually 
    or fold it into a path"*? That is a genuinely new behaviour with no analogue in the product,
    and it may be the most honest thing an analyst can say. A high **Skip rate** (§5) on one Beat
    is exactly the signal that would trigger it.
+
+---
+
+## Appendix A — A worked example
+
+The rubric in §6 says what a good Brief is; this is what one *looks like*. It is the concrete
+form of §4.4 (every claim traces to a Source), §4.5 (report the delta), §4.3 (written at a
+Level) and §4.11 (weekly, on the learner's day), and it is deliberately the artifact to argue
+with when the TDD writes the analyst prompt.
+
+> **Illustrative only. Every fact, publication and date below is invented, and the URLs are
+> deliberately `example.com`, so nothing here can be mistaken for a real citation.** The point
+> is the *shape* of a Brief, not its contents.
+
+**Beat:** AI in healthcare · **Level:** some experience · **Anchor day:** Monday ·
+**Guidance:** *"Clinical deployment and regulation. Not funding rounds."*
+
+---
+
+### Brief #5 — Monday 3 August 2026
+
+*Builds on [Brief #4](#) (Mon 27 Jul)*
+
+**The ambient-documentation backlash arrived, and it is about liability, not accuracy.**
+Northlake Health published a post-deployment review of 14 months of AI scribe use across 900
+clinicians. The accuracy findings were unremarkable — broadly in line with the vendor studies
+covered in Brief #2. What is new is the governance finding: in 3% of encounters the note
+contained a clinically material statement the clinician had not said and did not catch before
+signing. Northlake's recommendation is not to withdraw the tool but to change who is
+accountable for the signature. Expect that framing — *the error rate is fine, the sign-off
+model is not* — to be the shape of the next year's argument.
+
+**The FDA's PCCP pathway got its first real test, and it was slower than advertised.** The
+agency's own Q2 update reports a median 71 days for predetermined change control plan
+amendments, against the "weeks not months" the 2024 guidance implied. For anyone building
+adaptive models this is the number that matters: it sets how often a deployed model can
+actually be updated, and it is roughly a quarterly cadence rather than a monthly one.
+
+**Still open from Brief #4:** the EU AI Act's high-risk classification consultation for
+clinical decision support has not moved. It closes 11 September. Nothing has been published
+since I flagged it, and there is no signal yet on which way the Commission is leaning.
+
+**What I could not establish.** Two outlets reported that a large US payer is piloting
+automated prior-authorisation review, but neither named the payer and there is no primary
+source. I am not treating it as fact. If it is real, it is a bigger story than either item
+above, and I will chase it for Brief #6.
+
+**Sources**
+
+- Northlake Health System — *Ambient Documentation: 14-Month Post-Deployment Review* — 30 Jul 2026 — `https://example.com/northlake-review`
+- US Food and Drug Administration — *Digital Health PCCP Amendments: Q2 Processing Times* — 1 Aug 2026 — `https://example.com/fda-pccp-q2`
+- European Commission — *Consultation: High-Risk Classification for Clinical Decision Support* — 14 Jul 2026 — `https://example.com/ec-consultation`
+
+(Unnumbered on purpose: numbers would imply the inline markers §7.1 defers.)
+
+---
+
+### Why this is a good Brief
+
+- **It opens on the delta, not the topic.** No paragraph explains what ambient documentation
+  is. Brief #2 did that; re-establishing it would be re-reporting (§4.5).
+- **Every claim about the world is attributed in the prose** and resolves in the Sources list.
+  With inline markers deferred (§7.1), *this* is the provenance mechanism — "Northlake
+  published", "the agency's own Q2 update reports" — and it has to be strong enough on its
+  own that a reader can tell which sentences are sourced and which are the analyst's read.
+- **It separates fact from interpretation.** "Expect that framing…" is visibly the analyst
+  talking, not something a Source said. A Brief that blurs those two is ungrounded even when
+  every fact in it is true.
+- **It carries continuity forward explicitly.** The EU item is the *absence* of change, which
+  is real information for someone tracking it and is only available to an analyst that read
+  Brief #4.
+- **It says what it does not know.** The prior-authorisation rumour is reported as a rumour
+  with the reason it is not being treated as fact. §4.4's rule is that a Brief never exceeds
+  what its Sources support; naming the gap is how that looks in practice.
+- **It is level-appropriate.** "PCCP", "high-risk classification" and "prior authorisation" go
+  unglossed at *some experience*. At *new to it* the same findings need a clause of context
+  each; at *I work in it* the FDA item would lead with the number and drop the framing.
+- **It is short.** Three developments and an honest gap. A Brief is read on a phone.
+
+### What the same week looks like when it goes wrong
+
+> *AI continues to transform healthcare at a rapid pace. Ambient documentation tools are seeing
+> widespread adoption across health systems, with studies showing strong accuracy. Regulators
+> including the FDA and the European Commission continue to develop frameworks for adaptive
+> algorithms, and prior authorisation is emerging as a promising application area…*
+
+Every sentence is defensible and the whole thing is worthless. It re-establishes the subject
+instead of reporting change, it has no Sources because nothing in it came from one, it launders
+an unverified rumour into "an emerging application area", and it would read identically if
+written the week before or the week after. **This is what §4.6 exists to prevent**, and the
+correct output for a week with nothing in it is a one-line **Skipped** entry, not this.
