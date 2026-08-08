@@ -33,6 +33,7 @@ afterthought.
 | **3 — Flashcards and spaced repetition** | ✅ Shipped & launched (`flashcards` flag on) — all ten TDD tickets plus AL-410's card-management surface | [PRD](prds/phase-3-flashcards.md) · [TDD](tdds/phase-3-flashcards.md) · [mock](mocks/aleph-phase-3-flashcards.html) |
 | **4 — Adaptive paths** | ⬜ Not started — **no PRD yet** (2B pre-built the proposal/apply machinery) | — |
 | **5 — Momentum** | 🟡 In progress — streaks shipped **and launched**; goal ring and daily minutes unbuilt | streaks: [PRD](prds/phase-5-streaks.md) · [TDD](tdds/phase-5-streaks.md) |
+| **6 — The analyst** | ⬜ Not started — **PRD only, no TDD**. A second pillar beside paths, not a deepening of one | [PRD](prds/phase-6-analyst.md) |
 | **Beyond** | ⬜ Unscoped, sequenced against real usage | — |
 
 Three tails hang off the shipped phases and are tracked as open issues rather than
@@ -45,6 +46,9 @@ So, concretely, what is left to build: **the rest of Phase 5** — the goal ring
 the daily-minutes target, now that streaks are launched — then **all of Phase 4**,
 plus the Phase 2 slices listed as deferred below. Phase 3 has shipped and launched
 too, so no phase is waiting on a flag flip anymore — only on code not yet built.
+**Phase 6 sits outside that sequence**: it is a second pillar rather than the next
+rung of the first one, so it is sequenced by appetite rather than by dependency —
+nothing above it blocks it, and it blocks nothing above it.
 
 ## Phase 1 — The generated path (MVP)
 
@@ -205,7 +209,9 @@ any change that touches finished work.
 > 📄 **Full spec (streaks only):** [Phase 5 streaks PRD](prds/phase-5-streaks.md) ·
 > [Phase 5 streaks TDD](tdds/phase-5-streaks.md)
 
-The final core phase turns the tool into a habit. With learners already running
+The final phase of the *learning-path* pillar turns the tool into a habit — it was
+written as "the final core phase" when this roadmap had one pillar, and Phase 6
+below is why that framing no longer holds. With learners already running
 several paths, we add the light gamification the README is careful to bound: a
 weekly goal ring, a day streak, a daily-minutes target, and a small progress view
 with stats like cards mastered and minutes this week. The rule here is restraint —
@@ -222,6 +228,48 @@ same playbook `tutor` and `shaping` used — dark through the build-out, admin
 dogfood only, then one code-default flip — and is now **launched** for every
 learner. The weekly goal ring and the daily-minutes target remain here, unbuilt,
 for the rest of this phase.
+
+## Phase 6 — The analyst
+
+> ⬜ **Status:** not started. **PRD only** — no TDD, no code, no flag, no mock. The
+> vocabulary is already in [`CONTEXT.md`](CONTEXT.md) (the *The analyst* section,
+> marked unbuilt) because a name is cheapest to fix before prompts and schemas use
+> it.
+> 📄 **Full spec:** [Phase 6 PRD — The analyst](prds/phase-6-analyst.md)
+
+Every phase above deepens one pillar: a **path**, which teaches a body of knowledge
+that was already settled when you asked for it. This phase adds a second pillar
+beside it. A learner names a topic and **deploys an analyst** on it; the analyst
+researches what has actually happened since it last reported and publishes a short,
+cited **Brief** that builds on every Brief before it. Same reading surface, same
+Markdown pipeline, deliberately the same shape of rail — and the opposite
+relationship to time.
+
+The design turns on three decisions the PRD argues at length. **It is a sibling,
+not a "realtime path"**: linear unlock is the wrong reading model for a feed, an
+infinite path has no denominator, and folding Briefs into lesson-shaped counters
+would corrupt the **Activation rate** north star irreversibly. **Nothing is
+scheduled**: cadence is a floor on frequency rather than a calendar appointment,
+and work is driven by learner arrival plus the existing reconciler plus a
+time-axis **Brief prefetch** — which needs no cron, no always-on machine, and no
+deployment change, and which makes an unread Beat cost exactly nothing. And
+**nothing to report is a first-class outcome**: the failure mode that kills this
+feature is not a broken trigger but Brief #7 confidently restating Brief #6, so a
+period with no novel findings publishes a dated **Skipped** entry rather than
+filler.
+
+Two things the PRD deliberately leaves open. The **retrieval provider is
+unnamed** — the document states three product constraints (URLs that resolve, a
+usable publication date, enough text to ground a quote) and leaves the choice to
+the TDD. And the phase adds a constraint the eval harness has never faced: live
+retrieval makes an eval non-deterministic by construction, so the seed set has to
+pin recorded retrieval fixtures or it measures the news rather than the agent.
+
+The convergence with paths — flashcards drafted from a Brief, the tutor rail on a
+Brief, "teach me the fundamentals of what I keep reading about", a Brief feeding a
+Phase 4 proposal — is named in the PRD and built in none of it. That sequencing is
+the point of building the sibling rather than forcing Briefs into `lessons` on day
+one.
 
 ## Beyond
 
