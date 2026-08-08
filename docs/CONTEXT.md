@@ -8,14 +8,16 @@ synonym (say **path**, not "course"; **Quick check**, not "quiz question").
 > generation mechanics, model slots), **the Phase 2 PRD** (the tutor), **the Phase 2 TDD**
 > (the tutor model slot, reply transport), **the Phase 2B PRD** (shaping), **the Phase 5
 > streaks PRD** (Daily streak, Path streak, Active day, Best streak — pulled forward, see the
-> phase-boundary note below), **and the Phase 3 PRD** (which widened **Active day** to count a
-> review, and owns the Retention section below). References:
+> phase-boundary note below), **the Phase 3 PRD** (which widened **Active day** to count a
+> review, and owns the Retention section below), **and the Phase 6 PRD** (which owns The
+> analyst section, and widens **Active day** a second time — to count reading a Brief —
+> against a phase that is **not yet built**). References:
 > [`README.md`](../README.md) · [`roadmap.md`](roadmap.md) ·
 > [Phase 1 PRD](prds/phase-1-path-generation.md) · [Phase 1 TDD](tdds/phase-1-path-generation.md) ·
 > [Phase 2 PRD](prds/phase-2-tutor.md) · [Phase 2 TDD](tdds/phase-2-tutor.md) ·
 > [Phase 2B PRD](prds/phase-2b-shape-your-path.md) · [Phase 2B TDD](tdds/phase-2b-shape-your-path.md) ·
 > [Phase 5 streaks PRD](prds/phase-5-streaks.md) · [Phase 5 streaks TDD](tdds/phase-5-streaks.md) ·
-> [Phase 3 PRD](prds/phase-3-flashcards.md).
+> [Phase 3 PRD](prds/phase-3-flashcards.md) · [Phase 6 PRD](prds/phase-6-analyst.md).
 
 ## Core domain
 
@@ -64,9 +66,9 @@ synonym (say **path**, not "course"; **Quick check**, not "quiz question").
 | **Progress** | The persisted record of which lessons/units are complete, per path, per account. |
 | **Switcher** | The "Your paths" UI for moving between a learner's multiple paths, each keeping its own progress. |
 | **Delete path** | Removing a path and its progress (confirmed, not undoable in MVP). Doubles as **reset**: with no regenerate, deleting and creating anew is how a learner discards an unsatisfying path. |
-| **Active day** | A calendar day, in the learner's local timezone, on which the learner did **at least one** of: completed a lesson, or reviewed a flashcard. Those are the two signals a streak counts — not a view, not an Attempt on its own, not drafting or keeping a card. Membership in the set of Active days *is* the daily target, so there is no separate goal concept. **Widened by the Phase 3 PRD** (§4.9) — it was lesson completion alone through Phase 5, and the second signal went live with Phase 3's launch. |
-| **Daily streak** | The learner's **global** streak: the count of consecutive Active days, across every path, ending today — or ending yesterday if today is still empty, so it does not break at midnight (Phase 5 PRD §4.4). *The* streak: the one with the flame and the celebration. Derived, never stored (Phase 5 TDD D1) — from `lessons.completed_at`, **union**ed with reviews now that Phase 3 has shipped. |
-| **Path streak** | The same run-of-consecutive-Active-days count, scoped to one path's **lesson completions** instead of every path's. Deliberately narrower than the Daily streak: reviews never count toward it, because a flashcard belongs to the learner rather than to a path (Phase 3 PRD §4.1) and an orphaned card has no path to credit. A quieter stat, shown on the home list and deliberately not celebrated — with multiple paths a learner naturally alternates, which is the **Breadth** metric working, and a per-path streak breaks every time they do (Phase 5 PRD §4.3). |
+| **Active day** | A calendar day, in the learner's local timezone, on which the learner did **at least one** of: completed a lesson, reviewed a flashcard, or **read a Brief**. Those are the three signals a streak counts — not a view, not an Attempt on its own, not drafting or keeping a card, and never a Brief merely *arriving* (Phase 6 PRD §4.9: a streak that advanced because a background task ran would measure our uptime, not the learner). Membership in the set of Active days *is* the daily target, so there is no separate goal concept. **Widened twice**: by the Phase 3 PRD (§4.9) to count a review — lesson completion alone through Phase 5, live with Phase 3's launch — and by the Phase 6 PRD (§4.9) to count a Brief read. **The third signal is decided but unbuilt**, on the same reasoning the second was decided early: no Brief exists yet, so adding it moves no live streak, and this is the only moment the amendment is free. |
+| **Daily streak** | The learner's **global** streak: the count of consecutive Active days, across every path, ending today — or ending yesterday if today is still empty, so it does not break at midnight (Phase 5 PRD §4.4). *The* streak: the one with the flame and the celebration. Derived, never stored (Phase 5 TDD D1) — from `lessons.completed_at`, **union**ed with reviews now that Phase 3 has shipped, and to be unioned with Brief reads when Phase 6 is built. |
+| **Path streak** | The same run-of-consecutive-Active-days count, scoped to one path's **lesson completions** instead of every path's. Deliberately narrower than the Daily streak: neither reviews nor Brief reads count toward it — a flashcard belongs to the learner rather than to a path (Phase 3 PRD §4.1) and an orphaned card has no path to credit, and a **Beat** is not a path at all (Phase 6 PRD §4.9), so neither has a path to credit. A quieter stat, shown on the home list and deliberately not celebrated — with multiple paths a learner naturally alternates, which is the **Breadth** metric working, and a per-path streak breaks every time they do (Phase 5 PRD §4.3). |
 | **Best streak** | The longest run of consecutive Active days ever recorded — global or per path, matching whichever streak it sits beside — including a run that is not the current one. Renders only when it exceeds the current streak (Phase 5 TDD §14 R5). |
 
 ## The tutor
@@ -128,6 +130,23 @@ the foot of this document. Spec: [Phase 3 PRD](prds/phase-3-flashcards.md) ·
 | **Daily queue** | The learner's capped set of cards to review today, spanning every path — a path is a filter on it, never a second queue (Phase 3 PRD §4.3). All Due cards when there are 10 or fewer; otherwise the **7 most overdue plus 3 drawn at random** from the rest — anti-starvation, not top-up, since a not-yet-due card is never pulled forward (Phase 3 PRD §4.4). Derived, never stored: decided once, on the first request of the learner's local day, and stable for the rest of it — grading and reloading never re-roll it (Phase 3 PRD §4.5, TDD D3). Home and the app bar show only its size; the true backlog is never displayed (Phase 3 PRD §4.8). |
 | **Review** | The learner grading a Kept card in the review session: front, reveal, then one of two grades — **Again** or **Got it** — the fixed ladder this phase ships instead of the four-way Again/Hard/Good/Easy grading the roadmap once promised (Phase 3 PRD §4.6). Not an **Attempt** — that term stays a Quick check's. **Streak union:** a Review counts toward the **Daily streak**, the global one, and never toward the **Path streak** (Phase 3 PRD §4.9 — see both above). |
 | **Lapse** | An **Again** grade: demotes the card one rung (floor 0) and sets `due_on` to **today**, so the card re-shows later the **same day** rather than tomorrow. Never costs the Daily queue a slot — the cap counts distinct cards, and a re-shown Lapse is not a new one (Phase 3 PRD §4.7, TDD D8). |
+
+## The analyst (Phase 6)
+
+Phase 6 vocabulary — the second pillar, beside paths: a subject that is still moving, reported
+on as it moves. **Specified but entirely unbuilt**; see the phase-boundary note at the foot of
+this document. Spec: [Phase 6 PRD](prds/phase-6-analyst.md).
+
+| Term | Meaning |
+| --- | --- |
+| **Beat** | A standing research assignment on one **Topic** at one **Level**: the analyst a learner deploys, and the thing that produces **Briefs**. The top-level sibling of a **Path** — a learner can have several, capped (Phase 6 PRD §4.7). Where a path teaches what was already settled when you asked, a Beat follows what is still moving. Holds its orders (Topic, Level, Anchor day, Guidance) and its state (when it is next claimable); the orders are frozen at deployment exactly as a path's are, and changing your mind means deleting and redeploying. (Journalism's word for a standing assignment — not "subscription", not "feed", and never "newsletter", which names a genre rather than a thing in this product.) |
+| **Brief** | One dated, cited report published by a Beat: a **Markdown** body on the lesson reading surface, plus its **Sources**. Numbered per Beat (*Brief #7*) and **immutable, full stop** — not "immutable once engaged" as a lesson is, because a Brief is a claim about the world on a date and rewriting it retroactively would make **Brief continuity** a lie. A correction goes in the *next* Brief, in the open. Its period is **"since the last Brief"**, never a calendar slot (PRD §4.1), so a long absence produces one Brief covering the gap rather than a backlog. Not a **Lesson**: no **Quick check**, no **Unlock state**, no position in an ordered curriculum. |
+| **Source** | A retrieved document a Brief cites: publisher, title, publication date, URL, and the span that grounds the claim. Cited inline and listed at the foot of the Brief — a first-class region of the page, because it is the part a learner checks us on. **The analyst never cites what it did not read** (PRD §4.4): a URL that was retrieved but never entered the model's context is not a Source. **A Brief with no Sources is not publishable** — retrieval failure is a visible, retryable failure state, never an uncited essay from model priors. |
+| **Cadence** | How often a Beat may report. A **floor on frequency, not a calendar appointment** (PRD §4.2): *weekly* means "at most one Brief a week", and the promise is that the Beat keeps up, not that it fires at 07:00. **The first slice ships weekly and nothing else** (PRD §4.11) — it is the cadence that strains the novelty gate least and costs 7× less per learner, so the gate is calibrated there before daily is trusted to it. Daily is deferred, not dropped, which is why this stays a named axis rather than collapsing into **Anchor day**. |
+| **Anchor day** | The weekday a learner picks at deployment for a Beat to report on — *Reports on ▾ Monday* — evaluated in the learner's **local** time, and the **only scheduling control the product exposes**. A weekly report is a habit and a habit has a day; **a day, never a time**, because §4.2's trigger model has nothing that could honour 07:00 and offering the control would promise precision the design does not buy (PRD §4.11). The Beat becomes **claimable** as its Anchor day opens — a little before, via **Brief prefetch**. Local time is read from the arriving request's `tz_offset_minutes`, the same value the streak uses, so honouring an Anchor day needs **no stored timezone and no stored delivery time**. Part of the standing orders, so changing it means deleting and redeploying the Beat (PRD §8 Q5 records that as the first rough edge to revisit). |
+| **Brief continuity** | The rule that Brief *N* is generated aware of Briefs *1…N-1* — their claims and, critically, **their cited Source URLs** — so it reports what *changed* rather than re-establishing the subject. The **Continuity** of the Generation section, pointed at a different problem: lesson continuity prevents re-*teaching*, Brief continuity prevents re-*reporting*, and prior Source URLs are what make "we already covered this" a mechanical check rather than a stylistic hope. Surfaced to the learner as the `Builds on Brief #4` line. |
+| **Brief prefetch** | Making a Beat claimable a little *before* its **Anchor day** opens, so a moment when the process is already warm — Sunday evening, for a Monday Beat — produces the next Brief early and it is genuinely waiting. **Prefetch (+N)** on the time axis: same trick, same latency hidden, "ahead" measured in hours instead of lesson positions. |
+| **Skipped** | The outcome when no finding survives the novelty check against prior Briefs: a dated, one-line rail entry saying nothing material happened, instead of a padded Brief. A first-class result the way **Refused** is for a path — and, like Refused, **never conflated with failure**: Skipped means *the analyst found nothing*, and must never become a laundry slot for *we failed to run* (PRD §4.2, §4.6). A Skipped period is the feature working correctly. |
 
 ## Quality, safety & measurement
 
@@ -193,6 +212,17 @@ phase:
 - **System-proposed path edits** — Aleph proposing changes unprompted from miss data, plus the
   destructive edit shapes (remove, reorder, touching engaged work): **Phase 4**, building on 2B's
   Proposal/Apply machinery.
+- **Beat** / **Brief** / **Source** / **Cadence** / **Anchor day** / **Brief continuity** /
+  **Brief prefetch** / **Skipped** — the analyst (**Phase 6**), defined in The analyst section above: **specified,
+  entirely unbuilt** ([PRD](prds/phase-6-analyst.md); no TDD, no code, no flag, no mock). The
+  terms are here rather than waiting for the code because the vocabulary is authoritative and
+  a name is cheapest to fix before prompts and schemas use it. Two things in that section are
+  decisions the PRD makes rather than descriptions of anything running: a Brief's period is
+  *since the last Brief* rather than a calendar slot, and **Skipped** is a first-class outcome.
+  **Active day above is already widened to count reading a Brief** (PRD §4.9), on exactly the
+  Phase 3 precedent — no Brief exists, so the third signal adds no past Active day and moves no
+  live streak, and this is the only moment the amendment is free. Nothing reads that third
+  signal yet.
 - **Goal ring / daily minutes** — light gamification (**Phase 5**); **streaks
   shipped early, see the streaks PRD** ([PRD](prds/phase-5-streaks.md) ·
   [TDD](tdds/phase-5-streaks.md)), the same pull-forward move Phase 2B was.
