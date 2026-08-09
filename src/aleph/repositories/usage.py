@@ -23,6 +23,13 @@ D13). Like an outline retry, a drafting retry inserts no new row (D7's sparse,
 one-row-per-lesson claim) — only the stamp moves — so this counts *lessons
 with a drafting attempt today*, and a same-lesson retry loop still counts once;
 see ``services.rate_limit``.
+
+Phase 6 adds the sixth counter, the same ``count_path_outline_generations_since``
+shape again: Beat research runs, counted by ``beats.research_started_at`` — the
+stamp ``BeatRepository._claim`` (re-)writes on every claim (both the auto and
+retry paths, TDD D3/D14). A same-Beat retry loop (a ``failed`` run re-claimed
+via ``POST /retry``) overwrites the one stamp and so counts once, the same
+accepted MVP shape; see ``services.rate_limit``.
 """
 
 from __future__ import annotations
@@ -32,6 +39,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import func, select
 
 from aleph.models import (
+    Beat,
     Conversation,
     ConversationKind,
     FlashcardDraftRun,
@@ -198,6 +206,26 @@ class UsageRepository:
                 Path.user_id == user_id,
                 FlashcardDraftRun.started_at >= since,
             )
+        )
+        return result.scalar_one()
+
+    async def count_brief_research_runs_since(
+        self, *, user_id: uuid.UUID, since: datetime.datetime
+    ) -> int:
+        """Count ``user_id``'s Beats whose research run was (re)claimed since
+        ``since`` (Phase 6 TDD D14).
+
+        The ``count_path_outline_generations_since`` shape: ``research_started_at``
+        is stamped by every claim (auto or retry, ``BeatRepository._claim``), so
+        this counts *distinct Beats with a research attempt today* — a same-Beat
+        retry loop overwrites the one stamp and so counts once, the accepted MVP
+        shape ``services.rate_limit`` documents for its siblings. No join needed:
+        unlike lessons/drafts, a Beat carries its own ``user_id``.
+        """
+        result = await self.session.execute(
+            select(func.count())
+            .select_from(Beat)
+            .where(Beat.user_id == user_id, Beat.research_started_at >= since)
         )
         return result.scalar_one()
 

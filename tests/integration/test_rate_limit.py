@@ -22,6 +22,7 @@ from sqlalchemy import update
 
 from aleph import db
 from aleph.models import (
+    Beat,
     ConversationKind,
     Lesson,
     LessonGenerationState,
@@ -45,13 +46,19 @@ YESTERDAY = NOW - timedelta(days=1)
 
 
 def _limiter(
-    session, *, paths: int = 10, lessons: int = 100, tutor_messages: int = 0
+    session,
+    *,
+    paths: int = 10,
+    lessons: int = 100,
+    tutor_messages: int = 0,
+    brief_research: int = 0,
 ) -> DailyRateLimiter:
     return DailyRateLimiter(
         UsageRepository(session),
         paths_per_day=paths,
         lesson_generations_per_day=lessons,
         tutor_messages_per_day=tutor_messages,
+        brief_research_per_day=brief_research,
         now=lambda: NOW,
     )
 
@@ -370,3 +377,100 @@ async def test_clearing_the_thread_refunds_tutor_quota() -> None:
         await session.flush()
 
         await limiter.check_tutor_message(user_id=user.id, is_admin=False)
+
+
+# --------------------------------------------------------------------------- #
+# The Beat research cap (AL-521, Phase 6 TDD D14) —
+# ``count_brief_research_runs_since``, counted over ``beats.research_started_at``
+# (the stamp a claim (re-)writes), no join needed (a Beat carries its own
+# ``user_id``).
+# --------------------------------------------------------------------------- #
+
+
+async def _make_beat(
+    session, *, user_id: uuid.UUID, research_started_at: datetime | None = None
+) -> Beat:
+    beat = Beat(
+        user_id=user_id,
+        topic="EU AI regulation",
+        level=Level.SOME_EXPERIENCE,
+        anchor_weekday=0,
+        research_started_at=research_started_at,
+    )
+    session.add(beat)
+    await session.flush()
+    return beat
+
+
+@pytest.mark.anyio
+async def test_brief_research_cap_counts_beats_claimed_today() -> None:
+    async with db.async_session() as session:
+        user = await create_user(session, username="research", subject="research")
+
+        # Two Beats claimed today, one claimed yesterday, one never claimed.
+        await _make_beat(session, user_id=user.id, research_started_at=NOW)
+        await _make_beat(session, user_id=user.id, research_started_at=NOW)
+        await _make_beat(session, user_id=user.id, research_started_at=YESTERDAY)
+        await _make_beat(session, user_id=user.id, research_started_at=None)
+
+        # Cap of 2 -> the two claimed today put the learner at the cap.
+        assert (
+            await _limiter(session, brief_research=2).brief_research_capacity_available(
+                user_id=user.id, is_admin=False
+            )
+            is False
+        )
+
+        # Cap of 3 -> only two count today (yesterday's + never-claimed
+        # excluded), under the cap.
+        assert (
+            await _limiter(session, brief_research=3).brief_research_capacity_available(
+                user_id=user.id, is_admin=False
+            )
+            is True
+        )
+
+
+@pytest.mark.anyio
+async def test_brief_research_cap_never_raises_over_real_rows() -> None:
+    """The load-bearing property (TDD §7): a real-row cap hit degrades to a
+    plain ``False``, never an ``HTTPException`` — unlike every other cap in
+    this module."""
+    async with db.async_session() as session:
+        user = await create_user(session, username="research-2", subject="research-2")
+        for _ in range(5):
+            await _make_beat(session, user_id=user.id, research_started_at=NOW)
+
+        result = await _limiter(
+            session, brief_research=1
+        ).brief_research_capacity_available(user_id=user.id, is_admin=False)
+        assert result is False  # no exception raised to get here
+
+
+@pytest.mark.anyio
+async def test_brief_research_cap_is_per_account() -> None:
+    """The ``Beat.user_id`` scoping is the only learner filter — pin it."""
+    async with db.async_session() as session:
+        capped = await create_user(session, username="br-a", subject="br-a")
+        other = await create_user(session, username="br-b", subject="br-b")
+        await _make_beat(session, user_id=capped.id, research_started_at=NOW)
+
+        limiter = _limiter(session, brief_research=1)
+        assert (
+            await limiter.brief_research_capacity_available(
+                user_id=capped.id, is_admin=False
+            )
+            is False
+        )
+        assert (
+            await limiter.brief_research_capacity_available(
+                user_id=capped.id, is_admin=True
+            )
+            is True
+        )
+        assert (
+            await limiter.brief_research_capacity_available(
+                user_id=other.id, is_admin=False
+            )
+            is True
+        )

@@ -40,6 +40,20 @@ does **not** use the task registry: there is no background work to keep alive
 and nothing to reclaim if the process dies. The same object owns the
 per-conversation in-flight guard, because the two are one policy — "how much
 tutoring may run at once, and never twice on one thread".
+
+**Phase 6 adds a third, its own bound again** (Phase 6 TDD D14, ticket
+AL-521): a second ``asyncio.Semaphore`` sized by
+``MAX_CONCURRENT_BRIEF_RESEARCH``, bound to the module-level
+``services.briefing.briefing_service`` singleton alongside the existing one.
+Research is the most expensive generation in the product per unit of output,
+and it must never be able to starve lesson generation, so it gets its own
+pool rather than sharing ``max_concurrent_generations`` — the same argument
+that split the tutor's semaphore from generation's, one workload over. It
+**reuses the SAME** :class:`TaskRegistry` generation binds (TDD §2: "the
+registry ... reused as-is") — background research is exactly the same kind
+of work (strong ref, shutdown-cancelled, self-healing via stale recovery) as
+outline/lesson generation, so it needs no second registry, only a second
+semaphore. **This is the only change this ticket makes to this module.**
 """
 
 from __future__ import annotations
@@ -59,6 +73,7 @@ from aleph.config import settings as global_settings
 # one public seam rather than borrowing a private name from a sibling service.
 from aleph.db import new_session
 from aleph.repositories import PathRepository
+from aleph.services.briefing import briefing_service
 
 if TYPE_CHECKING:
     import uuid
@@ -400,6 +415,14 @@ class GenerationLifecycle:
         # Constructing the semaphore needs no running loop (3.10+ binds lazily on
         # first use). It is the ``model_slot``: entering it acquires one permit.
         self._semaphore = asyncio.Semaphore(config.max_concurrent_generations)
+        # D14's OWN, separate pool for Beat research — never shared with
+        # ``self._semaphore`` above, so research can never queue behind (or
+        # starve) lesson generation. Bound to the module-level
+        # ``briefing_service`` singleton in :meth:`start`, mirroring how
+        # ``self._semaphore`` is bound to ``orchestrator`` below.
+        self._research_semaphore = asyncio.Semaphore(
+            config.max_concurrent_brief_research
+        )
         self._reconciler = Reconciler(
             orchestrator,
             registry=self._registry,
@@ -432,6 +455,14 @@ class GenerationLifecycle:
             spawn=self._registry.spawn,
             model_slot=lambda: self._semaphore,
         )
+        # D14: the SAME registry (background research is cancelled/self-heals
+        # exactly like generation, TDD §2), but its OWN semaphore — never
+        # ``self._semaphore`` — so a spike of Beat research can never queue
+        # behind, or starve, lesson generation.
+        briefing_service.bind_runtime(
+            spawn=self._registry.spawn,
+            model_slot=lambda: self._research_semaphore,
+        )
         self._reconciler_task = asyncio.create_task(self._reconciler.run_forever())
         logger.info("generation_lifecycle_started")
 
@@ -454,4 +485,5 @@ class GenerationLifecycle:
             self._reconciler_task = None
         await self._registry.cancel_all()
         self._orchestrator.reset_runtime()
+        briefing_service.reset_runtime()
         logger.info("generation_lifecycle_stopped")

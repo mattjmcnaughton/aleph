@@ -78,6 +78,19 @@ model call (D13), so there is no "cap is 0 so this is never queried" posture
 here; the family's own off-switch (``cap <= 0``) is still honoured, per
 :class:`DailyRateLimiter`'s own docstring.
 
+**Beat research (``brief_research_capacity_available``, Phase 6 TDD D14).**
+``RATE_LIMIT_BRIEF_RESEARCH_PER_DAY`` counts the learner's Beats with a
+research attempt today (``UsageRepository.count_brief_research_runs_since``,
+keyed on ``beats.research_started_at``, the stamp a claim (re-)writes) — the
+same shape as ``check_flashcard_draft_generation``'s cap, not
+``check_lesson_generation``'s: a retry re-stamps rather than inserting, so a
+same-Beat retry loop still counts once. **Ships enabled** (default 5).
+Unlike every other check in this module, this one is **non-raising**: the
+arrival drain (``services/briefing.py::BriefingService.drain_claimable``,
+TDD §5.6/§7) runs inside a ``GET`` the learner did not ask to be billed for,
+so hitting the cap must degrade to "no research this time", never a ``429``
+on the beats list. Admins are exempt, matching every other cap here.
+
 The check is called *before* the billed work, and admins are exempt via an
 injected ``is_admin`` flag (decoupled from ``authz`` on purpose — AL-050 wires
 the two together). On refusal it raises ``HTTPException(429, ...)`` with a
@@ -100,6 +113,8 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
     from sqlalchemy.ext.asyncio import AsyncSession
+
+    from aleph.config import Settings
 
 
 class UsageCounter(Protocol):
@@ -133,6 +148,10 @@ class UsageCounter(Protocol):
         self, *, user_id: uuid.UUID, since: datetime
     ) -> int: ...
 
+    async def count_brief_research_runs_since(
+        self, *, user_id: uuid.UUID, since: datetime
+    ) -> int: ...
+
 
 def _utc_now() -> datetime:
     return datetime.now(UTC)
@@ -160,6 +179,7 @@ class DailyRateLimiter:
         tutor_messages_per_day: int,
         shaping_messages_per_day: int = 0,
         flashcard_drafts_per_day: int = 0,
+        brief_research_per_day: int = 0,
         now: Callable[[], datetime] = _utc_now,
     ) -> None:
         self._usage = usage
@@ -168,6 +188,7 @@ class DailyRateLimiter:
         self._tutor_messages_per_day = tutor_messages_per_day
         self._shaping_messages_per_day = shaping_messages_per_day
         self._flashcard_drafts_per_day = flashcard_drafts_per_day
+        self._brief_research_per_day = brief_research_per_day
         self._now = now
 
     async def check_path_creation(self, *, user_id: uuid.UUID, is_admin: bool) -> None:
@@ -308,6 +329,26 @@ class DailyRateLimiter:
             ),
         )
 
+    async def brief_research_capacity_available(
+        self, *, user_id: uuid.UUID, is_admin: bool
+    ) -> bool:
+        """Whether ``user_id`` may claim another Beat's research run today (D14).
+
+        **Non-raising**, unlike every other check in this class — see the
+        module docstring's "Beat research" section for why: the arrival drain
+        runs inside a read the learner did not ask to be billed for, so
+        hitting this cap must degrade to "no research this time" rather than
+        a ``429`` on the beats list. Admins are exempt, matching every other
+        cap; a cap of 0 or negative disables it (returns ``True`` always),
+        the same ``_exempt`` convention every other check here uses.
+        """
+        if self._exempt(self._brief_research_per_day, is_admin=is_admin):
+            return True
+        used = await self._usage.count_brief_research_runs_since(
+            user_id=user_id, since=_start_of_utc_day(self._now())
+        )
+        return used < self._brief_research_per_day
+
     async def _check(
         self,
         count_since: Callable[..., Awaitable[int]],
@@ -337,7 +378,9 @@ def _rate_limited(message: str) -> HTTPException:
     )
 
 
-def build_daily_rate_limiter(session: AsyncSession) -> DailyRateLimiter:
+def build_daily_rate_limiter(
+    session: AsyncSession, *, config: Settings = settings
+) -> DailyRateLimiter:
     """Construct a limiter from settings, wired to the Postgres row counter.
 
     The single entry point AL-050/051 call from their route handlers::
@@ -346,13 +389,19 @@ def build_daily_rate_limiter(session: AsyncSession) -> DailyRateLimiter:
         await limiter.check_path_creation(user_id=user.id, is_admin=is_admin)
 
     Kept here (not in a router) so the caps come from one place and the DB
-    seam is not re-derived per call site.
+    seam is not re-derived per call site. ``config`` defaults to the global
+    settings (every existing call site's behaviour, unchanged); a caller that
+    injects its own ``Settings`` (``services/briefing.py``'s ``BriefingService``,
+    Phase 6 TDD §7 — the drain must honour a test's/admin's overridden caps,
+    not read the module-global ones behind the injected config's back) gets a
+    limiter built from that instead.
     """
     return DailyRateLimiter(
         UsageRepository(session),
-        paths_per_day=settings.rate_limit_paths_per_day,
-        lesson_generations_per_day=settings.rate_limit_lesson_generations_per_day,
-        tutor_messages_per_day=settings.rate_limit_tutor_messages_per_day,
-        shaping_messages_per_day=settings.rate_limit_shaping_messages_per_day,
-        flashcard_drafts_per_day=settings.flashcard_drafts_per_day,
+        paths_per_day=config.rate_limit_paths_per_day,
+        lesson_generations_per_day=config.rate_limit_lesson_generations_per_day,
+        tutor_messages_per_day=config.rate_limit_tutor_messages_per_day,
+        shaping_messages_per_day=config.rate_limit_shaping_messages_per_day,
+        flashcard_drafts_per_day=config.flashcard_drafts_per_day,
+        brief_research_per_day=config.rate_limit_brief_research_per_day,
     )

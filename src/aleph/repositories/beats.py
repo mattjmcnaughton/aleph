@@ -111,6 +111,27 @@ class BeatRepository:
     async def get(self, beat_id: uuid.UUID) -> Beat | None:
         return await self.session.get(Beat, beat_id)
 
+    async def list_for_user(
+        self, *, user_id: uuid.UUID, limit: int | None = None
+    ) -> list[Beat]:
+        """A learner's Beats, oldest first (deployment order).
+
+        The arrival drain's read (TDD §5.6/D15): ``limit`` is the service's
+        own bound (``MAX_BEATS_PER_LEARNER``, D14) applied here rather than
+        trusted to already hold — a stock cap enforced at creation time can
+        still be raced or hand-edited, and this is the one query the drain
+        iterates per arrival, so it stays bounded regardless.
+        """
+        query = (
+            select(Beat)
+            .where(Beat.user_id == user_id)
+            .order_by(Beat.created_at, Beat.id)
+        )
+        if limit is not None:
+            query = query.limit(limit)
+        result = await self.session.execute(query)
+        return list(result.scalars())
+
     async def effective_research_state(
         self, beat_id: uuid.UUID
     ) -> BeatResearchState | None:
@@ -197,3 +218,70 @@ class BeatRepository:
             .returning(Beat.research_started_at)
         )
         return result.scalar_one_or_none()
+
+    # -- transitions out of a won claim (TDD §5.6/§5.7; ticket AL-521) -------- #
+    #
+    # Mirrors ``PathRepository.mark_ready``/``mark_failed``/``mark_refused``
+    # exactly: every write here is guarded by the claim fence (``research_state
+    # == RESEARCHING AND research_started_at == fence``), so a stalled worker
+    # that lost its claim to a fresh re-claim cannot overwrite it. Each returns
+    # whether *this* call still owned the claim.
+
+    async def mark_idle(self, beat_id: uuid.UUID, *, fence: datetime.datetime) -> bool:
+        """Return the Beat to ``idle`` after a resolved run (published or
+        skipped) — ready to report again next Anchor day (D3's asymmetry with
+        ``PathStatus``: a Beat's success is not terminal)."""
+        return await self._guarded_set_state(
+            beat_id, BeatResearchState.IDLE, fence, research_error=None
+        )
+
+    async def mark_failed(
+        self, beat_id: uuid.UUID, *, fence: datetime.datetime, error: str
+    ) -> bool:
+        """Record a research failure (retryable). Fenced like :meth:`mark_idle`."""
+        return await self._guarded_set_state(
+            beat_id, BeatResearchState.FAILED, fence, research_error=error
+        )
+
+    async def mark_refused(
+        self, beat_id: uuid.UUID, *, fence: datetime.datetime, message: str
+    ) -> bool:
+        """Record a refusal (terminal, PRD §2's safety branch). Fenced like
+        :meth:`mark_idle`."""
+        result = await self.session.execute(
+            update(Beat)
+            .where(
+                Beat.id == beat_id,
+                Beat.research_state == BeatResearchState.RESEARCHING,
+                Beat.research_started_at == fence,
+            )
+            .values(
+                research_state=BeatResearchState.REFUSED,
+                refusal_message=message,
+                updated_at=func.now(),
+            )
+        )
+        return affected_rows(result) > 0
+
+    async def _guarded_set_state(
+        self,
+        beat_id: uuid.UUID,
+        state: BeatResearchState,
+        fence: datetime.datetime,
+        *,
+        research_error: str | None,
+    ) -> bool:
+        result = await self.session.execute(
+            update(Beat)
+            .where(
+                Beat.id == beat_id,
+                Beat.research_state == BeatResearchState.RESEARCHING,
+                Beat.research_started_at == fence,
+            )
+            .values(
+                research_state=state,
+                research_error=research_error,
+                updated_at=func.now(),
+            )
+        )
+        return affected_rows(result) > 0
