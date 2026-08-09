@@ -20,6 +20,13 @@ No network and no database: the agent binds no model, so every test injects a
 - the real assembled agent — a valid Brief passes, an out-of-Deps citation
   forces a retry, a branch-mismatched ``SkippedNote`` forces a retry, and the
   retry budget bounds a persistently bad model.
+
+``SkippedNote.detail`` fixtures throughout this file are lower-case,
+no-terminal-period fragments (e.g. ``"the consultation is still open,
+closing 11 Sept"``) — the register the class docstring and the system
+prompt specify: ``detail`` reads as a continuation after an em dash, never
+a sentence of its own (TDD §5.4; see
+``test_skipped_note_detail_exemplar_matches_the_fragment_register``).
 """
 
 from __future__ import annotations
@@ -246,7 +253,7 @@ def test_validator_rejects_empty_body() -> None:
 
 
 def test_validator_passes_skipped_note_when_no_survivors() -> None:
-    result = SkippedNote(detail="The consultation is still open, closing 11 Sept.")
+    result = SkippedNote(detail="the consultation is still open, closing 11 Sept")
     assert validate_brief_result([], [], result) is result
 
 
@@ -341,7 +348,7 @@ def test_padding_test_agent_level_eventually_emits_skipped_note() -> None:
     # reachable, not merely that everything else is blocked.
     agent = build_analyst_agent()
     padding = _brief_dict()
-    skip = {"detail": "The consultation is still open, closing 11 Sept."}
+    skip = {"detail": "the consultation is still open, closing 11 Sept"}
     respond = AnalystResponder([("cited_urls", padding), ("detail", skip)])
     result = agent.run_sync(
         "write the brief",
@@ -350,6 +357,7 @@ def test_padding_test_agent_level_eventually_emits_skipped_note() -> None:
     ).output
     assert isinstance(result, SkippedNote)
     assert respond.call_count == 2
+    assert result.detail == skip["detail"]
 
 
 # --- build_analyst_prompt -------------------------------------------------------
@@ -430,7 +438,7 @@ def test_agent_returns_valid_brief_when_survivors_present() -> None:
 
 def test_agent_returns_skipped_note_when_no_survivors() -> None:
     agent = build_analyst_agent()
-    respond = AnalystResponder([("detail", {"detail": "Still open, closing 11 Sept."})])
+    respond = AnalystResponder([("detail", {"detail": "still open, closing 11 Sept"})])
     result = agent.run_sync(
         "write the brief",
         deps=_deps(documents=[], survivors=[]),

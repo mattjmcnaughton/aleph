@@ -108,7 +108,8 @@ _NO_TOOL_AGENT_FACTORIES = (build_researcher_agent, build_analyst_agent)
 
 
 def test_researcher_and_analyst_define_no_tool() -> None:
-    """The two AL-520 agents register zero function tools (TDD D6a).
+    """The two AL-520 agents register zero function tools AND bind no
+    user-supplied toolset (TDD D6a).
 
     `agent._function_toolset.tools` is pydantic-ai's own bookkeeping of every
     `@agent.tool`/`@agent.tool_plain` registered on an ``Agent`` — empty means
@@ -116,6 +117,31 @@ def test_researcher_and_analyst_define_no_tool() -> None:
     pydantic-ai has no public "list my tools" surface; the coupling is worth
     it, since a tool silently appearing on either agent is exactly the
     regression TDD D6a's "no agent calls a tool" exists to rule out.
+
+    **That check alone passes vacuously for the more dangerous shape.**
+    Verified against pydantic-ai 2.15.0: ``Agent(..., toolsets=[some_toolset])``
+    never touches ``_function_toolset`` at all — it stays ``{}`` — while the
+    toolset is live on ``agent.toolsets``/``agent.run()``. That is exactly
+    the shape a future search tool would take (``build_researcher_agent()``
+    wired with a retrieval toolset), and precisely the D6a violation this
+    test exists to catch, so the first assertion alone would let it through.
+
+    ``agent._user_toolsets`` is the second guard: pydantic-ai's own
+    bookkeeping of every toolset a caller passed via ``Agent(toolsets=...)``,
+    separate from the framework's internal output/function toolsets that
+    always populate ``agent.toolsets`` regardless (confirmed empirically: a
+    freshly built ``Agent`` with no ``toolsets=`` argument has
+    ``len(agent.toolsets) == 1`` — its own function toolset — and
+    ``agent._user_toolsets == []``; passing one user toolset makes
+    ``len(agent.toolsets) == 2`` and ``agent._user_toolsets`` non-empty).
+    ``_user_toolsets`` is preferred here over asserting an exact
+    ``len(agent.toolsets)`` count, because the latter is coupled to how many
+    *internal* toolsets pydantic-ai's own ``Agent.__init__`` happens to
+    construct today — a number this package does not control and a future
+    pydantic-ai release could change for reasons unrelated to D6a.
+    ``_user_toolsets`` names the concept this test actually cares about ("did
+    a caller supply a toolset") directly, so it stays true regardless of how
+    many internal toolsets the library adds around it.
     """
     for factory in _NO_TOOL_AGENT_FACTORIES:
         agent = factory()
@@ -123,6 +149,12 @@ def test_researcher_and_analyst_define_no_tool() -> None:
             f"{factory.__name__}() registered a tool: "
             f"{sorted(agent._function_toolset.tools)} — TDD D6a: no agent "
             "in the research/write pipeline may bind a tool."
+        )
+        assert agent._user_toolsets == [], (
+            f"{factory.__name__}() was built with a user-supplied toolset: "
+            f"{agent._user_toolsets!r} — TDD D6a: no agent in the "
+            "research/write pipeline may bind a tool, including via a "
+            "toolset the `_function_toolset.tools` check above cannot see."
         )
 
 
