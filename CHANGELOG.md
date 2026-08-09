@@ -1,3 +1,10 @@
+# [1.26.0](https://github.com/mattjmcnaughton/aleph/compare/v1.25.0...v1.26.0) (2026-08-09)
+
+
+### Features
+
+* **config:** model slots, the Phase 6 settings block, and the analyst flag ([#182](https://github.com/mattjmcnaughton/aleph/issues/182)) ([06f4dad](https://github.com/mattjmcnaughton/aleph/commit/06f4daddcb0cbe66d81415eb19c7d30e58903d04)), closes [#165](https://github.com/mattjmcnaughton/aleph/issues/165)
+
 # [1.25.0](https://github.com/mattjmcnaughton/aleph/compare/v1.24.1...v1.25.0) (2026-08-07)
 
 
