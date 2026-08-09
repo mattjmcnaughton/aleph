@@ -13,6 +13,8 @@ Everything is re-exported here so call sites keep importing
 from __future__ import annotations
 
 from aleph.repositories.attempts import AttemptRepository, LessonAnswer
+from aleph.repositories.beats import BeatRepository
+from aleph.repositories.briefs import BriefRepository, NewSource
 from aleph.repositories.changes import ChangeRepository, OwnedChange
 from aleph.repositories.conversations import (
     ConversationRepository,
@@ -39,6 +41,8 @@ from aleph.repositories.users import UserRepository
 
 __all__ = [
     "AttemptRepository",
+    "BeatRepository",
+    "BriefRepository",
     "ChangeRepository",
     "CompletionDay",
     "ConversationRepository",
@@ -49,6 +53,7 @@ __all__ = [
     "LessonAnswer",
     "LessonRepository",
     "LocatedMessage",
+    "NewSource",
     "OwnedChange",
     "OwnedShapingMessage",
     "PathGenerationProgress",

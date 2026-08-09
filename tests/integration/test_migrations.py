@@ -1198,3 +1198,149 @@ def test_earlier_tables_are_unchanged_by_the_card_management_migration(
     after = {table: asyncio.run(_columns(database_url, table)) for table in tracked}
 
     assert before == after
+
+
+# --------------------------------------------------------------------------- #
+# AL-511 (issue #168): the analyst branch (migration 0012) — beats, briefs,
+# brief_sources.
+#
+# Same shape as the flashcards branch above: three new tables and two new
+# enum types (``level`` is reused, not redeclared, per TDD D13's correction),
+# additive and reversible by dropping the three tables. Column inventories are
+# asserted from ``0012``'s own vantage point, matching every other step in
+# this file.
+# --------------------------------------------------------------------------- #
+
+ANALYST_HEAD = "0012_analyst"
+ANALYST_TABLES = ("beats", "briefs", "brief_sources")
+ANALYST_ENUM_TYPES = ("beat_research_state", "brief_kind")
+BRIEF_NUMBER_INDEX = "uq_briefs_beat_id_number"
+BRIEF_PUBLISHED_ON_INDEX = "ix_briefs_beat_id_published_on"
+
+
+def test_analyst_migration_downgrades_and_reapplies_cleanly(
+    isolated_database: str,
+) -> None:
+    database_url = isolated_database
+
+    at_head = asyncio.run(_tables(database_url))
+    assert set(ANALYST_TABLES) <= at_head
+
+    username = asyncio.run(_seed_phase_1_row(database_url))
+
+    run_alembic(database_url, CARD_MANAGEMENT_HEAD, downgrade=True)
+
+    after_downgrade = asyncio.run(_tables(database_url))
+    assert set(ANALYST_TABLES) & after_downgrade == set()
+    # Everything before Phase 6 survives the reversal, rows included.
+    assert set(PHASE_1_TABLES) <= after_downgrade
+    assert set(PHASE_2_TABLES) <= after_downgrade
+    assert FLAGS_TABLE in after_downgrade
+    assert CHANGES_TABLE in after_downgrade
+    assert set(FLASHCARDS_TABLES) <= after_downgrade
+    assert asyncio.run(_count(database_url, "users")) == 1
+    # The two Phase 6 enum types go with the step — no orphan type left
+    # behind to collide with a re-upgrade. This is the property this test
+    # exists for.
+    assert set(ANALYST_ENUM_TYPES) & asyncio.run(_enum_types(database_url)) == set()
+    # ``level`` (reused, not redeclared, D13) survives the reversal — it is
+    # migration 0001's type, never touched by this step either way.
+    assert "level" in asyncio.run(_enum_types(database_url))
+
+    run_alembic(database_url, ANALYST_HEAD)
+
+    reapplied = asyncio.run(_tables(database_url))
+    assert set(ANALYST_TABLES) <= reapplied
+    assert set(PHASE_1_TABLES) <= reapplied
+    assert asyncio.run(_count(database_url, "users")) == 1
+    assert username == "migration-user"
+    # The tables come back empty — a migration reapply is schema-only.
+    for table in ANALYST_TABLES:
+        assert asyncio.run(_count(database_url, table)) == 0
+    assert set(ANALYST_ENUM_TYPES) <= asyncio.run(_enum_types(database_url))
+
+
+def test_analyst_migration_creates_the_documented_columns(
+    isolated_database: str,
+) -> None:
+    database_url = isolated_database
+
+    assert asyncio.run(_columns(database_url, "beats")) == {
+        "id",
+        "user_id",
+        "topic",
+        "guidance",
+        "level",
+        "anchor_weekday",
+        "research_state",
+        "research_started_at",
+        "research_error",
+        "refusal_message",
+        "model_research",
+        "model_brief",
+        "created_at",
+        "updated_at",
+    }
+    assert asyncio.run(_columns(database_url, "briefs")) == {
+        "id",
+        "beat_id",
+        "kind",
+        "number",
+        "published_at",
+        "published_on",
+        "title",
+        "body_markdown",
+        "skip_line",
+        "claims",
+        "read_at",
+        "sources_seen_at",
+        "created_at",
+        "updated_at",
+    }
+    assert asyncio.run(_columns(database_url, "brief_sources")) == {
+        "id",
+        "brief_id",
+        "position",
+        "url",
+        "publisher",
+        "title",
+        "published_on",
+        "created_at",
+        "updated_at",
+    }
+
+
+def test_analyst_migration_creates_the_partial_unique_index_on_briefs(
+    isolated_database: str,
+) -> None:
+    """D2's storage device: sparse over published Briefs only."""
+    database_url = isolated_database
+
+    indexes = asyncio.run(_indexes(database_url, "briefs"))
+    assert BRIEF_NUMBER_INDEX in indexes
+    assert "UNIQUE" in indexes[BRIEF_NUMBER_INDEX]
+    assert "number IS NOT NULL" in indexes[BRIEF_NUMBER_INDEX]
+    assert BRIEF_PUBLISHED_ON_INDEX in indexes
+    assert "DESC" in indexes[BRIEF_PUBLISHED_ON_INDEX]
+
+
+def test_earlier_tables_are_unchanged_by_the_analyst_migration(
+    isolated_database: str,
+) -> None:
+    """The step adds three tables; it alters no existing one (TDD §4)."""
+    database_url = isolated_database
+    tracked = (
+        *PHASE_1_TABLES,
+        *PHASE_2_TABLES,
+        FLAGS_TABLE,
+        CHANGES_TABLE,
+        "lessons",
+        "paths",
+        *FLASHCARDS_TABLES,
+    )
+
+    before = {table: asyncio.run(_columns(database_url, table)) for table in tracked}
+    run_alembic(database_url, CARD_MANAGEMENT_HEAD, downgrade=True)
+    after = {table: asyncio.run(_columns(database_url, table)) for table in tracked}
+
+    assert before == after
