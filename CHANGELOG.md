@@ -1,3 +1,10 @@
+# [1.30.0](https://github.com/mattjmcnaughton/aleph/compare/v1.29.0...v1.30.0) (2026-08-09)
+
+
+### Features
+
+* **agents:** the researcher and the analyst, with structural provenance ([#187](https://github.com/mattjmcnaughton/aleph/issues/187)) ([403389d](https://github.com/mattjmcnaughton/aleph/commit/403389d83fe743bc6eb53fe3a71072b3043f904f)), closes [#170](https://github.com/mattjmcnaughton/aleph/issues/170)
+
 # [1.29.0](https://github.com/mattjmcnaughton/aleph/compare/v1.28.0...v1.29.0) (2026-08-09)
 
 
