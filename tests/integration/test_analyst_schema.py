@@ -36,6 +36,7 @@ from sqlalchemy.exc import IntegrityError
 from aleph import db
 from aleph.models import (
     Beat,
+    BeatResearchRun,
     BeatResearchState,
     Brief,
     BriefKind,
@@ -660,6 +661,95 @@ async def test_stale_researching_beat_is_reclaimable_fresh_not() -> None:
 
 
 # --------------------------------------------------------------------------- #
+# list_claim_eligible_for_user (second-pass code-review FIX A on AL-521) —
+# NO repository-level test existed for this method at all. It reuses
+# `claimable_predicate` (the SAME predicate `claim_research`'s own `UPDATE`
+# enforces), which is what lets a stale `researching` Beat through — but it
+# READS like a plain state filter, and its docstring calls it one. Someone
+# "simplifying" it to `Beat.research_state.in_(_CLAIMABLE_STATES)` would
+# leave every OTHER assertion below green; only the stale-`researching` arm
+# distinguishes the two, which is why it is the load-bearing case. In
+# production `drain_claimable` is the ONLY recovery path for a crashed run
+# (D5 — no Beats scan): a Beat excluded here wedges in `researching` forever.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.anyio
+async def test_list_claim_eligible_for_user_covers_every_claim_state_arm() -> None:
+    now = datetime.now(UTC)
+    async with db.async_session() as session:
+        user = await create_user(session)
+        idle = await _make_beat(session, user=user, topic="idle")
+        fresh_researching = await _make_beat(
+            session,
+            user=user,
+            topic="fresh researching",
+            research_state=BeatResearchState.RESEARCHING,
+            research_started_at=now - FRESH_AGE,
+        )
+        stale_researching = await _make_beat(
+            session,
+            user=user,
+            topic="stale researching",
+            research_state=BeatResearchState.RESEARCHING,
+            research_started_at=now - STALE_AGE,
+        )
+        failed = await _make_beat(
+            session,
+            user=user,
+            topic="failed",
+            research_state=BeatResearchState.FAILED,
+            research_error="retrieval unavailable",
+        )
+        refused = await _make_beat(
+            session,
+            user=user,
+            topic="refused",
+            research_state=BeatResearchState.REFUSED,
+        )
+        # An idle Beat that is NOT yet due (a fresh Brief exists) — included
+        # anyway. Cadence due-ness is NOT this method's concern (that is
+        # `domains.cadence.is_claimable`, evaluated separately by the drain
+        # against `last_published_on_by_beat`); this method only ever
+        # answers "could this Beat's research STATE possibly be claimed
+        # right now." Proving that decoupling here is what keeps a future
+        # "helpful" attempt to fold cadence into this query from silently
+        # narrowing it.
+        not_due = await _make_beat(session, user=user, topic="not due")
+        await session.commit()
+        await BriefRepository(session).create_published(
+            beat_id=not_due.id,
+            number=1,
+            published_at=now,
+            published_on=now.date(),
+            title="Recent",
+            body_markdown="Body.",
+            claims=[],
+            sources=[],
+        )
+        await session.commit()
+        user_id = user.id
+        ids = {
+            "idle": idle.id,
+            "fresh": fresh_researching.id,
+            "stale": stale_researching.id,
+            "failed": failed.id,
+            "refused": refused.id,
+            "not_due": not_due.id,
+        }
+
+    async with db.async_session() as session:
+        repo = BeatRepository(session, stale_after_seconds=TEST_STALE_AFTER_SECONDS)
+        eligible = await repo.list_claim_eligible_for_user(user_id=user_id)
+
+    eligible_ids = {beat.id for beat in eligible}
+    assert eligible_ids == {ids["idle"], ids["stale"], ids["not_due"]}
+    assert ids["fresh"] not in eligible_ids
+    assert ids["failed"] not in eligible_ids
+    assert ids["refused"] not in eligible_ids
+
+
+# --------------------------------------------------------------------------- #
 # effective_research_state (§5.7's "process dies mid-run" row) — the READ
 # side of stale recovery; the tests above cover only the CLAIM side. Inverting
 # generating_state/failed_state, or reading Beat.created_at instead of
@@ -1004,6 +1094,58 @@ async def test_prior_claims_and_source_urls_span_the_whole_beat_history() -> Non
     assert urls == {"https://example.com/first", "https://example.com/second"}
 
 
+# --------------------------------------------------------------------------- #
+# `latest_published` as `AnalystDeps.open_threads`'s data source — second-pass
+# code-review FIX B on AL-521, rewriting the `latest_entry_claims_for_beat`
+# tests this replaces (that method is gone: FIX B switched `open_threads` to
+# the latest PUBLISHED Brief's claims, never the latest ENTRY's, so a
+# separate bounded read is no longer needed — `latest_published` already
+# answers both `latest_published_number` and this).
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.anyio
+async def test_latest_published_ignores_a_more_recent_skipped_entry() -> None:
+    """The bug FIX B fixes, pinned at its data source: a Skipped entry more
+    recent than the last published Brief must NOT make `latest_published`
+    (and therefore `open_threads`) go empty. A Skipped row's ``claims`` is
+    always ``[]`` (``create_skipped``'s own shape) — the OLD "latest entry"
+    reading treated that as "nothing to carry forward"; `latest_published`
+    keeps returning the last real report regardless of how many quiet
+    entries follow it.
+    """
+    async with db.async_session() as session:
+        user = await create_user(session)
+        beat = await _make_beat(session, user=user)
+        await session.commit()
+        repo = BriefRepository(session)
+        await repo.create_published(
+            beat_id=beat.id,
+            number=1,
+            published_at=datetime(2026, 7, 6, 9, tzinfo=UTC),
+            published_on=date(2026, 7, 6),
+            title="First",
+            body_markdown="Body.",
+            claims=["an old claim"],
+            sources=[_new_source()],
+        )
+        await repo.create_skipped(
+            beat_id=beat.id,
+            published_at=datetime(2026, 7, 13, 9, tzinfo=UTC),
+            published_on=date(2026, 7, 13),
+            skip_line="Nothing material since Brief #1",
+        )
+        await session.commit()
+        beat_id = beat.id
+
+    async with db.async_session() as session:
+        latest = await BriefRepository(session).latest_published(beat_id)
+
+    assert latest is not None
+    assert latest.number == 1
+    assert latest.claims == ["an old claim"]
+
+
 @pytest.mark.anyio
 async def test_another_beats_claims_and_sources_never_leak_in() -> None:
     async with db.async_session() as session:
@@ -1042,3 +1184,59 @@ async def test_another_beats_claims_and_sources_never_leak_in() -> None:
 
     assert claims == ["owner claim"]
     assert urls == {"https://example.com/owner"}
+
+
+# --------------------------------------------------------------------------- #
+# beat_research_runs (migration 0013, code-review FIX 2) — index parity.
+# Second-pass code-review FIX D: this codebase deliberately keeps
+# "declared on both model and migration" index-parity tests (see
+# `test_the_brief_number_index_is_declared_on_both_model_and_migration` above
+# and `test_flashcards_schema.py`'s equivalent) because index drift between
+# `__table_args__` and the migration is a known hazard here. 0013 declared
+# its two indexes twice with no such test — and
+# `ix_beat_research_runs_user_id_started_at` is the only thing keeping the
+# daily research cap's own `COUNT` off a sequential scan of every learner's
+# runs, so drift here is a production-latency issue, not a cosmetic one.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.anyio
+async def test_beat_research_run_indexes_declared_on_both_model_and_migration() -> None:
+    table = cast("Table", BeatResearchRun.__table__)
+    model_index_names = {index.name for index in table.indexes}
+    assert model_index_names == {
+        "ix_beat_research_runs_user_id_started_at",
+        "ix_beat_research_runs_beat_id",
+    }
+    user_started_at_index = next(
+        index
+        for index in table.indexes
+        if index.name == "ix_beat_research_runs_user_id_started_at"
+    )
+    assert [column.name for column in user_started_at_index.columns] == [
+        "user_id",
+        "started_at",
+    ]
+    beat_id_index = next(
+        index
+        for index in table.indexes
+        if index.name == "ix_beat_research_runs_beat_id"
+    )
+    assert [column.name for column in beat_id_index.columns] == ["beat_id"]
+
+    async with db.async_session() as session:
+        rows = (
+            await session.execute(
+                text(
+                    "SELECT indexname, indexdef FROM pg_indexes "
+                    "WHERE tablename = 'beat_research_runs'"
+                )
+            )
+        ).all()
+    indexdefs = {row.indexname: row.indexdef for row in rows}
+
+    for name in model_index_names:
+        assert name in indexdefs
+    assert "user_id" in indexdefs["ix_beat_research_runs_user_id_started_at"]
+    assert "started_at" in indexdefs["ix_beat_research_runs_user_id_started_at"]
+    assert "beat_id" in indexdefs["ix_beat_research_runs_beat_id"]

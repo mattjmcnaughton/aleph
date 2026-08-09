@@ -40,6 +40,7 @@ class _FakeUsage:
         self.tutor_messages: dict[uuid.UUID, list[datetime]] = {}
         self.shaping_messages: dict[uuid.UUID, list[datetime]] = {}
         self.flashcard_draft_runs: dict[uuid.UUID, list[datetime]] = {}
+        self.brief_research_runs: dict[uuid.UUID, list[datetime]] = {}
 
     def add_path(self, user_id: uuid.UUID, when: datetime) -> None:
         self.paths.setdefault(user_id, []).append(when)
@@ -58,6 +59,9 @@ class _FakeUsage:
 
     def add_flashcard_draft_run(self, user_id: uuid.UUID, when: datetime) -> None:
         self.flashcard_draft_runs.setdefault(user_id, []).append(when)
+
+    def add_brief_research_run(self, user_id: uuid.UUID, when: datetime) -> None:
+        self.brief_research_runs.setdefault(user_id, []).append(when)
 
     async def count_paths_created_since(
         self, *, user_id: uuid.UUID, since: datetime
@@ -89,6 +93,11 @@ class _FakeUsage:
     ) -> int:
         return sum(1 for t in self.flashcard_draft_runs.get(user_id, []) if t >= since)
 
+    async def count_brief_research_runs_since(
+        self, *, user_id: uuid.UUID, since: datetime
+    ) -> int:
+        return sum(1 for t in self.brief_research_runs.get(user_id, []) if t >= since)
+
 
 def _limiter(
     usage: _FakeUsage,
@@ -97,6 +106,7 @@ def _limiter(
     lessons: int = 100,
     tutor_messages: int = 0,
     shaping_messages: int = 0,
+    brief_research: int = 0,
     now: datetime = DAY_ONE,
 ) -> DailyRateLimiter:
     return DailyRateLimiter(
@@ -105,6 +115,7 @@ def _limiter(
         lesson_generations_per_day=lessons,
         tutor_messages_per_day=tutor_messages,
         shaping_messages_per_day=shaping_messages,
+        brief_research_per_day=brief_research,
         now=lambda: now,
     )
 
@@ -369,3 +380,98 @@ async def test_the_two_reply_caps_have_separate_budgets() -> None:
     with pytest.raises(HTTPException):
         await limiter.check_shaping_message(user_id=USER, is_admin=False)
     await limiter.check_tutor_message(user_id=USER, is_admin=False)
+
+
+# --------------------------------------------------------------------------- #
+# The Beat research cap (AL-521, Phase 6 TDD D14) —
+# ``brief_research_capacity_available``. Unlike every cap above, this one is
+# **non-raising**: the arrival drain runs inside a GET the learner did not
+# ask to be billed for, so hitting the cap must degrade to "no research this
+# time" (a plain ``False``), never an ``HTTPException``.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.anyio
+async def test_brief_research_capacity_available_up_to_cap_then_denies() -> None:
+    usage = _FakeUsage()
+    limiter = _limiter(usage, brief_research=3)
+
+    for _ in range(3):
+        assert (
+            await limiter.brief_research_capacity_available(
+                user_id=USER, is_admin=False
+            )
+            is True
+        )
+        usage.add_brief_research_run(USER, DAY_ONE)
+
+    # The 4th check sees 3 runs already today and returns False — never raises.
+    assert (
+        await limiter.brief_research_capacity_available(user_id=USER, is_admin=False)
+        is False
+    )
+
+
+@pytest.mark.anyio
+async def test_brief_research_capacity_never_raises_even_over_cap() -> None:
+    """The load-bearing property (TDD §7): a cap hit is a boolean, not a 429."""
+    usage = _FakeUsage()
+    for _ in range(50):  # far over any cap
+        usage.add_brief_research_run(USER, DAY_ONE)
+
+    limiter = _limiter(usage, brief_research=1)
+    result = await limiter.brief_research_capacity_available(
+        user_id=USER, is_admin=False
+    )
+    assert result is False  # a plain value, no exception raised to get here
+
+
+@pytest.mark.anyio
+async def test_brief_research_cap_is_disabled_at_the_default_of_zero() -> None:
+    usage = _FakeUsage()
+    for _ in range(50):
+        usage.add_brief_research_run(USER, DAY_ONE)
+
+    assert (
+        await _limiter(usage, brief_research=0).brief_research_capacity_available(
+            user_id=USER, is_admin=False
+        )
+        is True
+    )
+
+
+@pytest.mark.anyio
+async def test_brief_research_cap_exempts_admins_and_rolls_over() -> None:
+    usage = _FakeUsage()
+    for _ in range(20):
+        usage.add_brief_research_run(USER, DAY_ONE)
+
+    assert (
+        await _limiter(usage, brief_research=3).brief_research_capacity_available(
+            user_id=USER, is_admin=True
+        )
+        is True
+    )
+    assert (
+        await _limiter(
+            usage, brief_research=3, now=DAY_TWO
+        ).brief_research_capacity_available(user_id=USER, is_admin=False)
+        is True
+    )
+
+
+@pytest.mark.anyio
+async def test_brief_research_cap_is_per_account() -> None:
+    usage = _FakeUsage()
+    for _ in range(3):
+        usage.add_brief_research_run(USER, DAY_ONE)
+
+    limiter = _limiter(usage, brief_research=3)
+    assert (
+        await limiter.brief_research_capacity_available(user_id=USER, is_admin=False)
+        is False
+    )
+    assert (
+        await limiter.brief_research_capacity_available(user_id=OTHER, is_admin=False)
+        is True
+    )

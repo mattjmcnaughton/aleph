@@ -145,6 +145,49 @@ class BriefRepository:
     async def get(self, brief_id: uuid.UUID) -> Brief | None:
         return await self.session.get(Brief, brief_id)
 
+    async def last_published_on_by_beat(
+        self, beat_ids: Sequence[uuid.UUID]
+    ) -> dict[uuid.UUID, date]:
+        """``MAX(published_on)`` per Beat, of **either** kind (D4/D2).
+
+        The Cadence floor's whole input (``domains/cadence.py::is_claimable``):
+        "the last entry" is the highest ``published_on`` across every row —
+        published or Skipped — for a Beat, which is exactly what a Skipped
+        entry resetting the floor (PRD §4.6) means. Batched over every id in
+        one query (the arrival drain's own bound is
+        ``MAX_BEATS_PER_LEARNER``, so this never becomes a hot query), rather
+        than one round trip per Beat. A Beat absent from the returned mapping
+        has no entries at all (PRD §3's "claimable immediately" case).
+        """
+        if not beat_ids:
+            return {}
+        result = await self.session.execute(
+            select(Brief.beat_id, func.max(Brief.published_on))
+            .where(Brief.beat_id.in_(beat_ids))
+            .group_by(Brief.beat_id)
+        )
+        return {beat_id: last_on for beat_id, last_on in result.all()}
+
+    async def latest_published(self, beat_id: uuid.UUID) -> Brief | None:
+        """The highest-numbered **published** Brief for a Beat, or ``None``.
+
+        Two callers (``services/briefing.py``, ticket AL-521): the templated
+        Skipped clause's "Nothing material since Brief #N" (never the last
+        *entry* — a Skipped row carries no number to name, D2) and the next
+        Brief's own number (``N + 1``, or ``1`` on a Beat's first-ever
+        publish). Also the query shape AL-522's "Builds on Brief #N" read
+        will specialize with ``number < :n`` — unspecialized here since this
+        method answers a different question (the *overall* latest, not
+        "the latest below this one").
+        """
+        result = await self.session.execute(
+            select(Brief)
+            .where(Brief.beat_id == beat_id, Brief.kind == BriefKind.PUBLISHED)
+            .order_by(Brief.number.desc())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
     async def list_for_beat(self, beat_id: uuid.UUID) -> list[Brief]:
         """The Beat rail: newest first, **both kinds interleaved** (D2) —
         served by ``ix_briefs_beat_id_published_on``. Ties (same

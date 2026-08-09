@@ -23,6 +23,22 @@ D13). Like an outline retry, a drafting retry inserts no new row (D7's sparse,
 one-row-per-lesson claim) — only the stamp moves — so this counts *lessons
 with a drafting attempt today*, and a same-lesson retry loop still counts once;
 see ``services.rate_limit``.
+
+Phase 6 adds the sixth counter: Beat research RUNS, counted over
+``beat_research_runs`` — an append-only row inserted by ``BeatRepository.
+_claim`` every time a claim WINS (both the auto and retry paths, TDD D3/D14).
+**Not** the ``count_path_outline_generations_since``/
+``count_flashcard_draft_runs_since`` shape its siblings above use (counting a
+stamp that a retry *overwrites*): code-review FIX 2 on AL-521 found that
+shape unsound here specifically, because ``MAX_BEATS_PER_LEARNER`` bounds a
+learner's Beat count at 3, strictly below ``RATE_LIMIT_BRIEF_RESEARCH_PER_DAY``
+(5) — a same-Beat retry loop that only re-stamped one row could never drive
+the count past the Beat count, so the cap could never fire at production
+settings. Counting real, distinct run rows instead means a same-Beat retry
+loop counts every attempt, exactly like ``count_lesson_generations_since``'s
+own new-row-per-attempt shape — see ``models/beat_research_run.py`` and
+``services.rate_limit`` for the full write-up, including why this is not a
+revival of Phase 6 TDD D2a's rejected ``beat_runs`` table.
 """
 
 from __future__ import annotations
@@ -32,6 +48,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import func, select
 
 from aleph.models import (
+    BeatResearchRun,
     Conversation,
     ConversationKind,
     FlashcardDraftRun,
@@ -197,6 +214,34 @@ class UsageRepository:
             .where(
                 Path.user_id == user_id,
                 FlashcardDraftRun.started_at >= since,
+            )
+        )
+        return result.scalar_one()
+
+    async def count_brief_research_runs_since(
+        self, *, user_id: uuid.UUID, since: datetime.datetime
+    ) -> int:
+        """Count ``user_id``'s research RUNS (not Beats) claimed since ``since``.
+
+        Code-review FIX 2 on AL-521: counts real rows in
+        ``beat_research_runs`` — one inserted per WON claim
+        (``BeatRepository._claim``, both the auto and retry paths, TDD
+        D3/D14) — never ``beats`` rows. A same-Beat retry loop (a ``failed``
+        run re-claimed via ``POST /retry``) inserts a NEW row each time, so
+        it counts every attempt, unlike ``count_flashcard_draft_runs_since``'s
+        sibling shape (which counts a stamp a retry *overwrites*, and is
+        sound there only because a learner's lesson count is not bounded
+        anywhere near that cap). See ``models/beat_research_run.py`` for why
+        that distinction matters here specifically. No join needed: the run
+        row carries its own ``user_id`` (denormalized off the Beat at claim
+        time), exactly as ``Beat.user_id`` does.
+        """
+        result = await self.session.execute(
+            select(func.count())
+            .select_from(BeatResearchRun)
+            .where(
+                BeatResearchRun.user_id == user_id,
+                BeatResearchRun.started_at >= since,
             )
         )
         return result.scalar_one()

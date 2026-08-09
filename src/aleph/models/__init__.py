@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from aleph.models.attempt import Attempt
 from aleph.models.beat import Beat
+from aleph.models.beat_research_run import BeatResearchRun
 from aleph.models.brief import Brief, BriefSource
 from aleph.models.conversation import Conversation
 from aleph.models.enums import (
@@ -39,6 +40,7 @@ from aleph.models.users import User
 __all__ = [
     "Attempt",
     "Beat",
+    "BeatResearchRun",
     "BeatResearchState",
     "Brief",
     "BriefKind",
