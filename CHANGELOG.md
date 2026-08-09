@@ -1,3 +1,10 @@
+# [1.29.0](https://github.com/mattjmcnaughton/aleph/compare/v1.28.0...v1.29.0) (2026-08-09)
+
+
+### Features
+
+* **services:** the retrieval seam, with three adapters and one entry point ([#186](https://github.com/mattjmcnaughton/aleph/issues/186)) ([f63f53e](https://github.com/mattjmcnaughton/aleph/commit/f63f53e5b68ab9d3a559003465bfe00710d78c0d)), closes [#169](https://github.com/mattjmcnaughton/aleph/issues/169)
+
 # [1.28.0](https://github.com/mattjmcnaughton/aleph/compare/v1.27.0...v1.28.0) (2026-08-09)
 
 
