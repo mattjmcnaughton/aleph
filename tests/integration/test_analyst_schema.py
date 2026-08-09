@@ -46,7 +46,7 @@ from aleph.models import (
 from aleph.repositories.beats import BeatRepository
 from aleph.repositories.briefs import BriefRepository, NewSource
 
-from .conftest import create_user
+from .conftest import create_user, wait_until_lock_waiters
 
 if TYPE_CHECKING:
     import uuid
@@ -168,7 +168,10 @@ async def test_a_published_brief_with_no_number_is_rejected() -> None:
 
 
 @pytest.mark.anyio
-async def test_a_published_brief_missing_title_or_body_is_rejected() -> None:
+async def test_a_published_brief_missing_title_is_rejected() -> None:
+    """Exercises only the ``title IS NOT NULL`` arm — ``body_markdown`` is
+    present, so a passing test here cannot be hiding a missed ``title`` check.
+    """
     async with db.async_session() as session:
         user = await create_user(session)
         beat = await _make_beat(session, user=user)
@@ -184,8 +187,64 @@ async def test_a_published_brief_missing_title_or_body_is_rejected() -> None:
                 skip_line=None,
             )
         )
-        with pytest.raises(IntegrityError):
+        with pytest.raises(IntegrityError) as exc_info:
             await session.commit()
+    assert "ck_briefs_published_shape" in str(exc_info.value)
+
+
+@pytest.mark.anyio
+async def test_a_published_brief_missing_body_is_rejected() -> None:
+    """Exercises only the ``body_markdown IS NOT NULL`` arm — ``title`` is
+    present. Deleting ``AND body_markdown IS NOT NULL`` from
+    ``ck_briefs_published_shape`` would leave this the only test to catch it,
+    and a titled, numbered, bodyless Brief is exactly the empty/padded
+    artifact §5.5/§5.7 exist to forbid.
+    """
+    async with db.async_session() as session:
+        user = await create_user(session)
+        beat = await _make_beat(session, user=user)
+        session.add(
+            Brief(
+                beat_id=beat.id,
+                kind=BriefKind.PUBLISHED,
+                number=1,
+                published_at=datetime.now(UTC),
+                published_on=date(2026, 8, 3),
+                title="The backlash arrived",
+                body_markdown=None,  # missing
+                skip_line=None,
+            )
+        )
+        with pytest.raises(IntegrityError) as exc_info:
+            await session.commit()
+    assert "ck_briefs_published_shape" in str(exc_info.value)
+
+
+@pytest.mark.anyio
+async def test_a_skipped_brief_missing_skip_line_is_rejected() -> None:
+    """Exercises the ``skip_line IS NOT NULL`` arm of ``ck_briefs_skipped_shape``.
+    Deleting that conjunct would let a blank, dated rail entry — no number, no
+    body, no line of prose — be written, which is the same empty-artifact
+    class §5.5/§5.7 forbid, on the Skipped side.
+    """
+    async with db.async_session() as session:
+        user = await create_user(session)
+        beat = await _make_beat(session, user=user)
+        session.add(
+            Brief(
+                beat_id=beat.id,
+                kind=BriefKind.SKIPPED,
+                number=None,
+                published_at=datetime.now(UTC),
+                published_on=date(2026, 8, 3),
+                title=None,
+                body_markdown=None,
+                skip_line=None,  # missing
+            )
+        )
+        with pytest.raises(IntegrityError) as exc_info:
+            await session.commit()
+    assert "ck_briefs_skipped_shape" in str(exc_info.value)
 
 
 @pytest.mark.anyio
@@ -207,6 +266,70 @@ async def test_a_published_brief_with_a_skip_line_is_rejected() -> None:
         )
         with pytest.raises(IntegrityError):
             await session.commit()
+
+
+# --------------------------------------------------------------------------- #
+# ck_beats_anchor_weekday_range — currently the ONLY guard against an
+# out-of-range anchor_weekday (AL-522's AnchorWeekday = Field(ge=0, le=6)
+# does not exist yet), and domains/cadence.py's stated purpose is "the
+# off-by-one lives here" — so a silently widened CHECK would let a 7 reach it.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.anyio
+async def test_beat_with_anchor_weekday_negative_one_is_rejected() -> None:
+    async with db.async_session() as session:
+        user = await create_user(session)
+        session.add(
+            Beat(
+                user_id=user.id,
+                topic="EU AI regulation",
+                level=Level.SOME_EXPERIENCE,
+                anchor_weekday=-1,
+            )
+        )
+        with pytest.raises(IntegrityError) as exc_info:
+            await session.commit()
+    assert "ck_beats_anchor_weekday_range" in str(exc_info.value)
+
+
+@pytest.mark.anyio
+async def test_beat_with_anchor_weekday_seven_is_rejected() -> None:
+    async with db.async_session() as session:
+        user = await create_user(session)
+        session.add(
+            Beat(
+                user_id=user.id,
+                topic="EU AI regulation",
+                level=Level.SOME_EXPERIENCE,
+                anchor_weekday=7,
+            )
+        )
+        with pytest.raises(IntegrityError) as exc_info:
+            await session.commit()
+    assert "ck_beats_anchor_weekday_range" in str(exc_info.value)
+
+
+@pytest.mark.anyio
+async def test_beat_with_anchor_weekday_zero_and_six_are_accepted() -> None:
+    """The inclusive boundaries (Python's Monday == 0, Sunday == 6)."""
+    async with db.async_session() as session:
+        user = await create_user(session)
+        monday = await _make_beat(session, user=user, anchor_weekday=0)
+        sunday = await _make_beat(
+            session, user=user, topic="another topic", anchor_weekday=6
+        )
+        await session.commit()  # must not raise
+        monday_id, sunday_id = monday.id, sunday.id
+
+    async with db.async_session() as session:
+        repo = BeatRepository(session)
+        monday_beat = await repo.get(monday_id)
+        sunday_beat = await repo.get(sunday_id)
+    assert monday_beat is not None
+    assert monday_beat.anchor_weekday == 0
+    assert sunday_beat is not None
+    assert sunday_beat.anchor_weekday == 6
 
 
 # --------------------------------------------------------------------------- #
@@ -248,9 +371,18 @@ async def test_two_published_briefs_sharing_a_number_in_one_beat_rejected() -> N
 
 
 @pytest.mark.anyio
-async def test_two_skipped_briefs_in_one_beat_succeed() -> None:
-    """The property the partial index buys (TDD §4): NULL ``number`` is never
-    indexed, so any number of Skipped rows may share a Beat.
+async def test_two_skipped_briefs_in_one_beat_are_both_legal() -> None:
+    """Two Skipped periods for one Beat are a real, necessary property (D2) —
+    a Beat that skips two weeks running must still record both.
+
+    This does **not** prove the index is partial: Postgres btree unique
+    indexes already treat NULLs as distinct by default, so this insert would
+    succeed under a plain ``UNIQUE (beat_id, number)`` too. The test that
+    actually pins partiality is
+    ``test_the_brief_number_index_is_declared_on_both_model_and_migration``
+    below, which asserts ``"number IS NOT NULL" in indexdef`` against a real
+    database (mirrored by ``test_migrations.py``'s equivalent) — that is the
+    guard to keep, even though this test would keep passing without it.
     """
     async with db.async_session() as session:
         user = await create_user(session)
@@ -319,6 +451,58 @@ async def test_the_brief_number_index_is_declared_on_both_model_and_migration() 
 
 
 # --------------------------------------------------------------------------- #
+# uq_brief_sources_brief_id_position (§4) — untested until now
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.anyio
+async def test_two_sources_sharing_a_position_in_one_brief_is_rejected() -> None:
+    async with db.async_session() as session:
+        user = await create_user(session)
+        beat = await _make_beat(session, user=user)
+        await session.commit()
+        brief = await _published_brief(session, beat_id=beat.id)
+        await session.commit()
+        brief_id = brief.id
+
+    async with db.async_session() as session:
+        session.add(
+            BriefSource(
+                brief_id=brief_id,
+                position=1,  # collides with the Source _published_brief wrote
+                url="https://example.com/duplicate-position",
+                publisher="Northlake Health System",
+                title="A second report",
+                published_on=date(2026, 8, 1),
+            )
+        )
+        with pytest.raises(IntegrityError) as exc_info:
+            await session.commit()
+    assert "uq_brief_sources_brief_id_position" in str(exc_info.value)
+
+
+@pytest.mark.anyio
+async def test_the_same_position_under_a_different_brief_is_fine() -> None:
+    async with db.async_session() as session:
+        user = await create_user(session)
+        beat = await _make_beat(session, user=user)
+        await session.commit()
+        first_brief = await _published_brief(session, beat_id=beat.id, number=1)
+        await session.commit()
+        second_brief = await _published_brief(session, beat_id=beat.id, number=2)
+        await session.commit()  # must not raise
+        first_id, second_id = first_brief.id, second_brief.id
+
+    async with db.async_session() as session:
+        positions = await session.execute(
+            select(BriefSource.brief_id, BriefSource.position).where(
+                BriefSource.brief_id.in_([first_id, second_id])
+            )
+        )
+    assert set(positions.all()) == {(first_id, 1), (second_id, 1)}
+
+
+# --------------------------------------------------------------------------- #
 # The claim protocol (D3) — reused unchanged from _generation.py
 # --------------------------------------------------------------------------- #
 
@@ -346,6 +530,56 @@ async def test_two_concurrent_beat_research_claims_exactly_one_winner() -> None:
         assert beat is not None
         assert beat.research_state is BeatResearchState.RESEARCHING
         assert beat.research_started_at is not None
+
+
+@pytest.mark.anyio
+async def test_beat_claim_row_lock_forces_overlap_exactly_one_winner() -> None:
+    """Force *true* row-lock contention rather than trusting ``gather`` to
+    overlap (D3's claim is "the single largest piece of leverage in this
+    phase", TDD D3, and D15 makes every page load a claim attempt).
+
+    ``asyncio.gather`` over two sessions is not a serialized no-op, but it
+    does not *guarantee* both UPDATEs are ever in flight together — it works
+    only incidentally, because ``session.execute`` happens to yield at the
+    asyncpg round trip. This is the deterministic variant, in the shape of
+    ``test_repositories.py::test_lesson_claim_row_lock_forces_overlap_exactly_one_winner``:
+    ``A`` claims but does not commit — it holds the row lock. ``B``'s claim
+    then provably blocks on that lock (asserted via ``pg_stat_activity``, no
+    timed sleep). Committing ``A`` releases ``B``, which re-evaluates the now-
+    ``researching`` row and loses. A non-atomic (read-then-write) claim could
+    let both win under this exact interleaving; the single guarded ``UPDATE``
+    cannot.
+    """
+    async with db.async_session() as session:
+        user = await create_user(session)
+        beat = await _make_beat(session, user=user)
+        await session.commit()
+        beat_id = beat.id
+
+    async def claim_b() -> datetime | None:
+        async with db.async_session() as session_b:
+            won = await BeatRepository(session_b).claim_research(beat_id)
+            await session_b.commit()
+            return won
+
+    async with db.async_session() as session_a:
+        fence_a = await BeatRepository(session_a).claim_research(beat_id)
+        assert fence_a is not None  # A holds the row lock, uncommitted
+
+        b_task = asyncio.create_task(claim_b())
+        # Deterministically wait until B is genuinely blocked on A's row lock.
+        await asyncio.wait_for(wait_until_lock_waiters(1), timeout=10)
+        # Release A; B unblocks, re-reads the fresh claim, and loses.
+        await session_a.commit()
+        fence_b = await b_task
+
+    assert fence_b is None
+
+    async with db.async_session() as session:
+        beat = await BeatRepository(session).get(beat_id)
+        assert beat is not None
+        assert beat.research_state is BeatResearchState.RESEARCHING
+        assert beat.research_started_at == fence_a  # A's claim stands
 
 
 @pytest.mark.anyio
@@ -423,6 +657,79 @@ async def test_stale_researching_beat_is_reclaimable_fresh_not() -> None:
         assert await repo.claim_research(stale_id) is not None
         assert await repo.claim_research(fresh_id) is None
         await session.commit()
+
+
+# --------------------------------------------------------------------------- #
+# effective_research_state (§5.7's "process dies mid-run" row) — the READ
+# side of stale recovery; the tests above cover only the CLAIM side. Inverting
+# generating_state/failed_state, or reading Beat.created_at instead of
+# Beat.research_started_at, must fail one of these.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.anyio
+async def test_effective_research_state_of_fresh_researching_is_researching() -> None:
+    now = datetime.now(UTC)
+    async with db.async_session() as session:
+        user = await create_user(session)
+        beat = await _make_beat(
+            session,
+            user=user,
+            research_state=BeatResearchState.RESEARCHING,
+            research_started_at=now - FRESH_AGE,
+        )
+        await session.commit()
+        beat_id = beat.id
+
+    async with db.async_session() as session:
+        repo = BeatRepository(session, stale_after_seconds=TEST_STALE_AFTER_SECONDS)
+        state = await repo.effective_research_state(beat_id)
+    assert state is BeatResearchState.RESEARCHING
+
+
+@pytest.mark.anyio
+async def test_effective_research_state_of_a_stale_researching_beat_is_failed() -> None:
+    """The read side of D5's stale recovery (§5.7: "Process dies mid-run ->
+    stays ``researching``, reads as failed"). A stale run must read as
+    ``failed`` even though the stored column still says ``researching``, or a
+    crashed Beat shows a dead spinner with no retry affordance forever.
+    """
+    now = datetime.now(UTC)
+    async with db.async_session() as session:
+        user = await create_user(session)
+        beat = await _make_beat(
+            session,
+            user=user,
+            research_state=BeatResearchState.RESEARCHING,
+            research_started_at=now - STALE_AGE,
+        )
+        await session.commit()
+        beat_id = beat.id
+
+    async with db.async_session() as session:
+        repo = BeatRepository(session, stale_after_seconds=TEST_STALE_AFTER_SECONDS)
+        state = await repo.effective_research_state(beat_id)
+    assert state is BeatResearchState.FAILED
+
+
+@pytest.mark.parametrize(
+    "research_state",
+    [BeatResearchState.IDLE, BeatResearchState.FAILED, BeatResearchState.REFUSED],
+)
+@pytest.mark.anyio
+async def test_effective_research_state_of_idle_failed_refused_reads_as_itself(
+    research_state: BeatResearchState,
+) -> None:
+    async with db.async_session() as session:
+        user = await create_user(session)
+        beat = await _make_beat(session, user=user, research_state=research_state)
+        await session.commit()
+        beat_id = beat.id
+
+    async with db.async_session() as session:
+        repo = BeatRepository(session, stale_after_seconds=TEST_STALE_AFTER_SECONDS)
+        state = await repo.effective_research_state(beat_id)
+    assert state is research_state
 
 
 # --------------------------------------------------------------------------- #
@@ -607,6 +914,52 @@ async def test_list_for_beat_interleaves_both_kinds_newest_first() -> None:
         (BriefKind.SKIPPED, None, date(2026, 7, 27)),
         (BriefKind.PUBLISHED, 1, date(2026, 7, 20)),
     ]
+
+
+@pytest.mark.anyio
+async def test_list_for_beat_breaks_a_same_day_tie_on_published_at_not_id() -> None:
+    """Two entries sharing ``published_on`` must order by ``published_at`` —
+    the event (§4) — not by ``id`` (``uuid4``, chronologically meaningless).
+    The earlier fixture uses three distinct dates and cannot catch a
+    regression to an ``id``-only or otherwise wrong tiebreak; this one shares
+    a single ``published_on`` between two entries and asserts the later event
+    sorts first regardless of which row SQLAlchemy happens to construct
+    first.
+    """
+    same_day = date(2026, 8, 3)
+    async with db.async_session() as session:
+        user = await create_user(session)
+        beat = await _make_beat(session, user=user)
+        await session.commit()
+        repo = BriefRepository(session)
+        earlier = await repo.create_published(
+            beat_id=beat.id,
+            number=1,
+            published_at=datetime(2026, 8, 3, 8, tzinfo=UTC),
+            published_on=same_day,
+            title="Morning edition",
+            body_markdown="Body one.",
+            claims=["claim one"],
+            sources=[_new_source()],
+        )
+        later = await repo.create_published(
+            beat_id=beat.id,
+            number=2,
+            published_at=datetime(2026, 8, 3, 20, tzinfo=UTC),
+            published_on=same_day,
+            title="Evening edition",
+            body_markdown="Body two.",
+            claims=["claim two"],
+            sources=[_new_source(url="https://example.com/b")],
+        )
+        await session.commit()
+        beat_id = beat.id
+        earlier_id, later_id = earlier.id, later.id
+
+    async with db.async_session() as session:
+        entries = await BriefRepository(session).list_for_beat(beat_id)
+
+    assert [entry.id for entry in entries] == [later_id, earlier_id]
 
 
 @pytest.mark.anyio

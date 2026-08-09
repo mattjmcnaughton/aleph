@@ -111,24 +111,6 @@ class BeatRepository:
     async def get(self, beat_id: uuid.UUID) -> Beat | None:
         return await self.session.get(Beat, beat_id)
 
-    async def get_for_user(
-        self, *, beat_id: uuid.UUID, user_id: uuid.UUID
-    ) -> Beat | None:
-        """Fetch a Beat only if it belongs to ``user_id`` (ownership guard)."""
-        result = await self.session.execute(
-            select(Beat).where(Beat.id == beat_id, Beat.user_id == user_id)
-        )
-        return result.scalar_one_or_none()
-
-    async def list_for_user(self, *, user_id: uuid.UUID) -> list[Beat]:
-        """A learner's Beats, newest first (the list surface's read, §6)."""
-        result = await self.session.execute(
-            select(Beat)
-            .where(Beat.user_id == user_id)
-            .order_by(Beat.created_at.desc(), Beat.id)
-        )
-        return list(result.scalars())
-
     async def effective_research_state(
         self, beat_id: uuid.UUID
     ) -> BeatResearchState | None:

@@ -145,33 +145,23 @@ class BriefRepository:
     async def get(self, brief_id: uuid.UUID) -> Brief | None:
         return await self.session.get(Brief, brief_id)
 
-    async def get_for_beat(
-        self, *, brief_id: uuid.UUID, beat_id: uuid.UUID
-    ) -> Brief | None:
-        """Fetch a Brief only if it belongs to ``beat_id`` (ownership guard)."""
-        result = await self.session.execute(
-            select(Brief).where(Brief.id == brief_id, Brief.beat_id == beat_id)
-        )
-        return result.scalar_one_or_none()
-
     async def list_for_beat(self, beat_id: uuid.UUID) -> list[Brief]:
         """The Beat rail: newest first, **both kinds interleaved** (D2) —
-        served by ``ix_briefs_beat_id_published_on``. ``id`` breaks ties
-        between same-day entries so the order is total and stable.
+        served by ``ix_briefs_beat_id_published_on``. Ties (same
+        ``published_on``) break on ``published_at``, the event timestamp
+        (TDD §4), so two same-day entries still order by when they actually
+        happened; ``id`` is a final tiebreak only for the (practically
+        unreachable) case both timestamps also match, keeping the order
+        total.
         """
         result = await self.session.execute(
             select(Brief)
             .where(Brief.beat_id == beat_id)
-            .order_by(Brief.published_on.desc(), Brief.id.desc())
-        )
-        return list(result.scalars())
-
-    async def sources_for_brief(self, brief_id: uuid.UUID) -> list[BriefSource]:
-        """A Brief's Sources, in citation order (§6's ``sources`` payload)."""
-        result = await self.session.execute(
-            select(BriefSource)
-            .where(BriefSource.brief_id == brief_id)
-            .order_by(BriefSource.position)
+            .order_by(
+                Brief.published_on.desc(),
+                Brief.published_at.desc(),
+                Brief.id.desc(),
+            )
         )
         return list(result.scalars())
 

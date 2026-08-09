@@ -57,7 +57,7 @@ down_revision: str | None = "0011_flashcard_management"
 branch_labels: str | tuple[str, ...] | None = None
 depends_on: str | tuple[str, ...] | None = None
 
-BEAT_RESEARCH_STATE_INDEX = "ix_beats_user_id"
+BEAT_USER_ID_INDEX = "ix_beats_user_id"
 BRIEF_NUMBER_INDEX = "uq_briefs_beat_id_number"
 BRIEF_PUBLISHED_ON_INDEX = "ix_briefs_beat_id_published_on"
 BRIEF_SOURCE_INDEX = "ix_brief_sources_brief_id"
@@ -131,7 +131,7 @@ def upgrade() -> None:
             name="ck_beats_anchor_weekday_range",
         ),
     )
-    op.create_index(BEAT_RESEARCH_STATE_INDEX, "beats", ["user_id"])
+    op.create_index(BEAT_USER_ID_INDEX, "beats", ["user_id"])
 
     op.create_table(
         "briefs",
@@ -235,7 +235,7 @@ def downgrade() -> None:
     op.drop_index(BRIEF_NUMBER_INDEX, table_name="briefs")
     op.drop_table("briefs")
 
-    op.drop_index(BEAT_RESEARCH_STATE_INDEX, table_name="beats")
+    op.drop_index(BEAT_USER_ID_INDEX, table_name="beats")
     op.drop_table("beats")
 
     bind = op.get_bind()

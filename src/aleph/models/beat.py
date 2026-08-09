@@ -95,6 +95,7 @@ class Beat(Base, UUIDAuditMixin):
         ),
         nullable=False,
         default=BeatResearchState.IDLE,
+        server_default=BeatResearchState.IDLE.value,
     )
     research_started_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
