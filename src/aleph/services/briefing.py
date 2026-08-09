@@ -8,30 +8,48 @@ owns claim -> run -> persist -> (no emit yet, AL-540) for one Beat's research
 run, exactly the shape ``GenerationOrchestrator``/``FlashcardDraftingService``
 already establish twice.
 
-**The two entry points, and how they compose (TDD §3, §5.6).**
+**The two entry points, and how they compose (TDD §3, §5.6) — CORRECTED by
+code-review FIX 1 on AL-521; the paragraph below describes the current,
+fixed shape, not the TDD's original pseudocode ordering.**
 
 * :meth:`BriefingService.drain_claimable` — the arrival trigger (D15). Reads
   the caller's own ``session`` (a side effect of a read the learner already
   wanted — listing or opening Beats), derives ``local_today`` **once** (D5,
   the single owner of "today" — the ``services/progress_read.py`` seam,
   reused), evaluates :func:`aleph.domains.cadence.is_claimable` per Beat
-  (bounded by ``MAX_BEATS_PER_LEARNER``), checks the research cap
-  (non-raising — see :func:`aleph.services.rate_limit.DailyRateLimiter.
-  brief_research_capacity_available`), and spawns :meth:`run_research` through
-  the injected ``spawn`` seam (``TaskRegistry``, unchanged) for every Beat
-  that clears both gates.
-* :meth:`BriefingService.run_research` — the **already-claiming** pipeline
-  target (mirrors ``run_outline_task``'s shape: the permit is acquired
-  *before* the claim, and the claim happens *inside* this method, not before
-  it is spawned). This is what makes two concurrent arrivals safe with no
-  fence to thread through the spawn boundary: both ``drain_claimable`` calls
-  may decide the same Beat is claimable and both may spawn
-  ``run_research(beat_id, local_today)`` — the atomic ``UPDATE ... WHERE
-  ...`` inside it (reused unchanged from ``repositories/beats.py``, itself
-  built on ``repositories/_generation.py``) lets exactly one win, and the
-  loser's call is a silent no-op. ``local_today`` rides the spawn (D4a): the
-  Brief's ``published_on`` is the date the *arrival* decided, never one a
-  background frame would have to re-derive.
+  (bounded by ``MAX_BEATS_PER_LEARNER``, and pre-filtered to claim-eligible
+  research states — FIX 3, see
+  :meth:`~aleph.repositories.beats.BeatRepository.list_claim_eligible_for_user`),
+  and then, **for each claimable Beat, in order**: checks the research cap
+  (FIX 4 — before *every* claim, not once for the whole drain; non-raising,
+  see :func:`aleph.services.rate_limit.DailyRateLimiter.
+  brief_research_capacity_available`), **claims it synchronously on the
+  caller's own session and commits** (FIX 1), and only then spawns
+  :meth:`run_research` through the injected ``spawn`` seam (``TaskRegistry``,
+  unchanged) — passing the fence the claim just won.
+
+  **Why the claim moved here (FIX 1).** The TDD's original ordering spawned
+  first and claimed inside the spawned task. A Beat's pre-claim state
+  (``idle``) is *also* its post-success state — unlike a path's ``pending``,
+  which is a non-terminal poll state — and the detail poll
+  (``lib/polling.ts``) stops on any terminal state, ``idle`` included. So the
+  original ordering had a real window: the handler could drain, spawn, and
+  return ``research_state: "idle"`` before the spawned task had been given
+  the event loop to claim — the client's first poll would see a terminal
+  state and never start polling, and the Brief would land with nothing on
+  screen to show it. Claiming here, before the spawn, makes the response
+  (and the request's own subsequent read, on the same session) deterministically
+  ``researching``.
+* :meth:`BriefingService.run_research` — the pipeline target. Called two
+  ways: with a pre-won ``fence`` (the arrival drain, above — the claim
+  already happened, this method never re-claims) or with none (a direct
+  call, e.g. tests and a future retry-driven entry point — self-claims
+  exactly as before, permit-before-claim, ``run_outline_task``'s own
+  ordering). Either way the permit (``MAX_CONCURRENT_BRIEF_RESEARCH``, D14)
+  gates only the actual pipeline work (retrieval + the two model calls), never
+  the claim itself. ``local_today`` rides the spawn (D4a): the Brief's
+  ``published_on`` is the date the *arrival* decided, never one a background
+  frame would have to re-derive.
 
 **The pipeline inside one claimed run** (TDD §3's pseudocode, §5.3-§5.5):
 plan (pure, ``services/retrieval.py::build_query_plan``) -> retrieve (I/O,
@@ -67,15 +85,27 @@ from the *retrieved* ``RetrievedDocument``s by URL, never from anything the
 model said in prose — this is what the adversarial provenance test
 (``tests/integration/test_briefing.py``) exercises directly.
 
-**Open threads (a reading, recorded because the TDD does not spell one out).**
-``AnalystDeps.open_threads`` has no dedicated schema column — §5.4 names only
-that it "carries forward from prior Briefs". The only structurally available
-candidate is the Beat's flattened prior claims
-(``BriefRepository.prior_claims_for_beat``, D9's own novelty-gate input), so
-this service passes the identical list to both the gate and the writer. If a
-future ticket wants a narrower "still open" signal, this is the seam to
-sharpen; nothing here assumes a stronger contract than "every claim ever
-published on this Beat".
+**Open threads — bounded to the most recent entry, decoupled from the gate's
+input (code-review FIX 6 on AL-521, correcting the paragraph this replaces).**
+``AnalystDeps.open_threads`` is built from
+``BriefRepository.latest_entry_claims_for_beat`` — the MOST RECENT entry's
+claims only — never from ``prior_claims_for_beat`` (D9's own novelty-gate
+input, the Beat's *whole* history). The two were previously the same list,
+which was wrong on both counts it can be wrong on: **inverted** (the analyst
+prompt asks it to write about exactly the claims the novelty gate just
+guaranteed it has no *new* evidence for — the gate's whole job is dropping
+findings that restate them) and **unbounded** (hundreds of strings injected
+into the analyst prompt on an old, long-running Beat, growing with the
+Beat's age rather than staying flat). ``latest_entry_claims_for_beat`` fixes
+both: it is a *different* read from the gate's own, and it is bounded to at
+most one entry's worth of claims regardless of how old the Beat is. See its
+docstring for the "most recent entry may be Skipped" case.
+
+**A Brief with no Sources is not publishable — enforced at the persist
+boundary (FIX 5).** ``_materialize_sources``'s own defensive ``continue``
+(a cited URL with no matching document) can degenerate to ``[]``; that ``[]``
+must never reach :meth:`_persist_published` — see the guard in
+:meth:`_run_claimed`, just before the publish branch.
 """
 
 from __future__ import annotations
@@ -151,6 +181,19 @@ _RETRIEVAL_FAILED_MESSAGE = "Couldn't reach sources. Please retry."
 _NO_DOCUMENTS_MESSAGE = "Couldn't reach sources. Please retry."
 _RESEARCH_TIMEOUT_MESSAGE = "Research timed out. Please retry."
 _RESEARCH_FAILED_MESSAGE = "Research failed. Please retry."
+# FIX 5 (AL-521 review): the persist-boundary guard's own message — a Brief
+# with no Sources is not publishable (TDD §5.5/§5.7), distinguished from the
+# generic failure text so an operator reading `research_error` can tell this
+# branch from an ordinary pipeline failure without the DB row leaking any
+# model/provider internals.
+_NO_SOURCES_MESSAGE = "Couldn't verify any sources. Please retry."
+# FIX 9 (AL-521 review): a programming-error invariant violation (AnalystDeps
+# construction, an unrecognized Level) is not a provider blip — see the
+# dedicated except clause in `_run_claimed`. Still generic/non-leaky (no
+# exception text, no stack trace) so nothing internal reaches a learner-facing
+# render; the distinguishing detail lives in the structured log instead
+# (`brief_research_invariant_violation`).
+_INVARIANT_VIOLATION_MESSAGE = "Research failed due to an internal error. Please retry."
 
 
 class _UnconfiguredRetriever:
@@ -181,7 +224,16 @@ class _UnconfiguredRetriever:
 
 @dataclass(frozen=True)
 class _ResearchContext:
-    """Everything one claimed research run needs, loaded from the DB once."""
+    """Everything one claimed research run needs, loaded from the DB once.
+
+    ``prior_claims`` and ``open_thread_claims`` are deliberately two
+    different reads (FIX 6, code-review on AL-521): ``prior_claims`` is D9's
+    own novelty-gate input, the Beat's *whole* claim history; the analyst's
+    ``open_threads`` is built from ``open_thread_claims`` instead — the MOST
+    RECENT entry's claims only. See ``BriefRepository.
+    latest_entry_claims_for_beat``'s docstring and the module docstring's
+    "Open threads" section for why the two must not be the same list.
+    """
 
     account_id: uuid.UUID
     topic: str
@@ -192,6 +244,7 @@ class _ResearchContext:
     last_entry_on: date | None
     prior_urls: frozenset[str]
     prior_claims: tuple[str, ...]
+    open_thread_claims: tuple[str, ...]
     latest_published_number: int | None
 
 
@@ -271,10 +324,24 @@ def _materialize_sources(
     somehow left undated (also unreachable: §5.2 drops undated documents
     before any model sees them) is skipped defensively rather than raised —
     this function never invents a Source's metadata from nothing.
+
+    **Deduplicated, preserving first-occurrence order (FIX 5, code review on
+    AL-521).** ``cited_urls`` is a plain ``list[str]`` with no uniqueness
+    guarantee anywhere upstream of here — neither agent's own validator
+    checks for repeats — so a model listing the same URL twice would
+    otherwise become two ``brief_sources`` rows citing the same URL at two
+    different positions (``UNIQUE (brief_id, position)`` does not catch that:
+    the two positions are distinct) and the Sources block would render the
+    same Source twice. A repeated URL is folded to its first occurrence
+    before the join below.
     """
     by_url = {document.url: document for document in documents}
     sources: list[NewSource] = []
+    seen: set[str] = set()
     for url in cited_urls:
+        if url in seen:
+            continue
+        seen.add(url)
         document = by_url.get(url)
         if document is None or document.published_on is None:
             continue
@@ -376,31 +443,43 @@ class BriefingService:
         is_admin: bool = False,
         now: datetime | None = None,
     ) -> None:
-        """Evaluate cadence for ``user_id``'s Beats and spawn what is due.
+        """Evaluate cadence for ``user_id``'s Beats, claim what is due, and
+        spawn its research — claim-before-spawn (code-review FIX 1 on
+        AL-521; see the module docstring's "how they compose" section for
+        why this ordering matters).
 
         Runs against the caller's own ``session`` (the read the learner
-        already wanted — TDD §5.6/§7's "a GET with a side effect"): this
-        method itself performs no claim and opens no transaction of its own,
-        only reads. ``local_today`` is derived exactly once (D5) and carried
-        into every spawned :meth:`run_research` call (D4a) — never re-derived
-        by the background frame that eventually runs it.
+        already wanted — TDD §5.6/§7's "a GET with a side effect"):
+        ``local_today`` is derived exactly once (D5) and carried into every
+        spawned :meth:`run_research` call (D4a) — never re-derived by the
+        background frame that eventually runs it.
 
-        Bounded by ``MAX_BEATS_PER_LEARNER`` (D14, via
-        ``BeatRepository.list_for_user``'s ``limit``) and, before any claim
-        is attempted, by the research rate cap — checked **once per drain
-        call**, before spawning any beat, and **non-raising**: hitting
-        ``RATE_LIMIT_BRIEF_RESEARCH_PER_DAY`` here degrades to "no research
-        this time" rather than turning a beats-list ``GET`` into a ``429``
-        (TDD §7's explicit rule).
-
-        The claim itself happens **inside** :meth:`run_research`, not here —
-        so two concurrent ``drain_claimable`` calls may both decide the same
-        Beat is claimable and both spawn a task for it; only one wins the
-        atomic claim, and the other's task is a silent no-op (see the module
-        docstring's "how they compose" note).
+        Bounded by ``MAX_BEATS_PER_LEARNER`` (D14) and pre-filtered to
+        claim-eligible research states (FIX 3, via ``BeatRepository.
+        list_claim_eligible_for_user`` — a Beat already ``researching``,
+        ``failed``, or ``refused`` never reaches the cadence check at all).
+        For each Beat the cadence still says is due, **in order**: the
+        research rate cap is checked (FIX 4 — before *this* claim, not once
+        for the whole drain, so capacity spent by an earlier claim in this
+        same loop is reflected before the next one; non-raising — hitting
+        ``RATE_LIMIT_BRIEF_RESEARCH_PER_DAY`` degrades to "no more research
+        this time" rather than turning a beats-list ``GET`` into a ``429``,
+        TDD §7's explicit rule, and stops the whole loop rather than
+        skipping just that Beat, since the cap can only ever get tighter as
+        the loop claims more), then the Beat is claimed **synchronously, on
+        this session, and committed** (FIX 1) — so the claim is durable and
+        visible (to this session's own subsequent reads, and to any other
+        session, since Postgres' default READ COMMITTED isolation means a
+        commit here is visible to the very next statement anywhere) before
+        the spawn ever happens — and only a WON claim is spawned
+        (:meth:`run_research`, passed the fence this call just won). A lost
+        claim (raced by a concurrent drain, or a state that changed between
+        the eligibility read above and now) spawns nothing at all — FIX 3's
+        other half, on top of the query-level filter above.
         """
         local_today = _local_today(tz_offset_minutes, now)
-        beats = await self._beats(session).list_for_user(
+        beats_repo = self._beats(session)
+        beats = await beats_repo.list_claim_eligible_for_user(
             user_id=user_id, limit=self._config.max_beats_per_learner
         )
         if not beats:
@@ -420,40 +499,58 @@ class BriefingService:
             return
 
         limiter = build_daily_rate_limiter(session, config=self._config)
-        if not await limiter.brief_research_capacity_available(
-            user_id=user_id, is_admin=is_admin
-        ):
-            return
-
         for beat_id in claimable_ids:
-            self._spawn(self.run_research(beat_id, local_today))
+            if not await limiter.brief_research_capacity_available(
+                user_id=user_id, is_admin=is_admin
+            ):
+                return
+            fence = await beats_repo.claim_research(beat_id)
+            if fence is None:
+                # Lost the race (a concurrent drain claimed it first, or its
+                # state changed since the eligibility read above) — never
+                # spawn a task for a claim that did not win (FIX 1/FIX 3).
+                continue
+            await session.commit()
+            self._spawn(self.run_research(beat_id, local_today, fence=fence))
 
     # -- the claimed pipeline (TDD §3/§5.3-§5.5/§5.7) ------------------------ #
 
-    async def run_research(self, beat_id: uuid.UUID, local_today: date) -> None:
-        """Claim -> plan -> retrieve -> find -> gate -> write -> persist.
+    async def run_research(
+        self,
+        beat_id: uuid.UUID,
+        local_today: date,
+        *,
+        fence: datetime | None = None,
+    ) -> None:
+        """Plan -> retrieve -> find -> gate -> write -> persist, against an
+        already-claimed Beat.
 
-        The permit (``MAX_CONCURRENT_BRIEF_RESEARCH``, D14) is acquired
-        **before** the claim — ``run_outline_task``'s own reasoning, one
-        workload over: a claim must never commit ``researching`` and then
-        queue unbounded on the semaphore, which under a spike could let a
-        healthy claimed row go stale mid-queue and be double-claimed. The
-        claim itself is the atomic, idle-or-stale-only ``UPDATE`` reused
-        unchanged from ``repositories/beats.py`` (D3) — a lost race (already
-        ``researching``/``failed``/``refused``) is a silent no-op, exactly
-        ``run_outline_task``'s shape.
+        ``fence`` is the claim token :meth:`drain_claimable` already won
+        (code-review FIX 1 on AL-521) — the normal production path from the
+        arrival trigger. When ``fence`` is ``None`` (a direct call — tests,
+        and a future retry-driven entry point) this method self-claims
+        first, exactly as it always has: the permit
+        (``MAX_CONCURRENT_BRIEF_RESEARCH``, D14) is acquired **before** the
+        claim — ``run_outline_task``'s own reasoning, one workload over — and
+        the claim itself is the atomic, idle-or-stale-only ``UPDATE`` reused
+        unchanged from ``repositories/beats.py`` (D3); a lost race is a
+        silent no-op. Either way, the permit gates only the pipeline work
+        itself (retrieval + the two model calls) — never the claim, which
+        FIX 1 requires to already be resolved (or resolved here) before any
+        model or retrieval I/O begins.
 
         Any escape from the claimed body (an infra blip after the model ran,
         a persist error) is recorded ``failed`` best-effort by the top-level
-        handler, mirroring ``run_outline_task``'s own invariant: the spawned
-        task never leaks an unretrieved exception, and a row never wedges in
+        handler, mirroring ``run_outline_task``'s own invariant: this method
+        never leaks an unretrieved exception, and a row never wedges in
         ``researching`` until the stale window when a fenced mark could have
         recorded the real cause.
         """
         async with self._model_slot():
-            fence = await self._claim(beat_id)
             if fence is None:
-                return
+                fence = await self._claim(beat_id)
+                if fence is None:
+                    return
             try:
                 await self._run_claimed(beat_id, local_today, fence=fence)
             except Exception:
@@ -538,13 +635,18 @@ class BriefingService:
                 analyst_documents = _documents_for_survivors(documents, survivors)
 
                 # -- write (model): survivors -> BriefBody | SkippedNote ---- #
+                # FIX 6 (AL-521 review): `open_threads` comes from
+                # `open_thread_claims` (the MOST RECENT entry's claims,
+                # bounded) — NEVER `prior_claims` (D9's own, unbounded gate
+                # input, used above). See the module docstring's "Open
+                # threads" section.
                 analyst_deps = AnalystDeps(
                     topic=context.topic,
                     level=AGENT_LEVEL[context.level],
                     guidance=context.guidance,
                     documents=analyst_documents,
                     survivors=survivors,
-                    open_threads=list(context.prior_claims),
+                    open_threads=list(context.open_thread_claims),
                 )
                 analyst_run = await build_analyst_agent().run(
                     build_analyst_prompt(analyst_deps),
@@ -562,6 +664,33 @@ class BriefingService:
             return
         except TimeoutError:
             await self._mark_failed(beat_id, fence, _RESEARCH_TIMEOUT_MESSAGE)
+            return
+        except (ValueError, KeyError) as exc:
+            # FIX 9 (AL-521 review): a PROGRAMMING-error invariant violation,
+            # not a provider blip — `AnalystDeps.__post_init__`'s
+            # `ValueError` (an invariant its author deliberately made loud:
+            # "failing here, before a single model call, is the whole
+            # point") and `AGENT_LEVEL[context.level]`'s `KeyError` both land
+            # here rather than in the blanket handler below. The blanket
+            # handler stays (it is the house pattern, and `failed` is not
+            # auto-claimable, TDD D3, so a bug here cannot become an
+            # infinitely-retried billed run) — but a contract breach that
+            # will fail IDENTICALLY on every retry deserves to be
+            # distinguishable from an infra blip that might not. Logged
+            # under its own event name, with the exception's TYPE (never its
+            # message — avoid leaking internals into a structured log field
+            # that is not this codebase's operator-only surface either) so
+            # an operator can tell the two apart; the stored
+            # `research_error` is a differently-worded but equally generic,
+            # non-leaky message — nothing here reaches a learner-facing
+            # render (AL-522) any more specifically than the ordinary
+            # failure text does.
+            logger.exception(
+                "brief_research_invariant_violation",
+                beat_id=str(beat_id),
+                error_type=type(exc).__name__,
+            )
+            await self._mark_failed(beat_id, fence, _INVARIANT_VIOLATION_MESSAGE)
             return
         except Exception:  # noqa: BLE001 - §5.5/§5.7: any agent/infra error -> failed
             # Covers a researcher/analyst retry-budget exhaustion
@@ -585,6 +714,26 @@ class BriefingService:
             )
         else:
             sources = _materialize_sources(result.cited_urls, documents)
+            if not sources:
+                # FIX 5 (AL-521 review): "a Brief with no Sources is not
+                # publishable" (TDD §5.5/§5.7), enforced at the PERSIST
+                # boundary rather than merely assumed true because upstream
+                # invariants make it currently-true. Structurally
+                # unreachable today — `AnalystDeps`'s construction-time
+                # invariant plus both agents' output validators already
+                # guarantee a non-empty, resolvable `cited_urls` — which is
+                # exactly why this is a hard guard rather than trusting
+                # `_materialize_sources`'s own defensive `continue`: that
+                # `continue` turns the one observable symptom (a cited URL
+                # with no matching document) into silence, and silence here
+                # would mean a zero-Source Brief gets PUBLISHED.
+                logger.error(
+                    "brief_research_zero_sources_at_persist",
+                    beat_id=str(beat_id),
+                    cited_url_count=len(result.cited_urls),
+                )
+                await self._mark_failed(beat_id, fence, _NO_SOURCES_MESSAGE)
+                return
             number = (context.latest_published_number or 0) + 1
             persisted = await self._persist_published(
                 beat_id,
@@ -614,6 +763,11 @@ class BriefingService:
             last_entries = await briefs.last_published_on_by_beat([beat_id])
             prior_urls = await briefs.prior_source_urls_for_beat(beat_id)
             prior_claims = await briefs.prior_claims_for_beat(beat_id)
+            # FIX 6 (AL-521 review): a SEPARATE, bounded read — the most
+            # recent entry's claims only — never the same list as
+            # `prior_claims` above (D9's own, deliberately unbounded gate
+            # input). See `_ResearchContext`'s docstring.
+            open_thread_claims = await briefs.latest_entry_claims_for_beat(beat_id)
             latest_published = await briefs.latest_published(beat_id)
             return _ResearchContext(
                 account_id=beat.user_id,
@@ -625,6 +779,7 @@ class BriefingService:
                 last_entry_on=last_entries.get(beat_id),
                 prior_urls=frozenset(prior_urls),
                 prior_claims=tuple(prior_claims),
+                open_thread_claims=tuple(open_thread_claims),
                 latest_published_number=(
                     latest_published.number if latest_published is not None else None
                 ),

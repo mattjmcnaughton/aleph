@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import ColumnElement, delete, func, select, update
 
 from aleph.config import settings
-from aleph.models import Beat, BeatResearchState
+from aleph.models import Beat, BeatResearchRun, BeatResearchState
 from aleph.repositories._generation import (
     affected_rows,
     claimable_predicate,
@@ -132,6 +132,51 @@ class BeatRepository:
         result = await self.session.execute(query)
         return list(result.scalars())
 
+    async def list_claim_eligible_for_user(
+        self, *, user_id: uuid.UUID, limit: int | None = None
+    ) -> list[Beat]:
+        """A learner's Beats whose research state could possibly be claimed
+        right now — code-review FIX 3 on AL-521.
+
+        Filters **at the query level** to :data:`_CLAIMABLE_STATES` (``idle``)
+        or a stale ``researching`` row — the identical predicate
+        :meth:`claim_research`'s own ``UPDATE`` enforces — so a Beat already
+        ``researching`` (a run genuinely in flight), ``failed``, or
+        ``refused`` is excluded from the arrival drain's cadence evaluation
+        **entirely**, never merely rejected after a wasted claim attempt.
+
+        This is what stops two failure modes the drain would otherwise hit on
+        every arrival: a run in flight being re-evaluated (and, before FIX 1,
+        re-spawned) on every poll while `lib/polling.ts` checks back every
+        2-5s over a run that can take minutes, and a permanently
+        ``failed``/``refused`` Beat being re-evaluated on every beats-list
+        ``GET`` forever, since neither state's cadence floor ever stops being
+        satisfied.
+
+        The arrival drain (``services/briefing.py::BriefingService.
+        drain_claimable``) is this method's only caller; :meth:`list_for_user`
+        (unfiltered, every state) remains what a Beat *list/detail* read uses
+        to render the learner's actual Beats regardless of research state.
+        """
+        query = (
+            select(Beat)
+            .where(
+                Beat.user_id == user_id,
+                claimable_predicate(
+                    state_col=Beat.research_state,
+                    started_at_col=Beat.research_started_at,
+                    claimable_states=_CLAIMABLE_STATES,
+                    generating_state=BeatResearchState.RESEARCHING,
+                    stale_after_seconds=self._stale_after_seconds,
+                ),
+            )
+            .order_by(Beat.created_at, Beat.id)
+        )
+        if limit is not None:
+            query = query.limit(limit)
+        result = await self.session.execute(query)
+        return list(result.scalars())
+
     async def effective_research_state(
         self, beat_id: uuid.UUID
     ) -> BeatResearchState | None:
@@ -173,6 +218,14 @@ class BeatRepository:
         ``PathRepository.claim_outline``: the row lock is held to commit, and
         a claim left open in a long transaction both blocks competitors and
         freezes the stale clock.
+
+        Callers: ``services/briefing.py::BriefingService.drain_claimable``
+        calls this directly on the request's own session, synchronously,
+        **before** spawning the research task (code-review FIX 1 on AL-521) —
+        so a claim is committed and visible to the request's own subsequent
+        read before any background work has even started. ``run_research``
+        also self-claims through this method when called with no pre-claimed
+        fence (a direct call, e.g. a future retry-driven pipeline entry).
         """
         return await self._claim(beat_id, _CLAIMABLE_STATES)
 
@@ -215,9 +268,24 @@ class BeatRepository:
                 refusal_message=None,
                 updated_at=func.now(),
             )
-            .returning(Beat.research_started_at)
+            .returning(Beat.research_started_at, Beat.user_id)
         )
-        return result.scalar_one_or_none()
+        row = result.one_or_none()
+        if row is None:
+            return None
+        fence, user_id = row
+        # Code-review FIX 2 on AL-521: one row per WON claim, in the SAME
+        # transaction as the UPDATE above — the daily research cap
+        # (``UsageRepository.count_brief_research_runs_since``) counts THIS
+        # table, never ``beats`` rows, because a claim overwrites
+        # ``beats.research_started_at`` on every (re-)claim and a learner's
+        # Beat count sits well below the daily cap (see
+        # ``models/beat_research_run.py``).
+        self.session.add(
+            BeatResearchRun(beat_id=beat_id, user_id=user_id, started_at=fence)
+        )
+        await self.session.flush()
+        return fence
 
     # -- transitions out of a won claim (TDD §5.6/§5.7; ticket AL-521) -------- #
     #

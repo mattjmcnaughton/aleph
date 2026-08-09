@@ -224,6 +224,44 @@ class BriefRepository:
             claims.extend(row_claims)
         return claims
 
+    async def latest_entry_claims_for_beat(self, beat_id: uuid.UUID) -> list[str]:
+        """The MOST RECENT entry's claims — code-review FIX 6 on AL-521.
+
+        This, not :meth:`prior_claims_for_beat`, is what
+        ``AnalystDeps.open_threads`` is built from. The two must diverge:
+        ``prior_claims_for_beat`` is D9's own novelty-gate input and stays
+        the Beat's *whole* history (unbounded, on purpose — the gate needs
+        every prior claim to dedupe against); ``open_threads`` is "carried
+        forward from prior Briefs" (TDD §5.4), which most plainly reads as
+        *the last thing reported*, not the Beat's entire archive. Bounding it
+        here also keeps the analyst prompt's size independent of a Beat's
+        age — a two-year-old weekly Beat has ~104 entries's worth of claims
+        under the old (unbounded) reading; this always contributes at most
+        one entry's worth, however old the Beat is.
+
+        Same "most recent" ordering as :meth:`list_for_beat`'s rail read
+        (``published_on`` desc, then ``published_at`` desc, then ``id`` desc
+        as a final tiebreak) — one definition of "most recent" shared by both.
+
+        The most recent entry may be **Skipped**, whose ``claims`` is always
+        ``[]`` (``create_skipped``'s own shape) — that is read as "nothing to
+        carry forward", an empty list, never a fallback to an OLDER entry:
+        "nothing was said last time" is itself the honest continuity signal,
+        not a gap to paper over by reaching further back.
+        """
+        result = await self.session.execute(
+            select(Brief.claims)
+            .where(Brief.beat_id == beat_id)
+            .order_by(
+                Brief.published_on.desc(),
+                Brief.published_at.desc(),
+                Brief.id.desc(),
+            )
+            .limit(1)
+        )
+        row = result.scalar_one_or_none()
+        return list(row) if row is not None else []
+
     async def prior_source_urls_for_beat(self, beat_id: uuid.UUID) -> set[str]:
         """Every Source URL ever cited by this Beat's Briefs — Brief
         continuity's mechanical check (CONTEXT.md: Brief continuity; D9's

@@ -79,12 +79,19 @@ here; the family's own off-switch (``cap <= 0``) is still honoured, per
 :class:`DailyRateLimiter`'s own docstring.
 
 **Beat research (``brief_research_capacity_available``, Phase 6 TDD D14).**
-``RATE_LIMIT_BRIEF_RESEARCH_PER_DAY`` counts the learner's Beats with a
-research attempt today (``UsageRepository.count_brief_research_runs_since``,
-keyed on ``beats.research_started_at``, the stamp a claim (re-)writes) — the
-same shape as ``check_flashcard_draft_generation``'s cap, not
-``check_lesson_generation``'s: a retry re-stamps rather than inserting, so a
-same-Beat retry loop still counts once. **Ships enabled** (default 5).
+``RATE_LIMIT_BRIEF_RESEARCH_PER_DAY`` counts the learner's research RUNS today
+(``UsageRepository.count_brief_research_runs_since``, over the append-only
+``beat_research_runs`` table — one row inserted per WON claim). Code-review
+FIX 2 on AL-521: this is deliberately **not**
+``check_flashcard_draft_generation``'s shape (a stamp a retry overwrites, so
+a same-entity retry loop counts once) — that shape is unsound here
+specifically, because ``MAX_BEATS_PER_LEARNER`` bounds a learner's Beat count
+at 3, strictly below this cap's default of 5, so a counter keyed on distinct
+Beats-with-an-attempt-today could never reach the cap at production settings.
+Counting real run rows means a same-Beat retry loop counts every attempt,
+``check_lesson_generation``'s shape instead. See
+``models/beat_research_run.py`` for the full write-up. **Ships enabled**
+(default 5).
 Unlike every other check in this module, this one is **non-raising**: the
 arrival drain (``services/briefing.py::BriefingService.drain_claimable``,
 TDD §5.6/§7) runs inside a ``GET`` the learner did not ask to be billed for,

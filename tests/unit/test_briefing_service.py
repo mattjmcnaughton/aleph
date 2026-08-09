@@ -7,49 +7,32 @@ The claim/spawn/DB-driven pipeline itself (``BriefingService.drain_claimable`` /
 ``GenerationOrchestrator``: these are the config-free pieces worth pinning
 cheaply with no database.
 
-Also carries the structural guard the ticket calls for explicitly: nothing
-stops a future edit from calling ``Retriever.search()`` directly and handing
-raw documents to the researcher, silently removing D14a's only cost-
-enforcement point (the character budget in ``services/retrieval.py::retrieve``)
-with no test failing. That guard belongs here, pinned against this module's
-own source.
+**The source-grep structural guard that used to live here has moved and
+changed shape (code-review FIX 8 on AL-521).** A bare
+``assert ".search(" not in inspect.getsource(briefing)`` only ever caught one
+literal spelling — a bound-method alias, a helper in another module, a second
+``Retriever``, or even a comment containing the substring would each defeat
+or spuriously trip it. ``tests/integration/test_briefing.py``'s
+``test_documents_reaching_researcher_deps_are_capped_and_budget_truncated``
+replaces it with a behavioral guard on the INVARIANT instead: a real pipeline
+run, a ``Retriever`` fake that records its own calls, and an assertion that
+exactly one ``search()`` happened and that what reached ``ResearcherDeps`` is
+capped and character-budget-truncated — i.e. that it demonstrably came
+through ``services/retrieval.py::retrieve()``, regardless of how the calling
+code spells it.
 """
 
 from __future__ import annotations
 
-import inspect
 from datetime import UTC, date, datetime
 
 from aleph.agents.researcher import Finding, RetrievedDocument
-from aleph.services import briefing
 from aleph.services.briefing import (
     _documents_for_survivors,
     _local_today,
     _materialize_sources,
     _render_skip_line,
 )
-
-# --------------------------------------------------------------------------- #
-# The structural guard: retrieve() is the ONLY path from a Retriever to a
-# model (inherited contract #3). A direct ``.search(`` call anywhere in this
-# module would bypass ``services/retrieval.py::retrieve``'s dedupe/dated/cap/
-# character-budget invariants with nothing here to notice.
-# --------------------------------------------------------------------------- #
-
-
-def test_briefing_service_never_calls_retriever_search_directly() -> None:
-    source = inspect.getsource(briefing)
-    assert ".search(" not in source, (
-        "services/briefing.py must reach a Retriever only through "
-        "services.retrieval.retrieve() — a direct Retriever.search() call "
-        "would bypass retrieve()'s dedupe/dated-filter/document-cap/character-"
-        "budget invariants (D14a's only cost-enforcement point) with no test "
-        "here to catch it."
-    )
-    # A guard that trivially passes because nothing calls anything is not a
-    # guard — pin the one call that *should* be there.
-    assert "await retrieve(" in source
-
 
 # --------------------------------------------------------------------------- #
 # _local_today — D5's arithmetic, reused verbatim from
@@ -210,3 +193,21 @@ def test_materialize_sources_skips_a_cited_url_with_no_matching_document() -> No
     raising and failing an otherwise-good Brief."""
     sources = _materialize_sources(["https://missing"], [_doc("https://a")])
     assert sources == []
+
+
+def test_materialize_sources_dedupes_a_repeated_cited_url() -> None:
+    """FIX 5 (AL-521 review): nothing upstream of this function dedupes
+    ``cited_urls`` — a model listing the same URL twice must fold to ONE
+    Source, not two ``brief_sources`` rows at two positions."""
+    doc = _doc("https://a")
+    sources = _materialize_sources(["https://a", "https://a"], [doc])
+    assert len(sources) == 1
+    assert sources[0].url == "https://a"
+
+
+def test_materialize_sources_dedupe_preserves_first_occurrence_among_others() -> None:
+    doc_a, doc_b = _doc("https://a"), _doc("https://b")
+    sources = _materialize_sources(
+        ["https://a", "https://b", "https://a"], [doc_a, doc_b]
+    )
+    assert [s.url for s in sources] == ["https://a", "https://b"]

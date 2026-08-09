@@ -1004,6 +1004,100 @@ async def test_prior_claims_and_source_urls_span_the_whole_beat_history() -> Non
     assert urls == {"https://example.com/first", "https://example.com/second"}
 
 
+# --------------------------------------------------------------------------- #
+# `latest_entry_claims_for_beat` — code-review FIX 6 on AL-521: the bounded
+# read `AnalystDeps.open_threads` is built from, deliberately DIFFERENT from
+# `prior_claims_for_beat` above (D9's own, unbounded gate input).
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.anyio
+async def test_latest_entry_claims_returns_only_the_most_recent_entrys_claims() -> None:
+    async with db.async_session() as session:
+        user = await create_user(session)
+        beat = await _make_beat(session, user=user)
+        await session.commit()
+        repo = BriefRepository(session)
+        await repo.create_published(
+            beat_id=beat.id,
+            number=1,
+            published_at=datetime(2026, 7, 6, 9, tzinfo=UTC),
+            published_on=date(2026, 7, 6),
+            title="First",
+            body_markdown="Body one.",
+            claims=["an old claim, long superseded"],
+            sources=[_new_source(url="https://example.com/first")],
+        )
+        await repo.create_published(
+            beat_id=beat.id,
+            number=2,
+            published_at=datetime(2026, 7, 20, 9, tzinfo=UTC),
+            published_on=date(2026, 7, 20),
+            title="Second",
+            body_markdown="Body two.",
+            claims=["the newest claim"],
+            sources=[_new_source(url="https://example.com/second")],
+        )
+        await session.commit()
+        beat_id = beat.id
+
+    async with db.async_session() as session:
+        claims = await BriefRepository(session).latest_entry_claims_for_beat(beat_id)
+
+    assert claims == ["the newest claim"]  # NOT the first Brief's claim too
+
+
+@pytest.mark.anyio
+async def test_latest_entry_claims_is_empty_when_the_most_recent_entry_is_skipped() -> (
+    None
+):
+    """A Skipped entry carries no claims (``create_skipped``'s own shape) —
+    the most-recent-entry bound reads that as "nothing to carry forward",
+    never falling back to an OLDER published entry's claims."""
+    async with db.async_session() as session:
+        user = await create_user(session)
+        beat = await _make_beat(session, user=user)
+        await session.commit()
+        repo = BriefRepository(session)
+        await repo.create_published(
+            beat_id=beat.id,
+            number=1,
+            published_at=datetime(2026, 7, 6, 9, tzinfo=UTC),
+            published_on=date(2026, 7, 6),
+            title="First",
+            body_markdown="Body.",
+            claims=["an old claim"],
+            sources=[_new_source()],
+        )
+        await repo.create_skipped(
+            beat_id=beat.id,
+            published_at=datetime(2026, 7, 13, 9, tzinfo=UTC),
+            published_on=date(2026, 7, 13),
+            skip_line="Nothing material since Brief #1",
+        )
+        await session.commit()
+        beat_id = beat.id
+
+    async with db.async_session() as session:
+        claims = await BriefRepository(session).latest_entry_claims_for_beat(beat_id)
+
+    assert claims == []
+
+
+@pytest.mark.anyio
+async def test_latest_entry_claims_is_empty_with_no_entries_at_all() -> None:
+    async with db.async_session() as session:
+        user = await create_user(session)
+        beat = await _make_beat(session, user=user)
+        await session.commit()
+        beat_id = beat.id
+
+    async with db.async_session() as session:
+        claims = await BriefRepository(session).latest_entry_claims_for_beat(beat_id)
+
+    assert claims == []
+
+
 @pytest.mark.anyio
 async def test_another_beats_claims_and_sources_never_leak_in() -> None:
     async with db.async_session() as session:
