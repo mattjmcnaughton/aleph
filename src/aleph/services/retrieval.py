@@ -1,14 +1,10 @@
-"""The retrieval seam (TDD §3, §5.2, D6/D6a/D10/D14a; ticket AL-512).
+"""The retrieval seam (TDD §3, §5.2, D6/D6a/D10/D14a; tickets AL-512, AL-523).
 
-Three things live here: the `Retriever` `Protocol` every provider implements,
-the pure query planner, and `retrieve()` — the single entry point that owns
-every invariant a Brief's retrieved text must satisfy, so a second provider
-can never ship without them.
-
-**`ExaRetriever` (the live adapter) is NOT built here** — that is AL-523. This
-module ships everything the pipeline needs to be fully testable with no API
-key and no network: the Protocol, the planner, `retrieve()`,
-`RetrievalUnavailableError`, `FixtureRetriever` (evals + integration), and
+Four things live here: the `Retriever` `Protocol` every provider implements,
+the pure query planner, `retrieve()` — the single entry point that owns every
+invariant a Brief's retrieved text must satisfy, so a second provider can
+never ship without them — and the three implementations D6 names: `ExaRetriever`
+(live, ticket AL-523), `FixtureRetriever` (evals + integration), and
 `StubRetriever` (e2e, beside `services/stub_model.py`).
 
 **Purity note, carried from the TDD verbatim.** `build_query_plan` is a pure
@@ -27,6 +23,9 @@ import re
 from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from typing import TYPE_CHECKING, Protocol
+from urllib.parse import urlparse
+
+import httpx
 
 from aleph.agents.researcher import RetrievedDocument
 
@@ -140,8 +139,8 @@ class Retriever(Protocol):
     """The retrieval seam every provider implements.
 
     Three implementations across the phase (D6): `ExaRetriever` (live,
-    AL-523, not built here), `FixtureRetriever` (evals + integration, below),
-    and `StubRetriever` (e2e, below). An agent never sees a `Retriever` — it
+    below), `FixtureRetriever` (evals + integration, below), and
+    `StubRetriever` (e2e, below). An agent never sees a `Retriever` — it
     receives `RetrievedDocument`s as plain data in its `Deps` (TDD §3).
     """
 
@@ -322,6 +321,224 @@ def _apply_text_budget(
         replace(document, text=document.text[: allocation[index]])
         for index, document in enumerate(documents)
     ]
+
+
+# --- ExaRetriever — the live adapter (D6; ticket AL-523) -----------------------
+
+_EXA_BASE_URL = "https://api.exa.ai"
+_EXA_SEARCH_PATH = "/search"
+# Exa's documented ceiling on `numResults` (CONFIRMED FROM DOCS —
+# exa-labs/openapi-spec's `/search` request schema: `numResults` is `1..100`,
+# default 10). `retrieve()` applies the real, cross-query cap (`max_documents`,
+# D14a); this only bounds what one query asks Exa for, so it is never a
+# substitute for that cap and exists purely so a misconfigured
+# `BRIEF_RETRIEVAL_MAX_DOCUMENTS` cannot build a request Exa would itself
+# reject.
+_EXA_MAX_NUM_RESULTS = 100
+_DEFAULT_TIMEOUT_SECONDS = 30.0
+
+
+def _exa_request_payload(
+    query: str, *, since: date | None, num_results: int
+) -> dict[str, object]:
+    """The JSON body for one Exa `/search` call (CONFIRMED FROM DOCS shape —
+    exa-labs/openapi-spec's `/search` request schema).
+
+    `contents: {"text": true}` asks for the full extracted page text (PRD
+    §4.4: "the full text, NOT a snippet") rather than `highlights`, Exa's
+    snippet-shaped alternative. `since` becomes `startPublishedDate` — an
+    ISO 8601 **datetime**, not a bare date (CONFIRMED FROM DOCS) — and is
+    omitted entirely for a Beat's first-ever run (`since is None`, PRD §3),
+    asking Exa for its full history rather than filtering to a period start
+    that does not exist yet.
+    """
+    payload: dict[str, object] = {
+        "query": query,
+        "numResults": max(1, min(num_results, _EXA_MAX_NUM_RESULTS)),
+        "contents": {"text": True},
+    }
+    if since is not None:
+        payload["startPublishedDate"] = f"{since.isoformat()}T00:00:00.000Z"
+    return payload
+
+
+def _exa_publisher(author: object, url: str) -> str:
+    """The Source's `publisher` — Exa's response has **no such field**
+    (INFERRED, not in the documented schema).
+
+    exa-labs/openapi-spec's `/search` response documents `author` (nullable)
+    and `url` on every result, but no `publisher`/site-name field at all.
+    When `author` is a non-empty string it is the best available byline;
+    otherwise the document's own domain (`url`'s netloc, `www.` stripped)
+    stands in. `brief_sources.publisher` is `NOT NULL` (TDD §4), so leaving
+    a Source with no publisher label at all is not an option this adapter
+    can defer to a later layer.
+    """
+    if isinstance(author, str) and author.strip():
+        return author.strip()
+    netloc = urlparse(url).netloc
+    return netloc.removeprefix("www.") if netloc else "unknown"
+
+
+def _exa_published_on(raw: object) -> date | None:
+    """Parse Exa's `publishedDate` into a `date`, or `None` on anything
+    absent or unparseable.
+
+    Documented format is a bare `YYYY-MM-DD`, and the field is nullable
+    (CONFIRMED FROM DOCS). **Deliberately lenient, not a raise**:
+    `retrieve()` is the one place that drops an undated document (§5.2's
+    "one owner" rule) — this adapter must not duplicate that decision, so a
+    `null`/missing/malformed date maps to `None` and the document still
+    comes back from `search()` for `retrieve()` to filter. Only the first 10
+    characters are read, so a full ISO datetime (were Exa ever to send one
+    instead of its documented bare date) still parses.
+    """
+    if not raw:
+        return None
+    try:
+        return date.fromisoformat(str(raw)[:10])
+    except ValueError:
+        return None
+
+
+def _document_from_exa_result(item: Mapping[str, object]) -> RetrievedDocument:
+    """One `RetrievedDocument` from a single `results[i]` object (CONFIRMED
+    FROM DOCS field names — exa-labs/openapi-spec's `ResultWithContent`
+    schema: `url`, `title`, `publishedDate`, `author`, `text`).
+
+    `url` is the only field treated as required: its absence (`KeyError`) or
+    `item` not being a mapping at all (`TypeError`) means the response does
+    not match Exa's documented contract, so it raises rather than fabricate
+    a document with no address — the caller (`ExaRetriever._search_one`)
+    maps both to `RetrievalUnavailableError`. `title` and `text` fall back to
+    `""` when absent: Exa's own schema does not guarantee either is
+    populated for every URL (a page can fail content extraction and still be
+    a real, listed result), and an empty-text document is `retrieve()`'s to
+    drop (§5.2's "drop documents with no original text" rule), not this
+    adapter's.
+    """
+    url = str(item["url"])
+    title = str(item.get("title") or "")
+    text = str(item.get("text") or "")
+    return RetrievedDocument(
+        url=url,
+        publisher=_exa_publisher(item.get("author"), url),
+        title=title,
+        published_on=_exa_published_on(item.get("publishedDate")),
+        text=text,
+    )
+
+
+class ExaRetriever:
+    """The live `Retriever` (D6; ticket AL-523) — Exa's Search API over plain
+    `httpx`, not the `exa-py` SDK.
+
+    **Why plain `httpx` over `exa-py`.** `services/openrouter.py` wraps an
+    SDK (pydantic-ai's `OpenRouterProvider`) because pydantic-ai already owns
+    that whole protocol end to end — the model-calling machinery, not just
+    the HTTP request. Exa is a single REST endpoint with no comparable
+    runtime dependency anywhere else in this codebase, so a thin HTTP call is
+    the smaller surface, and it is also what keeps this seam testable with an
+    in-process fake **transport** (`httpx.MockTransport`) rather than an
+    SDK-shaped mock — CLAUDE.md's "Fakes over mocks", applied one level below
+    the `Retriever` fakes `test_retrieval.py` already uses for `retrieve()`.
+    `httpx` itself is not a new dependency at runtime — it already resolves
+    transitively via `logfire[httpx]`/`pydantic-ai` — but this ticket
+    promotes it to a direct dependency in `pyproject.toml`, on the same
+    reasoning `_load_fixture`'s pyyaml note below records: a top-level
+    `import httpx` reachable from production should not depend on some other
+    package's extra staying exactly as configured.
+
+    **Every transport, auth, quota, rate-limit, or malformed-response error
+    becomes `RetrievalUnavailableError`** (§5.7's first row — this ticket's
+    whole reason to exist, never a Skipped entry or an uncited Brief).
+    `httpx.HTTPError` is the base of every `httpx` failure this call can
+    raise: connection-level failures (DNS, TLS, timeout, refused connection —
+    every `httpx.RequestError` subclass) *and* HTTP status failures
+    (`response.raise_for_status()`, so 401 auth, 402/403 quota, 429
+    rate-limit, and 5xx all land here alike — Exa's OpenAPI spec documents no
+    per-code error body worth distinguishing, CONFIRMED FROM DOCS: "the
+    specification does not include explicit error response schemas for 401,
+    429, or 500"). A response that parses as JSON but does not match the
+    documented shape — no `results` key, `results` not a list, an item
+    missing `url` — raises `KeyError`/`TypeError`; a body that is not valid
+    JSON at all raises `ValueError` (`json.JSONDecodeError`, a `ValueError`
+    subclass). All of these are caught in one `except` and re-raised as
+    `RetrievalUnavailableError`, so nothing here can surface a bare
+    `httpx`/`json` exception past this class.
+
+    **Undated and empty-text documents are NOT dropped here** — `retrieve()`
+    owns both (§5.2's "one owner" rule; see `_exa_published_on` and
+    `_document_from_exa_result`'s docstrings).
+
+    `since` and `max_documents` are bound at construction (matching
+    `FixtureRetriever`'s `beat`): the `Retriever.search(queries)` Protocol
+    takes only query strings, so anything a call needs beyond that must live
+    on the instance. `transport` exists solely for tests
+    (`httpx.MockTransport`) — production leaves it `None` and gets `httpx`'s
+    real transport.
+    """
+
+    def __init__(
+        self,
+        api_key: str,
+        *,
+        since: date | None,
+        max_documents: int,
+        transport: httpx.AsyncBaseTransport | None = None,
+        timeout_seconds: float = _DEFAULT_TIMEOUT_SECONDS,
+    ) -> None:
+        self._api_key = api_key
+        self._since = since
+        self._max_documents = max_documents
+        self._transport = transport
+        self._timeout_seconds = timeout_seconds
+
+    async def search(self, queries: Sequence[str]) -> list[RetrievedDocument]:
+        """One Exa `/search` call per query, sequentially, concatenated.
+
+        Sequential rather than fanned out with `asyncio.gather`: a plan is
+        capped at `BRIEF_RETRIEVAL_MAX_QUERIES` (6, config.py) queries, and
+        either way the first failure becomes the same
+        `RetrievalUnavailableError` — concurrency here would buy latency, not
+        correctness, at the cost of a `TaskGroup`/`return_exceptions` dance
+        for a loop this short.
+        """
+        documents: list[RetrievedDocument] = []
+        async with httpx.AsyncClient(
+            base_url=_EXA_BASE_URL,
+            timeout=self._timeout_seconds,
+            transport=self._transport,
+        ) as client:
+            for query in queries:
+                documents.extend(await self._search_one(client, query))
+        return documents
+
+    async def _search_one(
+        self, client: httpx.AsyncClient, query: str
+    ) -> list[RetrievedDocument]:
+        """One Exa `/search` round trip, mapped to `RetrievedDocument`s or
+        raised as `RetrievalUnavailableError` — see the class docstring for
+        the full error-mapping table this `except` clause implements."""
+        payload = _exa_request_payload(
+            query, since=self._since, num_results=self._max_documents
+        )
+        try:
+            response = await client.post(
+                _EXA_SEARCH_PATH,
+                json=payload,
+                headers={"x-api-key": self._api_key},
+            )
+            response.raise_for_status()
+            data = response.json()
+            results = data["results"]
+            if not isinstance(results, list):
+                msg = f"'results' is not a list (got {type(results).__name__})"
+                raise TypeError(msg)
+            return [_document_from_exa_result(item) for item in results]
+        except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
+            msg = f"Exa search failed for query {query!r}: {exc}"
+            raise RetrievalUnavailableError(msg) from exc
 
 
 # --- FixtureRetriever — evals + integration replay (TDD §5.2, §10, D10) --------
