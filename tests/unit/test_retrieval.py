@@ -16,14 +16,17 @@ silently manufacture a Skipped entry (§5.2).
 
 from __future__ import annotations
 
+import json
 from datetime import date
 from typing import TYPE_CHECKING
 
+import httpx
 import pytest
 
 from aleph.agents.researcher import RetrievedDocument
 from aleph.services.retrieval import (
     FORCE_RETRIEVAL_FAILURE,
+    ExaRetriever,
     FixtureRetriever,
     QueryPlan,
     RetrievalUnavailableError,
@@ -402,6 +405,660 @@ async def test_retrieve_propagates_retrieval_unavailable() -> None:
         await retrieve(
             _RaisingRetriever(), plan, max_documents=1_000, text_budget_chars=1_000
         )
+
+
+# --- ExaRetriever (D6; ticket AL-523) -------------------------------------------
+#
+# A FAKE HTTP layer (`httpx.MockTransport`), never a mock library — CLAUDE.md's
+# "Fakes over mocks", applied to the one seam in this module that talks to a
+# real network in production. No test here reaches the actual Exa API.
+
+
+def _exa_result(
+    *,
+    url: str = "https://example.com/article",
+    title: str | None = "Some article",
+    published_date: str | None = "2026-07-30",
+    author: str | None = "Jane Reporter",
+    text: str | None = "The full retrieved article body, not a snippet.",
+) -> dict[str, object]:
+    """One `results[i]` object, in Exa's documented `ResultWithContent` shape."""
+    item: dict[str, object] = {"url": url}
+    if title is not None:
+        item["title"] = title
+    if published_date is not None:
+        item["publishedDate"] = published_date
+    if author is not None:
+        item["author"] = author
+    if text is not None:
+        item["text"] = text
+    return item
+
+
+def _exa_response(*, results: list[dict[str, object]]) -> httpx.Response:
+    return httpx.Response(200, json={"results": results})
+
+
+@pytest.mark.anyio
+async def test_exa_retriever_maps_fields_correctly() -> None:
+    """The core field-mapping contract: url, publisher (from the URL's
+    domain — Exa has no publisher field and `author` is a byline, not an
+    organization, FIX 1, ticket AL-512 review), title, `publishedDate` ->
+    `published_on`, and the full `text` (not empty, not truncated to a
+    snippet). `author` is deliberately present here (an organization name,
+    which the adapter used to prefer) to demonstrate it is now ignored
+    entirely — see `test_exa_retriever_publisher_is_the_domain_not_a_persons_byline`
+    for the case that actually broke.
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        del request
+        return _exa_response(
+            results=[
+                _exa_result(
+                    url="https://example.com/northlake-review",
+                    title="Ambient Documentation: 14-Month Review",
+                    published_date="2026-07-30",
+                    author="Northlake Health System",
+                    text="The full retrieved body text, not a truncated snippet.",
+                )
+            ]
+        )
+
+    retriever = ExaRetriever(
+        "exa-key",
+        since=None,
+        max_documents=12,
+        transport=httpx.MockTransport(handler),
+    )
+
+    documents = await retriever.search(["EU AI regulation"])
+
+    assert len(documents) == 1
+    document = documents[0]
+    assert document.url == "https://example.com/northlake-review"
+    assert document.title == "Ambient Documentation: 14-Month Review"
+    assert document.publisher == "example.com"
+    assert document.published_on == date(2026, 7, 30)
+    assert document.text == "The full retrieved body text, not a truncated snippet."
+
+
+@pytest.mark.anyio
+async def test_exa_retriever_maps_a_full_datetime_published_date() -> None:
+    """FIX 2 (ticket AL-512 review): every EXAMPLE value in Exa's own
+    OpenAPI spec for `publishedDate` is a full ISO 8601 datetime, not the
+    bare `YYYY-MM-DD` its prose describes — `date.fromisoformat` raises on
+    that string unsliced, so the `[:10]` slice in `_exa_published_on` is
+    load-bearing for the actual production format, not defensive
+    belt-and-braces. Before this test, no unit test used a datetime-shaped
+    `publishedDate` at all — only `"2026-07-30"`, `"not-a-date"`, or absent.
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        del request
+        return _exa_response(
+            results=[_exa_result(published_date="2023-11-16T01:36:32.547Z")]
+        )
+
+    retriever = ExaRetriever(
+        "exa-key", since=None, max_documents=12, transport=httpx.MockTransport(handler)
+    )
+
+    documents = await retriever.search(["q"])
+
+    assert documents[0].published_on == date(2023, 11, 16)
+
+
+@pytest.mark.anyio
+async def test_exa_retriever_undated_documents_survive_the_adapter() -> None:
+    """`ExaRetriever` must NOT drop an undated document itself — dropping is
+    `retrieve()`'s one job (§5.2's "one owner" rule; acceptance criteria).
+    A result with no `publishedDate` still comes back from `search()`, with
+    `published_on` mapped to `None` rather than the document vanishing.
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        del request
+        return _exa_response(results=[_exa_result(published_date=None)])
+
+    retriever = ExaRetriever(
+        "exa-key", since=None, max_documents=12, transport=httpx.MockTransport(handler)
+    )
+
+    documents = await retriever.search(["q"])
+
+    assert len(documents) == 1
+    assert documents[0].published_on is None
+
+
+@pytest.mark.anyio
+async def test_exa_retriever_unparseable_date_also_survives_as_undated() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        del request
+        return _exa_response(results=[_exa_result(published_date="not-a-date")])
+
+    retriever = ExaRetriever(
+        "exa-key", since=None, max_documents=12, transport=httpx.MockTransport(handler)
+    )
+
+    documents = await retriever.search(["q"])
+
+    assert documents[0].published_on is None
+
+
+@pytest.mark.anyio
+async def test_exa_retriever_empty_text_survives_the_adapter() -> None:
+    """The same "one owner" rule, applied to `retrieve()`'s other drop
+    condition: a result with no extracted text maps to `text=""` here
+    rather than the document being dropped by this adapter.
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        del request
+        return _exa_response(results=[_exa_result(text=None)])
+
+    retriever = ExaRetriever(
+        "exa-key", since=None, max_documents=12, transport=httpx.MockTransport(handler)
+    )
+
+    documents = await retriever.search(["q"])
+
+    assert len(documents) == 1
+    assert documents[0].text == ""
+
+
+@pytest.mark.anyio
+async def test_exa_retriever_falls_back_to_domain_when_author_is_absent() -> None:
+    """Exa's response has no `publisher` field at all (INFERRED mapping,
+    ticket AL-523's report): with no `author`, the adapter uses the
+    result's own domain, `www.` stripped."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        del request
+        return _exa_response(
+            results=[_exa_result(url="https://www.example.com/piece", author=None)]
+        )
+
+    retriever = ExaRetriever(
+        "exa-key", since=None, max_documents=12, transport=httpx.MockTransport(handler)
+    )
+
+    documents = await retriever.search(["q"])
+
+    assert documents[0].publisher == "example.com"
+
+
+@pytest.mark.anyio
+async def test_exa_retriever_publisher_is_the_domain_not_a_persons_byline() -> None:
+    """FIX 1 (ticket AL-512 review): `author` is a BYLINE, not an
+    organization — probed with Exa's own spec example values, preferring it
+    over the domain produced `publisher = "Dan Milmon"` for a Guardian
+    article. `brief_sources.publisher` is `Text` and lands verbatim in the
+    rendered Sources block (PRD §3: "the part a learner checks us on"), so a
+    person's name there reads as a bug, not a source identity. The domain is
+    now the SOLE source, regardless of what `author` says — even when
+    `author` is a real person's full name, exactly the shape that used to
+    leak through.
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        del request
+        return _exa_response(
+            results=[
+                _exa_result(
+                    url="https://www.theguardian.com/technology/article",
+                    author="Dan Milmon",
+                )
+            ]
+        )
+
+    retriever = ExaRetriever(
+        "exa-key", since=None, max_documents=12, transport=httpx.MockTransport(handler)
+    )
+
+    documents = await retriever.search(["q"])
+
+    assert documents[0].publisher == "theguardian.com"
+    assert documents[0].publisher != "Dan Milmon"
+
+
+@pytest.mark.anyio
+async def test_exa_retriever_since_becomes_start_published_date() -> None:
+    """`since` (the prior Brief's `published_on`) is passed through as Exa's
+    `startPublishedDate` date filter, an ISO 8601 datetime."""
+    captured: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(json.loads(request.content))
+        return _exa_response(results=[])
+
+    retriever = ExaRetriever(
+        "exa-key",
+        since=date(2026, 7, 20),
+        max_documents=12,
+        transport=httpx.MockTransport(handler),
+    )
+
+    await retriever.search(["EU AI regulation"])
+
+    assert captured[0]["query"] == "EU AI regulation"
+    assert captured[0]["startPublishedDate"] == "2026-07-20T00:00:00.000Z"
+    assert captured[0]["contents"] == {"text": True}
+
+
+@pytest.mark.anyio
+async def test_exa_retriever_omits_the_date_filter_on_a_beats_first_run() -> None:
+    """`since=None` (PRD §3 — a Beat's first-ever run) sends no date filter
+    at all, rather than a filter no prior Brief could have derived."""
+    captured: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(json.loads(request.content))
+        return _exa_response(results=[])
+
+    retriever = ExaRetriever(
+        "exa-key", since=None, max_documents=12, transport=httpx.MockTransport(handler)
+    )
+
+    await retriever.search(["q"])
+
+    assert "startPublishedDate" not in captured[0]
+
+
+@pytest.mark.anyio
+async def test_exa_retriever_sends_the_api_key_header() -> None:
+    captured_headers: list[httpx.Headers] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured_headers.append(request.headers)
+        return _exa_response(results=[])
+
+    retriever = ExaRetriever(
+        "secret-exa-key",
+        since=None,
+        max_documents=12,
+        transport=httpx.MockTransport(handler),
+    )
+
+    await retriever.search(["q"])
+
+    assert captured_headers[0]["x-api-key"] == "secret-exa-key"
+
+
+@pytest.mark.anyio
+async def test_exa_retriever_pins_neural_search_type() -> None:
+    """FIX 7 (ticket AL-512 review): `type` must be pinned to `"neural"`,
+    Exa's OpenAPI-documented, deterministically cheaper search type
+    (`perRequestPrices.neuralSearch_1_25_results = $0.005`) — leaving it
+    unset lets Exa's `auto` default select `deep`/`deep-reasoning`
+    (`$0.015`-`$0.075`/request), which made every prior cost claim a lower
+    bound rather than a figure.
+    """
+    captured: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(json.loads(request.content))
+        return _exa_response(results=[])
+
+    retriever = ExaRetriever(
+        "exa-key", since=None, max_documents=12, transport=httpx.MockTransport(handler)
+    )
+
+    await retriever.search(["q"])
+
+    assert captured[0]["type"] == "neural"
+
+
+@pytest.mark.anyio
+async def test_exa_retriever_clamps_num_results_into_exas_documented_range() -> None:
+    """`retrieve()` owns the real, cross-query `max_documents` cap (D14a);
+    this only keeps a single request within Exa's own documented `1..100`
+    (CONFIRMED FROM DOCS) so a misconfigured cap can't build a request Exa
+    would itself reject."""
+    captured: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(json.loads(request.content))
+        return _exa_response(results=[])
+
+    retriever = ExaRetriever(
+        "exa-key", since=None, max_documents=500, transport=httpx.MockTransport(handler)
+    )
+
+    await retriever.search(["q"])
+
+    assert captured[0]["numResults"] == 100
+
+
+@pytest.mark.anyio
+async def test_exa_retriever_issues_one_request_per_query_and_concatenates() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        return _exa_response(
+            results=[_exa_result(url=f"https://example.com/{body['query']}")]
+        )
+
+    retriever = ExaRetriever(
+        "exa-key", since=None, max_documents=12, transport=httpx.MockTransport(handler)
+    )
+
+    documents = await retriever.search(["alpha", "beta"])
+
+    assert sorted(document.url for document in documents) == [
+        "https://example.com/alpha",
+        "https://example.com/beta",
+    ]
+
+
+@pytest.mark.anyio
+async def test_exa_retriever_sizes_each_query_relative_to_max_documents() -> None:
+    """FIX 6 (ticket AL-512 review): each query asks for `max_documents /
+    len(queries)` (rounded up, with 50% headroom), not a flat
+    `max_documents` per query — the old rule over-fetched ~6x at shipped
+    config (`max_queries=6`, `max_documents=12`: 6 requests x 12 results
+    instead of 6 x 3).
+    """
+    captured: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(json.loads(request.content))
+        return _exa_response(results=[])
+
+    retriever = ExaRetriever(
+        "exa-key", since=None, max_documents=12, transport=httpx.MockTransport(handler)
+    )
+
+    await retriever.search([f"query {i}" for i in range(6)])
+
+    # ceil((12 / 6) * 1.5) == 3, for every one of the 6 requests.
+    assert [body["numResults"] for body in captured] == [3, 3, 3, 3, 3, 3]
+
+
+@pytest.mark.anyio
+async def test_retrieve_with_exa_samples_across_queries_under_the_cap() -> None:
+    """FIX 6 (ticket AL-512 review): `retrieve()`'s first-`max_documents` cap
+    must sample ACROSS angles, not drain a single query's results —
+    `ExaRetriever.search()`'s round-robin interleave is what makes that
+    true, since `Retriever.search()` returns a flat list with no query
+    attribution and `retrieve()` itself has no way to interleave.
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        query_slug = str(body["query"]).replace(" ", "-")
+        num_results = int(body["numResults"])  # type: ignore[arg-type]
+        return _exa_response(
+            results=[
+                _exa_result(
+                    url=f"https://example.com/{query_slug}-{i}",
+                    published_date="2026-07-01",
+                )
+                for i in range(num_results)
+            ]
+        )
+
+    retriever = ExaRetriever(
+        "exa-key", since=None, max_documents=6, transport=httpx.MockTransport(handler)
+    )
+    plan = QueryPlan(queries=("angle one", "angle two", "angle three"))
+
+    documents = await retrieve(
+        retriever, plan, max_documents=3, text_budget_chars=100_000
+    )
+
+    represented_queries = {document.url.rsplit("-", 1)[0] for document in documents}
+    assert len(documents) == 3
+    assert len(represented_queries) > 1, (
+        "the capped batch came entirely from one query — interleaving is "
+        "not sampling across angles"
+    )
+
+
+# --- ExaRetriever error mapping: every failure -> RetrievalUnavailableError -----
+#
+# The acceptance criterion, verbatim: "Any transport / auth / quota /
+# rate-limit / malformed-response error -> RetrievalUnavailableError, so it
+# lands as a visible, retryable `failed` run and NEVER as a Skipped entry or
+# an uncited Brief." One test per row of that mapping.
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("status_code", "case"),
+    [
+        (400, "unsupported-parameters"),
+        (401, "auth"),
+        (402, "quota"),
+        (403, "quota"),
+        (429, "rate-limit"),
+        (500, "server"),
+        (503, "server"),
+    ],
+)
+async def test_exa_retriever_maps_http_error_status_to_retrieval_unavailable(
+    status_code: int, case: str
+) -> None:
+    """400 (per the spec, unsupported parameters) is deterministic and
+    permanent rather than transient, but the status mapping stays uniform
+    (ticket AL-512 review, FIX 4's note) — this row just proves it is
+    covered, not that its retryability differs from the others.
+    """
+    del case  # documents which row of §5.7's table this parametrization covers
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        del request
+        return httpx.Response(status_code, json={"error": "nope"})
+
+    retriever = ExaRetriever(
+        "exa-key", since=None, max_documents=12, transport=httpx.MockTransport(handler)
+    )
+
+    with pytest.raises(RetrievalUnavailableError):
+        await retriever.search(["q"])
+
+
+@pytest.mark.anyio
+async def test_exa_retriever_maps_a_connection_failure_to_retrieval_unavailable() -> (
+    None
+):
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused", request=request)
+
+    retriever = ExaRetriever(
+        "exa-key", since=None, max_documents=12, transport=httpx.MockTransport(handler)
+    )
+
+    with pytest.raises(RetrievalUnavailableError):
+        await retriever.search(["q"])
+
+
+@pytest.mark.anyio
+async def test_exa_retriever_maps_a_timeout_to_retrieval_unavailable() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("timed out", request=request)
+
+    retriever = ExaRetriever(
+        "exa-key", since=None, max_documents=12, transport=httpx.MockTransport(handler)
+    )
+
+    with pytest.raises(RetrievalUnavailableError):
+        await retriever.search(["q"])
+
+
+@pytest.mark.anyio
+async def test_exa_retriever_maps_invalid_json_to_retrieval_unavailable() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        del request
+        return httpx.Response(200, content=b"not json at all")
+
+    retriever = ExaRetriever(
+        "exa-key", since=None, max_documents=12, transport=httpx.MockTransport(handler)
+    )
+
+    with pytest.raises(RetrievalUnavailableError):
+        await retriever.search(["q"])
+
+
+@pytest.mark.anyio
+async def test_exa_retriever_maps_a_missing_results_key_to_retrieval_unavailable() -> (
+    None
+):
+    def handler(request: httpx.Request) -> httpx.Response:
+        del request
+        return httpx.Response(200, json={"requestId": "abc"})  # no 'results' key
+
+    retriever = ExaRetriever(
+        "exa-key", since=None, max_documents=12, transport=httpx.MockTransport(handler)
+    )
+
+    with pytest.raises(RetrievalUnavailableError):
+        await retriever.search(["q"])
+
+
+@pytest.mark.anyio
+async def test_exa_retriever_maps_a_non_list_results_to_retrieval_unavailable() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        del request
+        return httpx.Response(200, json={"results": "not-a-list"})
+
+    retriever = ExaRetriever(
+        "exa-key", since=None, max_documents=12, transport=httpx.MockTransport(handler)
+    )
+
+    with pytest.raises(RetrievalUnavailableError):
+        await retriever.search(["q"])
+
+
+@pytest.mark.anyio
+async def test_exa_retriever_skips_a_result_missing_url_rather_than_raising() -> None:
+    """FIX 3 (ticket AL-512 review) supersedes the old behavior here: a
+    single malformed result (no `url`) used to fail the WHOLE query
+    (`RetrievalUnavailableError`); now it is skipped and `search()` returns
+    whatever remains — `[]` when it was the only result. Zero documents is
+    `retrieve()`'s "zero documents after the filters" case (§5.7), not this
+    adapter's to raise.
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        del request
+        return _exa_response(results=[{"title": "no url on this one"}])
+
+    retriever = ExaRetriever(
+        "exa-key", since=None, max_documents=12, transport=httpx.MockTransport(handler)
+    )
+
+    documents = await retriever.search(["q"])
+
+    assert documents == []
+
+
+@pytest.mark.anyio
+async def test_exa_retriever_skips_a_malformed_result_and_keeps_the_good_ones() -> None:
+    """FIX 3 (ticket AL-512 review): one malformed result (missing `url`)
+    among three must not discard the two good, dated, full-text documents
+    alongside it — confirmed empirically to raise and drop all three on the
+    prior code, presenting the learner "Couldn't reach sources" with a
+    Retry that keeps failing while Exa keeps returning that result.
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        del request
+        return _exa_response(
+            results=[
+                _exa_result(url="https://example.com/first"),
+                {"title": "no url on this one"},
+                _exa_result(url="https://example.com/third"),
+            ]
+        )
+
+    retriever = ExaRetriever(
+        "exa-key", since=None, max_documents=12, transport=httpx.MockTransport(handler)
+    )
+
+    documents = await retriever.search(["q"])
+
+    assert sorted(document.url for document in documents) == [
+        "https://example.com/first",
+        "https://example.com/third",
+    ]
+
+
+@pytest.mark.anyio
+async def test_exa_retriever_skips_a_result_with_an_unparseable_url() -> None:
+    """FIX 3 (ticket AL-512 review): a URL malformed enough that `urlparse`
+    raises (`ValueError: Invalid IPv6 URL`) inside `_exa_publisher` must
+    also be skipped, not escalated into a whole-query failure.
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        del request
+        return _exa_response(
+            results=[
+                _exa_result(url="https://example.com/good"),
+                _exa_result(url="https://[bad"),
+            ]
+        )
+
+    retriever = ExaRetriever(
+        "exa-key", since=None, max_documents=12, transport=httpx.MockTransport(handler)
+    )
+
+    documents = await retriever.search(["q"])
+
+    assert [document.url for document in documents] == ["https://example.com/good"]
+
+
+@pytest.mark.anyio
+async def test_exa_retriever_does_not_disguise_a_mapping_bug_as_retrieval_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """FIX 4 (ticket AL-512 review): the `try` around the HTTP call must NOT
+    also swallow a bug in OUR OWN mapping code. Monkeypatching
+    `_document_from_exa_result` to raise `TypeError` — not one of FIX 3's
+    two named malformed-result cases (`KeyError`/`ValueError`) — must
+    propagate as a real `TypeError`, not get disguised as
+    `RetrievalUnavailableError` behind a Retry that could never fix a code
+    bug.
+    """
+
+    def _broken_mapper(item: object) -> RetrievedDocument:
+        del item
+        msg = "simulated wrong-arity bug"
+        raise TypeError(msg)
+
+    monkeypatch.setattr(
+        "aleph.services.retrieval._document_from_exa_result", _broken_mapper
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        del request
+        return _exa_response(results=[_exa_result()])
+
+    retriever = ExaRetriever(
+        "exa-key", since=None, max_documents=12, transport=httpx.MockTransport(handler)
+    )
+
+    with pytest.raises(TypeError, match="simulated wrong-arity bug"):
+        await retriever.search(["q"])
+
+
+@pytest.mark.anyio
+async def test_exa_retriever_failure_through_retrieve_never_becomes_skipped() -> None:
+    """The end-to-end shape of §5.7's load-bearing row: an Exa outage
+    propagates through `retrieve()` as `RetrievalUnavailableError`, exactly
+    like `_RaisingRetriever`'s case above — never an empty list a caller
+    could mistake for "nothing material happened this week"."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused", request=request)
+
+    retriever = ExaRetriever(
+        "exa-key", since=None, max_documents=12, transport=httpx.MockTransport(handler)
+    )
+    plan = QueryPlan(queries=("q1",))
+
+    with pytest.raises(RetrievalUnavailableError):
+        await retrieve(retriever, plan, max_documents=12, text_budget_chars=10_000)
 
 
 # --- FixtureRetriever (TDD §10, D10) --------------------------------------------

@@ -29,6 +29,13 @@ dependencies = [
     "authlib>=1.7.2",
     "itsdangerous>=2.2.0",
     "logfire[fastapi,httpx,sqlalchemy]>=4.37",
+    # Direct dependency as of AL-523: `services/retrieval.py`'s `ExaRetriever`
+    # imports `httpx` at module level. It already resolved transitively (via
+    # `logfire[httpx]`/`pydantic-ai`), but a top-level import reachable from
+    # production should not depend on another package's extra staying exactly
+    # as configured (the same fragility `_load_fixture`'s pyyaml note in that
+    # module records and deliberately avoids by importing pyyaml locally).
+    "httpx>=0.28",
 ]
 
 [project.urls]
