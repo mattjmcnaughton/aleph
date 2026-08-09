@@ -512,8 +512,8 @@ phase and asking a chatbot what is new.
 
 **Considered and rejected as a smaller MVP.** Dropping cadence entirely — one Beat, a manual
 `Research now` button, no triggers — tests whether a cited, continuous Brief is worth reading
-without any scheduling machinery. It saves very little, because arrival-triggering is a due
-column plus one more scan in a claim protocol that already exists, and it costs the whole of
+without any scheduling machinery. It saves very little, because arrival-triggering is a derived
+due date plus one claim in a protocol that already exists, and it costs the whole of
 §5's north-star question: whether a Brief brings a learner back on a day nothing else would
 have. That question is the reason to build a pillar rather than a report generator.
 
@@ -538,7 +538,8 @@ are load-bearing and the alternatives will be re-proposed by someone eventually 
    accepted cost is that most Briefs are researched while the learner waits at current scale;
    §3's "the rest of the app stays usable" is what makes that acceptable, and the **Wait
    tolerance** guardrail in §5 is what would falsify it. The always-on option is deliberately
-   left one config line away (§4.2) — with §4.8's hibernation as its price.
+   left close to one config line away (§4.2 — plus the reconciler scan this slice does not carry)
+   — with §4.8's hibernation as its price.
 3. ~~**Does reading a Brief keep a streak alive?**~~ **Resolved: yes** (§4.9). Third signal into
    **Active day**, Daily streak only, decided now because no Brief exists yet and this is the
    only moment the amendment is free.

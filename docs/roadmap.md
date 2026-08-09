@@ -33,7 +33,7 @@ afterthought.
 | **3 — Flashcards and spaced repetition** | ✅ Shipped & launched (`flashcards` flag on) — all ten TDD tickets plus AL-410's card-management surface | [PRD](prds/phase-3-flashcards.md) · [TDD](tdds/phase-3-flashcards.md) · [mock](mocks/aleph-phase-3-flashcards.html) |
 | **4 — Adaptive paths** | ⬜ Not started — **no PRD yet** (2B pre-built the proposal/apply machinery) | — |
 | **5 — Momentum** | 🟡 In progress — streaks shipped **and launched**; goal ring and daily minutes unbuilt | streaks: [PRD](prds/phase-5-streaks.md) · [TDD](tdds/phase-5-streaks.md) |
-| **6 — The analyst** | ⬜ Not started — **PRD only, no TDD**. A second pillar beside paths, not a deepening of one | [PRD](prds/phase-6-analyst.md) |
+| **6 — The analyst** | ⬜ Not started — **PRD + TDD, no code, no flag, no mock**. A second pillar beside paths, not a deepening of one | [PRD](prds/phase-6-analyst.md) · [TDD](tdds/phase-6-analyst.md) |
 | **Beyond** | ⬜ Unscoped, sequenced against real usage | — |
 
 Three tails hang off the shipped phases and are tracked as open issues rather than
@@ -231,11 +231,12 @@ for the rest of this phase.
 
 ## Phase 6 — The analyst
 
-> ⬜ **Status:** not started. **PRD only** — no TDD, no code, no flag, no mock. The
+> ⬜ **Status:** not started. **PRD + TDD** — no code, no flag, no mock. The
 > vocabulary is already in [`CONTEXT.md`](CONTEXT.md) (the *The analyst* section,
 > marked unbuilt) because a name is cheapest to fix before prompts and schemas use
 > it.
-> 📄 **Full spec:** [Phase 6 PRD — The analyst](prds/phase-6-analyst.md)
+> 📄 **Full spec:** [Phase 6 PRD — The analyst](prds/phase-6-analyst.md) ·
+> [Phase 6 TDD](tdds/phase-6-analyst.md)
 
 Every phase above deepens one pillar: a **path**, which teaches a body of knowledge
 that was already settled when you asked for it. This phase adds a second pillar
@@ -250,7 +251,7 @@ not a "realtime path"**: linear unlock is the wrong reading model for a feed, an
 infinite path has no denominator, and folding Briefs into lesson-shaped counters
 would corrupt the **Activation rate** north star irreversibly. **Nothing is
 scheduled**: cadence is a floor on frequency rather than a calendar appointment,
-and work is driven by learner arrival plus the existing reconciler plus a
+and work is driven by learner arrival plus a
 time-axis **Brief prefetch** — which needs no cron, no always-on machine, and no
 deployment change, and which makes an unread Beat cost exactly nothing. And
 **nothing to report is a first-class outcome**: the failure mode that kills this
