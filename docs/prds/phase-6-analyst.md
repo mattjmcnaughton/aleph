@@ -1,8 +1,8 @@
 # PRD — Phase 6: The analyst
 
-**Status:** Proposal (not accepted) · **Owner:** solo builder · **Roadmap item:** [Phase 6 — The analyst](../roadmap.md#phase-6--the-analyst)
-**Companion to:** a Phase 6 TDD that does not exist yet — this document owns the product boundary only
-**References:** [`README.md`](../../README.md) · [`roadmap.md`](../roadmap.md) · [`CONTEXT.md`](../CONTEXT.md) (ubiquitous language) · [Phase 1 PRD](phase-1-path-generation.md) · [Phase 2B PRD](phase-2b-shape-your-path.md) · [Phase 3 PRD](phase-3-flashcards.md) · [Phase 5 streaks PRD](phase-5-streaks.md) · [`architecture.md`](../architecture.md) · [`metrics.md`](../metrics.md) · [`evals.md`](../evals.md) · [`deploy.md`](../deploy.md)
+**Status:** Accepted · **Owner:** solo builder · **Roadmap item:** [Phase 6 — The analyst](../roadmap.md#phase-6--the-analyst)
+**Companion to:** [Phase 6 TDD](../tdds/phase-6-analyst.md) — this document owns the product boundary only; the TDD's §14 records where the shipped design corrected this one
+**References:** [`README.md`](../../README.md) · [`roadmap.md`](../roadmap.md) · [`CONTEXT.md`](../CONTEXT.md) (ubiquitous language) · [Phase 1 PRD](phase-1-path-generation.md) · [Phase 2B PRD](phase-2b-shape-your-path.md) · [Phase 3 PRD](phase-3-flashcards.md) · [Phase 5 streaks PRD](phase-5-streaks.md) · [Phase 6 TDD](../tdds/phase-6-analyst.md) · [`architecture.md`](../architecture.md) · [`metrics.md`](../metrics.md) · [`evals.md`](../evals.md) · [`deploy.md`](../deploy.md)
 
 > **This document owns the product boundary only.** Schema, the claim protocol, **which
 > retrieval provider we use**, how findings are deduplicated against prior Briefs, the API and
@@ -12,7 +12,8 @@
 > **Provider choice is explicitly deferred.** This document says *retrieval* and never names a
 > vendor. A neural search API, a general web search API, a search-augmented model through the
 > OpenRouter client we already have — all are candidates, all are the TDD's call, and §4.4
-> states the only product constraints the choice has to satisfy.
+> states the only product constraints the choice has to satisfy (the third rule there rules out
+> the third candidate).
 
 ## 1. Summary
 
@@ -43,7 +44,7 @@ due — because something new exists that did not exist yesterday.
 
 **Why now.** Phases 1–3 built the reading surface, the tutor rail, the retention loop, and —
 most importantly for this phase — the generation machinery that survives a crash with no
-learner watching: claim, stale recovery, the reconciler, bounded concurrency
+learner watching: claim, stale recovery, bounded concurrency
 (`services/lifecycle.py`), and **Trigger + poll** as the delivery model. Every one of those
 exists for reasons this phase inherits exactly, and §4.2 turns out to need almost nothing new.
 
@@ -76,7 +77,7 @@ learner should not have to learn a second app.
 
 | Reused verbatim | Why it fits unchanged |
 | --- | --- |
-| **Trigger + poll** and the generation lifecycle — claim, stale recovery, reconciler, `TaskRegistry`, the concurrency semaphore | Built for work that must survive a restart and be driven by whoever shows up. §4.2 is that model applied to a clock instead of a position. |
+| **Trigger + poll** and the generation lifecycle — claim, stale recovery, `TaskRegistry`, the concurrency semaphore, **except the reconciler** (§4.2) | Built for work that must survive a restart and be driven by whoever shows up. §4.2 is that model applied to a clock instead of a position. |
 | **Prefetch (+N)**, on the time axis (§4.2) | The same idea — generate ahead of where the learner is, to hide latency — with "ahead" measured in hours rather than lesson positions. **Deferred from the first slice** (§7.1): at current scale the warm moment it exploits does not exist. |
 | The Markdown pipeline (`markdown.tsx`) | It is the security boundary for model-written text. A Brief is model-written text, and it must not get its own renderer. |
 | **Topic**, **Level**, **Guidance**, **Refused** | A Beat takes the same three generation inputs, frozen the same way, with the same safety branch. No new vocabulary where the old vocabulary is right. |
@@ -186,6 +187,14 @@ claim about the world on a date, and rewriting it retroactively would make **Bri
 a lie. If a Brief gets something wrong, the *next* Brief corrects it in the open. That is what
 an analyst does.
 
+**The publication date is part of that immutability, not a view onto it.** A Brief is stamped
+with its date the moment it is written, from the local day the run that produced it was claimed
+on (§4.2) — it is never recomputed later from whoever happens to be reading. `Brief #5 — Monday
+3 August 2026` is content, the same way the body is; deriving it fresh per request the way a
+streak derives "today" would let a learner's travel move a published document's date, and the
+cadence floor (§4.2) with it. The accepted consequence: a learner who deploys in London and
+reads in Tokyo sees each Brief dated where they were when it published, not where they are now.
+
 **A Brief's period is "since the last Brief", never a calendar slot.** Brief #7 covers
 everything since Brief #6, whenever that was. This falls out of §4.2 and is better than the
 calendar alternative in three ways: a learner returning after a month triggers **one**
@@ -196,38 +205,38 @@ faithful to §4.5 — the delta is naturally measured from the last report, not 
 **Cadence is a floor on frequency, not a calendar appointment**: *weekly* means "at most one
 Brief a week", and the promise to the learner is that a Beat keeps up, not that it fires at
 07:00. A Beat becomes **claimable** on its **Anchor day** (§4.11), in the learner's local time,
-and the claim is driven by three triggers, in order — all of which already exist:
+and the claim is driven by two triggers:
 
 1. **Arrival.** A request from a learner with a claimable Beat kicks the drain, exactly as
    reaching a lesson kicks its generation today. This is Phase 1's **Trigger + poll**, verbatim,
-   and at current scale it is the trigger that will almost always fire.
-2. **The reconciler.** It already ticks every `RECONCILER_INTERVAL` whenever the process is
-   alive for any reason. One more scan drains claimable Beats for free during any warm moment.
-3. **Brief prefetch** — **specified, and deferred from the first slice** (§7.1). A Beat becomes
+   and at current scale it is the sole trigger that fires — see below for why the reconciler
+   does not join it.
+2. **Brief prefetch** — **specified, and deferred from the first slice** (§7.1). A Beat becomes
    claimable a little *before* its Anchor day opens, so a warm moment on Sunday evening produces
    Monday's Brief and it is genuinely waiting. This is **Prefetch (+N)** on the time axis: the
    same trick, hiding the same latency, for the same reason. Early by hours is a feature; the
    Brief's period is *since the last Brief* (§4.1), so nothing about it depends on the exact
    moment it was written. It waits because the warm moment it exploits does not exist at current
-   scale — which means **the first slice runs on triggers 1 and 2 alone**, and in practice on 1.
+   scale — which means **the first slice runs on arrival alone**.
 
 **The learner's local time comes from the arrival, so nothing has to be stored.** "Is it Monday
 for this learner" is only ever asked at the moment a request arrives, and a request already
 carries `tz_offset_minutes` — the same value `services/progress_read.py` uses to decide what
 "today" means for a streak. Aleph therefore needs no stored timezone and no stored delivery
 time (§7) to honour an Anchor day, which is a second thing arrival-triggering buys and a
-scheduler would have had to pay for. The reconciler (trigger 2) has no request and no offset,
-so it is a **backstop that may run a Beat late and never early** — which is exactly §4.2's
-promise, not an exception to it.
+scheduler would have had to pay for.
 
-**So the reconciler does not deliver anchored Beats at all**, and that is the first slice's
-answer rather than a limitation to engineer around: it would need either a stored timezone
-(which §7 excludes) or a conservative "wait until the Anchor day has opened everywhere" lag,
-and at current scale it is the trigger that barely fires. Arrival is therefore the sole trigger
-that evaluates an Anchor day. The learner-visible consequence is worth stating plainly: **a
-Brief appears the first time you open the app on or after your day**, and never before you show
-up. This becomes a real decision only on a move to always-on (§4.2), where the reconciler is
-the primary trigger and a stored timezone is wanted anyway.
+**The reconciler plays no part in this.** It already ticks every `RECONCILER_INTERVAL` for
+paths and lessons, whenever the process is alive for any reason, but it has no request and no
+`tz_offset_minutes` to ask "is it Monday for this learner" with. Evaluating an Anchor day off
+the reconciler would need either a stored timezone (which §7 excludes) or a conservative "wait
+until the Anchor day has opened everywhere" lag, and at current scale it would be a trigger that
+barely fires — so the reconciler does not scan Beats at all in this slice. **Arrival is
+therefore the sole trigger that evaluates an Anchor day.** The learner-visible consequence is
+worth stating plainly: **a Brief appears the first time you open the app on or after your
+day**, and never before you show up. This becomes a real decision only on a move to always-on,
+where the reconciler is worth teaching to scan Beats as the primary trigger and a stored
+timezone is wanted anyway.
 
 **Nothing is ever silently skipped for infrastructural reasons.** **Skipped** (§4.6) means *the
 analyst found nothing*, and it must never become a laundry slot for *we failed to run*. Those
@@ -246,10 +255,11 @@ while the learner waits. §3's rule — the rest of the app stays usable — is 
 acceptable. It also improves on its own: the more the product is used, the warmer the process,
 the more often a Brief is finished before anyone asks for it.
 
-**And it does not foreclose always-on.** Setting `min_machines_running = 1` is a one-line
-config change that requires **no code change at all** — it simply promotes trigger 2 from
-backup to primary, and Briefs start being ready on schedule. The decision is reversible in both
-directions for the price of a deploy, which is the main reason to start here.
+**And it does not foreclose always-on.** Setting `min_machines_running = 1` is close to a
+one-line config change — paired with teaching the reconciler the same claimable-Beats scan
+arrival already runs, which the reconciler does not carry in this slice (§4.2) — and Briefs
+start being ready on schedule instead of on arrival. The decision is reversible in both
+directions for close to the price of a deploy, which is the main reason to start here.
 
 **4.3 A Beat has a Level and Guidance, for the same reason a path does.** "What has happened in
 EU AI regulation" is a different document for a policy lawyer and for someone who just heard
@@ -263,13 +273,21 @@ and enough of the retrieved text to ground a quote. Which vendor satisfies that 
 question with real cost and quality tradeoffs, and this document takes no position beyond those
 three requirements.
 
-Two things it *does* take a position on, because they are product rules and not implementation:
+Three things it *does* take a position on, because they are product rules and not implementation:
 
 - **The analyst never cites what it did not read.** A URL that was retrieved but whose content
   never entered the model's context is not a Source. A citation is a claim of provenance.
 - **A Brief with no Sources is not publishable.** If retrieval failed, that is a failure state
   (retryable, visible), never an uncited essay from model priors. The whole difference between
   this phase and asking a chatbot what's new is that difference.
+- **Retrieval itself is deterministic — a plan, not a tool a model reaches for.** The queries are
+  derived from the Beat's frozen standing orders (Topic, Guidance) and the period since the last
+  entry; no model in the pipeline calls a search tool of its own to produce them, whichever
+  vendor ends up executing the plan. This is what keeps the two rules above enforceable rather
+  than aspirational — the researcher's inputs are exactly what retrieval returned, with no tool
+  call in between whose arguments could drift from what was actually read — and the
+  **research/write split** holds independently, for the same reason: read, then write, never
+  one pass doing both.
 
 **4.5 Brief continuity: report the delta, not the topic.** Brief *N* is generated with awareness
 of Briefs *1…N-1* — their claims and, critically, **their cited Source URLs** — and its job is
@@ -293,6 +311,12 @@ This is the rule most likely to be argued away later under pressure to look busy
 stated as a decision and not a heuristic: **a Skipped period is the feature working
 correctly.** A learner who reads three padded Briefs stops opening the fourth, and we will
 never see that in a metric until the Beat is already dead.
+
+**A Skipped entry carries no number of its own.** §3's own example already assumes this — "Nothing
+material since Brief #4" names the last *Brief*, not a Skipped period before or after it. Only
+published Briefs are numbered, and a Skipped period sits in the rail dated but unnumbered between
+them. Numbering it would imply a Skipped period is a kind of Brief; it is the opposite, an honest
+record that no Brief exists for that stretch.
 
 **4.7 Multiple Beats, with a cap.** A learner may deploy several — this mirrors paths, where
 multiple-from-day-one was a deliberate Phase 1 call, and it is what makes the Beat section on
@@ -383,7 +407,7 @@ than deepened.
 | Metric | Question it answers |
 | --- | --- |
 | **Brief read rate** — Briefs opened ÷ Briefs published | The blunt one. Below some floor, nothing else matters. |
-| **Depth of read** — share of opened Briefs where the learner reaches the Sources | Is it being read, or glanced at? A feature about provenance should be able to show that provenance gets used. |
+| **Depth of read** — share of opened Briefs where the learner reaches the Sources | Is it being read, or glanced at? A feature about provenance should be able to show that provenance gets used, which needs a second signal distinct from opening: whether the Sources block was seen at all. |
 | **Skip rate** — Skipped ÷ research runs, per Beat | Calibrates §4.6 in both directions. Near zero means the novelty gate is not gating and we are shipping filler; consistently high on one Beat means weekly is faster than that subject moves (§8 Q7), and high across all of them means the gate is too strict. It is also the number that has to look healthy before a daily cadence is trusted (§4.11). |
 | **Wait tolerance** (guardrail, §4.2) — share of researching Beats the learner is still present for when the Brief lands, and what they did in between | The direct measurement of the tradeoff §4.2 accepts, and the **first** metric to read: with Brief prefetch deferred (§7.1) the first slice waits every time, so this is measured at its worst case rather than an average. If learners consistently leave and never come back to the finished Brief, the fix is prefetch first and always-on second. |
 | **Beat survival** — Beats with a read Brief in the last 30 days | The honest verdict on whether an analyst is a thing people keep. |
@@ -405,17 +429,18 @@ would build it):
    system-proposed **Addition**. This is genuine fusion and it lands *after* Phase 4, on Phase
    4's machinery.
 
-**New workflows** (W28 is the next free number; W1–W27 are taken):
+**New workflows** (W29 is the next free number; W1–W28 are taken — AL-410 took W28 while this
+document was in review):
 
-- **W28 — Deploy an analyst, get a cited Brief.** Create a Beat → the first Brief is researched
+- **W29 — Deploy an analyst, get a cited Brief.** Create a Beat → the first Brief is researched
   immediately → it renders with resolving Sources.
-- **W29 — The second Brief builds on the first.** A Beat with a prior Brief produces one that
+- **W30 — The second Brief builds on the first.** A Beat with a prior Brief produces one that
   cites the earlier Brief and does not re-report its claims.
-- **W30 — A quiet period is Skipped, not padded.** With no novel findings, the run publishes a
+- **W31 — A quiet period is Skipped, not padded.** With no novel findings, the run publishes a
   Skipped entry and no Brief body, and does not immediately re-research.
-- **W31 — A long absence produces one Brief, not a backlog.** A Beat left claimable for several
+- **W32 — A long absence produces one Brief, not a backlog.** A Beat left claimable for several
   Anchor days generates a single Brief covering everything since the last one (§4.1).
-- **W32 — Retrieval failure is recoverable and never uncited.** With retrieval unavailable, the
+- **W33 — Retrieval failure is recoverable and never uncited.** With retrieval unavailable, the
   run fails visibly and retries; no Brief is ever published without Sources.
 
 ## 6. Evals (AI components)
@@ -458,7 +483,8 @@ Beat's standing orders after deployment, the **Anchor day** included (delete and
 Phase 1 does for paths — §4.11, §8 Q5) · learner-supplied sources, RSS feeds, or private or
 paywalled documents · **a daily cadence, or any cadence choice at all** (§4.11 — weekly is the
 only one this slice ships) · a delivery *time* of day, and any stored per-learner timezone
-(§4.2 — the arrival carries it) · a public or shareable Brief · exporting a Beat · comments,
+(§4.2 — the claiming arrival carries it; §4.1 for why the date is then frozen) · a public or
+shareable Brief · exporting a Beat · comments,
 highlights or annotations on a Brief · any aggregation of Brief content across learners ·
 counting a read Brief toward **Activated learner** (§4.9, a standing rule rather than a slice
 boundary) · always-on hosting and the hibernation rule it would require (§4.2, §4.8).
@@ -471,23 +497,23 @@ adding one back later is a decision rather than a drift.
 
 | Deferred | Why it waits |
 | --- | --- |
-| **Brief prefetch** — the third trigger (§4.2) | Speculative optimization for traffic that does not exist. With the machine asleep most of the time the warm-moment window essentially never fires, so arrival + reconciler are behaviourally identical today. Costs nothing to cut, costs nothing to add back. |
+| **Brief prefetch** — the second trigger (§4.2) | Speculative optimization for traffic that does not exist. With the machine asleep most of the time the warm-moment window essentially never fires, so cutting it leaves arrival as the only trigger there is today anyway. Costs nothing to cut, costs nothing to add back. |
 | **Inline citations** (§3) | Numbered markers mean the agent emits them, the renderer resolves them, and something validates that every marker points at a real Source — and that means extending `markdown.tsx`, the security boundary for model-written text and the last place to churn early. **The Sources list is not deferred**: §4.4's provenance rule holds in full, carried by prose attribution in the body plus the Sources block at the foot (Appendix A shows exactly this). Inline markers are the upgrade once Briefs are worth checking line by line. |
-| **The streak union** (§4.9) | The vocabulary amendment already landed and is the part that had to happen now; the wiring can wait. Read-tracking itself is **not** deferred — §5's north-star metric needs it, and it is a column plus an event. This defers only feeding Brief reads into **Active day**, exactly the split [`CONTEXT.md`](../CONTEXT.md) already describes when it says nothing reads the third signal yet. |
+| **The streak union** (§4.9) | The vocabulary amendment already landed and is the part that had to happen now; the wiring can wait. Read-tracking itself is **not** deferred — §5's north-star metric needs it, and it is two columns plus an event carrying a `marker` discriminator. This defers only feeding Brief reads into **Active day**, exactly the split [`CONTEXT.md`](../CONTEXT.md) already describes when it says nothing reads the third signal yet. |
 | **The `brief_findings` eval kind** (§6) | Ship `brief` alone. Novelty against prior Briefs is mostly a *deterministic* check — Source-URL overlap plus claim dedup — which belongs as a layer-1 predicate rather than judge spend. **Recorded retrieval fixtures are not deferred**: without them the phase cannot be evaluated *or* booted by `scripts/e2e_backend.py`. |
 | **Period grouping in the Beat rail** (§3) | Month subheadings would group nothing for the entire window in which the phase is being judged — at weekly cadence, month one is a single *August* header over one to four Briefs, and grouping starts earning its keep somewhere past ten. A flat dated list carries the same information, and there is an obvious trigger to revisit: when a Beat's rail no longer fits on one screen. |
-| **W29, W31, W32** (§5) | W28 (a cited Brief) and W30 (Skipped, not padded) carry the phase's two load-bearing claims as browser journeys. W29 needs two Briefs to set up, and W31/W32 are edge cases that test better as integration cases than as Playwright runs. |
+| **W30, W32, W33** (§5) | W29 (a cited Brief) and W31 (Skipped, not padded) carry the phase's two load-bearing claims as browser journeys. W30 needs two Briefs to set up, and W32/W33 are edge cases that test better as integration cases than as Playwright runs. |
 
 **Considered and kept.** *Multiple Beats* (§4.7) stays in the first slice by owner decision —
-the cap is what bounds it. The *research/write split* (§4.4) stays: one tool-using agent that
-searches and writes is simpler, but it makes "never cite what you did not read" very hard to
-enforce, and that rule is the whole difference between this phase and asking a chatbot what is
-new.
+the cap is what bounds it. The *research/write split* (§4.4) stays: one agent that reads
+retrieved documents and writes the Brief in a single pass is simpler, but it makes "never cite
+what you did not read" very hard to enforce, and that rule is the whole difference between this
+phase and asking a chatbot what is new.
 
 **Considered and rejected as a smaller MVP.** Dropping cadence entirely — one Beat, a manual
 `Research now` button, no triggers — tests whether a cited, continuous Brief is worth reading
-without any scheduling machinery. It saves very little, because arrival-triggering is a due
-column plus one more scan in a claim protocol that already exists, and it costs the whole of
+without any scheduling machinery. It saves very little, because arrival-triggering is a derived
+due date plus one claim in a protocol that already exists, and it costs the whole of
 §5's north-star question: whether a Brief brings a learner back on a day nothing else would
 have. That question is the reason to build a pillar rather than a report generator.
 
@@ -507,12 +533,13 @@ are load-bearing and the alternatives will be re-proposed by someone eventually 
    "Newsletter" is the genre rather than the unit and is now absent from this document entirely
    — the product says **Beat** and **Brief**.
 2. ~~**What replaces `min_machines_running = 0`?**~~ **Resolved: nothing.** §4.2 replaces the
-   scheduler with arrival-triggering plus the existing reconciler and a time-axis prefetch,
+   scheduler with arrival-triggering, plus a time-axis prefetch specified for a later slice,
    which needs no deployment change, no external cron, and no second deployment artifact. The
    accepted cost is that most Briefs are researched while the learner waits at current scale;
    §3's "the rest of the app stays usable" is what makes that acceptable, and the **Wait
    tolerance** guardrail in §5 is what would falsify it. The always-on option is deliberately
-   left one config line away (§4.2) — with §4.8's hibernation as its price.
+   left close to one config line away (§4.2 — plus the reconciler scan this slice does not carry)
+   — with §4.8's hibernation as its price.
 3. ~~**Does reading a Brief keep a streak alive?**~~ **Resolved: yes** (§4.9). Third signal into
    **Active day**, Daily streak only, decided now because no Brief exists yet and this is the
    only moment the amendment is free.
@@ -531,10 +558,10 @@ are load-bearing and the alternatives will be re-proposed by someone eventually 
    setting a learner is most likely to want to change after living with it. It is the first
    candidate for a follow-on, ahead of daily cadence.
 6. **Does a Beat inherit the admin model picker, and how many slots?** §4.4's split — research
-   (tool-using, expensive, mechanical) versus writing (no tools, quality-sensitive) — argues for
-   **two** slots on the `outline`/`lesson` precedent rather than one. The TDD owns the split; the
-   question here is only whether the per-request picker reaches them, which has a production-guard
-   consequence (`MODEL_SLOTS` in `config.py`).
+   (a mechanical read of retrieved documents, huge-input, expensive) versus writing
+   (quality-sensitive, short) — argues for **two** slots on the `outline`/`lesson` precedent
+   rather than one. The TDD owns the split; the question here is only whether the per-request
+   picker reaches them, which has a production-guard consequence (`MODEL_SLOTS` in `config.py`).
 7. **How does a Beat handle a Topic that was a bad idea?** §4.8 means a dead Beat is no longer
    expensive, which removes the urgency but not the question: is there a case for the analyst
    itself reporting *"this subject does not move enough to be worth a weekly beat — try monthly,

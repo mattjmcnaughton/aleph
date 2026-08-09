@@ -214,7 +214,7 @@ phase:
   Proposal/Apply machinery.
 - **Beat** / **Brief** / **Source** / **Cadence** / **Anchor day** / **Brief continuity** /
   **Brief prefetch** / **Skipped** — the analyst (**Phase 6**), defined in The analyst section above: **specified,
-  entirely unbuilt** ([PRD](prds/phase-6-analyst.md); no TDD, no code, no flag, no mock). The
+  entirely unbuilt** ([PRD](prds/phase-6-analyst.md), [TDD](tdds/phase-6-analyst.md); no code, no flag, no mock). The
   terms are here rather than waiting for the code because the vocabulary is authoritative and
   a name is cheapest to fix before prompts and schemas use it. Two things in that section are
   decisions the PRD makes rather than descriptions of anything running: a Brief's period is
