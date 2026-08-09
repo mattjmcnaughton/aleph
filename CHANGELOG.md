@@ -1,3 +1,10 @@
+# [1.32.0](https://github.com/mattjmcnaughton/aleph/compare/v1.31.0...v1.32.0) (2026-08-09)
+
+
+### Features
+
+* **services:** the arrival drain, the claim, and the research pipeline ([#189](https://github.com/mattjmcnaughton/aleph/issues/189)) ([854b004](https://github.com/mattjmcnaughton/aleph/commit/854b004121f547ee89da94e8326394d2c6b6ff6e)), closes [#171](https://github.com/mattjmcnaughton/aleph/issues/171)
+
 # [1.31.0](https://github.com/mattjmcnaughton/aleph/compare/v1.30.0...v1.31.0) (2026-08-09)
 
 
