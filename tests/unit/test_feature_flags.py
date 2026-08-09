@@ -165,12 +165,25 @@ def test_flashcards_is_registered_and_launched_on_by_default() -> None:
     assert feature_flags.FeatureFlag.FLASHCARDS in feature_flags.ADMIN_DEFAULT_FLAGS
 
 
-def test_the_registry_is_exactly_the_four_phase_flags() -> None:
+def test_analyst_is_registered_off_by_default_and_on_for_admins() -> None:
+    """Phase 6's one flag (TDD D12), registered dark like ``tutor`` first was.
+
+    Unlike the four launched flags, ``analyst`` spends its whole build-out at
+    ``False`` — that is what shipping dark means, and what lets every
+    analyst ticket merge and deploy with zero learner exposure while admins
+    dogfood it via the admin baseline.
+    """
+    assert feature_flags.FeatureFlag.ANALYST == "analyst"
+    assert feature_flags.FLAG_DEFAULTS[feature_flags.FeatureFlag.ANALYST] is False
+    assert feature_flags.FeatureFlag.ANALYST in feature_flags.ADMIN_DEFAULT_FLAGS
+
+
+def test_the_registry_is_exactly_the_five_phase_flags() -> None:
     # The whole registry in one assertion: a flag added to the enum but missed by
     # ``FLAG_DEFAULTS`` does not exist as far as resolution is concerned, and
     # would silently resolve off everywhere.
     assert feature_flags.known_flag_keys() == frozenset(
-        {"tutor", "shaping", "streaks", "flashcards"}
+        {"tutor", "shaping", "streaks", "flashcards", "analyst"}
     )
 
 

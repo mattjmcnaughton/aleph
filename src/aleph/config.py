@@ -23,6 +23,8 @@ MODEL_SLOTS: tuple[str, ...] = (
     "model_tutor",
     "model_shaper",
     "model_flashcard",
+    "model_research",
+    "model_brief",
 )
 
 
@@ -643,6 +645,95 @@ class Settings(BaseSettings):
             msg = (
                 "flashcard_drafts_min must be <= flashcard_drafts_max; got "
                 f"min={self.flashcard_drafts_min} > max={self.flashcard_drafts_max}."
+            )
+            raise ValueError(msg)
+        return self
+
+    # --- Phase 6: the analyst (TDD §13, D6/D7/D12/D14/D14a) -------------------
+    # Appended as this phase's self-contained block at the END of Settings
+    # (every phase branch appends its own; keep them separate to avoid merge
+    # conflicts). AL-501 is config-only — the two model slots, the caps, the
+    # retrieval budget, the timeout/stale pair, and the flag. No retrieval
+    # code, no models, no service, no router: those are later tickets in
+    # epic #163.
+
+    # The Exa credential (D6): optional at startup, absent by default. Nothing
+    # reads it yet — retrieval is a later ticket — so startup must succeed
+    # without it, same posture as ``openrouter_api_key``/``logfire_token``. A
+    # real value is a Fly secret, set once AL-502 lands (``docs/deploy.md``'s
+    # Required row).
+    exa_api_key: str = ""
+
+    # The seventh and eighth model slots (D7), resolved through
+    # ``services/openrouter.py`` like the rest. Both start on the same strong
+    # model as every other slot (the uniform-start discipline). Two slots, not
+    # one, because the two calls have opposite profiles: reading retrieved
+    # documents (``model_research``) is mechanical and huge-input, writing the
+    # Brief (``model_brief``) is quality-sensitive and short — the same split
+    # that separated ``outline`` from ``lesson``. **Both are also listed in
+    # ``MODEL_SLOTS``** — the production stub guard iterates that constant, so
+    # a slot missing from it would let the deterministic stub research or write
+    # production Briefs. The admin per-request picker reaches them too, but
+    # stored on the ``beats`` row rather than held on the request (D7) — a
+    # later ticket's concern.
+    model_research: str = "anthropic/claude-sonnet-5"
+    model_brief: str = "anthropic/claude-sonnet-5"
+
+    # PRD §4.7's cap on how many Beats a learner may deploy, as config rather
+    # than a constant (D14) — an open question (§15) dogfooding may move.
+    max_beats_per_learner: int = 3
+
+    # The sixth counter on the existing ``DailyRateLimiter`` (D14), joining
+    # ``rate_limit_paths_per_day`` and siblings: same family, same "0 or
+    # negative disables the cap" convention, admins exempt at the call site.
+    rate_limit_brief_research_per_day: int = 5
+
+    # Research's own semaphore (D14) — never ``max_concurrent_generations``.
+    # Research is the most expensive generation in the product per unit of
+    # output, and it must not be able to starve lesson generation; a learner
+    # waiting on lesson 3 of their path should never queue behind an analyst
+    # run. Sized well below the general pool (2 against 8) to say which one
+    # yields. Must admit at least one permit (``ge=1``): zero would deadlock
+    # every run.
+    max_concurrent_brief_research: int = Field(default=2, ge=1)
+
+    # Retrieval's shape (D6a's plan size) and its two cost ceilings (D14a). A
+    # document count alone does not bound cost — twelve long articles can cost
+    # far more than twelve short ones — so the real ceiling is the character
+    # budget, allocated evenly across returned documents and truncated at the
+    # ``Retriever`` seam before anything reaches a model.
+    # ``BRIEF_RETRIEVAL_TEXT_BUDGET_CHARS`` is the knob to move if the ceiling
+    # is wrong; every other number here bounds *how often*, only this one
+    # bounds *how much*.
+    brief_retrieval_max_queries: int = 6
+    brief_retrieval_max_documents: int = 12
+    brief_retrieval_text_budget_chars: int = 160_000
+
+    # Research timings (D7, D14a) — the generation pair's precedent, one
+    # workload over. ``brief_research_timeout_seconds`` bounds a run so it
+    # always reaches a terminal state (no dead spinner); a run stuck past
+    # ``brief_research_stale_after_seconds`` is treated as failed and
+    # re-claimable, so a crashed/restarted process self-heals. Longer than
+    # ``generation_timeout_seconds`` (60): research is two model calls plus
+    # retrieval, not one. Stale MUST exceed the timeout (+ overhead), else a
+    # healthy slow run gets double-claimed — a tested invariant
+    # (``_check_brief_research_timings``, mirroring
+    # ``_check_generation_timings``), not a comment.
+    brief_research_timeout_seconds: int = 180
+    brief_research_stale_after_seconds: int = 420
+
+    @model_validator(mode="after")
+    def _check_brief_research_timings(self) -> Self:
+        if (
+            self.brief_research_stale_after_seconds
+            <= self.brief_research_timeout_seconds
+        ):
+            msg = (
+                "brief_research_stale_after_seconds "
+                f"({self.brief_research_stale_after_seconds}) must exceed "
+                "brief_research_timeout_seconds "
+                f"({self.brief_research_timeout_seconds}): otherwise a healthy "
+                "slow research run is double-claimed (TDD §13)."
             )
             raise ValueError(msg)
         return self

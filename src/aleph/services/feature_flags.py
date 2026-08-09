@@ -55,6 +55,11 @@ A launched flag is still a **kill switch**: ``FEATURE_FLAG_DEFAULTS=tutor:off``
 outranks this module's defaults with no code deploy, and reaches admins too (step
 2 above), which is what makes it usable mid-incident.
 
+``analyst`` (Phase 6, TDD D12) is registered the same way ``tutor`` first was:
+``False`` in :data:`FLAG_DEFAULTS`, present in :data:`ADMIN_DEFAULT_FLAGS` — the
+current build-out spends it dark, exactly as the other four once did, before its
+own launch flip.
+
 Ported from habagou's service of the same name; adapted to aleph's
 ``authz.is_admin(user, settings)`` signature, which takes the config explicitly,
 and to this ticket's precedence — habagou lets the admin baseline outrank the
@@ -109,6 +114,11 @@ class FeatureFlag(StrEnum):
     # signal. Its own key, independent of the three above, for the same reason
     # they are independent of each other.
     FLASHCARDS = "flashcards"
+    # Phase 6's one flag (TDD D12): the analyst — Beats, Briefs, and every
+    # route under them, gated router-level so a future route cannot forget it.
+    # Off -> ``404``. Its own key, independent of the four above, for the same
+    # reason they are independent of each other.
+    ANALYST = "analyst"
 
 
 # Code defaults per flag. Every FeatureFlag member gets an entry here; a flag
@@ -134,6 +144,13 @@ FLAG_DEFAULTS: dict[FeatureFlag, bool] = {
     # review. This flip is the launch itself: the AL-270/AL-370/streaks
     # playbook, repeated a fourth time.
     FeatureFlag.FLASHCARDS: True,
+    # Off: Phase 6 (the analyst) has not shipped. This is the dark posture the
+    # other four spent their whole build-out at (D12) — registering the flag
+    # ``False`` here, and in ``ADMIN_DEFAULT_FLAGS`` below, is what lets every
+    # analyst ticket merge and deploy with zero learner exposure while admins
+    # dogfood it. Flip this at launch, the AL-270/AL-370/streaks/flashcards
+    # playbook a fifth time.
+    FeatureFlag.ANALYST: False,
 }
 
 
@@ -144,21 +161,26 @@ FLAG_DEFAULTS: dict[FeatureFlag, bool] = {
 # ``tutor:off`` there turns the flag off for admins too (kill switch), and a
 # per-user override beats it for everyone, admins included.
 #
-# All four members — ``TUTOR``, ``SHAPING``, ``STREAKS``, ``FLASHCARDS`` — are
-# **currently redundant**: a flag whose code default is already ``True`` is
-# on for admins by that default alone, and after a ``:off`` kill the settings
-# map outranks this baseline anyway, so membership changes no answer either
-# way for any of them. They stay listed rather than dropped because this is
-# the seam the *next* dark phase uses, and re-deriving which flags belong here
-# is exactly the kind of thing that gets forgotten at the moment a flag flips
-# back off — membership costs nothing while a flag is launched and saves a
-# forgotten step the day one isn't.
+# ``TUTOR``, ``SHAPING``, ``STREAKS``, ``FLASHCARDS`` are **currently
+# redundant**: a flag whose code default is already ``True`` is on for admins
+# by that default alone, and after a ``:off`` kill the settings map outranks
+# this baseline anyway, so membership changes no answer either way for any of
+# them. They stay listed rather than dropped because this is the seam the
+# *next* dark phase uses, and re-deriving which flags belong here is exactly
+# the kind of thing that gets forgotten at the moment a flag flips back off —
+# membership costs nothing while a flag is launched and saves a forgotten step
+# the day one isn't.
+#
+# ``ANALYST`` is not redundant: it is the live one, doing real work today —
+# ``FLAG_DEFAULTS`` has it ``False``, so this baseline is what lets admins
+# dogfood Phase 6 while every learner still gets ``404`` (D12).
 ADMIN_DEFAULT_FLAGS: frozenset[FeatureFlag] = frozenset(
     {
         FeatureFlag.TUTOR,
         FeatureFlag.SHAPING,
         FeatureFlag.STREAKS,
         FeatureFlag.FLASHCARDS,
+        FeatureFlag.ANALYST,
     }
 )
 
