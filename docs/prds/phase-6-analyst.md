@@ -12,7 +12,8 @@
 > **Provider choice is explicitly deferred.** This document says *retrieval* and never names a
 > vendor. A neural search API, a general web search API, a search-augmented model through the
 > OpenRouter client we already have — all are candidates, all are the TDD's call, and §4.4
-> states the only product constraints the choice has to satisfy.
+> states the only product constraints the choice has to satisfy (the third rule there rules out
+> the third candidate).
 
 ## 1. Summary
 
@@ -43,7 +44,7 @@ due — because something new exists that did not exist yesterday.
 
 **Why now.** Phases 1–3 built the reading surface, the tutor rail, the retention loop, and —
 most importantly for this phase — the generation machinery that survives a crash with no
-learner watching: claim, stale recovery, the reconciler, bounded concurrency
+learner watching: claim, stale recovery, bounded concurrency
 (`services/lifecycle.py`), and **Trigger + poll** as the delivery model. Every one of those
 exists for reasons this phase inherits exactly, and §4.2 turns out to need almost nothing new.
 
@@ -76,7 +77,7 @@ learner should not have to learn a second app.
 
 | Reused verbatim | Why it fits unchanged |
 | --- | --- |
-| **Trigger + poll** and the generation lifecycle — claim, stale recovery, reconciler, `TaskRegistry`, the concurrency semaphore | Built for work that must survive a restart and be driven by whoever shows up. §4.2 is that model applied to a clock instead of a position. |
+| **Trigger + poll** and the generation lifecycle — claim, stale recovery, `TaskRegistry`, the concurrency semaphore, **except the reconciler** (§4.2) | Built for work that must survive a restart and be driven by whoever shows up. §4.2 is that model applied to a clock instead of a position. |
 | **Prefetch (+N)**, on the time axis (§4.2) | The same idea — generate ahead of where the learner is, to hide latency — with "ahead" measured in hours rather than lesson positions. **Deferred from the first slice** (§7.1): at current scale the warm moment it exploits does not exist. |
 | The Markdown pipeline (`markdown.tsx`) | It is the security boundary for model-written text. A Brief is model-written text, and it must not get its own renderer. |
 | **Topic**, **Level**, **Guidance**, **Refused** | A Beat takes the same three generation inputs, frozen the same way, with the same safety branch. No new vocabulary where the old vocabulary is right. |
@@ -284,9 +285,9 @@ Three things it *does* take a position on, because they are product rules and no
   entry; no model in the pipeline calls a search tool of its own to produce them, whichever
   vendor ends up executing the plan. This is what keeps the two rules above enforceable rather
   than aspirational — the researcher's inputs are exactly what retrieval returned, with no tool
-  call in between whose arguments could drift from what was actually read — and it is why the
-  **research/write split** stays split regardless of how retrieval is executed: read, then
-  write, never one pass doing both.
+  call in between whose arguments could drift from what was actually read — and the
+  **research/write split** holds independently, for the same reason: read, then write, never
+  one pass doing both.
 
 **4.5 Brief continuity: report the delta, not the topic.** Brief *N* is generated with awareness
 of Briefs *1…N-1* — their claims and, critically, **their cited Source URLs** — and its job is
@@ -312,11 +313,10 @@ correctly.** A learner who reads three padded Briefs stops opening the fourth, a
 never see that in a metric until the Beat is already dead.
 
 **A Skipped entry carries no number of its own.** §3's own example already assumes this — "Nothing
-material since Brief #4" names the last *Brief*, not a Skipped period before or after it — so the
-rule is worth stating rather than leaving implicit: only published Briefs are numbered, and a
-Skipped period sits in the rail dated but unnumbered between them. Numbering it would imply a
-Skipped period is a kind of Brief; it is the opposite, an honest record that no Brief exists for
-that stretch.
+material since Brief #4" names the last *Brief*, not a Skipped period before or after it. Only
+published Briefs are numbered, and a Skipped period sits in the rail dated but unnumbered between
+them. Numbering it would imply a Skipped period is a kind of Brief; it is the opposite, an honest
+record that no Brief exists for that stretch.
 
 **4.7 Multiple Beats, with a cap.** A learner may deploy several — this mirrors paths, where
 multiple-from-day-one was a deliberate Phase 1 call, and it is what makes the Beat section on
@@ -407,7 +407,7 @@ than deepened.
 | Metric | Question it answers |
 | --- | --- |
 | **Brief read rate** — Briefs opened ÷ Briefs published | The blunt one. Below some floor, nothing else matters. |
-| **Depth of read** — share of opened Briefs where the learner reaches the Sources, which needs a second signal distinct from opening: whether the Sources block itself was seen | Is it being read, or glanced at? A feature about provenance should be able to show that provenance gets used. |
+| **Depth of read** — share of opened Briefs where the learner reaches the Sources | Is it being read, or glanced at? A feature about provenance should be able to show that provenance gets used, which needs a second signal distinct from opening: whether the Sources block was seen at all. |
 | **Skip rate** — Skipped ÷ research runs, per Beat | Calibrates §4.6 in both directions. Near zero means the novelty gate is not gating and we are shipping filler; consistently high on one Beat means weekly is faster than that subject moves (§8 Q7), and high across all of them means the gate is too strict. It is also the number that has to look healthy before a daily cadence is trusted (§4.11). |
 | **Wait tolerance** (guardrail, §4.2) — share of researching Beats the learner is still present for when the Brief lands, and what they did in between | The direct measurement of the tradeoff §4.2 accepts, and the **first** metric to read: with Brief prefetch deferred (§7.1) the first slice waits every time, so this is measured at its worst case rather than an average. If learners consistently leave and never come back to the finished Brief, the fix is prefetch first and always-on second. |
 | **Beat survival** — Beats with a read Brief in the last 30 days | The honest verdict on whether an analyst is a thing people keep. |
@@ -483,7 +483,8 @@ Beat's standing orders after deployment, the **Anchor day** included (delete and
 Phase 1 does for paths — §4.11, §8 Q5) · learner-supplied sources, RSS feeds, or private or
 paywalled documents · **a daily cadence, or any cadence choice at all** (§4.11 — weekly is the
 only one this slice ships) · a delivery *time* of day, and any stored per-learner timezone
-(§4.2 — the arrival carries it) · a public or shareable Brief · exporting a Beat · comments,
+(§4.2 — the claiming arrival carries it; §4.1 for why the date is then frozen) · a public or
+shareable Brief · exporting a Beat · comments,
 highlights or annotations on a Brief · any aggregation of Brief content across learners ·
 counting a read Brief toward **Activated learner** (§4.9, a standing rule rather than a slice
 boundary) · always-on hosting and the hibernation rule it would require (§4.2, §4.8).
@@ -498,7 +499,7 @@ adding one back later is a decision rather than a drift.
 | --- | --- |
 | **Brief prefetch** — the second trigger (§4.2) | Speculative optimization for traffic that does not exist. With the machine asleep most of the time the warm-moment window essentially never fires, so cutting it leaves arrival as the only trigger there is today anyway. Costs nothing to cut, costs nothing to add back. |
 | **Inline citations** (§3) | Numbered markers mean the agent emits them, the renderer resolves them, and something validates that every marker points at a real Source — and that means extending `markdown.tsx`, the security boundary for model-written text and the last place to churn early. **The Sources list is not deferred**: §4.4's provenance rule holds in full, carried by prose attribution in the body plus the Sources block at the foot (Appendix A shows exactly this). Inline markers are the upgrade once Briefs are worth checking line by line. |
-| **The streak union** (§4.9) | The vocabulary amendment already landed and is the part that had to happen now; the wiring can wait. Read-tracking itself is **not** deferred — §5's north-star metric needs it, and it is a column plus an event. This defers only feeding Brief reads into **Active day**, exactly the split [`CONTEXT.md`](../CONTEXT.md) already describes when it says nothing reads the third signal yet. |
+| **The streak union** (§4.9) | The vocabulary amendment already landed and is the part that had to happen now; the wiring can wait. Read-tracking itself is **not** deferred — §5's north-star metric needs it, and it is two columns plus an event carrying a `marker` discriminator. This defers only feeding Brief reads into **Active day**, exactly the split [`CONTEXT.md`](../CONTEXT.md) already describes when it says nothing reads the third signal yet. |
 | **The `brief_findings` eval kind** (§6) | Ship `brief` alone. Novelty against prior Briefs is mostly a *deterministic* check — Source-URL overlap plus claim dedup — which belongs as a layer-1 predicate rather than judge spend. **Recorded retrieval fixtures are not deferred**: without them the phase cannot be evaluated *or* booted by `scripts/e2e_backend.py`. |
 | **Period grouping in the Beat rail** (§3) | Month subheadings would group nothing for the entire window in which the phase is being judged — at weekly cadence, month one is a single *August* header over one to four Briefs, and grouping starts earning its keep somewhere past ten. A flat dated list carries the same information, and there is an obvious trigger to revisit: when a Beat's rail no longer fits on one screen. |
 | **W30, W32, W33** (§5) | W29 (a cited Brief) and W31 (Skipped, not padded) carry the phase's two load-bearing claims as browser journeys. W30 needs two Briefs to set up, and W32/W33 are edge cases that test better as integration cases than as Playwright runs. |
