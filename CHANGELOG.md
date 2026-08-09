@@ -1,3 +1,10 @@
+# [1.27.0](https://github.com/mattjmcnaughton/aleph/compare/v1.26.0...v1.27.0) (2026-08-09)
+
+
+### Features
+
+* **domains:** cadence and novelty, the analyst's two pure rules ([#184](https://github.com/mattjmcnaughton/aleph/issues/184)) ([0a3eb24](https://github.com/mattjmcnaughton/aleph/commit/0a3eb242288ccde1ecef7de9364d9c0f0332d4ce)), closes [#167](https://github.com/mattjmcnaughton/aleph/issues/167)
+
 # [1.26.0](https://github.com/mattjmcnaughton/aleph/compare/v1.25.0...v1.26.0) (2026-08-09)
 
 
