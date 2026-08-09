@@ -9,8 +9,12 @@ sites keep importing ``from aleph.models import X``.
 from __future__ import annotations
 
 from aleph.models.attempt import Attempt
+from aleph.models.beat import Beat
+from aleph.models.brief import Brief, BriefSource
 from aleph.models.conversation import Conversation
 from aleph.models.enums import (
+    BeatResearchState,
+    BriefKind,
     ConversationKind,
     FlashcardDraftRunState,
     FlashcardGrade,
@@ -34,6 +38,11 @@ from aleph.models.users import User
 
 __all__ = [
     "Attempt",
+    "Beat",
+    "BeatResearchState",
+    "Brief",
+    "BriefKind",
+    "BriefSource",
     "Conversation",
     "ConversationKind",
     "Flashcard",

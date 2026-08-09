@@ -120,6 +120,34 @@ class FlashcardGrade(StrEnum):
     GOT_IT = "got_it"
 
 
+class BeatResearchState(StrEnum):
+    """A Beat's research run state (Phase 6 TDD §4/D3).
+
+    ``idle`` -> ``researching`` -> ``idle``, with ``failed`` (retryable) and
+    ``refused`` (terminal, safety) branches — the ``PathStatus`` claim shape
+    (``repositories/_generation.py``), one asymmetry: a path's status is
+    *terminal* on success (``ready``); a Beat's returns to ``idle`` because it
+    reports again next Anchor day, so this is its own enum rather than a reuse
+    of ``PathStatus``.
+    """
+
+    IDLE = "idle"
+    RESEARCHING = "researching"
+    FAILED = "failed"
+    REFUSED = "refused"
+
+
+class BriefKind(StrEnum):
+    """Whether a ``briefs`` row is a published report or a Skipped period (D2).
+
+    ``CONTEXT.md``: Brief, Skipped. Two members, the whole vocabulary of the
+    discriminated row the two ``CHECK`` constraints (TDD §4) enforce.
+    """
+
+    PUBLISHED = "published"
+    SKIPPED = "skipped"
+
+
 class FlashcardDraftRunState(StrEnum):
     """A lesson's drafting-run state (Phase 3 TDD §4/D7).
 
