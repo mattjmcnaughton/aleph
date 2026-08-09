@@ -1,3 +1,10 @@
+# [1.28.0](https://github.com/mattjmcnaughton/aleph/compare/v1.27.0...v1.28.0) (2026-08-09)
+
+
+### Features
+
+* **db:** beats, briefs and brief_sources, with the claim pair ([#185](https://github.com/mattjmcnaughton/aleph/issues/185)) ([12a27ce](https://github.com/mattjmcnaughton/aleph/commit/12a27ce8401f524be1da6344bf927dfbe26c01a0)), closes [#168](https://github.com/mattjmcnaughton/aleph/issues/168)
+
 # [1.27.0](https://github.com/mattjmcnaughton/aleph/compare/v1.26.0...v1.27.0) (2026-08-09)
 
 
