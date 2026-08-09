@@ -1,3 +1,10 @@
+# [1.31.0](https://github.com/mattjmcnaughton/aleph/compare/v1.30.0...v1.31.0) (2026-08-09)
+
+
+### Features
+
+* **services:** ExaRetriever, the live third implementation of the seam ([#188](https://github.com/mattjmcnaughton/aleph/issues/188)) ([7b8704d](https://github.com/mattjmcnaughton/aleph/commit/7b8704dffb2a38966a0ec624ba18f90058c859f3)), closes [#173](https://github.com/mattjmcnaughton/aleph/issues/173)
+
 # [1.30.0](https://github.com/mattjmcnaughton/aleph/compare/v1.29.0...v1.30.0) (2026-08-09)
 
 
