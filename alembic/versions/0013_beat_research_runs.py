@@ -18,6 +18,17 @@ Purely additive: one new table, two new indexes, nothing touched on any
 existing table. Online-safe on Neon at any size. Rollback is dropping the one
 table nothing else references.
 
+**Accepted cost, stated accurately (second-pass code-review FIX C on
+AL-521).** This table makes the cap count real runs, but it does not close
+every gap between "billed" and "ran": a process death in the window between
+the claim's commit and the spawn actually starting leaves the Beat
+``researching`` for the full stale window *and* has already inserted a row
+here, consuming a cap unit for work that never executed. This is an accepted
+cost, not an oversight — it is strictly narrower than Phase 6 TDD D5's own
+accepted window (a crashed run already leaves a Beat reading "Researching…"
+until the next arrival self-heals it, D5's "Accepted cost" row) — but it is
+real, and worth stating precisely rather than claiming no such window exists.
+
 Revision ID: 0013_beat_research_runs
 Revises: 0012_analyst
 Create Date: 2026-08-09

@@ -1344,3 +1344,96 @@ def test_earlier_tables_are_unchanged_by_the_analyst_migration(
     after = {table: asyncio.run(_columns(database_url, table)) for table in tracked}
 
     assert before == after
+
+
+# --------------------------------------------------------------------------- #
+# Code-review FIX 2 on AL-521 (epic #163's correctness review): the daily
+# research cap's own counter (migration 0013) — one table, additive on top of
+# the analyst branch. Second-pass code-review FIX D: this step shipped with
+# NEITHER of the two standard tests every other migration in this file has
+# (downgrade/reapply, documented columns) — its `downgrade()` was exercised
+# only transitively. Same shape as every other additive step above.
+# --------------------------------------------------------------------------- #
+
+BEAT_RESEARCH_RUNS_HEAD = "0013_beat_research_runs"
+BEAT_RESEARCH_RUNS_TABLE = "beat_research_runs"
+BEAT_RESEARCH_RUNS_USER_STARTED_AT_INDEX = "ix_beat_research_runs_user_id_started_at"
+BEAT_RESEARCH_RUNS_BEAT_ID_INDEX = "ix_beat_research_runs_beat_id"
+
+
+def test_beat_research_runs_migration_downgrades_and_reapplies_cleanly(
+    isolated_database: str,
+) -> None:
+    database_url = isolated_database
+
+    at_head = asyncio.run(_tables(database_url))
+    assert BEAT_RESEARCH_RUNS_TABLE in at_head
+
+    username = asyncio.run(_seed_phase_1_row(database_url))
+
+    run_alembic(database_url, ANALYST_HEAD, downgrade=True)
+
+    after_downgrade = asyncio.run(_tables(database_url))
+    assert BEAT_RESEARCH_RUNS_TABLE not in after_downgrade
+    # Everything through the analyst branch survives the reversal, rows
+    # included — this step is purely additive on top of it.
+    assert set(ANALYST_TABLES) <= after_downgrade
+    assert set(PHASE_1_TABLES) <= after_downgrade
+    assert set(PHASE_2_TABLES) <= after_downgrade
+    assert set(FLASHCARDS_TABLES) <= after_downgrade
+    assert asyncio.run(_count(database_url, "users")) == 1
+
+    run_alembic(database_url, BEAT_RESEARCH_RUNS_HEAD)
+
+    reapplied = asyncio.run(_tables(database_url))
+    assert BEAT_RESEARCH_RUNS_TABLE in reapplied
+    assert set(ANALYST_TABLES) <= reapplied
+    assert asyncio.run(_count(database_url, "users")) == 1
+    assert username == "migration-user"
+    # The table comes back empty — a migration reapply is schema-only.
+    assert asyncio.run(_count(database_url, BEAT_RESEARCH_RUNS_TABLE)) == 0
+
+
+def test_beat_research_runs_migration_creates_the_documented_columns(
+    isolated_database: str,
+) -> None:
+    database_url = isolated_database
+
+    assert asyncio.run(_columns(database_url, BEAT_RESEARCH_RUNS_TABLE)) == {
+        "id",
+        "beat_id",
+        "user_id",
+        "started_at",
+        "created_at",
+        "updated_at",
+    }
+
+    indexes = asyncio.run(_indexes(database_url, BEAT_RESEARCH_RUNS_TABLE))
+    assert BEAT_RESEARCH_RUNS_USER_STARTED_AT_INDEX in indexes
+    assert "user_id" in indexes[BEAT_RESEARCH_RUNS_USER_STARTED_AT_INDEX]
+    assert "started_at" in indexes[BEAT_RESEARCH_RUNS_USER_STARTED_AT_INDEX]
+    assert BEAT_RESEARCH_RUNS_BEAT_ID_INDEX in indexes
+    assert "beat_id" in indexes[BEAT_RESEARCH_RUNS_BEAT_ID_INDEX]
+
+
+def test_earlier_tables_are_unchanged_by_the_beat_research_runs_migration(
+    isolated_database: str,
+) -> None:
+    """The step adds one table; it alters no existing one."""
+    database_url = isolated_database
+    tracked = (
+        *PHASE_1_TABLES,
+        *PHASE_2_TABLES,
+        FLAGS_TABLE,
+        CHANGES_TABLE,
+        "lessons",
+        "paths",
+        *FLASHCARDS_TABLES,
+        *ANALYST_TABLES,
+    )
+
+    before = {table: asyncio.run(_columns(database_url, table)) for table in tracked}
+    run_alembic(database_url, ANALYST_HEAD, downgrade=True)
+    after = {table: asyncio.run(_columns(database_url, table)) for table in tracked}
+
+    assert before == after

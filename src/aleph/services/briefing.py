@@ -23,10 +23,11 @@ fixed shape, not the TDD's original pseudocode ordering.**
   and then, **for each claimable Beat, in order**: checks the research cap
   (FIX 4 — before *every* claim, not once for the whole drain; non-raising,
   see :func:`aleph.services.rate_limit.DailyRateLimiter.
-  brief_research_capacity_available`), **claims it synchronously on the
-  caller's own session and commits** (FIX 1), and only then spawns
-  :meth:`run_research` through the injected ``spawn`` seam (``TaskRegistry``,
-  unchanged) — passing the fence the claim just won.
+  brief_research_capacity_available`), **claims it synchronously, in its own
+  short transaction, and commits that transaction** (FIX 1's ordering; the
+  transaction itself is second-pass code-review FIX C on AL-521, see below),
+  and only then spawns :meth:`run_research` through the injected ``spawn``
+  seam (``TaskRegistry``, unchanged) — passing the fence the claim just won.
 
   **Why the claim moved here (FIX 1).** The TDD's original ordering spawned
   first and claimed inside the spawned task. A Beat's pre-claim state
@@ -40,6 +41,35 @@ fixed shape, not the TDD's original pseudocode ordering.**
   screen to show it. Claiming here, before the spawn, makes the response
   (and the request's own subsequent read, on the same session) deterministically
   ``researching``.
+
+  **Claiming inside its own transaction, not the caller's (FIX C, second-pass
+  code-review on AL-521, correcting the paragraph above).** FIX 1 required
+  only that the claim be committed and visible before the spawn — under
+  Postgres' default READ COMMITTED isolation, a commit on *any* connection is
+  visible to the very next statement on *any other* connection, so that
+  guarantee never needed to be a commit on the caller's own ``session``.
+  Committing the caller's session was a second, unrequired effect: it broke
+  the pattern every other claim in this codebase follows —
+  ``services/generation.py::_claim_and_generate`` and
+  ``services/flashcard_drafting.py`` both open a short transaction via
+  ``self._session_factory`` precisely so a service never commits a unit of
+  work it does not own — and it is a real hazard once a router sits in front
+  of this (AL-522): a handler that creates a Beat and then drains it would
+  have the drain's commit make the Beat creation durable *mid-handler*, so a
+  later failure (DTO construction, a cap check, the response envelope) could
+  no longer be undone by the router's own rollback. The claim now runs
+  through ``self._session_factory()`` — the exact shape
+  :meth:`BriefingService._claim` (``run_research``'s self-claim path) and
+  every fenced mark below already use — and the caller's ``session`` is used
+  for reads only (the eligibility list, the cadence read, the rate-limit
+  check). **One thing this does NOT fix by itself**: ``db.py``'s
+  ``async_session``/``new_session`` are constructed with
+  ``expire_on_commit=False``, which happens to keep any ORM identities the
+  caller already holds from expiring when the claim's *own* session commits.
+  That is what would otherwise be the other half of this hazard (a
+  caller-held ``Beat`` instance going stale mid-handler); it holds today
+  because of that one shared setting, not because this method arranges it,
+  and should not be relied on if that setting ever changes.
 * :meth:`BriefingService.run_research` — the pipeline target. Called two
   ways: with a pre-won ``fence`` (the arrival drain, above — the claim
   already happened, this method never re-claims) or with none (a direct
@@ -85,21 +115,38 @@ from the *retrieved* ``RetrievedDocument``s by URL, never from anything the
 model said in prose — this is what the adversarial provenance test
 (``tests/integration/test_briefing.py``) exercises directly.
 
-**Open threads — bounded to the most recent entry, decoupled from the gate's
-input (code-review FIX 6 on AL-521, correcting the paragraph this replaces).**
-``AnalystDeps.open_threads`` is built from
-``BriefRepository.latest_entry_claims_for_beat`` — the MOST RECENT entry's
-claims only — never from ``prior_claims_for_beat`` (D9's own novelty-gate
-input, the Beat's *whole* history). The two were previously the same list,
-which was wrong on both counts it can be wrong on: **inverted** (the analyst
-prompt asks it to write about exactly the claims the novelty gate just
-guaranteed it has no *new* evidence for — the gate's whole job is dropping
-findings that restate them) and **unbounded** (hundreds of strings injected
-into the analyst prompt on an old, long-running Beat, growing with the
-Beat's age rather than staying flat). ``latest_entry_claims_for_beat`` fixes
-both: it is a *different* read from the gate's own, and it is bounded to at
-most one entry's worth of claims regardless of how old the Beat is. See its
-docstring for the "most recent entry may be Skipped" case.
+**Open threads — bounded to the latest PUBLISHED Brief, decoupled from the
+gate's input (code-review FIX 6 on AL-521, corrected again by second-pass
+code-review FIX B — the paragraph below describes the current, fixed
+source, not FIX 6's original "latest entry" one).**
+``AnalystDeps.open_threads`` is built from ``BriefRepository.
+latest_published``'s own ``claims`` — the latest PUBLISHED Brief's claims
+only — never from ``prior_claims_for_beat`` (D9's own novelty-gate input, the
+Beat's *whole* history), and, since FIX B, never from the latest *entry*
+either. Three states this field can be wrong in, all now avoided:
+**inverted** (the analyst prompt asking it to write about exactly the claims
+the novelty gate just guaranteed it has no *new* evidence for — the gate's
+whole job is dropping findings that restate them), **unbounded** (hundreds of
+strings injected into the analyst prompt on an old, long-running Beat,
+growing with the Beat's age rather than staying flat), and — FIX 6's own
+defect, found by the second pass — **erased by the first quiet week and every
+one after it**: a Skipped row's ``claims`` is always ``[]``
+(``create_skipped``'s own shape), so bounding to the latest *entry* means
+``open_threads`` goes empty the moment a single Skip happens and STAYS empty
+through every consecutive Skip after it, because each Skip's own claims are
+``[]`` too — exactly TDD §5.4's own motivating example (Brief #4's still-open
+consultation) becoming unreachable after week 2, forever, on the single most
+common path this feature has (a quiet Beat). Keying on the latest
+**published** Brief instead keeps both of FIX 6's original goals (bounded —
+one entry's claims, not the whole history; decoupled from the gate's own
+input) while fixing this: a run of Skips carries the last real report's
+claims forward through every one of them, exactly matching
+``_render_skip_line``'s own ``latest_published_number`` — the two clauses of
+one skip line, and the SkippedNote flowing under them, now share one data
+source rather than two that quietly drift apart. ``latest_published`` is
+already loaded once per run (see :meth:`_load_context`), so this costs no
+extra query; the old, now-redundant ``BriefRepository.
+latest_entry_claims_for_beat`` read is gone.
 
 **A Brief with no Sources is not publishable — enforced at the persist
 boundary (FIX 5).** ``_materialize_sources``'s own defensive ``continue``
@@ -193,7 +240,42 @@ _NO_SOURCES_MESSAGE = "Couldn't verify any sources. Please retry."
 # exception text, no stack trace) so nothing internal reaches a learner-facing
 # render; the distinguishing detail lives in the structured log instead
 # (`brief_research_invariant_violation`).
-_INVARIANT_VIOLATION_MESSAGE = "Research failed due to an internal error. Please retry."
+# FIX F (second-pass code review on AL-521): reworded — this failure is
+# documented (`_InvariantViolationError`'s docstring) as one that "will fail
+# IDENTICALLY on every retry", so the old "Please retry." text was inviting a
+# retry that burns retrieval plus a full researcher model call and a cap unit
+# before failing at the same line again. No other wording change: still
+# generic, still no internals.
+_INVARIANT_VIOLATION_MESSAGE = "Research couldn't finish because of an internal error."
+
+
+class _InvariantViolationError(Exception):
+    """Wraps a ``ValueError``/``KeyError`` raised while constructing
+    ``AnalystDeps`` or resolving ``AGENT_LEVEL[context.level]`` — second-pass
+    code-review FIX E on AL-521, narrowing FIX 9's original
+    ``except (ValueError, KeyError)`` clause.
+
+    FIX 9's clause was meant to catch invariant violations
+    (``AnalystDeps.__post_init__``'s ``ValueError``, an unrecognized
+    ``Level``'s ``KeyError``) but, spanning the *whole* pipeline ``try``
+    block, also caught anything else that happened to raise a ``ValueError``
+    subclass along the way — and ``pydantic_core.ValidationError`` is exactly
+    that, as is ``json.JSONDecodeError``. Both are reachable inside the
+    guarded block: ``retrieve()`` runs there, and a real ``Retriever`` parses
+    a provider payload and constructs ``RetrievedDocument``s from it. A
+    malformed or truncated search-API response — the textbook provider blip
+    that MIGHT succeed on retry — was therefore being logged and stored as an
+    invariant violation ("internal error"), exactly the misclassification
+    this fix exists to keep out of that bucket.
+
+    Only :meth:`BriefingService._run_claimed`'s two named call sites raise
+    this (each wraps its own ``ValueError``/``KeyError`` and re-raises this
+    type, preserving the original via ``__cause__``); nothing else in the
+    pipeline can, so catching this type instead of the bare exception classes
+    is the whole fix. Learner-facing behavior is unchanged either way (both
+    branches still resolve to ``failed``) — this is observability-only, but
+    it is the signal an operator reads the first day a provider hiccups.
+    """
 
 
 class _UnconfiguredRetriever:
@@ -227,12 +309,14 @@ class _ResearchContext:
     """Everything one claimed research run needs, loaded from the DB once.
 
     ``prior_claims`` and ``open_thread_claims`` are deliberately two
-    different reads (FIX 6, code-review on AL-521): ``prior_claims`` is D9's
-    own novelty-gate input, the Beat's *whole* claim history; the analyst's
-    ``open_threads`` is built from ``open_thread_claims`` instead — the MOST
-    RECENT entry's claims only. See ``BriefRepository.
-    latest_entry_claims_for_beat``'s docstring and the module docstring's
-    "Open threads" section for why the two must not be the same list.
+    different reads (FIX 6, code-review on AL-521, corrected by second-pass
+    FIX B): ``prior_claims`` is D9's own novelty-gate input, the Beat's
+    *whole* claim history; the analyst's ``open_threads`` is built from
+    ``open_thread_claims`` instead — the latest **PUBLISHED** Brief's claims
+    only (``BriefRepository.latest_published(...).claims``), never the latest
+    *entry*'s, since an entry may be a Skipped row whose claims are always
+    ``[]``. See the module docstring's "Open threads" section for why the two
+    fields must not be the same list, and why "latest entry" was wrong.
     """
 
     account_id: uuid.UUID
@@ -466,16 +550,22 @@ class BriefingService:
         this time" rather than turning a beats-list ``GET`` into a ``429``,
         TDD §7's explicit rule, and stops the whole loop rather than
         skipping just that Beat, since the cap can only ever get tighter as
-        the loop claims more), then the Beat is claimed **synchronously, on
-        this session, and committed** (FIX 1) — so the claim is durable and
-        visible (to this session's own subsequent reads, and to any other
-        session, since Postgres' default READ COMMITTED isolation means a
-        commit here is visible to the very next statement anywhere) before
-        the spawn ever happens — and only a WON claim is spawned
-        (:meth:`run_research`, passed the fence this call just won). A lost
-        claim (raced by a concurrent drain, or a state that changed between
-        the eligibility read above and now) spawns nothing at all — FIX 3's
-        other half, on top of the query-level filter above.
+        the loop claims more), then the Beat is claimed **synchronously, in
+        its own short transaction via ``self._session_factory()``, and
+        committed there** (FIX 1's ordering, corrected by second-pass
+        code-review FIX C on AL-521 — see the class docstring's "Claiming
+        inside its own transaction" note for why the caller's own ``session``
+        is never the one committed) before the spawn ever happens — and only
+        a WON claim is spawned (:meth:`run_research`, passed the fence this
+        call just won). The claim is still durable and visible before the
+        spawn (FIX 1's own requirement): Postgres' default READ COMMITTED
+        isolation means a commit on *any* connection is visible to the very
+        next statement on *any other* connection, including this session's
+        own subsequent reads, so committing the caller's session was never
+        required for that guarantee. A lost claim (raced by a concurrent
+        drain, or a state that changed between the eligibility read above and
+        now) spawns nothing at all — FIX 3's other half, on top of the
+        query-level filter above.
         """
         local_today = _local_today(tz_offset_minutes, now)
         beats_repo = self._beats(session)
@@ -504,13 +594,18 @@ class BriefingService:
                 user_id=user_id, is_admin=is_admin
             ):
                 return
-            fence = await beats_repo.claim_research(beat_id)
+            # FIX C (second-pass code review on AL-521): the claim runs in
+            # its OWN short transaction, on a session this service opened and
+            # owns — never a commit on the CALLER's session. See the class
+            # docstring's "Claiming inside its own transaction" note.
+            async with self._session_factory() as claim_session:
+                fence = await self._beats(claim_session).claim_research(beat_id)
+                await claim_session.commit()
             if fence is None:
                 # Lost the race (a concurrent drain claimed it first, or its
                 # state changed since the eligibility read above) — never
                 # spawn a task for a claim that did not win (FIX 1/FIX 3).
                 continue
-            await session.commit()
             self._spawn(self.run_research(beat_id, local_today, fence=fence))
 
     # -- the claimed pipeline (TDD §3/§5.3-§5.5/§5.7) ------------------------ #
@@ -635,19 +730,32 @@ class BriefingService:
                 analyst_documents = _documents_for_survivors(documents, survivors)
 
                 # -- write (model): survivors -> BriefBody | SkippedNote ---- #
-                # FIX 6 (AL-521 review): `open_threads` comes from
-                # `open_thread_claims` (the MOST RECENT entry's claims,
-                # bounded) — NEVER `prior_claims` (D9's own, unbounded gate
-                # input, used above). See the module docstring's "Open
-                # threads" section.
-                analyst_deps = AnalystDeps(
-                    topic=context.topic,
-                    level=AGENT_LEVEL[context.level],
-                    guidance=context.guidance,
-                    documents=analyst_documents,
-                    survivors=survivors,
-                    open_threads=list(context.open_thread_claims),
-                )
+                # FIX 6 (AL-521 review), corrected by second-pass FIX B:
+                # `open_threads` comes from `open_thread_claims` (the latest
+                # PUBLISHED Brief's claims, bounded) — NEVER `prior_claims`
+                # (D9's own, unbounded gate input, used above) and never the
+                # latest ENTRY's (a Skipped row's claims are always `[]`).
+                # See the module docstring's "Open threads" section.
+                #
+                # FIX E (second-pass code review on AL-521): this
+                # construction — the ONLY place `AnalystDeps.__post_init__`'s
+                # `ValueError` or `AGENT_LEVEL[...]`'s `KeyError` can
+                # originate — is wrapped in its own try/except and re-raised
+                # as `_InvariantViolationError`, narrower than catching
+                # `(ValueError, KeyError)` across the whole pipeline below
+                # (see `_InvariantViolationError`'s docstring for why that was too
+                # broad).
+                try:
+                    analyst_deps = AnalystDeps(
+                        topic=context.topic,
+                        level=AGENT_LEVEL[context.level],
+                        guidance=context.guidance,
+                        documents=analyst_documents,
+                        survivors=survivors,
+                        open_threads=list(context.open_thread_claims),
+                    )
+                except (ValueError, KeyError) as exc:
+                    raise _InvariantViolationError(str(exc)) from exc
                 analyst_run = await build_analyst_agent().run(
                     build_analyst_prompt(analyst_deps),
                     deps=analyst_deps,
@@ -665,30 +773,38 @@ class BriefingService:
         except TimeoutError:
             await self._mark_failed(beat_id, fence, _RESEARCH_TIMEOUT_MESSAGE)
             return
-        except (ValueError, KeyError) as exc:
-            # FIX 9 (AL-521 review): a PROGRAMMING-error invariant violation,
-            # not a provider blip — `AnalystDeps.__post_init__`'s
-            # `ValueError` (an invariant its author deliberately made loud:
-            # "failing here, before a single model call, is the whole
-            # point") and `AGENT_LEVEL[context.level]`'s `KeyError` both land
-            # here rather than in the blanket handler below. The blanket
-            # handler stays (it is the house pattern, and `failed` is not
-            # auto-claimable, TDD D3, so a bug here cannot become an
-            # infinitely-retried billed run) — but a contract breach that
-            # will fail IDENTICALLY on every retry deserves to be
-            # distinguishable from an infra blip that might not. Logged
-            # under its own event name, with the exception's TYPE (never its
-            # message — avoid leaking internals into a structured log field
-            # that is not this codebase's operator-only surface either) so
-            # an operator can tell the two apart; the stored
-            # `research_error` is a differently-worded but equally generic,
-            # non-leaky message — nothing here reaches a learner-facing
-            # render (AL-522) any more specifically than the ordinary
-            # failure text does.
+        except _InvariantViolationError as exc:
+            # FIX 9 (AL-521 review), narrowed by second-pass FIX E: a
+            # PROGRAMMING-error invariant violation, not a provider blip —
+            # `AnalystDeps.__post_init__`'s `ValueError` (an invariant its
+            # author deliberately made loud: "failing here, before a single
+            # model call, is the whole point") and `AGENT_LEVEL[context.
+            # level]`'s `KeyError` both land here rather than in the blanket
+            # handler below. Catching `_InvariantViolationError` specifically
+            # (rather than the bare `(ValueError, KeyError)` FIX 9 originally
+            # used) is what keeps a provider-shaped `ValueError` subclass
+            # raised from inside `retrieve()` or an agent's `.run()` —
+            # `pydantic_core.ValidationError`, `json.JSONDecodeError` — out of
+            # this branch: only `_InvariantViolationError`'s own two call sites
+            # can raise it, so nothing upstream can land here by accident.
+            # The blanket handler stays (it is the house pattern, and
+            # `failed` is not auto-claimable, TDD D3, so a bug here cannot
+            # become an infinitely-retried billed run) — but a contract
+            # breach that will fail IDENTICALLY on every retry deserves to be
+            # distinguishable from an infra blip that might not. Logged under
+            # its own event name, with the ORIGINAL exception's TYPE (via
+            # `__cause__` — never its message, avoiding internals in a
+            # structured log field that is not this codebase's operator-only
+            # surface either) so an operator can tell the two apart; the
+            # stored `research_error` is a differently-worded but equally
+            # generic, non-leaky message — nothing here reaches a
+            # learner-facing render (AL-522) any more specifically than the
+            # ordinary failure text does.
+            cause = exc.__cause__
             logger.exception(
                 "brief_research_invariant_violation",
                 beat_id=str(beat_id),
-                error_type=type(exc).__name__,
+                error_type=type(cause).__name__ if cause is not None else "unknown",
             )
             await self._mark_failed(beat_id, fence, _INVARIANT_VIOLATION_MESSAGE)
             return
@@ -763,12 +879,17 @@ class BriefingService:
             last_entries = await briefs.last_published_on_by_beat([beat_id])
             prior_urls = await briefs.prior_source_urls_for_beat(beat_id)
             prior_claims = await briefs.prior_claims_for_beat(beat_id)
-            # FIX 6 (AL-521 review): a SEPARATE, bounded read — the most
-            # recent entry's claims only — never the same list as
-            # `prior_claims` above (D9's own, deliberately unbounded gate
-            # input). See `_ResearchContext`'s docstring.
-            open_thread_claims = await briefs.latest_entry_claims_for_beat(beat_id)
+            # FIX 6 (AL-521 review), corrected by second-pass FIX B: a
+            # SEPARATE, bounded read from `prior_claims` above (D9's own,
+            # deliberately unbounded gate input) — but bounded to the latest
+            # PUBLISHED Brief's claims, never the latest ENTRY's (a Skipped
+            # row's claims are always `[]`, D2). `latest_published` already
+            # answers `latest_published_number` below, so this costs no
+            # extra query. See `_ResearchContext`'s docstring.
             latest_published = await briefs.latest_published(beat_id)
+            open_thread_claims = (
+                tuple(latest_published.claims) if latest_published is not None else ()
+            )
             return _ResearchContext(
                 account_id=beat.user_id,
                 topic=beat.topic,
@@ -779,7 +900,7 @@ class BriefingService:
                 last_entry_on=last_entries.get(beat_id),
                 prior_urls=frozenset(prior_urls),
                 prior_claims=tuple(prior_claims),
-                open_thread_claims=tuple(open_thread_claims),
+                open_thread_claims=open_thread_claims,
                 latest_published_number=(
                     latest_published.number if latest_published is not None else None
                 ),

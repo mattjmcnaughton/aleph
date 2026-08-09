@@ -27,6 +27,7 @@ from datetime import UTC, date, datetime, timedelta
 from typing import TYPE_CHECKING
 
 import pytest
+from pydantic import BaseModel
 from pydantic_ai.messages import ModelResponse, ToolCallPart
 from pydantic_ai.models.function import FunctionModel
 from sqlalchemy import select, update
@@ -642,6 +643,35 @@ async def test_repeated_draining_across_several_anchor_days_produces_one_brief()
     published_final = [b for b in briefs_final if b.kind is BriefKind.PUBLISHED]
     assert len(published_final) == 2  # still exactly one NEW Brief, not more
 
+    # FIX G (second-pass code review on AL-521): every assertion above this
+    # point is NEGATIVE (the floor did NOT open early) — a regression that
+    # left the Beat permanently unclaimable (FIX A's own failure mode) would
+    # pass every one of them. Day 5: on/after the NEW floor (8/3) — the Beat
+    # must become claimable AGAIN, proving the floor MOVED rather than
+    # closing for good. A fresh finding/URL, since #2's own claim/URL are
+    # now already-cited and would be gated to a Skip, not a publish.
+    retriever.documents = [_doc("https://example.com/w")]
+    responder.researcher = (
+        "findings",
+        {"findings": [_finding_payload("W happened", ["https://example.com/w"])]},
+    )
+    responder.analyst = (
+        "cited_urls",
+        {
+            "title": "Third edition",
+            "body_markdown": "W happened.",
+            "cited_urls": ["https://example.com/w"],
+        },
+    )
+    await _drain_on(date(2026, 8, 3))
+
+    briefs_third = await _briefs_for_beat(beat_id)
+    published_third = [b for b in briefs_third if b.kind is BriefKind.PUBLISHED]
+    assert len(published_third) == 3
+    newest_third = max(published_third, key=lambda b: b.number)
+    assert newest_third.number == 3
+    assert newest_third.published_on == date(2026, 8, 3)
+
 
 # --------------------------------------------------------------------------- #
 # Zero documents after the §5.2 filters -> failed, NOT skipped. The
@@ -1126,6 +1156,77 @@ async def test_draining_a_refused_or_failed_beat_spawns_nothing() -> None:
 
 
 # --------------------------------------------------------------------------- #
+# Second-pass code-review FIX A on AL-521: no DRAIN-level test covered the
+# stale-`researching` arm at all — every existing stale test (above, and
+# `test_stale_researching_beat_is_reclaimable_after_the_stale_window`) drives
+# `run_research` directly, the SELF-claim path, never `drain_claimable`. In
+# production `drain_claimable` is the ONLY recovery path for a crashed run
+# (D5 — no Beats scan): if this regressed to a plain state filter, this is
+# the test that would catch a permanently-wedged Beat that every other test
+# in this file would still call green.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.anyio
+async def test_draining_a_stale_researching_beat_reclaims_it() -> None:
+    user = await _create_user()
+    beat_id = await _make_beat(user=user, anchor_weekday=0)
+    stale_fence = datetime(2026, 7, 1, tzinfo=UTC)
+    await _force_state(
+        beat_id,
+        research_state=BeatResearchState.RESEARCHING,
+        research_started_at=stale_fence,
+    )
+
+    retriever = _FakeRetriever(documents=[_doc("https://example.com/a")])
+    responder = _PipelineResponder(
+        researcher=(
+            "findings",
+            {"findings": [_finding_payload("X happened", ["https://example.com/a"])]},
+        ),
+        analyst=(
+            "cited_urls",
+            {
+                "title": "T",
+                "body_markdown": "Body.",
+                "cited_urls": ["https://example.com/a"],
+            },
+        ),
+    )
+    spawn = CollectingSpawn(hold=True)
+    service, _ = _make_service(
+        retriever=retriever,
+        resolve_model_fn=_resolver(FunctionModel(responder)),
+        spawn=spawn,
+        stale_after_seconds=1.0,  # far shorter than the fence's age above
+    )
+
+    async with db.async_session() as session:
+        await service.drain_claimable(
+            session,
+            user_id=user.id,
+            tz_offset_minutes=0,
+            now=datetime(2026, 8, 3, 12, tzinfo=UTC),
+        )
+
+    # Drained AND re-claimed: one task spawned, and the fence moved off the
+    # stale timestamp -- proof this is a FRESH claim, not merely a read that
+    # happened to still see `researching`.
+    assert len(spawn.tasks) == 1
+    beat = await _reload_beat(beat_id)
+    assert beat.research_state is BeatResearchState.RESEARCHING
+    assert beat.research_started_at != stale_fence
+
+    await spawn.drain()
+
+    beat_after = await _reload_beat(beat_id)
+    assert beat_after.research_state is BeatResearchState.IDLE
+    briefs = await _briefs_for_beat(beat_id)
+    assert len(briefs) == 1
+    assert briefs[0].kind is BriefKind.PUBLISHED
+
+
+# --------------------------------------------------------------------------- #
 # FIX 4 (code review, AL-521): the cap is checked PER CLAIM, not once per
 # drain — with `used = cap - 1` and several claimable Beats, only ONE of
 # them may claim, never all of them.
@@ -1383,17 +1484,24 @@ async def test_a_url_cited_twice_produces_one_source_not_two() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# FIX 6 (code review, AL-521): `open_threads` is bounded to the MOST RECENT
-# entry's claims, decoupled from the novelty gate's own (unbounded) input.
+# `open_threads` comes from the latest PUBLISHED Brief, never the latest
+# ENTRY (second-pass code-review FIX B on AL-521, rewriting FIX 6's test to
+# pin the corrected behavior). §5.4's own motivating example — "Nothing
+# material since Brief #4 -- the Commission's consultation is still open" --
+# is unreachable past the first quiet week under the old "latest entry"
+# reading, because a Skipped row's `claims` is always `[]`. A quiet Beat is
+# the NORMAL case, so this is the common path, not an edge case.
 # --------------------------------------------------------------------------- #
 
 
 @pytest.mark.anyio
-async def test_load_context_open_thread_claims_is_bounded_to_the_latest_entry() -> None:
+async def test_open_thread_claims_come_from_the_latest_published_brief() -> None:
     """`_ResearchContext`'s two claim-shaped fields must diverge:
     `prior_claims` (the gate's own unbounded input, D9) keeps the Beat's
     WHOLE history; `open_thread_claims` (what reaches `AnalystDeps.
-    open_threads`) is bounded to the MOST RECENT entry only."""
+    open_threads`) is bounded to the latest PUBLISHED Brief's claims only --
+    proven here by a Skipped row that is the more RECENT entry, whose own
+    claims (`[]`) must NOT win."""
     user = await _create_user()
     beat_id = await _make_beat(user=user)
 
@@ -1419,6 +1527,15 @@ async def test_load_context_open_thread_claims_is_bounded_to_the_latest_entry() 
             claims=["the newest claim"],
             sources=[],
         )
+        # The latest ENTRY, more recent than Brief #2 -- a Skipped row, whose
+        # claims are always `[]`. The old ("latest entry") reading would make
+        # `open_thread_claims` `()` here; FIX B must not.
+        await briefs_repo.create_skipped(
+            beat_id=beat_id,
+            published_at=datetime(2026, 7, 27, 9, tzinfo=UTC),
+            published_on=date(2026, 7, 27),
+            skip_line="Nothing material since Brief #2",
+        )
         await session.commit()
 
     retriever = _FakeRetriever()
@@ -1427,14 +1544,100 @@ async def test_load_context_open_thread_claims_is_bounded_to_the_latest_entry() 
         retriever=retriever, resolve_model_fn=_resolver(FunctionModel(responder))
     )
 
-    context = await service._load_context(beat_id)  # white-box: FIX 6's own field
+    context = await service._load_context(beat_id)  # white-box: FIX B's own field
 
     assert context is not None
     assert set(context.prior_claims) == {
         "an ancient claim from the first edition",
         "the newest claim",
     }
+    # The latest PUBLISHED Brief's claims (#2), NOT the empty latest entry's.
     assert context.open_thread_claims == ("the newest claim",)
+    assert context.latest_published_number == 2
+
+
+@pytest.mark.anyio
+async def test_two_consecutive_skips_still_carry_the_latest_published_claims() -> None:
+    """§5.4's own worked example, played out for a second quiet week. Week 1
+    publishes Brief #1 with a claim that stays "open" for weeks to come; week
+    2 is quiet (a legitimate zero-findings Skip); week 3 is STILL quiet --
+    under the OLD "latest entry" reading, `open_thread_claims` would already
+    be `()` by week 3 (week 2's own Skip row), permanently losing "the
+    consultation is still open" the moment the FIRST quiet week passed. This
+    is the common path (consecutive quiet weeks), not an edge case."""
+    user = await _create_user()
+    beat_id = await _make_beat(user=user, anchor_weekday=0)
+
+    # Week 1: publishes.
+    retriever_1 = _FakeRetriever(documents=[_doc("https://example.com/a")])
+    responder_1 = _PipelineResponder(
+        researcher=(
+            "findings",
+            {
+                "findings": [
+                    _finding_payload(
+                        "the consultation opened", ["https://example.com/a"]
+                    )
+                ]
+            },
+        ),
+        analyst=(
+            "cited_urls",
+            {
+                "title": "First edition",
+                "body_markdown": "The consultation opened.",
+                "cited_urls": ["https://example.com/a"],
+            },
+        ),
+    )
+    service_1, _ = _make_service(
+        retriever=retriever_1, resolve_model_fn=_resolver(FunctionModel(responder_1))
+    )
+    await service_1.run_research(beat_id, date(2026, 7, 6))
+
+    # Week 2: nothing novel -- a legitimate zero-findings quiet week.
+    retriever_2 = _FakeRetriever(documents=[_doc("https://example.com/b")])
+    responder_2 = _PipelineResponder(
+        researcher=("findings", {"findings": []}), analyst=("detail", {"detail": ""})
+    )
+    service_2, _ = _make_service(
+        retriever=retriever_2, resolve_model_fn=_resolver(FunctionModel(responder_2))
+    )
+    await service_2.run_research(beat_id, date(2026, 7, 13))
+
+    briefs_after_week_2 = await _briefs_for_beat(beat_id)
+    assert len(briefs_after_week_2) == 2
+    assert briefs_after_week_2[0].kind is BriefKind.SKIPPED  # newest first
+
+    # Week 3: STILL nothing novel. The latest ENTRY is now week 2's Skip
+    # (`claims == []`, `create_skipped`'s own shape) -- the exact case FIX B
+    # exists for. `open_thread_claims` must still carry week 1's claim here.
+    retriever_3 = _FakeRetriever(documents=[_doc("https://example.com/c")])
+    responder_3 = _PipelineResponder(
+        researcher=("findings", {"findings": []}), analyst=("detail", {"detail": ""})
+    )
+    service_3, _ = _make_service(
+        retriever=retriever_3, resolve_model_fn=_resolver(FunctionModel(responder_3))
+    )
+
+    context = await service_3._load_context(beat_id)  # white-box: FIX B's own field
+    assert context is not None
+    assert context.open_thread_claims == ("the consultation opened",)
+    assert context.latest_published_number == 1
+
+    await service_3.run_research(beat_id, date(2026, 7, 20))
+
+    briefs_final = await _briefs_for_beat(beat_id)
+    assert len(briefs_final) == 3
+    newest = briefs_final[0]
+    assert newest.kind is BriefKind.SKIPPED
+    # The skip line's number-naming clause was already keyed on
+    # `latest_published` before FIX B -- proven here alongside
+    # `open_thread_claims` so both halves of one skip line are shown to share
+    # ONE data source, which is the "internal inconsistency" tell FIX B's own
+    # bug report names.
+    assert newest.skip_line is not None
+    assert newest.skip_line.startswith("Nothing material since Brief #1")
 
 
 # --------------------------------------------------------------------------- #
@@ -1544,6 +1747,58 @@ async def test_analyst_deps_invariant_violation_is_a_distinguishable_failure(
     assert beat.research_error == _INVARIANT_VIOLATION_MESSAGE
     assert beat.research_error != _RESEARCH_FAILED_MESSAGE  # distinguishable
     assert responder.analyst_calls == 0  # never reached a model call
+
+    briefs = await _briefs_for_beat(beat_id)
+    assert briefs == []
+
+
+# --------------------------------------------------------------------------- #
+# Second-pass code-review FIX E on AL-521: FIX 9's `except (ValueError,
+# KeyError)` was too broad -- `pydantic_core.ValidationError` (a real
+# `Retriever` parses a provider payload) and `json.JSONDecodeError` both
+# subclass `ValueError` and are reachable INSIDE the guarded block, since
+# `retrieve()` runs there too. A malformed/truncated search-API response —
+# the textbook provider blip that MIGHT succeed on retry — must fall through
+# to the ordinary blanket handler, never be misclassified as an invariant
+# violation.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.anyio
+async def test_a_validation_error_from_retrieve_is_not_misclassified_as_an_invariant(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A `pydantic_core.ValidationError` raised from inside `retrieve()` (here
+    forced directly, standing in for a real `Retriever` failing to parse a
+    malformed provider payload) must resolve to the ORDINARY `failed` message
+    (`_RESEARCH_FAILED_MESSAGE`), not `_INVARIANT_VIOLATION_MESSAGE` — proving
+    FIX E's narrower `_InvariantViolationError` catch no longer swallows this."""
+    user = await _create_user()
+    beat_id = await _make_beat(user=user)
+
+    class _Probe(BaseModel):
+        value: int
+
+    async def _raising_retrieve(*_args: object, **_kwargs: object) -> list[object]:
+        _Probe.model_validate({"value": "not-a-number"})  # raises ValidationError
+        return []  # pragma: no cover - unreachable, _Probe always raises above
+
+    monkeypatch.setattr(briefing_module, "retrieve", _raising_retrieve)
+
+    retriever = _FakeRetriever(documents=[_doc("https://example.com/a")])
+    responder = _PipelineResponder(researcher=("findings", {"findings": []}))
+    service, _ = _make_service(
+        retriever=retriever, resolve_model_fn=_resolver(FunctionModel(responder))
+    )
+
+    await service.run_research(beat_id, date(2026, 8, 3))
+
+    beat = await _reload_beat(beat_id)
+    assert beat.research_state is BeatResearchState.FAILED
+    # The ORDINARY blanket failure text -- NOT the invariant-violation one.
+    assert beat.research_error == _RESEARCH_FAILED_MESSAGE
+    assert beat.research_error != _INVARIANT_VIOLATION_MESSAGE
+    assert responder.researcher_calls == 0  # never reached: retrieve() raised first
 
     briefs = await _briefs_for_beat(beat_id)
     assert briefs == []
