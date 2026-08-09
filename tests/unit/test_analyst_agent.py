@@ -193,6 +193,18 @@ def test_analyst_reuses_researchers_predicate_object_unchanged() -> None:
     assert cites_only_read_documents is researcher_module.cites_only_read_documents
 
 
+def test_brief_body_field_set_is_exactly_title_body_and_cited_urls() -> None:
+    # FIX 4 (structural pin for TDD §5.5's second claim: "a Source's metadata
+    # is never model-written … which is exactly why this schema cannot
+    # express one"). That claim was enforced only by field ABSENCE — nothing
+    # stopped a later ticket adding e.g. `published_on: date` to `BriefBody`,
+    # and every existing test would still pass. Modeled on
+    # `test_no_agent_deps_carries_a_path_title_field`'s style
+    # (test_agents_layering.py): a closed field-set assertion turns a silent
+    # regression into a failing test.
+    assert set(BriefBody.model_fields) == {"title", "body_markdown", "cited_urls"}
+
+
 # --- validate_brief_result: BriefBody branch ------------------------------------
 
 
@@ -223,6 +235,22 @@ def test_validator_rejects_brief_citing_outside_its_deps() -> None:
     with pytest.raises(ModelRetry) as excinfo:
         validate_brief_result(documents, survivors, result)
     assert "https://example.com/never-read" in str(excinfo.value)
+
+
+def test_validator_citation_retry_names_the_permitted_url_set() -> None:
+    # FIX 1, part 3: the retry message must name the permitted set, not only
+    # the offending URL — otherwise it is the only place the truth about
+    # what IS citable could reach the model, and it does not.
+    documents = [_doc(url="https://example.com/a"), _doc(url="https://example.com/b")]
+    survivors = [_finding(source_urls=["https://example.com/a"])]
+    result = BriefBody.model_validate(
+        _brief_dict(cited_urls=["https://example.com/never-read"])
+    )
+    with pytest.raises(ModelRetry) as excinfo:
+        validate_brief_result(documents, survivors, result)
+    message = str(excinfo.value)
+    assert "https://example.com/a" in message
+    assert "https://example.com/b" in message
 
 
 def test_validator_rejects_brief_when_no_survivors() -> None:
@@ -272,6 +300,30 @@ def test_validator_rejects_skipped_note_when_survivors_present() -> None:
     result = SkippedNote(detail="Nothing happened.")
     with pytest.raises(ModelRetry):
         validate_brief_result(documents, survivors, result)
+
+
+def test_skipped_note_detail_exemplar_matches_the_fragment_register() -> None:
+    # FIX 3: `detail` is a sentence FRAGMENT read as a continuation after an
+    # em dash — no leading capital, no terminal period (class docstring,
+    # PRD §3's own example). Pins the exemplar's shape so a future edit
+    # cannot silently drift it back to a capitalized, full-stopped sentence.
+    detail = "the consultation is still open, closing 11 Sept"
+    assert detail[:1].islower()
+    assert not detail.endswith(".")
+    # Concatenated per PRD §3's template ("Nothing material since Brief #4 —
+    # <detail>"), the join must read as one continuous sentence.
+    templated = "Nothing material since Brief #4 — " + detail
+    assert templated == (
+        "Nothing material since Brief #4 — the consultation is still open, "
+        "closing 11 Sept"
+    )
+    # `SkippedNote(detail="")` is legitimate and, per the class docstring,
+    # means the SERVICE (AL-521) renders the templated clause alone, with no
+    # dangling " — " separator — a contract on the caller, not something
+    # this pure model can assert on itself.
+    result = validate_brief_result([], [], SkippedNote(detail=""))
+    assert isinstance(result, SkippedNote)
+    assert result.detail == ""
 
 
 # --- THE PADDING TEST: this phase's signature case (TDD §5.4, §11) -------------
@@ -368,7 +420,8 @@ def test_prompt_lists_survivors_with_index_and_urls() -> None:
         _finding(claim="First thing.", source_urls=["https://example.com/a"]),
         _finding(claim="Second thing.", source_urls=["https://example.com/b"]),
     ]
-    prompt = build_analyst_prompt(_deps(survivors=survivors))
+    documents = [_doc(url="https://example.com/a"), _doc(url="https://example.com/b")]
+    prompt = build_analyst_prompt(_deps(documents=documents, survivors=survivors))
     assert "[1]" in prompt and "First thing." in prompt
     assert "[2]" in prompt and "Second thing." in prompt
 
@@ -377,6 +430,30 @@ def test_prompt_with_no_survivors_says_so_and_omits_findings_block() -> None:
     prompt = build_analyst_prompt(_deps(survivors=[]))
     assert "No findings survived this run" in prompt
     assert "Findings surviving this run" not in prompt
+
+
+def test_prompt_permitted_urls_are_named_from_documents_not_survivors() -> None:
+    # FIX 1, part 1: the "cite ONLY these URLs" set must be built from
+    # `deps.documents` — the same set `validate_brief_result` checks against
+    # — never re-derived from each finding's own `source_urls`. Uses two
+    # documents but a survivor citing only one, so a prompt built from
+    # `source_urls` instead would omit the second URL from the permitted set.
+    documents = [_doc(url="https://example.com/a"), _doc(url="https://example.com/b")]
+    survivors = [_finding(source_urls=["https://example.com/a"])]
+    prompt = build_analyst_prompt(_deps(documents=documents, survivors=survivors))
+    assert "https://example.com/a" in prompt
+    assert "https://example.com/b" in prompt
+
+
+def test_prompt_renders_source_urls_bare_not_as_a_python_list_repr() -> None:
+    # FIX 6: no `['https://...']` list-repr punctuation around URLs — bare,
+    # matching `build_researcher_prompt`'s rendering, since brackets and
+    # quotes are drift surface the model must not copy under an exact-match
+    # membership check.
+    survivors = [_finding(source_urls=["https://example.com/a"])]
+    prompt = build_analyst_prompt(_deps(survivors=survivors))
+    assert "['https://example.com/a']" not in prompt
+    assert "source_urls: https://example.com/a" in prompt
 
 
 def test_prompt_includes_open_threads_when_present() -> None:
@@ -423,6 +500,69 @@ def test_deps_is_frozen() -> None:
         deps.topic = "changed"  # ty: ignore[invalid-assignment]
 
 
+def test_deps_rejects_survivor_citing_a_url_not_backed_by_documents() -> None:
+    # FIX 1, part 2: the invariant stated in AnalystDeps' docstring ("documents
+    # is exactly the RetrievedDocuments backing survivors") is now enforced,
+    # not just prose. A survivor citing a URL `documents` does not back must
+    # fail at construction, loudly, rather than reaching the model at all.
+    with pytest.raises(ValueError, match="never-read"):
+        AnalystDeps(
+            topic="t",
+            level="intermediate",
+            guidance=None,
+            documents=[_doc(url="https://example.com/a")],
+            survivors=[_finding(source_urls=["https://example.com/never-read"])],
+            open_threads=[],
+        )
+
+
+def test_deps_fix1_reproduction_case_fails_at_construction() -> None:
+    # FIX 1's exact reproduction case (ticket text, verbatim): D9's
+    # `filter_new` drops a finding only when EVERY one of its URLs was
+    # already cited, so a surviving finding can legitimately carry one new
+    # URL plus one previously-cited one that `documents` never re-fetched.
+    # Before FIX 1 this shape sailed straight through `AnalystDeps`
+    # construction and only failed after 4 model calls
+    # (`ModelRetry` x3, then `UnexpectedModelBehavior`) — the most expensive
+    # generation in the product. It must now fail HERE, at construction.
+    documents = [_doc(url="https://example.com/a")]
+    survivors = [
+        _finding(
+            claim="c",
+            detail="d",
+            source_urls=["https://example.com/a", "https://example.com/b"],
+        )
+    ]
+    with pytest.raises(ValueError, match="https://example.com/b"):
+        AnalystDeps(
+            topic="t",
+            level="intermediate",
+            guidance=None,
+            documents=documents,
+            survivors=survivors,
+            open_threads=[],
+        )
+
+
+def test_deps_accepts_survivor_citing_a_subset_of_documents() -> None:
+    # The invariant is one-directional: `documents` may legitimately carry
+    # more URLs than any single survivor cites (TDD §5.4's own module
+    # docstring precedent — documents is the union backing ALL survivors).
+    # Only "a survivor cites something documents does not back" is rejected.
+    deps = AnalystDeps(
+        topic="t",
+        level="intermediate",
+        guidance=None,
+        documents=[
+            _doc(url="https://example.com/a"),
+            _doc(url="https://example.com/b"),
+        ],
+        survivors=[_finding(source_urls=["https://example.com/a"])],
+        open_threads=[],
+    )
+    assert deps.survivors[0].source_urls == ["https://example.com/a"]
+
+
 # --- assembled agent --------------------------------------------------------------
 
 
@@ -465,6 +605,27 @@ def test_agent_retries_on_unread_citation_then_succeeds() -> None:
     assert respond.call_count == 2
     retry_text = _retry_prompt_text(respond.messages_per_call[1])
     assert "https://example.com/never-read" in retry_text
+
+
+def test_agent_retries_on_branch_mismatched_skipped_note_then_succeeds() -> None:
+    # FIX 5: the module docstring claims agent-tier coverage of "a
+    # branch-mismatched SkippedNote forces a retry" — until now the only
+    # coverage was the pure-validator
+    # test_validator_rejects_skipped_note_when_survivors_present. This closes
+    # that gap at the agent level: survivors are present, the model wrongly
+    # returns the skipped form, and the retry loop must reject it and accept
+    # a subsequent, correct BriefBody.
+    agent = build_analyst_agent()
+    bad_skip = {"detail": "nothing to report"}
+    good = _brief_dict()
+    respond = AnalystResponder([("detail", bad_skip), ("cited_urls", good)])
+    result = agent.run_sync(
+        "write the brief", deps=_deps(), model=FunctionModel(respond)
+    ).output
+    assert isinstance(result, BriefBody)
+    assert respond.call_count == 2
+    retry_text = _retry_prompt_text(respond.messages_per_call[1])
+    assert "skipped form" in retry_text
 
 
 def test_agent_system_prompt_is_level_scoped() -> None:
