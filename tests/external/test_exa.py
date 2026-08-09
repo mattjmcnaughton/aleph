@@ -29,6 +29,23 @@ and every test here is `@pytest.mark.external`, reachable only through
 `RetrievalUnavailableError`) is `tests/unit/test_retrieval.py`'s job, against
 a fake HTTP transport — this file only asks whether the real API's *content*
 satisfies the three requirements above, which no fixture or fake can answer.
+
+**Cost of running this file (FIX 7, ticket AL-512 review).** Both tests below
+call `ExaRetriever.search()` with exactly ONE query each, so
+`services/retrieval.py`'s per-query sizing rule (FIX 6) — `ceil(max_documents
+/ len(queries) * 1.5)` — degenerates to `ceil(max_documents * 1.5)`: 18
+results at shipped config (`settings.brief_retrieval_max_documents == 12`),
+not `max_documents` itself. With `type: "neural"` pinned (FIX 7), each
+request bills at the OpenAPI spec's `perRequestPrices.
+neuralSearch_1_25_results = $0.005` (18 results is within the 1-25 tier) —
+deterministically, rather than an unpinned `auto` request that could have
+been billed at `deepSearch`'s `$0.015`-`$0.075`. Content-text extraction
+bills per page actually returned, up to `perPagePrices.contentText = $0.001
+x 18 = $0.018` per test (an upper bound — the live query may return fewer
+than 18 results). **Two tests per run: at most ~$0.046** (`2 x ($0.005 +
+$0.018)`), corroborated by the OpenAPI spec's own `perRequestPrices`/
+`perPagePrices` fields — the same primary source the implementer already
+used to build the adapter, not a third-party pricing page.
 """
 
 from __future__ import annotations
@@ -72,9 +89,17 @@ async def test_live_exa_search_returns_usable_text_and_a_published_date() -> Non
     assert documents, "Exa returned no documents for a broad, active topic"
 
     # Requirement 1: usable text — not empty, not a truncated snippet.
-    assert all(document.text for document in documents), (
-        "at least one document came back with empty text"
-    )
+    #
+    # Deliberately NOT `assert all(document.text for document in documents)`
+    # (FIX 5, ticket AL-512 review): the adapter maps a failed extraction to
+    # `""` on purpose, and `retrieve()` — not this adapter — owns dropping
+    # those (§5.2's "one owner" rule; see `_document_from_exa_result`'s
+    # docstring). One paywalled or JS-only page among a dozen live results
+    # would fail this canary for a reason that is not drift, and a canary
+    # that fires spuriously gets ignored — worse than not having it. The
+    # `substantial` check below is what actually tests PRD §4.4's "enough
+    # text to ground a quote": it demands at least one document with real
+    # article-length text, not that every document has any text at all.
     substantial = [
         document
         for document in documents

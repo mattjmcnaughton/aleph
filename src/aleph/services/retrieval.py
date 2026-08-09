@@ -19,19 +19,24 @@ cost is that the layering test does not cover it, so its purity is
 from __future__ import annotations
 
 import hashlib
+import math
 import re
 from dataclasses import dataclass, replace
 from datetime import date, timedelta
+from itertools import zip_longest
 from typing import TYPE_CHECKING, Protocol
 from urllib.parse import urlparse
 
 import httpx
+import structlog
 
 from aleph.agents.researcher import RetrievedDocument
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
     from pathlib import Path
+
+logger = structlog.get_logger(__name__)
 
 
 class RetrievalUnavailableError(RuntimeError):
@@ -344,6 +349,17 @@ def _exa_request_payload(
     """The JSON body for one Exa `/search` call (CONFIRMED FROM DOCS shape —
     exa-labs/openapi-spec's `/search` request schema).
 
+    **`type: "neural"` is pinned explicitly** (FIX 7, ticket AL-512 review;
+    CONFIRMED FROM DOCS — the spec's `type` enum is `neural` / `fast` /
+    `auto` / `deep` / `deep-reasoning` / `instant`, defaulting to `auto`).
+    Left unset, `auto` lets Exa pick a strategy per request — including
+    `deep`/`deep-reasoning`, billed at `perRequestPrices`'s
+    `deepSearch_1_25_results = $0.015` / `deepSearch_26_100_results =
+    $0.075`, several times `neuralSearch`'s `$0.005` / `$0.025` — which made
+    every prior cost estimate a *lower bound*, not a figure: the search type
+    actually billed was never determined by this adapter. Pinning `neural`
+    makes the cost claim true by construction rather than optimistic.
+
     `contents: {"text": true}` asks for the full extracted page text (PRD
     §4.4: "the full text, NOT a snippet") rather than `highlights`, Exa's
     snippet-shaped alternative. `since` becomes `startPublishedDate` — an
@@ -354,6 +370,7 @@ def _exa_request_payload(
     """
     payload: dict[str, object] = {
         "query": query,
+        "type": "neural",
         "numResults": max(1, min(num_results, _EXA_MAX_NUM_RESULTS)),
         "contents": {"text": True},
     }
@@ -362,20 +379,24 @@ def _exa_request_payload(
     return payload
 
 
-def _exa_publisher(author: object, url: str) -> str:
+def _exa_publisher(url: str) -> str:
     """The Source's `publisher` — Exa's response has **no such field**
     (INFERRED, not in the documented schema).
 
-    exa-labs/openapi-spec's `/search` response documents `author` (nullable)
-    and `url` on every result, but no `publisher`/site-name field at all.
-    When `author` is a non-empty string it is the best available byline;
-    otherwise the document's own domain (`url`'s netloc, `www.` stripped)
-    stands in. `brief_sources.publisher` is `NOT NULL` (TDD §4), so leaving
-    a Source with no publisher label at all is not an option this adapter
-    can defer to a later layer.
+    **The URL's registrable domain (netloc, `www.` stripped) is the SOLE
+    source** (FIX 1, ticket AL-512 review corrected this — the adapter used
+    to prefer Exa's `author` field first and fall back to the domain only
+    when `author` was absent). `author` is a BYLINE, not an organization:
+    probed with Exa's own spec example values, preferring it produced
+    `publisher = "Dan Milmon"` for a Guardian article and a 300-character
+    author-and-affiliation blob for an academic paper. `brief_sources.publisher`
+    is `NOT NULL` **and** `Text` (TDD §4) — it lands verbatim in the rendered
+    Sources block, which PRD §3 calls "the part a learner checks us on" — so
+    a person's name there reads as a bug, not a source identity, and a URL's
+    domain (`theguardian.com`) is the only organizational identifier Exa's
+    response carries at all. `author` is not mapped to anything else here —
+    `RetrievedDocument` has no field for a byline.
     """
-    if isinstance(author, str) and author.strip():
-        return author.strip()
     netloc = urlparse(url).netloc
     return netloc.removeprefix("www.") if netloc else "unknown"
 
@@ -384,14 +405,29 @@ def _exa_published_on(raw: object) -> date | None:
     """Parse Exa's `publishedDate` into a `date`, or `None` on anything
     absent or unparseable.
 
-    Documented format is a bare `YYYY-MM-DD`, and the field is nullable
-    (CONFIRMED FROM DOCS). **Deliberately lenient, not a raise**:
-    `retrieve()` is the one place that drops an undated document (§5.2's
-    "one owner" rule) — this adapter must not duplicate that decision, so a
-    `null`/missing/malformed date maps to `None` and the document still
-    comes back from `search()` for `retrieve()` to filter. Only the first 10
-    characters are read, so a full ISO datetime (were Exa ever to send one
-    instead of its documented bare date) still parses.
+    **The `[:10]` slice is load-bearing, not defensive** (FIX 2, ticket
+    AL-512 review). The spec's prose DESCRIBES the field as a bare
+    `YYYY-MM-DD`, but every EXAMPLE value in exa-labs/openapi-spec is a full
+    ISO 8601 datetime (`"2023-11-16T01:36:32.547Z"`) — and
+    `date.fromisoformat` raises `ValueError` on that string unsliced. So the
+    slice is what makes this adapter work against Exa's actual production
+    format, which the spec's own examples show is a datetime; it is not
+    belt-and-braces for a shape Exa "might" send instead of its documented
+    bare date. (An earlier version of this docstring had that backwards —
+    calling the bare date "CONFIRMED FROM DOCS" and framing a datetime as
+    hypothetical. A maintainer who trusted that and simplified to
+    `date.fromisoformat(str(raw))` would keep every unit test green, since
+    `"2026-07-30"` parses fine unsliced — while every real Exa response gave
+    every document `published_on=None`, `retrieve()`'s dated-only filter
+    dropped them all, and every Beat run failed permanently behind a fully
+    green suite. `test_exa_retriever_maps_a_full_datetime_published_date`
+    below pins the datetime case directly.)
+
+    **Deliberately lenient, not a raise**: `retrieve()` is the one place
+    that drops an undated document (§5.2's "one owner" rule) — this adapter
+    must not duplicate that decision, so a `null`/missing/malformed date
+    maps to `None` and the document still comes back from `search()` for
+    `retrieve()` to filter.
     """
     if not raw:
         return None
@@ -404,29 +440,96 @@ def _exa_published_on(raw: object) -> date | None:
 def _document_from_exa_result(item: Mapping[str, object]) -> RetrievedDocument:
     """One `RetrievedDocument` from a single `results[i]` object (CONFIRMED
     FROM DOCS field names — exa-labs/openapi-spec's `ResultWithContent`
-    schema: `url`, `title`, `publishedDate`, `author`, `text`).
+    schema: `url`, `title`, `publishedDate`, `author`, `text`). `author` is
+    part of that schema but is never mapped to anything here — see
+    `_exa_publisher`'s docstring (FIX 1, ticket AL-512 review).
 
-    `url` is the only field treated as required: its absence (`KeyError`) or
-    `item` not being a mapping at all (`TypeError`) means the response does
-    not match Exa's documented contract, so it raises rather than fabricate
-    a document with no address — the caller (`ExaRetriever._search_one`)
-    maps both to `RetrievalUnavailableError`. `title` and `text` fall back to
-    `""` when absent: Exa's own schema does not guarantee either is
-    populated for every URL (a page can fail content extraction and still be
-    a real, listed result), and an empty-text document is `retrieve()`'s to
-    drop (§5.2's "drop documents with no original text" rule), not this
-    adapter's.
+    `url` is the only field treated as required: its absence raises
+    `KeyError`, and a URL malformed enough that `_exa_publisher`'s
+    `urlparse` call raises (`ValueError`, e.g. Exa returning `https://[bad`)
+    also propagates from here. Both mean this ONE result does not match
+    Exa's documented contract, so this function still raises rather than
+    fabricate a document with no address — but the caller
+    (`ExaRetriever._search_one`) now catches `KeyError`/`ValueError` around
+    each individual result and SKIPS just that one, instead of failing the
+    whole query and discarding every other good, dated, full-text document
+    alongside it (FIX 3, ticket AL-512 review). `item` not being a mapping
+    at all would raise `TypeError`, which is not one of those two named
+    cases and is deliberately NOT caught per-result (FIX 4) — Exa's
+    documented schema guarantees list items are objects, so this is not a
+    shape Exa can actually send; a `TypeError` here is a signal of a bug in
+    our own code, not a malformed Exa response, and must propagate as one.
+    `title` and `text` fall back to `""` when absent: Exa's own schema does
+    not guarantee either is populated for every URL (a page can fail
+    content extraction and still be a real, listed result), and an
+    empty-text document is `retrieve()`'s to drop (§5.2's "drop documents
+    with no original text" rule), not this adapter's.
     """
     url = str(item["url"])
     title = str(item.get("title") or "")
     text = str(item.get("text") or "")
     return RetrievedDocument(
         url=url,
-        publisher=_exa_publisher(item.get("author"), url),
+        publisher=_exa_publisher(url),
         title=title,
         published_on=_exa_published_on(item.get("publishedDate")),
         text=text,
     )
+
+
+_EXA_PER_QUERY_HEADROOM = 1.5
+"""Multiplier applied over an even split of `max_documents` across a plan's
+queries (FIX 6, ticket AL-512 review). A query's own results still lose some
+to cross-query dedupe and to `retrieve()`'s undated/empty-text drops, so
+asking each query for exactly its even share risks starving the post-cap
+batch below `max_documents` even when the content exists to fill it. 50%
+headroom absorbs that without reintroducing the old rule (`max_documents`
+asked of EVERY query), which over-fetched ~6x at shipped config
+(`max_queries=6`) and let the first query alone fill the entire batch."""
+
+
+def _exa_per_query_num_results(num_queries: int, max_documents: int) -> int:
+    """How many results to ask Exa for on ONE query of a `num_queries`-query
+    plan sharing a `max_documents` total (FIX 6, ticket AL-512 review).
+
+    `max_documents / num_queries`, rounded up and inflated by
+    `_EXA_PER_QUERY_HEADROOM` — e.g. 3 per query for the shipped
+    `max_queries=6`, `max_documents=12` (`ceil(2 * 1.5) == 3`), against the
+    old rule's flat 12 per query. Clamping to Exa's documented `1..100`
+    happens in `_exa_request_payload`, not here — this only computes the
+    target share.
+    """
+    if num_queries < 1:
+        msg = f"num_queries must be at least 1; got {num_queries}."
+        raise ValueError(msg)
+    even_share = max_documents / num_queries
+    return max(1, math.ceil(even_share * _EXA_PER_QUERY_HEADROOM))
+
+
+def _interleave_round_robin(
+    groups: Sequence[Sequence[RetrievedDocument]],
+) -> list[RetrievedDocument]:
+    """Flatten `groups` (one list per query, in query order) ROUND-ROBIN —
+    query 1's first result, query 2's first result, ..., then query 1's
+    second, and so on — rather than concatenating each query's results in
+    full before moving to the next (FIX 6, ticket AL-512 review).
+
+    This is what makes `retrieve()`'s first-`max_documents` cap sample
+    ACROSS angles instead of draining query 1 alone: if query 1 alone
+    returns `max_documents` dated, non-empty documents, a plain
+    concatenation lets it fill the entire post-cap batch and angles 2..N
+    contribute nothing to the Brief despite being paid for — silently
+    defeating D6a's whole argument for a multi-angle plan. This has to live
+    here, in `ExaRetriever`, and not in `retrieve()`: `Retriever.search()`
+    returns a flat list with no query attribution (D6's Protocol shape), so
+    by the time `retrieve()` sees the documents it has no way to recover
+    which query produced which one. `ExaRetriever` is the only layer that
+    still knows, so it is the only layer that can interleave.
+    """
+    interleaved: list[RetrievedDocument] = []
+    for row in zip_longest(*groups, fillvalue=None):
+        interleaved.extend(document for document in row if document is not None)
+    return interleaved
 
 
 class ExaRetriever:
@@ -449,23 +552,41 @@ class ExaRetriever:
     `import httpx` reachable from production should not depend on some other
     package's extra staying exactly as configured.
 
-    **Every transport, auth, quota, rate-limit, or malformed-response error
-    becomes `RetrievalUnavailableError`** (§5.7's first row — this ticket's
-    whole reason to exist, never a Skipped entry or an uncited Brief).
-    `httpx.HTTPError` is the base of every `httpx` failure this call can
-    raise: connection-level failures (DNS, TLS, timeout, refused connection —
-    every `httpx.RequestError` subclass) *and* HTTP status failures
-    (`response.raise_for_status()`, so 401 auth, 402/403 quota, 429
-    rate-limit, and 5xx all land here alike — Exa's OpenAPI spec documents no
-    per-code error body worth distinguishing, CONFIRMED FROM DOCS: "the
-    specification does not include explicit error response schemas for 401,
-    429, or 500"). A response that parses as JSON but does not match the
-    documented shape — no `results` key, `results` not a list, an item
-    missing `url` — raises `KeyError`/`TypeError`; a body that is not valid
-    JSON at all raises `ValueError` (`json.JSONDecodeError`, a `ValueError`
-    subclass). All of these are caught in one `except` and re-raised as
-    `RetrievalUnavailableError`, so nothing here can surface a bare
-    `httpx`/`json` exception past this class.
+    **Transport, auth, quota, rate-limit, and top-level malformed-response
+    errors become `RetrievalUnavailableError`** (§5.7's first row — this
+    ticket's whole reason to exist, never a Skipped entry or an uncited
+    Brief) — but the `try` that catches them is narrow (FIX 4, ticket AL-512
+    review): it wraps only the HTTP call, `response.raise_for_status()`,
+    `.json()`, and the top-level `results`-shape check, never the per-result
+    mapping. `httpx.HTTPError` is the base of every `httpx` failure this call
+    can raise: connection-level failures (DNS, TLS, timeout, refused
+    connection — every `httpx.RequestError` subclass) *and* HTTP status
+    failures (`response.raise_for_status()`, so 400 unsupported-parameters,
+    401 auth, 402/403 quota, 429 rate-limit, and 5xx all land here alike —
+    Exa's OpenAPI spec documents no per-code error body worth distinguishing,
+    CONFIRMED FROM DOCS: "the specification does not include explicit error
+    response schemas for 401, 429, or 500"; a 400 is deterministic and
+    permanent rather than transient, but the status mapping stays uniform —
+    see `test_exa_retriever_maps_http_error_status_to_retrieval_unavailable`).
+    A response that parses as JSON but carries no top-level `results` list
+    raises `KeyError`/`TypeError`; a body that is not valid JSON at all
+    raises `ValueError` (`json.JSONDecodeError`, a `ValueError` subclass).
+    These are caught in one `except` and re-raised as
+    `RetrievalUnavailableError`.
+
+    **Per-result mapping runs OUTSIDE that `try`** (FIX 3 and FIX 4
+    together, ticket AL-512 review). One malformed result — missing `url`
+    (`KeyError`), or a URL malformed enough that `_exa_publisher`'s
+    `urlparse` call raises (`ValueError`, e.g. Exa returning `https://[bad`)
+    — is caught narrowly around that ONE result's mapping call and SKIPPED,
+    so it no longer fails the whole query and discards every other good,
+    dated, full-text document alongside it (confirmed empirically: three
+    results with only the middle one malformed used to raise and discard all
+    three). A programming error in OUR OWN mapping code — a `TypeError` from
+    a wrong-arity call, an `AttributeError` from a typo — is caught NOWHERE
+    in this class and propagates as itself, so a bug introduced in a later
+    refactor surfaces as a real traceback instead of presenting as an Exa
+    outage behind a Retry that could never fix it.
 
     **Undated and empty-text documents are NOT dropped here** — `retrieve()`
     owns both (§5.2's "one owner" rule; see `_exa_published_on` and
@@ -495,7 +616,8 @@ class ExaRetriever:
         self._timeout_seconds = timeout_seconds
 
     async def search(self, queries: Sequence[str]) -> list[RetrievedDocument]:
-        """One Exa `/search` call per query, sequentially, concatenated.
+        """One Exa `/search` call per query, sequentially, interleaved
+        round-robin (FIX 6, ticket AL-512 review).
 
         Sequential rather than fanned out with `asyncio.gather`: a plan is
         capped at `BRIEF_RETRIEVAL_MAX_QUERIES` (6, config.py) queries, and
@@ -503,25 +625,56 @@ class ExaRetriever:
         `RetrievalUnavailableError` — concurrency here would buy latency, not
         correctness, at the cost of a `TaskGroup`/`return_exceptions` dance
         for a loop this short.
+
+        **Per-query sizing and interleaving (FIX 6).** Each query asks Exa
+        for `_exa_per_query_num_results(len(queries), max_documents)`
+        results — an even share of `max_documents` across the plan's
+        queries, with headroom — rather than `max_documents` itself. The old
+        rule asked EVERY query for the full `max_documents` and let
+        `retrieve()`'s first-N cap drain query 1 alone: at shipped config
+        (`max_queries=6`, `max_documents=12`) that pre-dedupe-fetched up to
+        6x12=72 documents (~$0.102/run: 6 requests x `$0.005` +
+        72 pages x `$0.001`) of which angles 2-6 could contribute NOTHING to
+        a Brief whenever query 1 alone satisfied the cap. The new rule
+        pre-dedupe-fetches 6x3=18 documents at shipped config, for **~$0.048
+        /run** (6 x `$0.005` + 18 x `$0.001`) — close to D14a's ~$0.04
+        retrieval design target. The per-query lists are then interleaved
+        round-robin (`_interleave_round_robin`) before returning, so the cap
+        samples across angles instead of draining the first one — see that
+        function's docstring for why this is the only layer that can do it.
         """
-        documents: list[RetrievedDocument] = []
+        if not queries:
+            return []
+        num_results = _exa_per_query_num_results(len(queries), self._max_documents)
+        per_query_documents: list[list[RetrievedDocument]] = []
         async with httpx.AsyncClient(
             base_url=_EXA_BASE_URL,
             timeout=self._timeout_seconds,
             transport=self._transport,
         ) as client:
             for query in queries:
-                documents.extend(await self._search_one(client, query))
-        return documents
+                per_query_documents.append(
+                    await self._search_one(client, query, num_results=num_results)
+                )
+        return _interleave_round_robin(per_query_documents)
 
     async def _search_one(
-        self, client: httpx.AsyncClient, query: str
+        self, client: httpx.AsyncClient, query: str, *, num_results: int
     ) -> list[RetrievedDocument]:
-        """One Exa `/search` round trip, mapped to `RetrievedDocument`s or
-        raised as `RetrievalUnavailableError` — see the class docstring for
-        the full error-mapping table this `except` clause implements."""
+        """One Exa `/search` round trip. The HTTP call, `.json()` parse, and
+        the top-level `results`-shape check are the only things wrapped in
+        `try` (FIX 4, ticket AL-512 review) — everything that can fail there
+        really is Exa/transport being unavailable, so it becomes
+        `RetrievalUnavailableError` (see the class docstring's error-mapping
+        section). Per-result MAPPING runs OUTSIDE that `try`: a malformed
+        individual result is caught narrowly, right around
+        `_document_from_exa_result`, and skipped (FIX 3) rather than failing
+        the whole query — but a bug in our own mapping code is not caught at
+        all here, so it propagates as itself instead of being disguised as
+        an Exa outage.
+        """
         payload = _exa_request_payload(
-            query, since=self._since, num_results=self._max_documents
+            query, since=self._since, num_results=num_results
         )
         try:
             response = await client.post(
@@ -535,10 +688,20 @@ class ExaRetriever:
             if not isinstance(results, list):
                 msg = f"'results' is not a list (got {type(results).__name__})"
                 raise TypeError(msg)
-            return [_document_from_exa_result(item) for item in results]
         except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
             msg = f"Exa search failed for query {query!r}: {exc}"
             raise RetrievalUnavailableError(msg) from exc
+
+        documents: list[RetrievedDocument] = []
+        for item in results:
+            try:
+                documents.append(_document_from_exa_result(item))
+            except (KeyError, ValueError) as exc:
+                logger.warning(
+                    "exa_result_skipped_malformed", query=query, error=str(exc)
+                )
+                continue
+        return documents
 
 
 # --- FixtureRetriever — evals + integration replay (TDD §5.2, §10, D10) --------
