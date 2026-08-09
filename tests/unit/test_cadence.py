@@ -105,18 +105,85 @@ def test_skipped_entry_resets_the_floor_like_a_published_one() -> None:
     both Skipped and published rows (D2) is what erases the distinction, and
     that means this module cannot special-case it even if it wanted to. The
     same date, however it was produced, yields the same floor.
-    """
-    published_last_entry_on = date(2026, 7, 20)
-    skipped_last_entry_on = date(2026, 7, 20)  # same date, a Skipped row's floor
-    anchor_weekday = 4
-    today = date(2026, 7, 24)
 
-    assert next_claimable_on(published_last_entry_on, anchor_weekday) == (
-        next_claimable_on(skipped_last_entry_on, anchor_weekday)
+    Asserted against the **concrete** expected date, not against itself:
+    `f(x) == f(x)` cannot fail for any implementation (replacing
+    `next_claimable_on`'s entire body with `return last_entry_on` would still
+    pass a same-input-same-output comparison). The point this test has to
+    make — that the function never learns which *kind* of entry it was —
+    only shows up once both a published-row floor and a skipped-row floor are
+    each checked against the real answer independently.
+
+    2026-07-20 is a Monday; with ``anchor_weekday=4`` (Friday) the next Anchor
+    day is 2026-07-24, so that date is claimable and the day before is not.
+    """
+    anchor_weekday = 4  # Friday
+    next_anchor = date(2026, 7, 24)
+
+    published_last_entry_on = date(2026, 7, 20)
+    assert next_claimable_on(published_last_entry_on, anchor_weekday) == next_anchor
+    assert (
+        is_claimable(published_last_entry_on, anchor_weekday, today=next_anchor) is True
     )
-    assert is_claimable(published_last_entry_on, anchor_weekday, today=today) == (
-        is_claimable(skipped_last_entry_on, anchor_weekday, today=today)
+    assert (
+        is_claimable(
+            published_last_entry_on,
+            anchor_weekday,
+            today=next_anchor - timedelta(days=1),
+        )
+        is False
     )
+
+    skipped_last_entry_on = date(2026, 7, 20)  # same date, a Skipped row's floor
+    assert next_claimable_on(skipped_last_entry_on, anchor_weekday) == next_anchor
+    assert (
+        is_claimable(skipped_last_entry_on, anchor_weekday, today=next_anchor) is True
+    )
+    assert (
+        is_claimable(
+            skipped_last_entry_on,
+            anchor_weekday,
+            today=next_anchor - timedelta(days=1),
+        )
+        is False
+    )
+
+
+# --- clock skew: today before the last entry (westward travel) ----------------
+
+
+def test_today_before_last_entry_is_not_claimable() -> None:
+    """Clock skew / westward travel: ``today`` lands before ``last_entry_on``.
+
+    Current behavior returns ``False`` — pinned here, not changed. See
+    ``cadence.py``'s comment on :func:`is_claimable` for why this is
+    deliberate and self-healing rather than a bug to fix.
+    """
+    last_entry_on = date(2026, 8, 3)
+    today = last_entry_on - timedelta(days=2)
+
+    assert is_claimable(last_entry_on, anchor_weekday=4, today=today) is False
+
+
+# --- leap day and year-boundary cases -------------------------------------
+
+
+def test_leap_day_last_entry() -> None:
+    """2024-02-29 is a Thursday; anchor Thursday -> 2024-03-07 (crosses the
+    leap day itself, not just a month boundary)."""
+    last_entry_on = date(2024, 2, 29)
+    assert last_entry_on.weekday() == 3  # Thursday
+
+    assert next_claimable_on(last_entry_on, anchor_weekday=3) == date(2024, 3, 7)
+
+
+def test_year_boundary_last_entry() -> None:
+    """2025-12-31 is a Wednesday; anchor Tuesday -> 2026-01-06, crossing the
+    year boundary."""
+    last_entry_on = date(2025, 12, 31)
+    assert last_entry_on.weekday() == 2  # Wednesday
+
+    assert next_claimable_on(last_entry_on, anchor_weekday=1) == date(2026, 1, 6)
 
 
 # --- all 49 anchor-weekday x today-weekday combinations ------------------------

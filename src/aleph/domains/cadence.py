@@ -78,6 +78,15 @@ def is_claimable(
     calls, so a type checker can see ``next_date`` is only ever ``None`` in
     exactly the branch that already short-circuits the comparison; the
     *behavior* is the formula above, unchanged.
+
+    **``today < last_entry_on`` (clock skew / westward travel) returns
+    ``False``, deliberately.** This function trusts its caller's ``today``
+    (D5 — evaluated once, on arrival, from the request's offset) rather than
+    re-deriving or clamping it, so a traveller whose local clock briefly reads
+    a date before their own last entry simply is not claimable *yet* by that
+    reading. Nothing needs correcting: the floor this function computes is at
+    most seven days out, so the next arrival with an honest ``today`` opens it
+    again on its own — self-healing rather than a case worth special-casing.
     """
     next_date = next_claimable_on(last_entry_on, anchor_weekday)
     return next_date is None or today >= next_date
