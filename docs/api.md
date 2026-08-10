@@ -637,7 +637,7 @@ accidentally read a Skipped row's `read_at` because the key is not there.
 | Method | Path | Query / Body | Success | Notes |
 | ------ | ---- | ------------- | ------- | ----- |
 | `GET` | `/api/v1/briefs/{id}` | — | `200` | A Brief's body Markdown, Sources, and `builds_on`. Ownership walks Brief → Beat → account (`404` for another learner's, never `403`). Also resolves a Skipped entry's id (its rail row links nowhere in the shipped frontend, but the API draws no such line) — `number`/`title`/`body_markdown` are `null` and `sources` is `[]` for one, mirroring D2's own storage `CHECK`. |
-| `POST` | `/api/v1/briefs/{id}/read` | `{marker: "opened" \| "sources"}` | `204` | The read ping (D11). `opened`/`sources` are independent, first-write-wins columns (`read_at`/`sources_seen_at`) — idempotent per marker: a repeat ping with the same `marker` never moves its timestamp. An unrecognized `marker` is `422 validation_error` before this body runs. |
+| `POST` | `/api/v1/briefs/{id}/read` | `tz_offset_minutes` (optional, default `0`) + `{marker: "opened" \| "sources"}` | `204` | The read ping (D11). `opened`/`sources` are independent, first-write-wins columns (`read_at`/`sources_seen_at`) — idempotent per marker: a repeat ping with the same `marker` never moves its timestamp. An unrecognized `marker` is `422 validation_error` before this body runs. A ping against a Skipped Brief is also a `204` no-op (it has nothing to mark read). `tz_offset_minutes` computes `brief_read`'s `age_days` (§9) against the learner's **local** day — `published_on` is itself a local day (D4a), so comparing it to UTC's *today* could otherwise go negative for a learner east of UTC reading a fresh Brief in their own morning. |
 
 ```jsonc
 // GET /api/v1/briefs/{id}

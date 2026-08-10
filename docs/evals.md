@@ -871,6 +871,19 @@ short version:
   any branch ref, so a prompt change — including a change to the judge prompt or
   the calibration examples — can be evaluated before merge. Never a required
   check, never triggered by pushes or PRs, and never on a schedule.
+- **Only `seed-set` (outline/lesson) and `agreement` are dispatchable.**
+  `.github/workflows/evals.yml`'s `mode` input has exactly those two `choice`
+  options — there is no third value that reaches `--flashcards` or `--briefs`,
+  and no separate input that does either. CLAUDE.md names workflow dispatch as
+  the sanctioned way to run evals, so this is a real gap, stated here rather
+  than assumed away: **`--flashcards` (Phase 3) and `--briefs` (Phase 6) are
+  local-only** — `just evals --flashcards`, `just evals --briefs`, and their
+  `--smoke` forms all require a developer's own `OPENROUTER_API_KEY` (and, for
+  a live `--briefs` run, `EXA_API_KEY`) on their own machine; neither mode has
+  ever run in CI, dispatched or otherwise. Adding either is a workflow-file
+  change (new `mode` options or new inputs), not a docs fix, and is out of
+  scope for this sweep (AL-561) — it is recorded here so the absence is a
+  known gap rather than a silent one.
 - **Secret:** `OPENROUTER_API_KEY` (repository secret, **AL-080 — not uploaded
   yet**). Until it lands, a dispatched run fails immediately with the harness's
   exit-2 message; nothing else about the workflow is waiting on it.
