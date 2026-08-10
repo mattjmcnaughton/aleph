@@ -60,13 +60,26 @@ class RetrievalUnavailableError(RuntimeError):
 class QueryPlan:
     """The frozen output of `build_query_plan` — what a `Retriever` executes.
 
-    Just the queries: `Retriever.search()` takes no separate `since` or cap
-    parameter (D6's Protocol shape), so `build_query_plan` folds the period
-    start into the query text itself rather than carrying it as a second
-    field here.
+    **`since` rides alongside `queries` as its own field** (corrected from an
+    earlier version of this docstring, which folded the period start into the
+    query text ALONE and left `Retriever.search()` with nowhere to carry it —
+    the AL-521/AL-523 handoff gap: `ExaRetriever` smuggled `since` into its
+    own constructor instead, which only produces the right per-Beat filter if
+    a fresh instance is built per Beat, and nothing did — every run asked Exa
+    for full history regardless of the Beat's real period start).
+
+    `queries` still folds the period into its own prose (`build_query_plan`'s
+    recency phrase, unchanged) — that half is for the model reading the
+    documents, not the provider's date filter — but the STRUCTURED value a
+    provider can filter on (Exa's `startPublishedDate`) now has exactly one
+    source of truth: this field, read by `retrieve()` and passed to
+    `Retriever.search(queries, since=...)`. `FixtureRetriever` and
+    `StubRetriever` accept the parameter and ignore it (D10: fixture replay
+    is keyed on the RECORDED queries, never re-derived from a live `since`).
     """
 
     queries: tuple[str, ...]
+    since: date | None = None
 
 
 def build_query_plan(
@@ -88,12 +101,10 @@ def build_query_plan(
     Queries are derived from the Beat's frozen standing orders (`topic` +
     optional `guidance`) plus the period start (`since` — the prior Brief's
     `published_on`, or `None` for a Beat's first-ever run, PRD §3). `since`
-    is folded into the query text as a recency phrase rather than passed to
-    the `Retriever` as a separate filter, because D6's `Retriever.search()`
-    takes only `queries` — a provider that wants a structured date filter
-    (Exa's `since`, AL-523) parses it back out of its own query text, or is
-    handed it a different way entirely; that adapter's problem, not this
-    function's.
+    is folded into the query text as a recency phrase (for the model reading
+    the documents) AND carried on the returned `QueryPlan.since` (for a
+    provider's own structured date filter, e.g. Exa's `startPublishedDate`,
+    AL-523) — one value, two uses, never re-derived from the other.
 
     Angles are listed most-valuable-first and truncated at `max_queries`,
     which the caller has already capped at `BRIEF_RETRIEVAL_MAX_QUERIES`
@@ -134,7 +145,7 @@ def build_query_plan(
         ]
     )
 
-    return QueryPlan(queries=tuple(angles[:max_queries]))
+    return QueryPlan(queries=tuple(angles[:max_queries]), since=since)
 
 
 # --- the Retriever Protocol (D6) ------------------------------------------------
@@ -149,7 +160,9 @@ class Retriever(Protocol):
     receives `RetrievedDocument`s as plain data in its `Deps` (TDD §3).
     """
 
-    async def search(self, queries: Sequence[str]) -> list[RetrievedDocument]:
+    async def search(
+        self, queries: Sequence[str], *, since: date | None = None
+    ) -> list[RetrievedDocument]:
         """Return whatever documents `queries` finds — no filtering, no cap.
 
         Every invariant a Brief's retrieved text must satisfy (dedupe,
@@ -157,6 +170,17 @@ class Retriever(Protocol):
         provider's — a `Retriever` is free to return duplicates, undated
         documents, or documents the budget cannot afford; `retrieve()` is
         what makes that safe for every implementation at once.
+
+        `since` is the SAME period start `QueryPlan.since` already carries
+        and that is already folded into `queries`' own recency phrase
+        (`build_query_plan`) — passed again here, structured, so a provider
+        with its own date filter (`ExaRetriever`'s `startPublishedDate`) has
+        somewhere to put it that does not require a fresh instance per call.
+        A provider with no such filter (`FixtureRetriever`, `StubRetriever`)
+        is free to ignore it; neither derives a second value from it.
+        `retrieve()` (the only production call site) always passes it
+        explicitly; the default here exists only so a test can construct a
+        `Retriever` and call `search()` directly without caring about it.
         """
         ...
 
@@ -248,8 +272,13 @@ async def retrieve(
     run, and only when a document list was actually returned — never on a
     `RetrievalUnavailableError` (nothing came back to count). `None` (the
     default) is a no-op, so every existing caller is unaffected.
+
+    `plan.since` is passed straight through as `search`'s own `since`
+    keyword — `QueryPlan` is the one source of truth for the period start
+    (see its docstring), so this function does not accept `since` as a
+    separate parameter and cannot re-derive it from anything else.
     """
-    documents = await retriever.search(plan.queries)
+    documents = await retriever.search(plan.queries, since=plan.since)
     if record_raw_count is not None:
         record_raw_count(len(documents))
     deduped = _dedupe_by_url(documents)
@@ -609,30 +638,39 @@ class ExaRetriever:
     owns both (§5.2's "one owner" rule; see `_exa_published_on` and
     `_document_from_exa_result`'s docstrings).
 
-    `since` and `max_documents` are bound at construction (matching
-    `FixtureRetriever`'s `beat`): the `Retriever.search(queries)` Protocol
-    takes only query strings, so anything a call needs beyond that must live
-    on the instance. `transport` exists solely for tests
-    (`httpx.MockTransport`) — production leaves it `None` and gets `httpx`'s
-    real transport.
+    **`since` rides on each `search()` call, not on the instance** (corrected
+    from an earlier version of this docstring, which bound it at
+    construction "matching `FixtureRetriever`'s `beat`" — that shape only
+    produces the right per-Beat date filter if a fresh instance is built per
+    Beat, and nothing did: `services/lifecycle.py` binds ONE `ExaRetriever`
+    for the whole process's lifetime, so a construction-time `since` was
+    pinned to whatever the first caller passed, forever. `Retriever.
+    search(queries, *, since)` now carries the period start on every call —
+    `retrieve()` reads it off `QueryPlan.since`, the plan `build_query_plan`
+    already derived it into — so this adapter needs no per-Beat construction
+    at all.). `max_documents` stays bound at construction: it sizes the
+    per-query fetch (`_exa_per_query_num_results`) the same way regardless of
+    which Beat is being searched, so it has no call-time source of truth to
+    read instead. `transport` exists solely for tests (`httpx.MockTransport`)
+    — production leaves it `None` and gets `httpx`'s real transport.
     """
 
     def __init__(
         self,
         api_key: str,
         *,
-        since: date | None,
         max_documents: int,
         transport: httpx.AsyncBaseTransport | None = None,
         timeout_seconds: float = _DEFAULT_TIMEOUT_SECONDS,
     ) -> None:
         self._api_key = api_key
-        self._since = since
         self._max_documents = max_documents
         self._transport = transport
         self._timeout_seconds = timeout_seconds
 
-    async def search(self, queries: Sequence[str]) -> list[RetrievedDocument]:
+    async def search(
+        self, queries: Sequence[str], *, since: date | None = None
+    ) -> list[RetrievedDocument]:
         """One Exa `/search` call per query, sequentially, interleaved
         round-robin (FIX 6, ticket AL-512 review).
 
@@ -671,12 +709,19 @@ class ExaRetriever:
         ) as client:
             for query in queries:
                 per_query_documents.append(
-                    await self._search_one(client, query, num_results=num_results)
+                    await self._search_one(
+                        client, query, since=since, num_results=num_results
+                    )
                 )
         return _interleave_round_robin(per_query_documents)
 
     async def _search_one(
-        self, client: httpx.AsyncClient, query: str, *, num_results: int
+        self,
+        client: httpx.AsyncClient,
+        query: str,
+        *,
+        since: date | None,
+        num_results: int,
     ) -> list[RetrievedDocument]:
         """One Exa `/search` round trip. The HTTP call, `.json()` parse, and
         the top-level `results`-shape check are the only things wrapped in
@@ -690,9 +735,7 @@ class ExaRetriever:
         all here, so it propagates as itself instead of being disguised as
         an Exa outage.
         """
-        payload = _exa_request_payload(
-            query, since=self._since, num_results=num_results
-        )
+        payload = _exa_request_payload(query, since=since, num_results=num_results)
         try:
             response = await client.post(
                 _EXA_SEARCH_PATH,
@@ -739,14 +782,20 @@ class FixtureRetriever:
     **Keyed on the Beat**: constructed with the Beat's fixture key (`beat`)
     and the directory holding recorded fixtures, it loads
     `{fixtures_dir}/{beat}.yaml` once, at construction. On `search()` it
-    **ignores the `queries` argument it is called with** and instead executes
-    the fixture's own recorded `queries` list against its `results` mapping
-    — D10's correction to D6a: "replay executes the RECORDED queries and
-    never re-derives them." Today `build_query_plan` is pure, so a plan built
-    live and the fixture's recorded plan are identical strings; this is
-    written the way it is anyway so that D6a's named upgrade (a model
-    query-proposer) costs no fixture re-record — the recorded queries stay
-    frozen at the moment the fixture was captured, whatever a proposer would
+    **ignores both the `queries` and the `since` arguments it is called
+    with** and instead executes the fixture's own recorded `queries` list
+    against its `results` mapping — D10's correction to D6a: "replay executes
+    the RECORDED queries and never re-derives them." `since` joined `search`'s
+    signature after this class was written (the AL-521/AL-523 handoff gap:
+    threading the period start through as a per-call parameter rather than
+    `ExaRetriever`'s own since-abandoned per-instance construction) and is
+    ignored for the identical reason — a live `since` must not change what a
+    fixture replays, or replay would stop being byte-identical. Today
+    `build_query_plan` is pure, so a plan built live and the fixture's
+    recorded plan are identical strings; this is written the way it is
+    anyway so that D6a's named upgrade (a model query-proposer) costs no
+    fixture re-record — the recorded queries stay frozen at the moment the
+    fixture was captured, whatever a proposer would
     ask for today.
 
     **The load-bearing behavior: a miss RAISES `RetrievalUnavailableError`,
@@ -803,8 +852,13 @@ class FixtureRetriever:
         self._path = fixtures_dir / f"{beat}.yaml"
         self._queries, self._results = _load_fixture(self._path, beat)
 
-    async def search(self, queries: Sequence[str]) -> list[RetrievedDocument]:
-        del queries  # intentionally ignored — see the class docstring (D10)
+    async def search(
+        self, queries: Sequence[str], *, since: date | None = None
+    ) -> list[RetrievedDocument]:
+        # Both intentionally ignored — see the class docstring (D10): replay
+        # executes the RECORDED queries and never re-derives them, so a live
+        # `since` (like a live `queries`) must not change what comes back.
+        del queries, since
         documents: list[RetrievedDocument] = []
         for query in self._queries:
             results = self._results.get(query)
@@ -988,7 +1042,14 @@ class StubRetriever:
     more for this retriever to special-case.
     """
 
-    async def search(self, queries: Sequence[str]) -> list[RetrievedDocument]:
+    async def search(
+        self, queries: Sequence[str], *, since: date | None = None
+    ) -> list[RetrievedDocument]:
+        # `since` is ignored: this stub is already deterministic purely from
+        # query text (`build_query_plan` folds the period into every query's
+        # own recency phrase, so the stub's seed already varies with it) —
+        # matching it structurally is not this fake's job to enforce.
+        del since
         if any(FORCE_RETRIEVAL_FAILURE in query for query in queries):
             msg = f"forced retrieval failure ({FORCE_RETRIEVAL_FAILURE})"
             raise RetrievalUnavailableError(msg)

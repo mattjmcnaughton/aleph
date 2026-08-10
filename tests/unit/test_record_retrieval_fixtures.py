@@ -41,7 +41,10 @@ class _FakeExaRetriever:
     """A deterministic, offline stand-in for ``ExaRetriever``.
 
     Constructed exactly the way ``_record_one`` constructs the real thing
-    (``ExaRetriever(api_key, since=since, max_documents=max_documents)``), so
+    (``ExaRetriever(api_key, max_documents=max_documents)``) — ``since`` rides
+    on ``search`` rather than the constructor, because one retriever instance
+    serves every query and production threads the plan's own ``since`` the
+    same way. ``since_calls`` records what each search was asked for, so
     monkeypatching the name in ``aleph.services.retrieval`` is a drop-in
     swap. ``calls`` is a list shared across every instance created in one
     test (via the factory below) so a test can assert whether the retriever
@@ -49,12 +52,13 @@ class _FakeExaRetriever:
     "skipped" from "recorded".
     """
 
-    def __init__(self, api_key: str, *, since: date | None, max_documents: int) -> None:
+    def __init__(self, api_key: str, *, max_documents: int) -> None:
         self.api_key = api_key
-        self.since = since
         self.max_documents = max_documents
 
-    async def search(self, queries: Sequence[str]) -> list[RetrievedDocument]:
+    async def search(
+        self, queries: Sequence[str], *, since: date | None = None
+    ) -> list[RetrievedDocument]:
         raise NotImplementedError  # overridden per-instance by the factory
 
 
@@ -68,8 +72,11 @@ def _fake_retriever_factory(
     query, named after the query so distinct queries never collide)."""
 
     class _Bound(_FakeExaRetriever):
-        async def search(self, queries: Sequence[str]) -> list[RetrievedDocument]:
+        async def search(
+            self, queries: Sequence[str], *, since: date | None = None
+        ) -> list[RetrievedDocument]:
             calls.append(list(queries))
+            self.since = since
             if documents_per_query is not None:
                 return list(documents_per_query.get(queries[0], []))
             query = queries[0]

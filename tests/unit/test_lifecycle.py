@@ -18,6 +18,7 @@ import pytest
 from structlog.testing import capture_logs
 
 from aleph.config import Settings
+from aleph.services.briefing import _UnconfiguredRetriever, briefing_service
 from aleph.services.generation import GenerationOrchestrator
 from aleph.services.lifecycle import (
     ConversationBusyError,
@@ -26,6 +27,7 @@ from aleph.services.lifecycle import (
     TaskRegistry,
     TutorReplyLimiter,
 )
+from aleph.services.retrieval import ExaRetriever
 
 
 @pytest.fixture
@@ -220,6 +222,98 @@ async def test_lifecycle_rejects_double_start() -> None:
             await lifecycle.start()
     finally:
         await lifecycle.stop()
+
+
+# --------------------------------------------------------------------------- #
+# The retriever seam (AL-521/AL-523 handoff gap): production must bind a live
+# ExaRetriever when EXA_API_KEY is configured, and startup must still succeed
+# — with the loud _UnconfiguredRetriever bound instead — when it is not
+# (TDD §12, §5.7). ``briefing_service`` is the shared module-level singleton
+# ``bind_runtime``/``reset_runtime`` mutate in place (the same reason
+# ``test_lifecycle_stop_restores_base_seams`` above touches ``orch`` rather
+# than a copy) — every test below pairs ``start()`` with ``stop()`` so it
+# leaves the singleton exactly as it found it.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.anyio
+async def test_lifecycle_binds_a_real_exa_retriever_when_key_configured() -> None:
+    # The heart of the gap: nothing bound a live Retriever in production, so
+    # every Beat research run raised at the first retrieval step. Asserting
+    # the bound object's *type* (not merely "something was bound") is what
+    # would have caught AL-521/AL-523 leaving `_UnconfiguredRetriever` in
+    # place forever.
+    config = Settings(exa_api_key="test-exa-key")
+    lifecycle = GenerationLifecycle(GenerationOrchestrator(), config=config)
+
+    await lifecycle.start()
+    try:
+        assert type(briefing_service._retriever) is ExaRetriever
+    finally:
+        await lifecycle.stop()
+
+
+@pytest.mark.anyio
+async def test_lifecycle_starts_clean_with_unconfigured_retriever_when_no_key() -> None:
+    # TDD §12: "startup succeeds without EXA_API_KEY, but research cannot
+    # run" — the app must boot either way, and a Beat's research must fail
+    # loudly (`_UnconfiguredRetriever`'s raise, §5.7) rather than silently.
+    config = Settings(exa_api_key="")
+    lifecycle = GenerationLifecycle(GenerationOrchestrator(), config=config)
+
+    await lifecycle.start()  # must not raise
+    try:
+        assert type(briefing_service._retriever) is _UnconfiguredRetriever
+    finally:
+        await lifecycle.stop()
+
+
+@pytest.mark.anyio
+async def test_lifecycle_stop_restores_unconfigured_retriever_for_a_clean_restart() -> (
+    None
+):
+    # reset_runtime() on shutdown must return the retriever seam to its inert
+    # construction-time state, exactly like spawn/model_slot above — so a
+    # second start() (a redeploy, a test re-running the lifespan) rebinds a
+    # fresh ExaRetriever rather than inheriting a stale one, and a process
+    # that starts with the key, loses it, and restarts fails loudly instead
+    # of quietly keeping the old live retriever bound.
+    config = Settings(exa_api_key="test-exa-key")
+    lifecycle = GenerationLifecycle(GenerationOrchestrator(), config=config)
+
+    await lifecycle.start()
+    assert type(briefing_service._retriever) is ExaRetriever
+    await lifecycle.stop()
+    assert type(briefing_service._retriever) is _UnconfiguredRetriever
+
+    # A second start/stop cycle is exactly as clean as the first.
+    await lifecycle.start()
+    assert type(briefing_service._retriever) is ExaRetriever
+    await lifecycle.stop()
+    assert type(briefing_service._retriever) is _UnconfiguredRetriever
+
+
+def test_e2e_stub_factory_does_not_pick_up_a_live_exa_key(
+    restored_live_settings: Settings,
+) -> None:
+    # The e2e stub factory (`scripts/e2e_backend.py::create_stub_app`) and
+    # this ticket's production wiring both read the *same* module-level
+    # `aleph.config.settings` singleton — so they could fight over the
+    # retriever seam the same way `bind_runtime`'s spawn/model_slot already
+    # could. `bind_runtime(retriever=None)` (the default when
+    # `EXA_API_KEY` is unset) is what keeps that safe: it leaves whatever is
+    # already bound untouched rather than force-clobbering it back to
+    # `_UnconfiguredRetriever`, so a future e2e wiring of `StubRetriever`
+    # would survive a lifespan start unharmed. What this test pins today is
+    # the precondition that makes that safe in the meantime: the stub
+    # factory sets no `EXA_API_KEY`, so `GenerationLifecycle` — reading this
+    # same singleton at lifespan startup — never constructs a real
+    # `ExaRetriever` (and never attempts a live Exa call) under the
+    # deterministic e2e harness.
+    from scripts.e2e_backend import create_stub_app
+
+    create_stub_app()
+    assert restored_live_settings.exa_api_key == ""
 
 
 def test_config_defaults_match_tdd_section_14() -> None:

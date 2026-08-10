@@ -80,11 +80,10 @@ async def test_live_exa_search_returns_usable_text_and_a_published_date() -> Non
 
     retriever = ExaRetriever(
         settings.exa_api_key,
-        since=None,
         max_documents=settings.brief_retrieval_max_documents,
     )
 
-    documents = await retriever.search([_LIVE_QUERY])
+    documents = await retriever.search([_LIVE_QUERY], since=None)
 
     assert documents, "Exa returned no documents for a broad, active topic"
 
@@ -127,11 +126,10 @@ async def test_live_exa_search_since_filter_actually_filters() -> None:
     since = date.today() - timedelta(days=7)
     retriever = ExaRetriever(
         settings.exa_api_key,
-        since=since,
         max_documents=settings.brief_retrieval_max_documents,
     )
 
-    documents = await retriever.search([_LIVE_QUERY])
+    documents = await retriever.search([_LIVE_QUERY], since=since)
 
     dated = [document for document in documents if document.published_on is not None]
     assert dated, "no dated documents came back to check the since filter against"

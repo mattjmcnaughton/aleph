@@ -23,8 +23,8 @@ explicit action rather than something a stray re-run does by accident.
 (``_exa_per_query_num_results(len(queries), max_documents)``, D14a's headroom
 math), because in production one ``search(queries)`` call shares
 ``BRIEF_RETRIEVAL_MAX_DOCUMENTS`` across every query in the plan. This script
-calls ``retriever.search([query])`` **one query at a time** — the only way to
-capture each query's own results separately for the fixture's
+calls ``retriever.search([query], since=plan.since)`` **one query at a time**
+— the only way to capture each query's own results separately for the fixture's
 ``results: {query: [...]}`` mapping — which means every call here computes its
 per-query share as if it were the plan's only query. The result is
 **conservatively larger**, never smaller, than what a live plan-wide call
@@ -129,7 +129,7 @@ async def _record_one(
     from aleph.services.retrieval import ExaRetriever, build_query_plan
 
     plan = build_query_plan(topic, guidance, since=since, max_queries=max_queries)
-    retriever = ExaRetriever(api_key, since=since, max_documents=max_documents)
+    retriever = ExaRetriever(api_key, max_documents=max_documents)
 
     # FIX 6 (code review, AL-550): dedupe by URL ACROSS this Beat's queries —
     # first occurrence wins, in `plan.queries` order, matching `retrieve()`'s
@@ -145,7 +145,10 @@ async def _record_one(
     raw_documents = 0
     recorded_documents = 0
     for query in plan.queries:
-        documents = await retriever.search([query])
+        # ``since`` rides on the call, not the constructor: one retriever
+        # instance serves every query, and ``retrieve()`` threads the plan's
+        # own ``since`` the same way in production.
+        documents = await retriever.search([query], since=plan.since)
         raw_documents += len(documents)
         kept: list[dict[str, object]] = []
         for document in documents:

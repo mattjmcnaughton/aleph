@@ -68,17 +68,39 @@ class _FakeRetriever:
     def __init__(self, documents: Sequence[RetrievedDocument]) -> None:
         self._documents = list(documents)
 
-    async def search(self, queries: Sequence[str]) -> list[RetrievedDocument]:
-        del queries
+    async def search(
+        self, queries: Sequence[str], *, since: date | None = None
+    ) -> list[RetrievedDocument]:
+        del queries, since
         return list(self._documents)
 
 
 class _RaisingRetriever:
     """A `Retriever` that always fails — the propagation case."""
 
-    async def search(self, queries: Sequence[str]) -> list[RetrievedDocument]:
-        del queries
+    async def search(
+        self, queries: Sequence[str], *, since: date | None = None
+    ) -> list[RetrievedDocument]:
+        del queries, since
         raise RetrievalUnavailableError("boom")
+
+
+class _RecordingRetriever:
+    """A `Retriever` that records every `search()` call's arguments —
+    exercises `retrieve()`'s contract that `plan.since` is passed straight
+    through as `search`'s own `since` keyword (the AL-521/AL-523 handoff
+    gap: `QueryPlan` is the one source of truth for the period start, see
+    its docstring), never re-derived or dropped along the way.
+    """
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[tuple[str, ...], date | None]] = []
+
+    async def search(
+        self, queries: Sequence[str], *, since: date | None = None
+    ) -> list[RetrievedDocument]:
+        self.calls.append((tuple(queries), since))
+        return []
 
 
 def _write_fixture(tmp_path: Path, beat: str, body: str) -> Path:
@@ -407,6 +429,37 @@ async def test_retrieve_propagates_retrieval_unavailable() -> None:
         )
 
 
+@pytest.mark.anyio
+async def test_retrieve_passes_the_plans_since_through_to_search() -> None:
+    """The AL-521/AL-523 handoff gap this closes: `retrieve()` must pass
+    `plan.since` — never a hardcoded or re-derived value — as `search`'s own
+    `since` keyword, so a provider with a structured date filter
+    (`ExaRetriever`'s `startPublishedDate`) gets the Beat's real period start
+    on every call, even though only one `Retriever` instance is bound for
+    the whole process's lifetime (`services/lifecycle.py`).
+    """
+    retriever = _RecordingRetriever()
+    plan = QueryPlan(queries=("q1", "q2"), since=date(2026, 7, 20))
+
+    await retrieve(retriever, plan, max_documents=1_000, text_budget_chars=1_000)
+
+    assert retriever.calls == [(("q1", "q2"), date(2026, 7, 20))]
+
+
+@pytest.mark.anyio
+async def test_retrieve_passes_none_through_for_a_beats_first_run() -> None:
+    """`QueryPlan.since` defaults to `None` (a Beat's first-ever run, PRD
+    §3) and `retrieve()` must pass that `None` through unchanged too — not
+    substitute a value of its own.
+    """
+    retriever = _RecordingRetriever()
+    plan = QueryPlan(queries=("q1",))
+
+    await retrieve(retriever, plan, max_documents=1_000, text_budget_chars=1_000)
+
+    assert retriever.calls == [(("q1",), None)]
+
+
 # --- ExaRetriever (D6; ticket AL-523) -------------------------------------------
 #
 # A FAKE HTTP layer (`httpx.MockTransport`), never a mock library — CLAUDE.md's
@@ -467,7 +520,6 @@ async def test_exa_retriever_maps_fields_correctly() -> None:
 
     retriever = ExaRetriever(
         "exa-key",
-        since=None,
         max_documents=12,
         transport=httpx.MockTransport(handler),
     )
@@ -501,7 +553,7 @@ async def test_exa_retriever_maps_a_full_datetime_published_date() -> None:
         )
 
     retriever = ExaRetriever(
-        "exa-key", since=None, max_documents=12, transport=httpx.MockTransport(handler)
+        "exa-key", max_documents=12, transport=httpx.MockTransport(handler)
     )
 
     documents = await retriever.search(["q"])
@@ -522,7 +574,7 @@ async def test_exa_retriever_undated_documents_survive_the_adapter() -> None:
         return _exa_response(results=[_exa_result(published_date=None)])
 
     retriever = ExaRetriever(
-        "exa-key", since=None, max_documents=12, transport=httpx.MockTransport(handler)
+        "exa-key", max_documents=12, transport=httpx.MockTransport(handler)
     )
 
     documents = await retriever.search(["q"])
@@ -538,7 +590,7 @@ async def test_exa_retriever_unparseable_date_also_survives_as_undated() -> None
         return _exa_response(results=[_exa_result(published_date="not-a-date")])
 
     retriever = ExaRetriever(
-        "exa-key", since=None, max_documents=12, transport=httpx.MockTransport(handler)
+        "exa-key", max_documents=12, transport=httpx.MockTransport(handler)
     )
 
     documents = await retriever.search(["q"])
@@ -558,7 +610,7 @@ async def test_exa_retriever_empty_text_survives_the_adapter() -> None:
         return _exa_response(results=[_exa_result(text=None)])
 
     retriever = ExaRetriever(
-        "exa-key", since=None, max_documents=12, transport=httpx.MockTransport(handler)
+        "exa-key", max_documents=12, transport=httpx.MockTransport(handler)
     )
 
     documents = await retriever.search(["q"])
@@ -580,7 +632,7 @@ async def test_exa_retriever_falls_back_to_domain_when_author_is_absent() -> Non
         )
 
     retriever = ExaRetriever(
-        "exa-key", since=None, max_documents=12, transport=httpx.MockTransport(handler)
+        "exa-key", max_documents=12, transport=httpx.MockTransport(handler)
     )
 
     documents = await retriever.search(["q"])
@@ -613,7 +665,7 @@ async def test_exa_retriever_publisher_is_the_domain_not_a_persons_byline() -> N
         )
 
     retriever = ExaRetriever(
-        "exa-key", since=None, max_documents=12, transport=httpx.MockTransport(handler)
+        "exa-key", max_documents=12, transport=httpx.MockTransport(handler)
     )
 
     documents = await retriever.search(["q"])
@@ -625,7 +677,15 @@ async def test_exa_retriever_publisher_is_the_domain_not_a_persons_byline() -> N
 @pytest.mark.anyio
 async def test_exa_retriever_since_becomes_start_published_date() -> None:
     """`since` (the prior Brief's `published_on`) is passed through as Exa's
-    `startPublishedDate` date filter, an ISO 8601 datetime."""
+    `startPublishedDate` date filter, an ISO 8601 datetime.
+
+    **Passed on the `search()` call, not at construction** (the AL-521/
+    AL-523 handoff gap this closes): a construction-time `since` only
+    produces the right per-Beat filter if a fresh `ExaRetriever` is built per
+    Beat, and production binds exactly one instance for the whole process's
+    lifetime (`services/lifecycle.py`) — so `since` now rides `Retriever.
+    search(queries, *, since)` on every call instead.
+    """
     captured: list[dict[str, object]] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -634,12 +694,11 @@ async def test_exa_retriever_since_becomes_start_published_date() -> None:
 
     retriever = ExaRetriever(
         "exa-key",
-        since=date(2026, 7, 20),
         max_documents=12,
         transport=httpx.MockTransport(handler),
     )
 
-    await retriever.search(["EU AI regulation"])
+    await retriever.search(["EU AI regulation"], since=date(2026, 7, 20))
 
     assert captured[0]["query"] == "EU AI regulation"
     assert captured[0]["startPublishedDate"] == "2026-07-20T00:00:00.000Z"
@@ -657,10 +716,10 @@ async def test_exa_retriever_omits_the_date_filter_on_a_beats_first_run() -> Non
         return _exa_response(results=[])
 
     retriever = ExaRetriever(
-        "exa-key", since=None, max_documents=12, transport=httpx.MockTransport(handler)
+        "exa-key", max_documents=12, transport=httpx.MockTransport(handler)
     )
 
-    await retriever.search(["q"])
+    await retriever.search(["q"], since=None)
 
     assert "startPublishedDate" not in captured[0]
 
@@ -675,7 +734,6 @@ async def test_exa_retriever_sends_the_api_key_header() -> None:
 
     retriever = ExaRetriever(
         "secret-exa-key",
-        since=None,
         max_documents=12,
         transport=httpx.MockTransport(handler),
     )
@@ -701,7 +759,7 @@ async def test_exa_retriever_pins_neural_search_type() -> None:
         return _exa_response(results=[])
 
     retriever = ExaRetriever(
-        "exa-key", since=None, max_documents=12, transport=httpx.MockTransport(handler)
+        "exa-key", max_documents=12, transport=httpx.MockTransport(handler)
     )
 
     await retriever.search(["q"])
@@ -722,7 +780,7 @@ async def test_exa_retriever_clamps_num_results_into_exas_documented_range() -> 
         return _exa_response(results=[])
 
     retriever = ExaRetriever(
-        "exa-key", since=None, max_documents=500, transport=httpx.MockTransport(handler)
+        "exa-key", max_documents=500, transport=httpx.MockTransport(handler)
     )
 
     await retriever.search(["q"])
@@ -739,7 +797,7 @@ async def test_exa_retriever_issues_one_request_per_query_and_concatenates() -> 
         )
 
     retriever = ExaRetriever(
-        "exa-key", since=None, max_documents=12, transport=httpx.MockTransport(handler)
+        "exa-key", max_documents=12, transport=httpx.MockTransport(handler)
     )
 
     documents = await retriever.search(["alpha", "beta"])
@@ -765,7 +823,7 @@ async def test_exa_retriever_sizes_each_query_relative_to_max_documents() -> Non
         return _exa_response(results=[])
 
     retriever = ExaRetriever(
-        "exa-key", since=None, max_documents=12, transport=httpx.MockTransport(handler)
+        "exa-key", max_documents=12, transport=httpx.MockTransport(handler)
     )
 
     await retriever.search([f"query {i}" for i in range(6)])
@@ -798,7 +856,7 @@ async def test_retrieve_with_exa_samples_across_queries_under_the_cap() -> None:
         )
 
     retriever = ExaRetriever(
-        "exa-key", since=None, max_documents=6, transport=httpx.MockTransport(handler)
+        "exa-key", max_documents=6, transport=httpx.MockTransport(handler)
     )
     plan = QueryPlan(queries=("angle one", "angle two", "angle three"))
 
@@ -850,7 +908,7 @@ async def test_exa_retriever_maps_http_error_status_to_retrieval_unavailable(
         return httpx.Response(status_code, json={"error": "nope"})
 
     retriever = ExaRetriever(
-        "exa-key", since=None, max_documents=12, transport=httpx.MockTransport(handler)
+        "exa-key", max_documents=12, transport=httpx.MockTransport(handler)
     )
 
     with pytest.raises(RetrievalUnavailableError):
@@ -865,7 +923,7 @@ async def test_exa_retriever_maps_a_connection_failure_to_retrieval_unavailable(
         raise httpx.ConnectError("connection refused", request=request)
 
     retriever = ExaRetriever(
-        "exa-key", since=None, max_documents=12, transport=httpx.MockTransport(handler)
+        "exa-key", max_documents=12, transport=httpx.MockTransport(handler)
     )
 
     with pytest.raises(RetrievalUnavailableError):
@@ -878,7 +936,7 @@ async def test_exa_retriever_maps_a_timeout_to_retrieval_unavailable() -> None:
         raise httpx.ReadTimeout("timed out", request=request)
 
     retriever = ExaRetriever(
-        "exa-key", since=None, max_documents=12, transport=httpx.MockTransport(handler)
+        "exa-key", max_documents=12, transport=httpx.MockTransport(handler)
     )
 
     with pytest.raises(RetrievalUnavailableError):
@@ -892,7 +950,7 @@ async def test_exa_retriever_maps_invalid_json_to_retrieval_unavailable() -> Non
         return httpx.Response(200, content=b"not json at all")
 
     retriever = ExaRetriever(
-        "exa-key", since=None, max_documents=12, transport=httpx.MockTransport(handler)
+        "exa-key", max_documents=12, transport=httpx.MockTransport(handler)
     )
 
     with pytest.raises(RetrievalUnavailableError):
@@ -908,7 +966,7 @@ async def test_exa_retriever_maps_a_missing_results_key_to_retrieval_unavailable
         return httpx.Response(200, json={"requestId": "abc"})  # no 'results' key
 
     retriever = ExaRetriever(
-        "exa-key", since=None, max_documents=12, transport=httpx.MockTransport(handler)
+        "exa-key", max_documents=12, transport=httpx.MockTransport(handler)
     )
 
     with pytest.raises(RetrievalUnavailableError):
@@ -922,7 +980,7 @@ async def test_exa_retriever_maps_a_non_list_results_to_retrieval_unavailable() 
         return httpx.Response(200, json={"results": "not-a-list"})
 
     retriever = ExaRetriever(
-        "exa-key", since=None, max_documents=12, transport=httpx.MockTransport(handler)
+        "exa-key", max_documents=12, transport=httpx.MockTransport(handler)
     )
 
     with pytest.raises(RetrievalUnavailableError):
@@ -944,7 +1002,7 @@ async def test_exa_retriever_skips_a_result_missing_url_rather_than_raising() ->
         return _exa_response(results=[{"title": "no url on this one"}])
 
     retriever = ExaRetriever(
-        "exa-key", since=None, max_documents=12, transport=httpx.MockTransport(handler)
+        "exa-key", max_documents=12, transport=httpx.MockTransport(handler)
     )
 
     documents = await retriever.search(["q"])
@@ -972,7 +1030,7 @@ async def test_exa_retriever_skips_a_malformed_result_and_keeps_the_good_ones() 
         )
 
     retriever = ExaRetriever(
-        "exa-key", since=None, max_documents=12, transport=httpx.MockTransport(handler)
+        "exa-key", max_documents=12, transport=httpx.MockTransport(handler)
     )
 
     documents = await retriever.search(["q"])
@@ -1000,7 +1058,7 @@ async def test_exa_retriever_skips_a_result_with_an_unparseable_url() -> None:
         )
 
     retriever = ExaRetriever(
-        "exa-key", since=None, max_documents=12, transport=httpx.MockTransport(handler)
+        "exa-key", max_documents=12, transport=httpx.MockTransport(handler)
     )
 
     documents = await retriever.search(["q"])
@@ -1035,7 +1093,7 @@ async def test_exa_retriever_does_not_disguise_a_mapping_bug_as_retrieval_unavai
         return _exa_response(results=[_exa_result()])
 
     retriever = ExaRetriever(
-        "exa-key", since=None, max_documents=12, transport=httpx.MockTransport(handler)
+        "exa-key", max_documents=12, transport=httpx.MockTransport(handler)
     )
 
     with pytest.raises(TypeError, match="simulated wrong-arity bug"):
@@ -1053,7 +1111,7 @@ async def test_exa_retriever_failure_through_retrieve_never_becomes_skipped() ->
         raise httpx.ConnectError("connection refused", request=request)
 
     retriever = ExaRetriever(
-        "exa-key", since=None, max_documents=12, transport=httpx.MockTransport(handler)
+        "exa-key", max_documents=12, transport=httpx.MockTransport(handler)
     )
     plan = QueryPlan(queries=("q1",))
 
@@ -1116,6 +1174,33 @@ async def test_fixture_retriever_ignores_the_live_queries_argument(
     second = await fixture_retriever.search(["an entirely different set", "of queries"])
 
     assert first == second
+
+
+@pytest.mark.anyio
+async def test_fixture_retriever_ignores_the_live_since_argument(
+    tmp_path: Path,
+) -> None:
+    """The same D10 guarantee, extended to `since` (the AL-521/AL-523
+    handoff gap this closes): replay must stay byte-identical whether or
+    not a live `since` is passed, and regardless of its value — a fixture's
+    recorded results are keyed on the recorded queries alone.
+    """
+    fixtures_dir = _write_fixture(
+        tmp_path, "eu-ai-regulation-some-experience", _FIXTURE_YAML
+    )
+    fixture_retriever = FixtureRetriever(
+        fixtures_dir, "eu-ai-regulation-some-experience"
+    )
+
+    no_since = await fixture_retriever.search(["a live query"])
+    with_since = await fixture_retriever.search(
+        ["a live query"], since=date(2026, 7, 20)
+    )
+    different_since = await fixture_retriever.search(
+        ["a live query"], since=date(2020, 1, 1)
+    )
+
+    assert no_since == with_since == different_since
 
 
 def test_fixture_retriever_raises_rather_than_returning_empty_on_a_miss(
