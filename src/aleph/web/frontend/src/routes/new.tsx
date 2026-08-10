@@ -15,11 +15,11 @@ import {
 } from "../lib/api";
 import { ModelPicker } from "../components/model-picker";
 import { Breadcrumbs } from "../components/breadcrumbs";
+import { LevelFieldset } from "../components/level-fieldset";
 import { PRIMARY_CTA, RetryNotices, Spinner, StateCard } from "../components/state-card";
 import { sessionQueryOptions } from "../lib/auth";
 import {
   GUIDANCE_MAX_LENGTH,
-  LEVELS,
   MODEL_SLOT_DEFAULT,
   TOPIC_MAX_LENGTH,
   buildCreatePathInput,
@@ -306,37 +306,7 @@ function OnboardingForm({
         />
       </div>
 
-      <fieldset className="mt-6">
-        <legend className="kicker">How much do you know already?</legend>
-        <div className="mt-3 grid gap-2">
-          {LEVELS.map((option) => {
-            const id = `level-${option.value}`;
-            const selected = level === option.value;
-            return (
-              <label
-                key={option.value}
-                htmlFor={id}
-                className={`flex cursor-pointer items-center rounded-md border px-4 py-3 text-sm font-medium transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-teal has-[:focus-visible]:ring-offset-2 has-[:focus-visible]:ring-offset-night ${
-                  selected
-                    ? "border-teal bg-teal/10 text-porcelain"
-                    : "border-divider bg-surface text-mist hover:text-porcelain"
-                }`}
-              >
-                <input
-                  id={id}
-                  type="radio"
-                  name="level"
-                  value={option.value}
-                  checked={selected}
-                  onChange={() => onLevelChange(option.value)}
-                  className="sr-only"
-                />
-                {option.label}
-              </label>
-            );
-          })}
-        </div>
-      </fieldset>
+      <LevelFieldset level={level} onChange={onLevelChange} idPrefix="level" />
 
       {modelPicker}
 

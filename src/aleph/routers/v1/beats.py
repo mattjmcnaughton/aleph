@@ -20,12 +20,13 @@ beyond resolving the caller's flags — no repository read, no drain, no spawn.
 SAME arrival drain the two ``GET`` routes use — a fresh Beat's cadence
 (``domains/cadence.py::is_claimable(None, ...)``) is unconditionally true
 (D4), so no separate claim path is needed. ``POST /beats/{id}/retry`` is the
-one true fire-and-forget trigger (``BriefingService.trigger_retry``,
-mirroring ``GenerationOrchestrator.trigger_outline_retry``): its response is
-built from state read *before* the retry is even spawned, since — unlike
-deploy — nothing in this ticket's acceptance criteria requires the retry
-response to reflect the claim synchronously, and the client already polls
-``GET /beats/{id}`` for the outcome.
+one explicit retry trigger (``BriefingService.trigger_retry``, mirroring
+``GenerationOrchestrator.trigger_outline_retry``'s split of claim from
+pipeline): its response is built from a re-read taken *after* the claim
+half of ``trigger_retry`` is awaited (code-review FIX 9), the identical
+drain-then-refresh shape the two ``GET`` routes already use — only the
+pipeline itself (retrieval + the two model calls) is spawned and left for
+the client's poll of ``GET /beats/{id}`` to observe finishing.
 
 **The arrival drain (D15, §5.6, §7) — DRAIN, THEN re-read, in that order**
 (code-review FIX 1, correcting this router's original ordering). Both
@@ -469,18 +470,20 @@ async def retry_beat(
     that: called right here, before the claim, only once the Beat is known
     to be ``failed`` — a breach must not cost a no-op its own quota unit.
 
-    On the real path: fire-and-forget, the claim and the pipeline both run
-    inside the spawned task (mirrors ``trigger_outline_retry``'s own shape),
-    so this route's response is still built from the row as read *before*
-    the retry is spawned — the client polls ``GET /beats/{id}`` for the
-    outcome. No drain of its own either way (this is an explicit,
-    single-Beat action, not an arrival read).
+    On the real path: the claim half of ``trigger_retry`` is awaited before
+    this route builds its response (code-review FIX 9), so ``session.refresh``
+    below picks up the claim's write exactly as ``deploy_beat``/``get_beat``
+    already refresh after their own drain — only the pipeline itself
+    (retrieval + the two model calls) is left running in the background for
+    the client's poll of ``GET /beats/{id}`` to observe. No drain of its own
+    either way (this is an explicit, single-Beat action, not an arrival
+    read).
     """
-    entries = await BriefRepository(session).list_for_beat(beat.id)
     if beat.research_state is not BeatResearchState.FAILED:
         # Not a real failure to retry: no cap check, no claim, no spawn, no
         # billing — see the docstring's FIX 2b note for why every other
         # state (idle above all) must be a genuine no-op here.
+        entries = await BriefRepository(session).list_for_beat(beat.id)
         return _beat_detail_dto(beat, entries)
 
     limiter = build_daily_rate_limiter(session)
@@ -489,7 +492,13 @@ async def retry_beat(
     )
 
     local_today = _local_today(tz_offset_minutes)
-    briefing_service.trigger_retry(beat.id, local_today)
+    await briefing_service.trigger_retry(beat.id, local_today)
+    # Re-read after triggering (code-review FIX 9, the AL-522 GET precedent):
+    # the claim inside `trigger_retry` is awaited and already committed by
+    # the time it returns, so this refresh picks up "researching" rather
+    # than echoing the stale, pre-claim "failed" this request started with.
+    await session.refresh(beat)
+    entries = await BriefRepository(session).list_for_beat(beat.id)
     return _beat_detail_dto(beat, entries)
 
 

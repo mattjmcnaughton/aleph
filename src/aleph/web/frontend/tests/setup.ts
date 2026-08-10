@@ -1,6 +1,7 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, vi } from "vitest";
+import { resetBeats } from "../src/mocks/beats";
 import { resetFlashcards } from "../src/mocks/flashcards";
 import { resetLessons } from "../src/mocks/lessons";
 import { resetPaths } from "../src/mocks/paths";
@@ -20,6 +21,7 @@ afterEach(() => {
   resetShaping();
   resetProgress();
   resetFlashcards();
+  resetBeats();
   vi.restoreAllMocks();
   cleanup();
   window.history.pushState({}, "", "/");

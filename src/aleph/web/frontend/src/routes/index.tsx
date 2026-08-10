@@ -6,6 +6,7 @@ import {
   type PathStatus,
   type PathStreak,
   type PathSummary,
+  beatsListQueryOptions,
   isNotFound,
   isPathListTerminal,
   pathsListQueryOptions,
@@ -13,6 +14,7 @@ import {
   reviewSummaryQueryOptions,
 } from "../lib/api";
 import { ActivityStrip } from "../components/activity-strip";
+import { BeatCard } from "../components/beat-card";
 import { DueTodayCard } from "../components/review/due-today-card";
 import { ReviewChip } from "../components/review/review-chip";
 import { PRIMARY_CTA, PRIMARY_CTA_BASE, StateCard } from "../components/state-card";
@@ -103,6 +105,16 @@ function Home() {
   const reviewDueByPath = new Map<string, number>(
     (reviewSummaryQuery.data?.paths ?? []).map((path) => [path.path_id, path.due_count]),
   );
+
+  // The Beats section (Phase 6 TDD §8, AL-530): a section **beside** "Your
+  // paths", never merged (PRD §4.10 — a Beat is not a path, and Aleph never
+  // blurs them for the learner). `enabled` off means `skipToken` — no
+  // request, no rendered section — and unlike the paths list this query is
+  // never polled (TDD §7: "nothing polls the beats list"), so it is a plain
+  // `useQuery` with no `refetchInterval` at all.
+  const analystEnabled = useFeatureFlag("analyst");
+  const beatsQuery = useQuery(beatsListQueryOptions(analystEnabled));
+  const beats = beatsQuery.data?.beats;
 
   // Armed only while some row is still non-terminal; a poll that resolves the
   // last one flips this false and tears the timer down.
@@ -244,6 +256,46 @@ function Home() {
           ))}
         </ul>
       )}
+
+      {/* Beats live in a section beside "Your paths", not mixed into it —
+          the same card grammar (title, a line of state) with a different
+          verb (PRD §3/§4.10). `analystEnabled` guards the whole section, not
+          just the query: flag off means no rendered surface at all, not an
+          empty one. */}
+      {analystEnabled ? (
+        <section data-testid="beats-section" className="mt-10">
+          <div className="flex items-center justify-between gap-4">
+            <p className="kicker">Your beats</p>
+            <Link
+              to="/beats/new"
+              data-testid="deploy-analyst-button"
+              // >=44px touch target (code-review FIX 2): the primary entry
+              // point into the whole feature was a 20px text link before this
+              // fix — `min-h-[44px]` alone isn't enough on an inline link
+              // whose box is only as tall as its text, so `inline-flex
+              // items-center` is what actually gives the padding somewhere
+              // to expand the hit area into.
+              className="inline-flex min-h-[44px] items-center rounded-md px-3 text-sm font-semibold text-teal transition-colors hover:text-teal-bright focus-visible:outline focus-visible:outline-2 focus-visible:outline-teal"
+            >
+              Deploy analyst
+            </Link>
+          </div>
+
+          {beats === undefined ? null : beats.length === 0 ? (
+            <p data-testid="beats-empty" className="mt-3 text-sm text-mist">
+              No Beats yet. Deploy one to keep watch on a topic that's still moving.
+            </p>
+          ) : (
+            <ul data-testid="beats-list" className="mt-3 space-y-3">
+              {beats.map((beat) => (
+                <li key={beat.id}>
+                  <BeatCard beat={beat} />
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      ) : null}
     </Workspace>
   );
 }
