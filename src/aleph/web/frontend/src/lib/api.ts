@@ -1051,6 +1051,240 @@ export function cardsQueryKey(
   return [...FLASHCARDS_QUERY_PREFIX, "list", pathId, q] as const;
 }
 
+// --- Beats & Briefs API (Phase 6 TDD §6-8, AL-530, docs/api.md ## Analyst) --
+//
+// The analyst's wire seam: deploy + poll (D15, mirroring paths/lessons, with
+// one wrinkle neither has — a Beat's `idle` is BOTH its pre-run and its
+// post-success state, so the shipped router drains before it reads
+// (`routers/v1/beats.py`'s own module doc) and the client's polling
+// predicate below treats `idle` as terminal on purpose: the response it is
+// reading always already reflects whatever this request's own arrival
+// triggered. Every route sits behind the `analyst` flag server-side
+// (router-level, TDD D12); every factory below is fed `enabled` from
+// `useFeatureFlag("analyst")` and goes to `skipToken` when it is off — no
+// flag, no fetch, matching every other gated query in this file.
+//
+// Brief prefetch, the Brief reading surface, the Sources block, and read
+// pings are AL-531 — this seam carries only what the rail and the home card
+// need: `BeatDetail`/`BeatSummary`, never `BriefDetail`.
+
+/** A Beat's research lifecycle (TDD §4/§6). `idle` is deliberately both the
+ *  pre-run state (a fresh Beat, nothing claimed yet) and the post-success
+ *  state (the last run published or Skipped) — see
+ *  `isBeatResearchStateTerminal` below for why that is safe to poll on. */
+export type BeatResearchState = "idle" | "researching" | "failed" | "refused";
+
+/** The only Cadence this slice ships (TDD §4.11/§6) — a `Literal` on the
+ *  wire, restated here rather than widened to `string`. */
+export type Cadence = "weekly";
+
+/**
+ * One published row in the Beat rail (`PublishedEntryDTO`, TDD §6). Carries
+ * no `skip_line` at all — a published entry has nothing to skip.
+ */
+export interface PublishedEntry {
+  kind: "published";
+  id: string;
+  number: number;
+  published_on: string;
+  title: string;
+  /** Non-null once the read ping fires (AL-531 builds that surface) — this
+   *  ticket never writes it, only renders whatever the server already has. */
+  read_at: string | null;
+}
+
+/**
+ * One Skipped period's row (`SkippedEntryDTO`, CONTEXT.md: Skipped, D2).
+ * Carries no `title`/`read_at` at all — a Skipped entry has no body to title
+ * and nothing to mark read.
+ */
+export interface SkippedEntry {
+  kind: "skipped";
+  id: string;
+  number: null;
+  published_on: string;
+  skip_line: string;
+}
+
+/**
+ * The rail's one list of both kinds (`BriefEntryDTO`, TDD §6: "entries is
+ * ONE list of both kinds, never two arrays") — narrow on `kind` in every
+ * renderer, never assume a nullable field belongs to both variants.
+ */
+export type BriefEntry = PublishedEntry | SkippedEntry;
+
+/**
+ * `GET /api/v1/beats/{id}` body (TDD §6) — the poll target and the rail.
+ * `entries` is newest first, **never locked** (PRD §3): every entry in the
+ * list is always fully rendered, unlike a path's lesson list.
+ */
+export interface BeatDetail {
+  id: string;
+  topic: string;
+  level: Level;
+  guidance: string | null;
+  /** Python's Monday==0 convention (CONTEXT.md: Anchor day). */
+  anchor_weekday: number;
+  cadence: Cadence;
+  research_state: BeatResearchState;
+  research_started_at: string | null;
+  /** Non-null only when `research_state === "refused"`. */
+  refusal_message: string | null;
+  entries: BriefEntry[];
+}
+
+/**
+ * One row of `GET /api/v1/beats` (`BeatSummaryDTO`, TDD §6): the learner's
+ * Beats with unread counts and research state — no `entries`, which is the
+ * detail poll's own payload.
+ */
+export interface BeatSummary {
+  id: string;
+  topic: string;
+  level: Level;
+  anchor_weekday: number;
+  cadence: Cadence;
+  research_state: BeatResearchState;
+  research_started_at: string | null;
+  refusal_message: string | null;
+  /** Published, unread Briefs only (TDD §6) — a Skipped entry never counts,
+   *  since nothing can ever stamp one read. */
+  unread_count: number;
+}
+
+/** `GET /api/v1/beats` body — the learner's Beats, newest first. Wrapped in
+ *  an object (never a bare top-level array), the `PathListResponse`
+ *  precedent, so the payload can grow fields without a breaking shape
+ *  change. */
+export interface BeatList {
+  beats: BeatSummary[];
+}
+
+/** `POST /api/v1/beats` body (docs/api.md, `DeployBeatRequest`). Admin-only
+ *  model overrides exist on the wire contract but this ticket's deploy form
+ *  never renders that picker (TDD §8's own field list omits it) — the type
+ *  still names the real shape rather than hiding it. */
+export interface DeployBeatInput {
+  topic: string;
+  level: Level;
+  anchor_weekday: number;
+  guidance?: string;
+  model_research?: string;
+  model_brief?: string;
+}
+
+/**
+ * Deploy an analyst. Returns the full `BeatDetail` — the same shape the poll
+ * target does, and by the time this `202` resolves the first run is already
+ * claimed (TDD D15: "researched immediately, not at the first Anchor day"),
+ * so the response's own `research_state` already reflects that claim rather
+ * than a stale pre-claim `idle` (`updatePathTitle`'s return-the-full-detail
+ * precedent, not `createPath`'s bare id — this seam's poll starts from a
+ * real state, never an assumed one).
+ */
+export function deployBeat(input: DeployBeatInput): Promise<BeatDetail> {
+  return apiFetch<BeatDetail>(apiV1Path("/beats"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+}
+
+/** Poll one Beat's detail: research state + the rail — the trigger+poll GET
+ *  (TDD D15; the router drains this Beat before it reads, so the response
+ *  always reflects whatever this request's own arrival just triggered). */
+export function getBeat(id: string): Promise<BeatDetail> {
+  return apiFetch<BeatDetail>(apiV1Path(`/beats/${id}`));
+}
+
+/** The learner's Beats, newest first, with unread counts (TDD §6). Also
+ *  drains every claimable Beat server-side (TDD D15) — never polled from
+ *  here (TDD §7: "nothing polls the beats list"). */
+export function listBeats(): Promise<BeatList> {
+  return apiFetch<BeatList>(apiV1Path("/beats"));
+}
+
+/** Re-claim a `failed` run (TDD §6/D3). A Beat that is not actually `failed`
+ *  is a silent no-op server-side (`idle` above all — it is a Beat's healthy
+ *  steady state, not a stray retry target) — the client always polls
+ *  `GET /beats/{id}` for the outcome regardless of which branch ran. */
+export function retryBeat(id: string): Promise<BeatDetail> {
+  return apiFetch<BeatDetail>(apiV1Path(`/beats/${id}/retry`), { method: "POST" });
+}
+
+/** Hard-delete a Beat (also how standing orders change — PRD §4.11: delete
+ *  and redeploy). Destructive and not undoable, the `deletePath` precedent —
+ *  no caller in this ticket's scope yet. */
+export function deleteBeat(id: string): Promise<void> {
+  return apiFetch<void>(apiV1Path(`/beats/${id}`), { method: "DELETE" });
+}
+
+/**
+ * TanStack query key for the learner's Beats — TDD §7's exact shape,
+ * `["beats"]`, unlike `PATHS_LIST_QUERY_KEY`'s own `["paths", "list"]`: a
+ * `"list"` segment would never collide with `beatQueryKey(id)` below either
+ * (ids are UUIDs), so the TDD's shorter key is followed verbatim rather than
+ * respelling the paths precedent.
+ */
+export const BEATS_LIST_QUERY_KEY: readonly ["beats"] = ["beats"] as const;
+
+/** TanStack query key for one Beat's detail poll — TDD §7's exact shape,
+ *  `["beats", id]`. */
+export function beatQueryKey(id: string): readonly ["beats", string] {
+  return ["beats", id] as const;
+}
+
+/**
+ * When the Beat detail poll can stop (TDD §7: "polls only while
+ * `research_state === 'researching'`… stops on any terminal state").
+ * `idle` is deliberately terminal here even though it is also a Beat's
+ * pre-run state: the shipped router (`routers/v1/beats.py`) drains before it
+ * reads, so a response this predicate ever sees that still says `idle`
+ * genuinely means nothing is in flight right now — never "a run I haven't
+ * heard about yet". `undefined` (nothing fetched yet) is non-terminal, the
+ * `isPathStatusTerminal` precedent.
+ */
+export function isBeatResearchStateTerminal(state: BeatResearchState | undefined): boolean {
+  return state === "idle" || state === "failed" || state === "refused";
+}
+
+/** `BeatDetail`-shaped wrapper around `isBeatResearchStateTerminal` — what
+ *  `routes/beats.$beatId.tsx` actually feeds `makePollingRefetchInterval`. */
+export function isBeatDetailTerminal(detail: BeatDetail | undefined): boolean {
+  return isBeatResearchStateTerminal(detail?.research_state);
+}
+
+/**
+ * THE Beats-list query — key + fetcher paired (the `sessionQueryOptions`
+ * house rule). `enabled` is `useFeatureFlag("analyst")` — off means
+ * `skipToken`: no request, no rendered surface (TDD §8). No
+ * `refetchInterval` is ever layered onto this one: TDD §7 is explicit that
+ * nothing polls the list, because a Beat that starts researching does so
+ * because this learner's own arrival triggered it, so the client already
+ * knows without asking again.
+ */
+export function beatsListQueryOptions(enabled: boolean) {
+  return queryOptions({
+    queryKey: BEATS_LIST_QUERY_KEY,
+    queryFn: enabled ? listBeats : skipToken,
+  });
+}
+
+/**
+ * THE Beat-detail query — key + fetcher paired, the poll target
+ * (`routes/beats.$beatId.tsx`, and `routes/beats.new.tsx`'s own seed write).
+ * `id: null` idles on `skipToken` exactly like `pathQueryOptions` does for a
+ * not-yet-created path — `routes/beats.new.tsx` has no id until the deploy
+ * mutation resolves. `enabled` is `useFeatureFlag("analyst")`, layered onto
+ * that same idle check: either reason is enough to skip the request.
+ */
+export function beatQueryOptions(id: string | null, enabled: boolean) {
+  return queryOptions({
+    queryKey: beatQueryKey(id ?? "idle"),
+    queryFn: id !== null && enabled ? () => getBeat(id) : skipToken,
+  });
+}
+
 /**
  * THE card-list query, for `/cards` (AL-410 plan §6) — an **infinite** query,
  * unlike every other factory in this file, because "Load more" is the one

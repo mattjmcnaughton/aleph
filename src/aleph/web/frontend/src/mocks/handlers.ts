@@ -1,5 +1,6 @@
 import { HttpResponse, http } from "msw";
 import { API_V1_BASE, AUTH_LOGOUT_PATH, type AuthSession, type AuthUser } from "../lib/api";
+import { beatHandlers } from "./beats";
 import { flashcardHandlers } from "./flashcards";
 import { lessonsHandlers } from "./lessons";
 import { ADMIN_MODEL_ALLOWLIST } from "./models";
@@ -31,8 +32,9 @@ export const learnerUser: AuthUser = {
   // learner ships them off anyway: this fixture's job is to make every gated
   // surface opt in explicitly via `server.use(...)`, so a test proves the gate
   // itself rather than inheriting an accident of whatever the backend default
-  // happens to be this week.
-  feature_flags: { tutor: false, streaks: false, flashcards: false },
+  // happens to be this week. `analyst` (AL-522/AL-530) joins the same
+  // dark-by-default posture (`routers/v1/beats.py`'s own `require_analyst_enabled`).
+  feature_flags: { tutor: false, streaks: false, flashcards: false, analyst: false },
 };
 
 export const authenticatedSession: AuthSession = {
@@ -92,4 +94,5 @@ export const handlers = [
   ...shapingHandlers,
   ...progressHandlers,
   ...flashcardHandlers,
+  ...beatHandlers,
 ];
