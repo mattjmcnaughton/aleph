@@ -16,6 +16,7 @@ so structlog events reach it as log records (``span_type == "log"``).
 
 from __future__ import annotations
 
+from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING
 
 import pytest
@@ -26,10 +27,13 @@ from aleph import events
 from aleph.app import create_app
 from aleph.auth import AuthIdentity
 from aleph.logging import configure_logging
+from aleph.routers.v1 import beats as beats_router_module
 from aleph.services import briefing as briefing_module
 from aleph.services import generation as gen_module
 
 from .conftest import CollectingSpawn, assert_event, captured_records, stub_resolver
+from .test_beats_api import _seed_beat, _seed_published
+from .test_beats_api import _sign_in as _sign_in_and_get_user_id
 from .test_briefing import (
     _doc,
     _FakeRetriever,
@@ -388,6 +392,71 @@ async def test_beat_deployed_and_brief_read_emit_every_declared_field(
         assert attributes["beat_id"] == beat_id
         assert attributes["brief_id"] == brief_id
         assert attributes["age_days"] >= 0
+
+
+@pytest.mark.anyio
+async def test_read_ping_age_days_uses_the_learners_local_day_not_utc(
+    app: FastAPI,
+    monkeypatch: pytest.MonkeyPatch,
+    analyst_flag_enabled: None,
+    capfire,
+) -> None:
+    """FIX 9 (code-review, AL-540): `age_days` is computed against the
+    learner's LOCAL day via the route's new `tz_offset_minutes` param, not
+    always UTC's. Regression case: a learner nine hours EAST of UTC (Tokyo,
+    `tz_offset_minutes = -540`, the JS `getTimezoneOffset()` sign convention
+    `dtos/progress.py` documents) reading a Brief in their own morning, at a
+    moment UTC still reads the PREVIOUS day.
+
+    The existing ``age_days >= 0`` assertion just above this test
+    (``test_beat_deployed_and_brief_read_emit_every_declared_field``) is
+    never exercised under a non-UTC offset — every call there omits
+    ``tz_offset_minutes`` and reads it same-day in UTC too, so it would stay
+    green even if this route silently went back to UTC-only. This test pins
+    the one case that distinguishes them: before FIX 9, this exact scenario
+    produced ``age_days == -1``."""
+    configure_logging()
+
+    class _FrozenDatetime(datetime):
+        """Freezes ``datetime.now(UTC)`` inside the beats router to
+        2026-08-10T16:00Z — 2026-08-11T01:00 for a Tokyo-local learner
+        (UTC+9), already the SAME calendar day as the Brief's own
+        ``published_on`` (2026-08-11, the learner's local day at publish
+        time, D4a) even though UTC itself still reads 2026-08-10."""
+
+        @classmethod
+        def now(cls, tz: object = None) -> _FrozenDatetime:
+            del tz
+            return cls(2026, 8, 10, 16, 0, tzinfo=UTC)
+
+    monkeypatch.setattr(beats_router_module, "datetime", _FrozenDatetime)
+
+    async with _client(app) as client:
+        # This module's own `_sign_in` returns `None`; `test_beats_api`'s
+        # version returns the signed-in `user_id`, which the direct
+        # repository seeding below needs (there is no deploy response to
+        # read it off).
+        user_id = await _sign_in_and_get_user_id(client, monkeypatch, OWNER)
+        beat_id = await _seed_beat(user_id=user_id)
+        brief_id = await _seed_published(
+            beat_id, number=1, published_on=date(2026, 8, 11), url="https://x.test/a"
+        )
+
+        resp = await client.post(
+            f"/api/v1/briefs/{brief_id}/read",
+            params={"tz_offset_minutes": -540},
+            json={"marker": "opened"},
+        )
+        assert resp.status_code == 204, resp.text
+
+    record = assert_event(capfire, events.BRIEF_READ)
+    assert record["brief_id"] == str(brief_id)
+    # Local day is 2026-08-11 (16:00 UTC + 9h = 01:00 local, already the
+    # 11th) — the SAME day the Brief published, so age_days is honestly 0.
+    # The old, UTC-only computation would have read UTC's date (still the
+    # 10th) minus published_on (the 11th) = -1, a value with no honest
+    # reading.
+    assert record["age_days"] == 0
 
 
 @pytest.mark.anyio

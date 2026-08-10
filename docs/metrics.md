@@ -350,22 +350,62 @@ than an average. It has no direct "still present" signal to read — no event
 records presence — so it is approximated from the two events that do exist:
 a published run's own Beat can resolve only one research run at a time (the
 claim fence), so the next `brief_read` (marker='opened') for that Beat after
-the run's own completion is unambiguously the read that run's Brief produced;
-"still present" is that read landing within a few minutes of the run
-finishing. A published run never opened at all reports NOT present, never a
-false positive.
+the run's own completion is a reasonable proxy for the read that run's Brief
+produced; "still present" is that read landing within a few minutes of the
+run finishing. A published run never opened at all reports NOT present. **This
+is a proxy, not unambiguous** (an earlier version of the query's own header
+overclaimed it was — see the caveat below) — the query now also requires the
+matching `brief_read`'s `age_days` to be `0`, which removes most, but not
+quite all, of the ambiguity.
 
 `brief_skip_rate.sql` answers TDD §15's own table, not just the ratio: it
-returns `avg_documents_retrieved_when_skipped` / `avg_findings_when_skipped` /
-`avg_survivors_when_skipped` alongside `skip_rate`, per Beat, because raw Skip
-rate cannot separate a genuinely quiet week (healthy retrieval, healthy
-findings, zero survivors) from thin retrieval RECALL (low, low, zero) from
-thin retrieval PRECISION (healthy, low, zero) — a human reads the two funnel
-averages against each other, per row, to place a Beat in one of its cases.
-What no query here can do is name the query that *would* have worked, or
-catch retrieval confidently returning documents about the wrong half of a
-subject — that has one detector, a person reading the week's real news and
-comparing, and it is a dogfooding ritual (AL-570), not a dashboard.
+returns, per Beat, `avg_documents_retrieved_when_skipped` /
+`avg_documents_after_filters_when_skipped` / `avg_findings_when_skipped` /
+`avg_survivors_when_skipped` — and, since code-review FIX 4, the identical
+four averages again `_when_published` — alongside `skip_rate`. Raw Skip rate
+cannot separate a genuinely quiet week (healthy retrieval, healthy findings,
+zero survivors) from thin retrieval RECALL (low, low, zero) from a
+RECALL-shaped miss `retrieve()`'s own filters manufactured (healthy raw
+documents, low survivors of the filters, low findings) from thin retrieval
+PRECISION (healthy documents at both stages, low findings) — a human reads
+the skipped-side averages against that SAME Beat's own published-side
+averages, per row, to place it in one of its cases. `documents_after_filters`
+is what tells the middle two apart; without it (before FIX 4) a Beat's own
+funnel had no way to distinguish "the source had little to say" from
+"`retrieve()`'s dedupe/dated/non-empty filters ate a document count that
+looked fine". The `_when_published` columns are the healthy baseline the
+skipped-side numbers are read against — without them (also before FIX 4) a
+Beat whose skip rate is 100%, the one row that most needs diagnosing, had no
+comparator on that Beat at all; a global sense of "healthy" does not
+substitute, since retrieval volume varies by subject. What no query here can
+do is name the query that *would* have worked, or catch retrieval confidently
+returning documents about the wrong half of a subject — that has one
+detector, a person reading the week's real news and comparing, and it is a
+dogfooding ritual (AL-570), not a dashboard.
+
+`cost_per_read_brief.sql` reports **dollars**, not a bare token count (FIX 3,
+code-review) — `prompt_tokens_per_read_brief`, `completion_tokens_per_read_brief`
+(priced 3-5x apart, so flattening them the old way hid which one actually
+drives spend), `retrieval_calls_per_read_brief` (the `queries` count — D14a's
+retrieval line, ~20% of its estimate, previously emitted and read by
+nothing), and `dollars_per_read_brief`, computed from rate constants stated
+in the query's own header (Claude Sonnet 5's per-token price, Exa's
+per-query/per-page price) — current as of 2026-08, **not an invariant**,
+D14a's own caveat. This is what makes "under or over the $0.50 ceiling" a
+question the query can actually answer, rather than a token count a reader
+has to price themselves.
+
+**Right-censored** (FIX 6, code-review; the `activation_rate.sql` clamp
+idiom, applied here for the first time): `brief_read_rate.sql` and
+`cost_per_read_brief.sql` exclude research runs from the last 24h;
+`brief_wait_tolerance.sql` excludes published runs from the last 5 minutes
+(its own PRESENT_WINDOW). A Brief that has not yet had a fair chance to be
+opened was previously counted as unread/uncounted-spend/"learner left"
+immediately — a purely mechanical dilution that reads exactly like the
+guardrail failing (a fresh Beat's read rate near 0.5, cost per read Brief
+inflated ~2x) when nothing about the feature is actually wrong, worst right
+after launch or a traffic spike — precisely when these guardrails are
+watched most closely.
 
 **Beat survival** (Beats with a read Brief in 30 days) is computable from
 `beat_deployed` and `brief_read` directly — join each Beat's deployment to
@@ -598,12 +638,21 @@ Shaping-specific caveats (Phase 2B):
 
 Analyst-specific caveats (Phase 6, AL-540):
 
-- **"Day" is UTC here too** — every analyst query inherits `return_rate.sql`'s
-  standing UTC-vs-local-day caveat above, unchanged: `brief_return.sql`
-  buckets Active days in UTC, and `read_brief`'s `age_days` is computed off
-  `datetime.now(UTC).date()` (no `tz_offset_minutes` rides that request). The
-  learner-local-timezone refinement is the same follow-up as everywhere else
-  in this document, not a Phase 6-specific gap.
+- **"Day" is UTC in the queries** — `brief_return.sql` buckets Active days in
+  UTC, the same standing caveat `return_rate.sql` carries above; that
+  refinement is the same follow-up as everywhere else in this document, not a
+  Phase 6-specific gap. **`read_brief`'s `age_days` is the one exception**
+  (FIX 9, code-review on AL-540): the route now takes an optional
+  `tz_offset_minutes` (`TzOffsetMinutes`, the shared param every other route
+  in `routers/v1/beats.py` already carries) and computes `age_days` against
+  the learner's LOCAL day, not UTC's — `published_on` is itself stamped in
+  the learner's local day (D4a), so comparing it to UTC's *today* could make
+  `age_days` **negative** for a learner east of UTC reading a fresh Brief in
+  their own morning, which has no honest reading (not a rounding question).
+  Defaults to `0` (UTC) when the param is omitted, so an unmigrated client
+  keeps today's exact behavior — **AL-531 owns sending it from the frontend**;
+  until that ships, `age_days` is still effectively UTC-derived in practice
+  even though the route itself is fixed.
 - **`failed` folds six distinct causes into one wire value.** Retrieval
   unavailable, zero documents after §5.2's filters, a model timeout, an
   exhausted writer retry budget, a construction-time invariant violation, and
@@ -620,13 +669,32 @@ Analyst-specific caveats (Phase 6, AL-540):
   (the claim fence), but a learner who happens to open an old, unrelated
   Brief for the same Beat inside that window would be misread as present.
   Practically negligible (the window is minutes, not the days between
-  Anchor days) but not structurally impossible.
+  Anchor days) but not structurally impossible. The query now also requires
+  `age_days = 0` on the matching read (FIX 8, code-review), which removes
+  most — not all — of this ambiguity; the query's own header used to claim
+  "unambiguously" and "never a false positive", which this document already
+  contradicted before the header was corrected to match.
+- **`brief_return.sql`'s Active-day vocabulary is held FIXED on both sides
+  of the pre/post split** (FIX 5, code-review) — `lesson_viewed` /
+  `lesson_completed` / `quick_check_attempted` only, never `brief_read`. An
+  earlier version widened it with `brief_read`, but a Brief cannot exist
+  before a Beat does, so that widening applied to the post side only — any
+  lift `return_rate_post_beat` showed over `return_rate_pre_beat` was
+  confounded by construction, not evidence a Brief moved anything.
+  `brief_first_share` is unaffected and remains the column that legitimately
+  measures Brief-driven return.
 - **`brief_return.sql`'s pre-Beat baseline can be `NULL` for a learner
   deployed on day one.** The split is by calendar day relative to the first
   `beat_deployed`, and a learner with no Active day before that timestamp
   contributes nothing to `return_rate_pre_beat` — correctly, since they have
   no pre-Beat baseline to report, never a false zero that would bias the
   comparison toward "the Beat helped."
+- **`brief_read_rate.sql`, `cost_per_read_brief.sql`, and
+  `brief_wait_tolerance.sql` are right-censored** (FIX 6, code-review,
+  matching `activation_rate.sql`'s own clamp): a Brief/run that has not yet
+  had a fair chance to be opened is excluded from the denominator/numerator
+  rather than counted against it immediately. See the Phase 6 section above
+  for the exact windows (24h / 5min) and the failure mode this closes.
 - **Beat survival has no saved query yet**, named as a decision in TDD §9,
   not an oversight: `beat_deployed` + `brief_read` already carry everything
   the join needs, but there is not enough Beat history at launch for the

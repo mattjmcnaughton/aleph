@@ -38,7 +38,7 @@ from pathlib import Path as FsPath
 import pytest
 from sqlalchemy import text
 
-from aleph import db
+from aleph import db, events
 
 _QUERIES_DIR = FsPath(__file__).resolve().parents[2] / "queries" / "logfire"
 
@@ -455,7 +455,7 @@ def _analyst_records() -> list[dict]:
             _BEAT_DEPLOYED_AT,
             account_id=_ACCOUNT_C,
             beat_id=_BEAT_1,
-            level="some_experience",
+            beat_level="some_experience",
             anchor_weekday=0,
             has_guidance=True,
         ),
@@ -464,7 +464,7 @@ def _analyst_records() -> list[dict]:
             _BEAT_DEPLOYED_AT,
             account_id=_ACCOUNT_C,
             beat_id=_BEAT_2,
-            level="new_to_it",
+            beat_level="new_to_it",
             anchor_weekday=2,
             has_guidance=False,
         ),
@@ -570,10 +570,28 @@ def _analyst_records() -> list[dict]:
             position_in_path=1,
         ),
         # TWO Active days on/after the first deployment — post-Beat IS a
-        # return. Day 1's earliest event is the brief_read "opened" ping
-        # above (same calendar day), so it is the day brief_first_share
-        # counts; day 2's earliest (only) event is an ordinary lesson_viewed,
-        # so brief_first_share is a real 1-of-2, not a trivial 100%.
+        # return, and (FIX 5, code-review) it is a GENUINE one: the
+        # Active-day vocabulary that decides membership is held fixed to
+        # lesson_viewed/lesson_completed/quick_check_attempted on both sides
+        # of the split, so this pair of days is real lesson activity, not
+        # brief_read padding a day count the pre-Beat side could never have
+        # matched (brief_read cannot occur before a Beat exists at all).
+        #
+        # Day 1 (deployment day): a lesson_viewed AFTER the brief_read pings
+        # above, so the day is genuinely Active under the fixed vocabulary
+        # while its FIRST same-day event is still the Brief open — the one
+        # brief_first_share counts.
+        _rec(
+            "lesson_viewed",
+            _SOURCES_SEEN_AT + timedelta(minutes=2),
+            account_id=_ACCOUNT_C,
+            path_id="path-c1",
+            lesson_id=str(uuid.uuid4()),
+            position_in_path=1,
+        ),
+        # Day 2: an ordinary lesson_viewed, whose day was never touched by a
+        # Brief at all — so brief_first_share is a real 1-of-2, not a
+        # trivial 100%.
         _rec(
             "lesson_viewed",
             _OPENED_AT + timedelta(days=1),
@@ -914,6 +932,29 @@ async def test_the_shaping_guardrails_compute_both_of_their_sides() -> None:
     assert latency["p95_duration_ms"] == pytest.approx(1500.0)
 
 
+def test_the_beat_deployed_fixture_does_not_drift_from_event_fields() -> None:
+    """FIX 7 (code-review, AL-540): this fixture is the one stand-in for real
+    emission whose whole job is fidelity — it passed for a while shaping
+    ``beat_deployed`` with the clobbered ``level`` key (structlog's
+    ``add_log_level`` owns the bare key, `path_level`'s own precedent) purely
+    because no query here reads that field, so nothing else in this module
+    would ever have caught it. Asserting every fixture attribute key against
+    the real manifest (``events.EVENT_FIELDS``) is what keeps this fixture
+    from silently drifting from what production actually emits again."""
+    beat_deployed_records = [
+        row for row in _fixture_records() if row["span_name"] == "beat_deployed"
+    ]
+    assert beat_deployed_records, "fixture carries no beat_deployed records"
+    known_fields = events.EVENT_FIELDS[events.BEAT_DEPLOYED]
+    for row in beat_deployed_records:
+        keys = set(json.loads(row["attributes"]))
+        unknown = keys - known_fields
+        assert not unknown, (
+            f"beat_deployed fixture record uses unknown fields {sorted(unknown)} "
+            f"(known: {sorted(known_fields)})"
+        )
+
+
 @pytest.mark.anyio
 async def test_the_analyst_funnel_separates_precision_from_recall() -> None:
     """``brief_skip_rate.sql`` (TDD §15): BEAT_1's Skip carries HEALTHY
@@ -934,40 +975,82 @@ async def test_the_analyst_funnel_separates_precision_from_recall() -> None:
     assert beat_2["skipped_runs"] == 1
     assert beat_2["skip_rate"] == pytest.approx(0.5)
 
-    # PRECISION: plenty retrieved, little worth reporting.
+    # PRECISION: plenty retrieved AND plenty surviving retrieve()'s own
+    # filters, little worth reporting -- the disambiguating field (FIX 4,
+    # code-review) is what tells this apart from BEAT_2 below.
     assert beat_1["avg_documents_retrieved_when_skipped"] == pytest.approx(9.0)
+    assert beat_1["avg_documents_after_filters_when_skipped"] == pytest.approx(7.0)
     assert beat_1["avg_findings_when_skipped"] == pytest.approx(1.0)
-    # RECALL: there was little to retrieve in the first place.
+    # RECALL: there was little to retrieve in the first place, and
+    # retrieve()'s filters had nothing to eat either -- both funnel counts
+    # agree, which is what makes it RECALL and not filter-manufactured.
     assert beat_2["avg_documents_retrieved_when_skipped"] == pytest.approx(1.0)
+    assert beat_2["avg_documents_after_filters_when_skipped"] == pytest.approx(1.0)
     assert beat_2["avg_findings_when_skipped"] == pytest.approx(0.0)
+
+    # The healthy baseline (FIX 4, code-review): BEAT_1's one published run
+    # is a real, self-contained comparator for its own skipped-side averages.
+    assert beat_1["avg_documents_retrieved_when_published"] == pytest.approx(10.0)
+    assert beat_1["avg_documents_after_filters_when_published"] == pytest.approx(8.0)
+    assert beat_1["avg_findings_when_published"] == pytest.approx(5.0)
+    assert beat_1["avg_survivors_when_published"] == pytest.approx(2.0)
+    # BEAT_2 never published at all -- the exact case a Beat with a 100%
+    # skip rate would also hit: no published-side baseline exists to read
+    # (NULL, not zero -- there is nothing to average over).
+    assert beat_2["avg_documents_retrieved_when_published"] is None
+    assert beat_2["avg_findings_when_published"] is None
 
 
 @pytest.mark.anyio
 async def test_the_analyst_read_and_cost_queries_compute_real_numbers() -> None:
     """``brief_read_rate`` / ``brief_depth_of_read`` / ``brief_wait_tolerance``
     / ``cost_per_read_brief`` — all four have one genuinely published, opened,
-    and Sources-reached Brief (BEAT_1's) to compute a real answer from."""
+    and Sources-reached Brief (BEAT_1's) to compute a real answer from. Every
+    analyst record in this fixture is ~10-20 days old (``_OUT_WINDOW``), well
+    past FIX 6's right-censoring clamps (24h / 5min), so those clamps drop
+    nothing here."""
     async with db.async_session() as session:
         await _load_records(session)
         read_rate = await _scalar(session, "brief_read_rate.sql")
         depth = await _scalar(session, "brief_depth_of_read.sql")
         wait = await _scalar(session, "brief_wait_tolerance.sql")
-        cost = await _scalar(session, "cost_per_read_brief.sql")
+        [cost] = await _rows(session, "cost_per_read_brief.sql")
 
     assert read_rate == pytest.approx(1.0)  # the one published Brief was opened
     assert depth == pytest.approx(1.0)  # and its Sources were reached too
     # Opened 2 minutes after the run landed — well inside the presence window.
     assert wait == pytest.approx(1.0)
-    # Every research run's tokens (1200 + 500 + 190 + 0), over the one Brief read.
-    assert cost == pytest.approx(1890.0)
+    # FIX 3 (code-review): dollars, split prompt/completion, plus the
+    # retrieval-call count — over the one Brief read. Every research run's
+    # tokens/queries count in the numerator (all 4 runs, every outcome):
+    #   prompt: 900+400+150+0 = 1450, completion: 300+100+40+0 = 440,
+    #   retrieval calls (queries): 6*4 = 24,
+    #   dollars: 4 runs' (queries*0.005 + documents_retrieved*0.001 +
+    #   prompt*0.000003 + completion*0.000015) = 0.15095.
+    assert cost["prompt_tokens_per_read_brief"] == pytest.approx(1450.0)
+    assert cost["completion_tokens_per_read_brief"] == pytest.approx(440.0)
+    assert cost["retrieval_calls_per_read_brief"] == pytest.approx(24.0)
+    assert cost["dollars_per_read_brief"] == pytest.approx(0.15095)
 
 
 @pytest.mark.anyio
 async def test_the_analyst_north_star_splits_pre_and_post_beat_return() -> None:
-    """``brief_return.sql``: C's one pre-Beat Active day is honestly NOT a
-    return (only one day); C's two post-Beat Active days ARE — and the
-    earlier of the two starts with the opened Brief, so brief_first_share is
-    a real 1-of-2, not a trivial 0 or 100%."""
+    """``brief_return.sql`` (FIX 5, code-review): C's one pre-Beat Active day
+    is honestly NOT a return (only one day); C's two post-Beat Active days
+    ARE — and this time genuinely, not manufactured by an asymmetric
+    Active-day vocabulary. Both post-Beat days carry a real
+    ``lesson_viewed`` (the SAME event kind the pre-Beat day used), so
+    ``return_rate_post_beat`` is computed on identical footing to
+    ``return_rate_pre_beat`` — deleting every ``brief_read`` record from the
+    fixture would not change either return rate at all, only
+    ``brief_first_share``, which is exactly the property FIX 5 requires
+    (before the fix, the OLD query widened only the post side with
+    ``brief_read`` and the assertions below were producible from Brief
+    padding alone — no lesson activity required).
+
+    The earlier of the two post-Beat days starts with the opened Brief
+    (before that day's own ``lesson_viewed``), so ``brief_first_share`` is a
+    real 1-of-2, not a trivial 0 or 100%."""
     async with db.async_session() as session:
         await _load_records(session)
         [row] = await _rows(session, "brief_return.sql")

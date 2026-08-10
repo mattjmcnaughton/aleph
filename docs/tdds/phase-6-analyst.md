@@ -511,9 +511,17 @@ assumed" contract, AL-070):
 
 | Event | Fields | Answers |
 | --- | --- | --- |
-| `beat_deployed` | `account_id`, `beat_id`, `level`, `anchor_weekday`, `has_guidance` | The denominator for **Beat survival**; the deployment-mix datum |
+| `beat_deployed` | `account_id`, `beat_id`, `beat_level`, `anchor_weekday`, `has_guidance` | The denominator for **Beat survival**; the deployment-mix datum |
 | `brief_research_completed` | `account_id`, `beat_id`, `outcome` (`published`/`skipped`/`failed`/`refused`), `duration_ms`, `queries`, `documents_retrieved`, `documents_after_filters`, `findings`, `survivors`, `prompt_tokens`, `completion_tokens`, `total_tokens` | **Skip rate**, **Cost per read Brief**, **Wait tolerance**'s duration half, and D14a's verification |
 | `brief_read` | `account_id`, `beat_id`, `brief_id`, `marker` (`opened`/`sources`), `age_days` | The **north star**, **Brief read rate**, **Depth of read** |
+
+**Corrected (code-review, FIX 10): `beat_deployed`'s Level field is `beat_level`, not `level`, above.**
+An earlier version of this table (and the code) used the bare `level` — structlog's `add_log_level`
+processor owns that key (the log severity), and silently clobbers any field emitted under the same
+name, exactly the `path_created`/`path_level` reason `services/generation.py` already documents.
+`docs/metrics.md` and `events.py`'s `EVENT_FIELDS` were both corrected; this table, the spec the
+ticket cites, was not — leaving it wrong here would have reintroduced the bug the next time someone
+built from this document instead of the code.
 
 `brief_research_completed` fires **however it resolved**, the shape `lesson_generation_completed`
 and `tutor_reply_completed` already use — one event with an `outcome`, never a success event and a
@@ -532,7 +540,7 @@ arithmetic, the event is the measurement, and if they disagree the event wins.
 | `brief_depth_of_read.sql` | Share of opened Briefs reaching the Sources (`marker = 'sources'` ÷ `marker = 'opened'`) |
 | `brief_skip_rate.sql` | Skipped ÷ research runs, per Beat — calibrates PRD §4.6 in both directions |
 | `brief_wait_tolerance.sql` | Share of researching Beats the learner is still present for when the Brief lands. **The first metric to read** (PRD §5): with prefetch deferred, the first slice waits every time, so this is the worst case rather than an average |
-| `cost_per_read_brief.sql` | Token spend ÷ Briefs read — the guardrail that decides viability |
+| `cost_per_read_brief.sql` | Dollar spend (split prompt/completion tokens plus the retrieval-call count, priced from rate constants in the query's own header, code-review FIX 3) ÷ Briefs read — the guardrail that decides viability against the $0.50 ceiling directly |
 
 `docs/metrics.md` gains the three event rows and the six query rows, and inherits
 `return_rate.sql`'s standing UTC-vs-local-day caveat.
@@ -745,17 +753,27 @@ record rather than a quiet rewrite. A reader holding the PRD needs the mapping.
   world, so the harness measures the agent and never our recall.
 
   **The instrument is the funnel, not Skip rate alone.** `brief_research_completed` carries
-  `documents_retrieved`, `findings` and `survivors` (§9) precisely so the three cases separate:
+  `documents_retrieved`, `documents_after_filters`, `findings` and `survivors` (§9) precisely so the
+  cases separate — the table below **corrected (code-review, FIX 4)** to include
+  `documents_after_filters`: the original two-column version (`documents_retrieved`, `findings`)
+  could not tell a genuine retrieval PRECISION miss (chum reached the researcher) from a
+  RECALL-shaped one `retrieve()`'s own dedupe/dated/non-empty filters manufactured out of a raw
+  count that looked healthy — `documents_after_filters` is emitted for exactly this and, until the
+  fix, was read by no query:
 
-  | `documents_retrieved` | `findings` | `survivors` | Reading |
-  | --- | --- | --- | --- |
-  | healthy | healthy | 0 | **A genuinely quiet week.** The gate working |
-  | **low** | low | 0 | **Retrieval recall** — we found little to read |
-  | healthy | **low** | 0 | **Retrieval precision** — we read plenty, it was chum |
-  | healthy | healthy | healthy | Working |
+  | `documents_retrieved` | `documents_after_filters` | `findings` | `survivors` | Reading |
+  | --- | --- | --- | --- | --- |
+  | healthy | healthy | healthy | 0 | **A genuinely quiet week.** The gate working |
+  | **low** | **low** | low | 0 | **Retrieval recall** — we found little to read |
+  | healthy | **low** | low | 0 | **Recall-shaped, but the filters did it** — `retrieve()`'s own dedupe/dated/non-empty filters ate the batch, not the source |
+  | healthy | healthy | **low** | 0 | **Retrieval precision** — we read plenty, it was chum |
+  | healthy | healthy | healthy | healthy | Working |
 
-  Raw Skip rate cannot tell those apart; the pair can. What neither can do is name the query that
-  *would* have worked, or notice retrieval confidently returning good documents about the wrong
+  Raw Skip rate cannot tell those apart; the funnel can — read a Beat's own Skipped-side averages
+  against that SAME Beat's Published-side averages (`brief_skip_rate.sql`'s `_when_published`
+  columns, FIX 4), since a global sense of "healthy" does not substitute — retrieval volume varies
+  by subject. What none of this can do is name the query that *would* have worked, or notice
+  retrieval confidently returning good documents about the wrong
   half of a subject. **That case has one detector: a person reading the week's news on a Beat's
   topic and comparing.** It is a dogfooding ritual (AL-570), not a dashboard — named here so the
   funnel query is not mistaken for coverage it does not provide.

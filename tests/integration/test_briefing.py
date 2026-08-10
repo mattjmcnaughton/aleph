@@ -46,7 +46,7 @@ from aleph.services.briefing import (
 )
 from aleph.services.retrieval import RetrievalUnavailableError
 
-from .conftest import CollectingSpawn, assert_event, create_user
+from .conftest import CollectingSpawn, assert_event, captured_records, create_user
 
 if TYPE_CHECKING:
     import uuid
@@ -485,6 +485,168 @@ async def test_a_refused_run_emits_brief_research_completed(capfire) -> None:
     assert record["documents_after_filters"] == 1
     assert record["findings"] == 0
     assert record["survivors"] == 0
+
+
+# --------------------------------------------------------------------------- #
+# FIX 1 (code-review, AL-540) — the two probe cases: a context-load error and
+# a persist-stage error must BOTH still resolve `failed` AND emit exactly one
+# `brief_research_completed`. Before this fix, `_load_context` and the whole
+# persist section sat outside every try/except in `_run_claimed`, so either
+# failure escaped straight to `run_research`'s blanket handler, which marks
+# `failed` WITHOUT emitting -- `state=failed, events=0`.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.anyio
+async def test_a_context_load_error_still_marks_failed_and_emits_exactly_once(
+    monkeypatch: pytest.MonkeyPatch, capfire
+) -> None:
+    """The context-load probe: `BriefRepository.prior_claims_for_beat` raises
+    (a stand-in for a Neon pool blip mid-query) — a failure that happens
+    AFTER the Beat itself was already fetched, exactly the case
+    `_ContextLoadError` exists to carry an `account_id` out of."""
+    configure_logging()
+    user = await _create_user()
+    beat_id = await _make_beat(user=user)
+
+    async def _raise(*_args: object, **_kwargs: object) -> list[str]:
+        raise RuntimeError("simulated context-load DB blip")
+
+    monkeypatch.setattr(BriefRepository, "prior_claims_for_beat", _raise)
+
+    retriever = _FakeRetriever(documents=[_doc("https://example.com/a")])
+    responder = _PipelineResponder(researcher=("findings", {"findings": []}))
+    service, _ = _make_service(
+        retriever=retriever, resolve_model_fn=_resolver(FunctionModel(responder))
+    )
+
+    await service.run_research(beat_id, date(2026, 8, 3))
+
+    beat = await _reload_beat(beat_id)
+    assert beat.research_state is BeatResearchState.FAILED
+    assert beat.research_error is not None
+
+    records = captured_records(capfire, events.BRIEF_RESEARCH_COMPLETED)
+    assert len(records) == 1, (
+        f"expected exactly one brief_research_completed event, got {len(records)}"
+    )
+    attributes = records[0]["attributes"]
+    assert attributes["beat_id"] == str(beat_id)
+    assert attributes["outcome"] == "failed"
+    # Raised before any pipeline I/O -- the funnel is honestly all zero, not
+    # a placeholder standing in for "unknown".
+    assert attributes["documents_retrieved"] == 0
+    assert attributes["findings"] == 0
+    assert attributes["total_tokens"] == 0
+    assert responder.researcher_calls == 0
+
+
+@pytest.mark.anyio
+async def test_a_persist_stage_error_still_marks_failed_and_emits_exactly_once(
+    monkeypatch: pytest.MonkeyPatch, capfire
+) -> None:
+    """The persist-stage probe: `_persist_published` raises (a stand-in for
+    a Neon pool blip on the final write) — after the full pipeline (both
+    model calls) has already run and cost real tokens."""
+    configure_logging()
+    user = await _create_user()
+    beat_id = await _make_beat(user=user)
+
+    async def _raise(*_args: object, **_kwargs: object) -> bool:
+        raise RuntimeError("simulated persist-stage DB blip")
+
+    monkeypatch.setattr(BriefingService, "_persist_published", _raise)
+
+    retriever = _FakeRetriever(documents=[_doc("https://example.com/a")])
+    responder = _PipelineResponder(
+        researcher=(
+            "findings",
+            {"findings": [_finding_payload("X happened", ["https://example.com/a"])]},
+        ),
+        analyst=(
+            "cited_urls",
+            {
+                "title": "T",
+                "body_markdown": "Body.",
+                "cited_urls": ["https://example.com/a"],
+            },
+        ),
+    )
+    service, _ = _make_service(
+        retriever=retriever, resolve_model_fn=_resolver(FunctionModel(responder))
+    )
+
+    await service.run_research(beat_id, date(2026, 8, 3))
+
+    beat = await _reload_beat(beat_id)
+    assert beat.research_state is BeatResearchState.FAILED
+    assert beat.research_error is not None
+    briefs = await _briefs_for_beat(beat_id)
+    assert briefs == []  # the raised write never actually persisted anything
+
+    records = captured_records(capfire, events.BRIEF_RESEARCH_COMPLETED)
+    assert len(records) == 1, (
+        f"expected exactly one brief_research_completed event, got {len(records)}"
+    )
+    attributes = records[0]["attributes"]
+    assert attributes["beat_id"] == str(beat_id)
+    assert attributes["outcome"] == "failed"
+    # The pipeline ran to completion (both model calls) before persist raised.
+    assert attributes["total_tokens"] > 0
+
+
+@pytest.mark.anyio
+async def test_duration_ms_includes_the_semaphore_wait(capfire) -> None:
+    """FIX 2 (code-review, AL-540): the clock starts before the
+    `MAX_CONCURRENT_BRIEF_RESEARCH` permit is acquired, so a run queued
+    behind a full pool reports the wait as part of `duration_ms` rather than
+    a suspiciously-fast run that hides exactly the saturation the metric
+    exists to catch."""
+    configure_logging()
+    user = await _create_user()
+    beat_id = await _make_beat(user=user)
+
+    retriever = _FakeRetriever(documents=[_doc("https://example.com/a")])
+    responder = _PipelineResponder(
+        researcher=(
+            "findings",
+            {"findings": [_finding_payload("X happened", ["https://example.com/a"])]},
+        ),
+        analyst=(
+            "cited_urls",
+            {
+                "title": "T",
+                "body_markdown": "Body.",
+                "cited_urls": ["https://example.com/a"],
+            },
+        ),
+    )
+    service, _ = _make_service(
+        retriever=retriever, resolve_model_fn=_resolver(FunctionModel(responder))
+    )
+    # A single-permit pool, already held -- the next `run_research` call must
+    # queue on it before the pipeline can even start.
+    semaphore = asyncio.Semaphore(1)
+    service._model_slot = lambda: semaphore  # the services/lifecycle.py binding shape
+    await semaphore.acquire()
+
+    wait_seconds = 0.2
+
+    async def _release_after_delay() -> None:
+        await asyncio.sleep(wait_seconds)
+        semaphore.release()
+
+    release_task = asyncio.create_task(_release_after_delay())
+    try:
+        await service.run_research(beat_id, date(2026, 8, 3))
+    finally:
+        await release_task
+
+    record = assert_event(capfire, events.BRIEF_RESEARCH_COMPLETED)
+    assert record["outcome"] == "published"
+    # Generous slack for scheduler jitter -- this only needs to prove the
+    # wait landed inside duration_ms, not measure it precisely.
+    assert record["duration_ms"] >= wait_seconds * 1000 * 0.5
 
 
 # --------------------------------------------------------------------------- #

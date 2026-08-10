@@ -1342,13 +1342,19 @@ def emit_brief_research_completed(
     never completed) the corresponding call.
 
     ``duration_ms`` measures the **run**, never the request: clocked from
-    the moment the claimed pipeline starts (``BriefingService._run_claimed``,
-    before its own context load) through retrieval, both model calls, and
-    persist. This fires from a background task
-    (``BriefingService.run_research``, spawned by the arrival drain or the
-    explicit retry trigger) that the request which spawned it never awaits,
-    so no HTTP round trip — nor any queueing before the spawn — is ever
-    inside this number.
+    the top of ``BriefingService.run_research``, **before the
+    ``MAX_CONCURRENT_BRIEF_RESEARCH`` permit is even acquired** (FIX 2,
+    code-review — corrected from an earlier version clocked from inside
+    ``_run_claimed``, after the permit was already held, which left any
+    semaphore wait invisible: with the permit count at 2 and a 180s timeout,
+    a third arrival queuing behind a full pool could report a healthy ~40s
+    run while the learner had actually waited most of three minutes) through
+    the permit wait, context load, retrieval, both model calls, and persist.
+    This fires from a background task (``BriefingService.run_research``,
+    spawned by the arrival drain or the explicit retry trigger) that the
+    request which spawned it never awaits, so no HTTP round trip — nor any
+    queueing *before the spawn* — is ever inside this number; queueing
+    *after* the spawn, on the model-concurrency permit, now is.
 
     Emitted only on a **fenced-win** mark (the ``outline_generated``/
     ``lesson_generated`` precedent): a lost race's mark is a silent no-op
