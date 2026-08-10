@@ -1,3 +1,10 @@
+# [1.37.0](https://github.com/mattjmcnaughton/aleph/compare/v1.36.0...v1.37.0) (2026-08-10)
+
+
+### Features
+
+* **evals:** brief as the fourth artifact kind, with retrieval fixtures ([#194](https://github.com/mattjmcnaughton/aleph/issues/194)) ([1cdd3c0](https://github.com/mattjmcnaughton/aleph/commit/1cdd3c0c8da37f326416990ba8bf1d84d1f5080f)), closes [#177](https://github.com/mattjmcnaughton/aleph/issues/177)
+
 # [1.36.0](https://github.com/mattjmcnaughton/aleph/compare/v1.35.0...v1.36.0) (2026-08-10)
 
 
