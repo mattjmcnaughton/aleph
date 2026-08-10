@@ -111,6 +111,24 @@ class BeatRepository:
     async def get(self, beat_id: uuid.UUID) -> Beat | None:
         return await self.session.get(Beat, beat_id)
 
+    async def get_for_user(
+        self, *, beat_id: uuid.UUID, user_id: uuid.UUID
+    ) -> Beat | None:
+        """Fetch a Beat only if it belongs to ``user_id`` (ownership guard).
+
+        Restored (AL-522, issue #172) after AL-511's review dropped it for
+        having no caller and no test — this ticket is that caller: the
+        ownership seam behind ``GET``/``DELETE``/``POST .../retry`` in
+        ``routers/v1/beats.py``. Mirrors ``PathRepository.get_for_user``
+        exactly: another learner's Beat resolves to ``None`` here, which the
+        router turns into ``404`` (never ``403`` — TDD §6, its existence is
+        not disclosed).
+        """
+        result = await self.session.execute(
+            select(Beat).where(Beat.id == beat_id, Beat.user_id == user_id)
+        )
+        return result.scalar_one_or_none()
+
     async def list_for_user(
         self, *, user_id: uuid.UUID, limit: int | None = None
     ) -> list[Beat]:

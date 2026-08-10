@@ -26,6 +26,7 @@ row-lock claims are decided by the database).
 from __future__ import annotations
 
 import asyncio
+import uuid
 from datetime import UTC, date, datetime, timedelta
 from typing import TYPE_CHECKING, cast
 
@@ -50,8 +51,6 @@ from aleph.repositories.briefs import BriefRepository, NewSource
 from .conftest import create_user, wait_until_lock_waiters
 
 if TYPE_CHECKING:
-    import uuid
-
     from sqlalchemy.ext.asyncio import AsyncSession
 
 # ``brief_research_stale_after_seconds`` defaults to 420s (AL-501); tests that
@@ -1240,3 +1239,285 @@ async def test_beat_research_run_indexes_declared_on_both_model_and_migration() 
     assert "user_id" in indexdefs["ix_beat_research_runs_user_id_started_at"]
     assert "started_at" in indexdefs["ix_beat_research_runs_user_id_started_at"]
     assert "beat_id" in indexdefs["ix_beat_research_runs_beat_id"]
+
+
+# --------------------------------------------------------------------------- #
+# AL-522 (issue #172): the four read methods AL-511's review dropped for
+# having no caller and no test — this ticket is their caller.
+# ``BeatRepository.list_for_user`` and ``BriefRepository.list_for_beat`` were
+# already restored by AL-521 (the drain, the future rail read) before this
+# ticket started; what remained missing were ``BeatRepository.get_for_user``,
+# ``BriefRepository.get_for_user``, and ``BriefRepository.sources_for_brief``
+# — added back here, plus two genuinely new reads this ticket's routes need
+# (``BriefRepository.previous_published`` for `builds_on`,
+# ``BriefRepository.unread_counts_by_beat`` for the Beats list).
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.anyio
+async def test_beat_get_for_user_resolves_only_the_owners_beat() -> None:
+    async with db.async_session() as session:
+        owner = await create_user(session, username="owner", subject="owner-sub")
+        other = await create_user(session, username="other", subject="other-sub")
+        beat = await _make_beat(session, user=owner)
+        await session.commit()
+        beat_id, owner_id, other_id = beat.id, owner.id, other.id
+
+    async with db.async_session() as session:
+        repo = BeatRepository(session)
+        owned = await repo.get_for_user(beat_id=beat_id, user_id=owner_id)
+        assert owned is not None
+        assert owned.id == beat_id
+
+        not_owned = await repo.get_for_user(beat_id=beat_id, user_id=other_id)
+        assert not_owned is None
+
+        unknown = await repo.get_for_user(beat_id=uuid.uuid4(), user_id=owner_id)
+        assert unknown is None
+
+
+@pytest.mark.anyio
+async def test_brief_get_for_user_resolves_only_via_the_owning_beat() -> None:
+    async with db.async_session() as session:
+        owner = await create_user(session, username="owner", subject="owner-sub-2")
+        other = await create_user(session, username="other", subject="other-sub-2")
+        beat = await _make_beat(session, user=owner)
+        await session.commit()
+        brief = await BriefRepository(session).create_published(
+            beat_id=beat.id,
+            number=1,
+            published_at=datetime(2026, 7, 20, 9, tzinfo=UTC),
+            published_on=date(2026, 7, 20),
+            title="First",
+            body_markdown="Body.",
+            claims=["a claim"],
+            sources=[_new_source()],
+        )
+        await session.commit()
+        brief_id, owner_id, other_id = brief.id, owner.id, other.id
+
+    async with db.async_session() as session:
+        repo = BriefRepository(session)
+        owned = await repo.get_for_user(brief_id=brief_id, user_id=owner_id)
+        assert owned is not None
+        assert owned.id == brief_id
+
+        # Another learner, even one with Beats of their own, never resolves
+        # this Brief — the ownership join walks THIS Brief's own Beat, not
+        # any Beat the caller happens to own.
+        not_owned = await repo.get_for_user(brief_id=brief_id, user_id=other_id)
+        assert not_owned is None
+
+        unknown = await repo.get_for_user(brief_id=uuid.uuid4(), user_id=owner_id)
+        assert unknown is None
+
+
+@pytest.mark.anyio
+async def test_sources_for_brief_returns_them_in_position_order() -> None:
+    async with db.async_session() as session:
+        user = await create_user(session)
+        beat = await _make_beat(session, user=user)
+        await session.commit()
+        brief = await BriefRepository(session).create_published(
+            beat_id=beat.id,
+            number=1,
+            published_at=datetime(2026, 7, 20, 9, tzinfo=UTC),
+            published_on=date(2026, 7, 20),
+            title="First",
+            body_markdown="Body.",
+            claims=["a claim"],
+            sources=[
+                _new_source(url="https://example.com/first", title="First source"),
+                _new_source(url="https://example.com/second", title="Second source"),
+                _new_source(url="https://example.com/third", title="Third source"),
+            ],
+        )
+        await session.commit()
+        brief_id = brief.id
+
+    async with db.async_session() as session:
+        sources = await BriefRepository(session).sources_for_brief(brief_id)
+
+    assert [(s.position, s.url) for s in sources] == [
+        (1, "https://example.com/first"),
+        (2, "https://example.com/second"),
+        (3, "https://example.com/third"),
+    ]
+
+
+@pytest.mark.anyio
+async def test_sources_for_brief_is_empty_for_a_skipped_entry() -> None:
+    async with db.async_session() as session:
+        user = await create_user(session)
+        beat = await _make_beat(session, user=user)
+        await session.commit()
+        skipped = await BriefRepository(session).create_skipped(
+            beat_id=beat.id,
+            published_at=datetime(2026, 7, 27, 9, tzinfo=UTC),
+            published_on=date(2026, 7, 27),
+            skip_line="Nothing material.",
+        )
+        await session.commit()
+        skipped_id = skipped.id
+
+    async with db.async_session() as session:
+        sources = await BriefRepository(session).sources_for_brief(skipped_id)
+
+    assert sources == []
+
+
+@pytest.mark.anyio
+async def test_previous_published_resolves_the_highest_numbered_brief_below() -> None:
+    async with db.async_session() as session:
+        user = await create_user(session)
+        beat = await _make_beat(session, user=user)
+        await session.commit()
+        repo = BriefRepository(session)
+        first = await repo.create_published(
+            beat_id=beat.id,
+            number=1,
+            published_at=datetime(2026, 7, 6, 9, tzinfo=UTC),
+            published_on=date(2026, 7, 6),
+            title="First",
+            body_markdown="Body one.",
+            claims=["claim one"],
+            sources=[_new_source(url="https://example.com/a")],
+        )
+        second = await repo.create_published(
+            beat_id=beat.id,
+            number=2,
+            published_at=datetime(2026, 7, 13, 9, tzinfo=UTC),
+            published_on=date(2026, 7, 13),
+            title="Second",
+            body_markdown="Body two.",
+            claims=["claim two"],
+            sources=[_new_source(url="https://example.com/b")],
+        )
+        third = await repo.create_published(
+            beat_id=beat.id,
+            number=3,
+            published_at=datetime(2026, 7, 20, 9, tzinfo=UTC),
+            published_on=date(2026, 7, 20),
+            title="Third",
+            body_markdown="Body three.",
+            claims=["claim three"],
+            sources=[_new_source(url="https://example.com/c")],
+        )
+        await session.commit()
+        beat_id = beat.id
+        first_id, second_id, third_id = first.id, second.id, third.id
+
+    async with db.async_session() as session:
+        repo = BriefRepository(session)
+        # Brief #1 has nothing below it.
+        assert await repo.previous_published(beat_id=beat_id, number=1) is None
+        below_two = await repo.previous_published(beat_id=beat_id, number=2)
+        assert below_two is not None
+        assert below_two.id == first_id
+        below_three = await repo.previous_published(beat_id=beat_id, number=3)
+        assert below_three is not None
+        assert below_three.id == second_id
+        # A hypothetical #4 resolves to the CURRENT highest published — #3 —
+        # exactly the arithmetic a freshly-published next Brief will use.
+        below_four = await repo.previous_published(beat_id=beat_id, number=4)
+        assert below_four is not None
+        assert below_four.id == third_id
+
+
+@pytest.mark.anyio
+async def test_previous_published_ignores_a_skipped_entry_between() -> None:
+    """A Skipped period sitting between two published Briefs never becomes a
+    `builds_on` target — it has no `number` to compare against at all, and
+    the query filters to `kind == PUBLISHED` explicitly."""
+    async with db.async_session() as session:
+        user = await create_user(session)
+        beat = await _make_beat(session, user=user)
+        await session.commit()
+        repo = BriefRepository(session)
+        first = await repo.create_published(
+            beat_id=beat.id,
+            number=1,
+            published_at=datetime(2026, 7, 6, 9, tzinfo=UTC),
+            published_on=date(2026, 7, 6),
+            title="First",
+            body_markdown="Body.",
+            claims=["claim one"],
+            sources=[_new_source()],
+        )
+        await repo.create_skipped(
+            beat_id=beat.id,
+            published_at=datetime(2026, 7, 13, 9, tzinfo=UTC),
+            published_on=date(2026, 7, 13),
+            skip_line="Nothing material.",
+        )
+        await repo.create_published(
+            beat_id=beat.id,
+            number=2,
+            published_at=datetime(2026, 7, 20, 9, tzinfo=UTC),
+            published_on=date(2026, 7, 20),
+            title="Second",
+            body_markdown="Body.",
+            claims=["claim two"],
+            sources=[_new_source(url="https://example.com/second")],
+        )
+        await session.commit()
+        beat_id = beat.id
+        first_id = first.id
+
+    async with db.async_session() as session:
+        below_second = await BriefRepository(session).previous_published(
+            beat_id=beat_id, number=2
+        )
+    assert below_second is not None
+    assert below_second.id == first_id
+
+
+@pytest.mark.anyio
+async def test_unread_counts_by_beat_counts_either_kind_per_beat() -> None:
+    async with db.async_session() as session:
+        user = await create_user(session)
+        beat_a = await _make_beat(session, user=user, topic="beat a")
+        beat_b = await _make_beat(session, user=user, topic="beat b")
+        await session.commit()
+        repo = BriefRepository(session)
+        read = await repo.create_published(
+            beat_id=beat_a.id,
+            number=1,
+            published_at=datetime(2026, 7, 6, 9, tzinfo=UTC),
+            published_on=date(2026, 7, 6),
+            title="Read already",
+            body_markdown="Body.",
+            claims=["claim"],
+            sources=[_new_source()],
+        )
+        await repo.create_published(
+            beat_id=beat_a.id,
+            number=2,
+            published_at=datetime(2026, 7, 13, 9, tzinfo=UTC),
+            published_on=date(2026, 7, 13),
+            title="Unread",
+            body_markdown="Body.",
+            claims=["claim"],
+            sources=[_new_source(url="https://example.com/second")],
+        )
+        await repo.create_skipped(
+            beat_id=beat_a.id,
+            published_at=datetime(2026, 7, 20, 9, tzinfo=UTC),
+            published_on=date(2026, 7, 20),
+            skip_line="Nothing material.",
+        )
+        await repo.mark_read(read.id)
+        await session.commit()
+        beat_a_id, beat_b_id = beat_a.id, beat_b.id
+
+    async with db.async_session() as session:
+        counts = await BriefRepository(session).unread_counts_by_beat(
+            [beat_a_id, beat_b_id]
+        )
+
+    # beat_a: 3 entries, one marked read -> 2 unread. beat_b has no entries at
+    # all, so it is absent from the mapping (the batched shape
+    # ``last_published_on_by_beat`` already uses), and the empty-input case
+    # short-circuits to {} without a query.
+    assert counts == {beat_a_id: 2}
+    assert await BriefRepository(session).unread_counts_by_beat([]) == {}

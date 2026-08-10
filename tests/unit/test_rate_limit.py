@@ -41,6 +41,7 @@ class _FakeUsage:
         self.shaping_messages: dict[uuid.UUID, list[datetime]] = {}
         self.flashcard_draft_runs: dict[uuid.UUID, list[datetime]] = {}
         self.brief_research_runs: dict[uuid.UUID, list[datetime]] = {}
+        self.beat_counts: dict[uuid.UUID, int] = {}
 
     def add_path(self, user_id: uuid.UUID, when: datetime) -> None:
         self.paths.setdefault(user_id, []).append(when)
@@ -62,6 +63,12 @@ class _FakeUsage:
 
     def add_brief_research_run(self, user_id: uuid.UUID, when: datetime) -> None:
         self.brief_research_runs.setdefault(user_id, []).append(when)
+
+    def set_beat_count(self, user_id: uuid.UUID, count: int) -> None:
+        """The **stock** counter's own setter — no timestamp, unlike every
+        other ``add_*`` above: ``check_beat_creation`` counts current rows,
+        never a window (TDD §7)."""
+        self.beat_counts[user_id] = count
 
     async def count_paths_created_since(
         self, *, user_id: uuid.UUID, since: datetime
@@ -98,6 +105,9 @@ class _FakeUsage:
     ) -> int:
         return sum(1 for t in self.brief_research_runs.get(user_id, []) if t >= since)
 
+    async def count_beats_for_user(self, *, user_id: uuid.UUID) -> int:
+        return self.beat_counts.get(user_id, 0)
+
 
 def _limiter(
     usage: _FakeUsage,
@@ -107,6 +117,7 @@ def _limiter(
     tutor_messages: int = 0,
     shaping_messages: int = 0,
     brief_research: int = 0,
+    beats: int = 0,
     now: datetime = DAY_ONE,
 ) -> DailyRateLimiter:
     return DailyRateLimiter(
@@ -116,6 +127,7 @@ def _limiter(
         tutor_messages_per_day=tutor_messages,
         shaping_messages_per_day=shaping_messages,
         brief_research_per_day=brief_research,
+        beats_per_learner=beats,
         now=lambda: now,
     )
 
@@ -475,3 +487,92 @@ async def test_brief_research_cap_is_per_account() -> None:
         await limiter.brief_research_capacity_available(user_id=OTHER, is_admin=False)
         is True
     )
+
+
+# --------------------------------------------------------------------------- #
+# The Beat cap (AL-522, Phase 6 TDD §7/D14) — ``check_beat_creation``. Unlike
+# every counter above, it is a **stock** cap (the count of live Beats a
+# learner currently holds), not a daily flow: no ``since`` window, and it
+# DOES raise (unlike the non-raising research cap right above it) — it is
+# the one 429 ``POST /beats`` can produce.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.anyio
+async def test_beat_creation_allows_up_to_cap_then_denies() -> None:
+    usage = _FakeUsage()
+    limiter = _limiter(usage, beats=3)
+
+    for count in range(3):
+        await limiter.check_beat_creation(user_id=USER, is_admin=False)
+        usage.set_beat_count(USER, count + 1)
+
+    with pytest.raises(HTTPException) as excinfo:
+        await limiter.check_beat_creation(user_id=USER, is_admin=False)
+    assert excinfo.value.status_code == status.HTTP_429_TOO_MANY_REQUESTS
+
+
+@pytest.mark.anyio
+async def test_beat_cap_is_disabled_at_the_default_of_zero() -> None:
+    usage = _FakeUsage()
+    usage.set_beat_count(USER, 50)  # far over any real cap
+
+    await _limiter(usage, beats=0).check_beat_creation(user_id=USER, is_admin=False)
+
+
+@pytest.mark.anyio
+async def test_beat_cap_exempts_admins() -> None:
+    usage = _FakeUsage()
+    usage.set_beat_count(USER, 50)
+
+    await _limiter(usage, beats=3).check_beat_creation(user_id=USER, is_admin=True)
+
+
+@pytest.mark.anyio
+async def test_beat_cap_is_per_account() -> None:
+    usage = _FakeUsage()
+    usage.set_beat_count(USER, 3)
+
+    limiter = _limiter(usage, beats=3)
+    with pytest.raises(HTTPException):
+        await limiter.check_beat_creation(user_id=USER, is_admin=False)
+    # A different account has its own allowance.
+    await limiter.check_beat_creation(user_id=OTHER, is_admin=False)
+
+
+@pytest.mark.anyio
+async def test_beat_cap_never_windows_by_day() -> None:
+    """The load-bearing difference from every other cap in this file: a
+    **stock** count is never reset by the UTC-day rollover ``_limiter``'s
+    ``now`` drives everywhere else, because it has no ``since`` at all —
+    only deleting a Beat frees quota."""
+    usage = _FakeUsage()
+    usage.set_beat_count(USER, 3)
+
+    with pytest.raises(HTTPException):
+        await _limiter(usage, beats=3, now=DAY_ONE).check_beat_creation(
+            user_id=USER, is_admin=False
+        )
+    # A "new day" changes nothing: the count is still 3 live Beats.
+    with pytest.raises(HTTPException):
+        await _limiter(usage, beats=3, now=DAY_TWO).check_beat_creation(
+            user_id=USER, is_admin=False
+        )
+
+    # Only "deleting" a Beat (the count going down) frees quota.
+    usage.set_beat_count(USER, 2)
+    await _limiter(usage, beats=3, now=DAY_TWO).check_beat_creation(
+        user_id=USER, is_admin=False
+    )
+
+
+@pytest.mark.anyio
+async def test_beat_cap_friendly_429_message_names_the_cap() -> None:
+    usage = _FakeUsage()
+    usage.set_beat_count(USER, 3)
+
+    with pytest.raises(HTTPException) as excinfo:
+        await _limiter(usage, beats=3).check_beat_creation(user_id=USER, is_admin=False)
+    detail = excinfo.value.detail
+    assert isinstance(detail, str)
+    assert "3" in detail

@@ -472,6 +472,20 @@ def streaks_flag_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture
+def analyst_flag_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Turn the ``analyst`` flag on globally for one test (Phase 6 TDD D12).
+
+    The ``tutor_flag_enabled`` pattern, one phase later: the analyst ships
+    dark (``FLAG_DEFAULTS[ANALYST] = False``), so an integration test that
+    drives Beats/Briefs as a plain learner would otherwise be testing the
+    flag gate rather than the analyst. No ``analyst_flag_disabled`` twin
+    exists (yet) — unlike ``streaks``/``tutor``, this flag has not launched,
+    so "off" is already every test's starting point with no fixture needed.
+    """
+    _enable_flag_globally(monkeypatch, "analyst")
+
+
+@pytest.fixture
 def streaks_flag_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
     """Turn the ``streaks`` flag off globally for one test.
 

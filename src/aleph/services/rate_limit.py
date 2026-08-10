@@ -103,6 +103,18 @@ injected ``is_admin`` flag (decoupled from ``authz`` on purpose — AL-050 wires
 the two together). On refusal it raises ``HTTPException(429, ...)`` with a
 friendly message; the app-wide error envelope (``errors.py``) renders it as
 ``{"error": {code: "rate_limited", ...}}``.
+
+**The Beat cap (``check_beat_creation``, AL-522, TDD §7/D14).** A **stock**
+cap, unlike every counter above it: ``MAX_BEATS_PER_LEARNER`` bounds the
+*count of live Beats* a learner may hold, not a daily flow, so it counts
+current rows (``UsageRepository.count_beats_for_user``, no ``since``) rather
+than rows created since a rolling window. **This is the cap that 429s on
+``POST /beats``** — the daily research cap above is deliberately the opposite
+shape (non-raising, checked only inside the drain) precisely so the two never
+compete for the same HTTP verb: creating a Beat can be denied, a background
+research run degrading to "no research this time" cannot. Admins are exempt,
+and a cap of 0 or negative disables it, the same ``_exempt`` convention every
+check in this class uses.
 """
 
 from __future__ import annotations
@@ -159,6 +171,8 @@ class UsageCounter(Protocol):
         self, *, user_id: uuid.UUID, since: datetime
     ) -> int: ...
 
+    async def count_beats_for_user(self, *, user_id: uuid.UUID) -> int: ...
+
 
 def _utc_now() -> datetime:
     return datetime.now(UTC)
@@ -187,6 +201,7 @@ class DailyRateLimiter:
         shaping_messages_per_day: int = 0,
         flashcard_drafts_per_day: int = 0,
         brief_research_per_day: int = 0,
+        beats_per_learner: int = 0,
         now: Callable[[], datetime] = _utc_now,
     ) -> None:
         self._usage = usage
@@ -196,6 +211,7 @@ class DailyRateLimiter:
         self._shaping_messages_per_day = shaping_messages_per_day
         self._flashcard_drafts_per_day = flashcard_drafts_per_day
         self._brief_research_per_day = brief_research_per_day
+        self._beats_per_learner = beats_per_learner
         self._now = now
 
     async def check_path_creation(self, *, user_id: uuid.UUID, is_admin: bool) -> None:
@@ -336,6 +352,24 @@ class DailyRateLimiter:
             ),
         )
 
+    async def check_beat_creation(self, *, user_id: uuid.UUID, is_admin: bool) -> None:
+        """Raise ``HTTPException(429)`` if ``user_id`` is at the live Beat cap.
+
+        Call before creating a Beat (``POST /beats``, AL-522). **Stock, not
+        flow**: counts current ``beats`` rows (``UsageRepository.
+        count_beats_for_user``, no ``since``) against
+        ``MAX_BEATS_PER_LEARNER`` — the only cap this phase raises a ``429``
+        for on the wire (the daily research cap below never does, TDD §7).
+        """
+        if self._exempt(self._beats_per_learner, is_admin=is_admin):
+            return
+        used = await self._usage.count_beats_for_user(user_id=user_id)
+        if used >= self._beats_per_learner:
+            raise _rate_limited(
+                f"You've reached the limit of {self._beats_per_learner} "
+                "analysts. Delete one to deploy another."
+            )
+
     async def brief_research_capacity_available(
         self, *, user_id: uuid.UUID, is_admin: bool
     ) -> bool:
@@ -411,4 +445,5 @@ def build_daily_rate_limiter(
         shaping_messages_per_day=config.rate_limit_shaping_messages_per_day,
         flashcard_drafts_per_day=config.flashcard_drafts_per_day,
         brief_research_per_day=config.rate_limit_brief_research_per_day,
+        beats_per_learner=config.max_beats_per_learner,
     )
