@@ -266,16 +266,20 @@ class BriefRepository:
 
         **Published only (code-review FIX 3, AL-522).** A Skipped row's
         ``read_at`` can never be stamped: ``SkippedEntryDTO`` carries no
-        ``read_at`` field at all and a Skipped rail row links nowhere in the
-        shipped frontend (``docs/api.md``), so no read ping is ever sent for
-        one — meaning a Skipped entry counted here would be permanently
-        unread, on a Beat that may have zero unread *Briefs*. A quiet Beat
-        that produces three Skipped weeks and one read Brief would otherwise
-        show "3 new briefs" forever (PRD §4.10's home-card copy), monotone in
-        skips and never returning to zero — destroying the exact signal that
-        copy exists to carry. Filtering to ``BriefKind.PUBLISHED`` is what
-        keeps this count meaning "Briefs this learner has not yet opened",
-        never "rows nothing can ever clear".
+        ``read_at`` field at all, a Skipped rail row links nowhere in the
+        shipped frontend (``docs/api.md``), and — since code-review FIX 2
+        (AL-531) — :meth:`mark_read` itself now refuses to stamp one even if
+        a ping somehow targeted it, so "no read ping is ever sent for one" is
+        an enforced invariant here, not merely an observation about what the
+        shipped client happens to do. Without the filter here, a Skipped
+        entry counted in this query would be permanently unread, on a Beat
+        that may have zero unread *Briefs*. A quiet Beat that produces three
+        Skipped weeks and one read Brief would otherwise show "3 new briefs"
+        forever (PRD §4.10's home-card copy), monotone in skips and never
+        returning to zero — destroying the exact signal that copy exists to
+        carry. Filtering to ``BriefKind.PUBLISHED`` is what keeps this count
+        meaning "Briefs this learner has not yet opened", never "rows
+        nothing can ever clear".
         """
         if not beat_ids:
             return {}

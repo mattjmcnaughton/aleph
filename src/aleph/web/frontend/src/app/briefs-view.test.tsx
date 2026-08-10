@@ -1,9 +1,10 @@
 import { QueryClient } from "@tanstack/react-query";
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
+import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { API_V1_BASE, type AuthSession } from "../lib/api";
-import { briefReadPingsFor, seedBrief, seedSkippedBriefId } from "../mocks/beats";
+import { briefReadPingsFor, seedBeat, seedBrief, seedSkippedBriefId } from "../mocks/beats";
 import { learnerUser } from "../mocks/handlers";
 import { server } from "../mocks/server";
 import { App } from "./app";
@@ -226,6 +227,29 @@ describe("Brief view — /briefs/$briefId", () => {
     expect(screen.queryByTestId("brief-body")).toBeNull();
   });
 
+  it("[code-review FIX 2] a deep link to a Skipped Brief sends NO `opened` ping", async () => {
+    // The reviewer's own probe: the mount effect used to fire before the
+    // render body ever inspected `body_markdown` to decide this page is
+    // showing `UnavailableState` — so a deep link to a Skipped id rendered
+    // "We couldn't load this Brief" AND sent `{"marker":"opened"}` in the
+    // same visit. The server now also refuses to stamp a Skipped row
+    // (`BriefRepository.mark_read`'s own `kind == PUBLISHED` guard, see the
+    // integration test), but the client should not be sending this ping at
+    // all for a page it is telling the learner it "couldn't load".
+    seedSkippedBriefId({ id: "brief-skipped-no-ping", beatId: BEAT_ID });
+
+    useAnalystSession();
+    window.history.pushState({}, "", "/briefs/brief-skipped-no-ping");
+    render(<App />);
+
+    await screen.findByTestId("brief-unavailable");
+    // Give the effect a chance to have fired if the guard were missing.
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(briefReadPingsFor("brief-skipped-no-ping")).toEqual([]);
+  });
+
   it("a deep link to a Brief that doesn't exist shows the unavailable state", async () => {
     useAnalystSession();
     window.history.pushState({}, "", "/briefs/does-not-exist");
@@ -236,23 +260,38 @@ describe("Brief view — /briefs/$briefId", () => {
 
   // --- Read pings (D11, TDD §6/§9) -------------------------------------------
 
-  it("[D11] the `opened` ping fires on mount and does not re-fire on re-render", async () => {
+  it("[D11, code-review FIX 4] the `opened` ping fires exactly once even under React StrictMode's double-invoked mount effect", async () => {
+    // The original test here (`for (let i = 0; i < 3; i++) await act(async
+    // () => {})`) flushed microtasks but triggered no re-render at all: the
+    // effect's deps (`detail`, `pingRead`) are both referentially stable
+    // across those no-op `act()` calls, so React never re-ran the effect
+    // body regardless of whether `openedFiredForRef` existed — mutation
+    // testing proved this by deleting the ref guard entirely and watching
+    // all 13 tests in this file, including this one, keep passing. This
+    // version forces an ACTUAL second invocation of the mount effect with
+    // the identical `detail` the guard is supposed to survive: React
+    // StrictMode deliberately mounts → runs effects → unmounts → remounts →
+    // runs effects again, on a single initial render, specifically to
+    // surface effects that are not idempotent — exactly the shape the
+    // docstring credits `openedFiredForRef` with covering, and exactly the
+    // shape `main.tsx` (`<StrictMode>`) actually renders the whole app
+    // through in production dev builds.
     seedBrief({ id: "brief-opened", beatId: BEAT_ID });
 
-    await gotoBrief("brief-opened");
+    useAnalystSession();
+    window.history.pushState({}, "", "/briefs/brief-opened");
+    render(
+      <StrictMode>
+        <App />
+      </StrictMode>,
+    );
 
-    // Wait for the mutation's own fetch to land.
+    await screen.findByTestId("brief-body");
     await act(async () => {
       await Promise.resolve();
     });
-    expect(briefReadPingsFor("brief-opened")).toEqual([{ marker: "opened", tzOffsetMinutes: 0 }]);
 
-    // Force a handful of re-renders of the same mounted route (StrictMode's
-    // own double-invoke shape, and ordinary React churn) — still exactly one.
-    for (let i = 0; i < 3; i++) {
-      await act(async () => {});
-    }
-    expect(briefReadPingsFor("brief-opened")).toHaveLength(1);
+    expect(briefReadPingsFor("brief-opened")).toEqual([{ marker: "opened", tzOffsetMinutes: 0 }]);
   });
 
   it("[D11] `tz_offset_minutes` rides on the read ping", async () => {
@@ -310,7 +349,110 @@ describe("Brief view — /briefs/$briefId", () => {
     expect(observer.disconnect).toHaveBeenCalledTimes(1);
   });
 
-  it('[TDD §7] the read ping invalidates exactly ["beats", beatId] — the unread count and the rail\'s read state move in the same interaction', async () => {
+  it("[code-review FIX 3/5] the `sources` ping still fires — and `opened` fires only once — after a Brief→Brief→cached-Brief navigation", async () => {
+    // The reviewer's own probe: open b5 (don't scroll) → follow `Builds on
+    // #4` to b4 (fires [opened, sources] once scrolled) → navigate BACK to
+    // b5, which TanStack Query still has cached (no `undefined` gap for
+    // `detail` to pass through, so this route re-renders in place rather
+    // than remounting) → b5's own Sources block must STILL be able to fire
+    // its `sources` ping, and `opened` must not fire a second time for b5.
+    // Before FIX 3, `<BriefSources>` carried no `key`, so returning to a
+    // cached Brief reused the same instance with `firedRef` already `true`
+    // and an already-disconnected observer — permanently suppressing
+    // `sources` for b5. Before FIX 5, `openedFiredForRef` was a single
+    // `string | null` that only remembered the MOST RECENT id (b4's, after
+    // this navigation), so the guard's `=== detail.id` check was false for
+    // b5 all over again and `opened` fired a second time.
+    seedBrief({
+      id: "brief-b5",
+      beatId: BEAT_ID,
+      number: 5,
+      buildsOn: { id: "brief-b4", number: 4, publishedOn: "2026-07-27" },
+      sources: [
+        {
+          position: 1,
+          publisher: "Publisher Five",
+          title: "Source Five",
+          published_on: "2026-07-30",
+          url: "https://example.com/five",
+        },
+      ],
+    });
+    seedBrief({
+      id: "brief-b4",
+      beatId: BEAT_ID,
+      number: 4,
+      buildsOn: null,
+      sources: [
+        {
+          position: 1,
+          publisher: "Publisher Four",
+          title: "Source Four",
+          published_on: "2026-07-20",
+          url: "https://example.com/four",
+        },
+      ],
+    });
+
+    await gotoBrief("brief-b5");
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(briefReadPingsFor("brief-b5")).toEqual([{ marker: "opened", tzOffsetMinutes: 0 }]);
+    // b5's Sources block never scrolled into view — no `sources` ping yet,
+    // and its observer is still live (never fired, never disconnected).
+
+    // Follow `Builds on Brief #4` — an uncached Brief, a real remount.
+    fireEvent.click(screen.getByTestId("builds-on-line"));
+    await screen.findByRole("heading", { name: "Brief #4" });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(briefReadPingsFor("brief-b4")).toEqual([{ marker: "opened", tzOffsetMinutes: 0 }]);
+
+    const b4Observer =
+      FakeIntersectionObserver.instances[FakeIntersectionObserver.instances.length - 1];
+    if (!b4Observer) throw new Error("expected b4's Sources block to install an observer");
+    intersect(b4Observer, true);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(briefReadPingsFor("brief-b4")).toEqual([
+      { marker: "opened", tzOffsetMinutes: 0 },
+      { marker: "sources", tzOffsetMinutes: 0 },
+    ]);
+
+    // Back to b5 — already in the TanStack Query cache (fetched once above,
+    // well inside the 30s `staleTime`), so this route re-renders in place
+    // rather than remounting.
+    window.history.back();
+    await screen.findByRole("heading", { name: "Brief #5" });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // FIX 5: `opened` did NOT fire a second time for b5.
+    expect(briefReadPingsFor("brief-b5")).toEqual([{ marker: "opened", tzOffsetMinutes: 0 }]);
+
+    // FIX 3: b5's Sources block gets a FRESH observer (keyed on `detail.id`)
+    // rather than reusing b4's already-fired, already-disconnected one, so
+    // it can still fire `sources` for b5 on first visibility.
+    const b5Observer =
+      FakeIntersectionObserver.instances[FakeIntersectionObserver.instances.length - 1];
+    if (!b5Observer || b5Observer === b4Observer) {
+      throw new Error("expected a fresh observer instance for b5, keyed by Brief id");
+    }
+    intersect(b5Observer, true);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(briefReadPingsFor("brief-b5")).toEqual([
+      { marker: "opened", tzOffsetMinutes: 0 },
+      { marker: "sources", tzOffsetMinutes: 0 },
+    ]);
+  });
+
+  it('[code-review FIX 1] the read ping invalidates the ["beats"] PREFIX — reaching both the list and the detail query, not just the detail key', async () => {
     const invalidateSpy = vi.spyOn(QueryClient.prototype, "invalidateQueries");
     seedBrief({ id: "brief-invalidate", beatId: BEAT_ID });
 
@@ -319,6 +461,69 @@ describe("Brief view — /briefs/$briefId", () => {
       await Promise.resolve();
     });
 
-    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["beats", BEAT_ID] });
+    // The defect this locked in: invalidating `["beats", BEAT_ID]` alone
+    // never prefix-matches the list's own `["beats"]` key (a query key must
+    // START WITH the filter key — the reverse is never true), so the list —
+    // the only carrier of `unread_count` — was never refreshed. `["beats"]`
+    // is a prefix of itself AND of `["beats", BEAT_ID]`, so this one call
+    // reaches both.
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["beats"] });
+  });
+
+  it("[code-review FIX 1, end to end] a read ping actually refreshes the home unread count, not just the rail's read state", async () => {
+    // Reproduces the reviewer's own probe: home shows "1 new brief · weekly"
+    // → open the Brief → `opened` fires and the rail's `read_at` stamps →
+    // navigate home (still inside the 30s `staleTime` every query in this
+    // app defaults to, `app.tsx`) → the home card must no longer say "1 new
+    // brief". A single continuous `render(<App />)` with real `Link` clicks
+    // (never a second `render()` call, which would mint a fresh
+    // `QueryClient` per TanStack Router precedent and could never reproduce
+    // a same-session cache staleness bug at all) — home -> the Beat's rail
+    // -> the Brief -> back home, entirely through the real router + the real
+    // cache this bug lives in.
+    const brief = { id: "brief-refresh-count", beatId: "beat-refresh-count" };
+    seedBeat({
+      id: brief.beatId,
+      topic: "Ambient documentation",
+      level: "some_experience",
+      entries: [
+        {
+          kind: "published",
+          id: brief.id,
+          number: 1,
+          publishedOn: "2026-08-03",
+          title: "The first Brief",
+          readAt: null,
+        },
+      ],
+    });
+    seedBrief({ id: brief.id, beatId: brief.beatId, number: 1 });
+
+    useAnalystSession();
+    window.history.pushState({}, "", "/");
+    render(<App />);
+
+    const card = await screen.findByTestId("beat-list-item");
+    expect(screen.getByTestId("beat-item-status").textContent).toBe("1 new brief · weekly");
+
+    fireEvent.click(card);
+    const publishedRow = await screen.findByTestId("beat-rail-published");
+    const railLink = publishedRow.querySelector("a");
+    if (!railLink) throw new Error("expected the rail row to render a link");
+    fireEvent.click(railLink);
+
+    await screen.findByTestId("brief-body");
+    // Let the `opened` mutation's own fetch (and its `onSuccess`
+    // invalidation) land before navigating away.
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(briefReadPingsFor(brief.id)).toEqual([{ marker: "opened", tzOffsetMinutes: 0 }]);
+
+    fireEvent.click(screen.getByRole("link", { name: /your beats/i }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("beat-item-status").textContent).toBe("Up to date · weekly");
+    });
   });
 });

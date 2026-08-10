@@ -71,28 +71,31 @@ function BriefView() {
   // not a bare mount effect (code-review FIX 2, see below), and not fired
   // for a Skipped id's `detail` either.
   //
-  // Keyed by `detail.id` (the `draftsTriggeredForRef` precedent,
-  // `routes/lessons.$lessonId.tsx`): TanStack Router re-renders this route
-  // with new params rather than remounting it on Brief-to-Brief navigation
-  // (the `Builds on Brief #N` link), so a per-instance flag would latch on
-  // the first Brief and never re-arm for the next one. Firing exactly once
-  // per Brief id also covers React's StrictMode double-invoke.
+  // TanStack Router re-renders this route with new params rather than
+  // remounting it on Brief-to-Brief navigation (the `Builds on Brief #N`
+  // link), so a per-instance flag latches on the first Brief and never
+  // re-arms for the next one — the same reasoning `BriefSources` needed a
+  // `key` for (code-review FIX 3).
   //
-  // **Guarded on `body_markdown !== null` (code-review FIX 2).** Without
-  // this, the effect fires as soon as `detail` resolves — before the render
-  // body below ever inspects `body_markdown` to decide the page is showing
-  // `UnavailableState` — so a deep link to a Skipped Brief's id sent an
-  // `opened` ping for a row that PRD §4.6 says is never read and
-  // `repositories/briefs.py` says can never have `read_at` stamped. The
-  // server now also refuses to stamp one (defense in depth, see that
-  // module), but the client should not send a ping for a page it is telling
-  // the learner it "couldn't load" in the first place.
-  const openedFiredForRef = useRef<string | null>(null);
+  // **A `Set`, not a single `string | null` (code-review FIX 5).** The
+  // original single-value ref only ever remembered the MOST RECENTLY fired
+  // id, which reads as "once per Brief id" right up until a learner follows
+  // `Builds on Brief #N` (b5 -> b4) and then navigates BACK to a Brief
+  // (b4 -> b5) already in the TanStack Query cache: `openedFiredForRef`
+  // holds b4's id, not b5's, so the guard's `=== detail.id` check is false
+  // for b5 all over again and `opened` fires a SECOND time for a Brief this
+  // session already pinged — inert server-side (first-write-wins,
+  // `mark_read`), but it breaks the "exactly once" the docstring/tests both
+  // claim, and inflates requests on exactly the navigation `Builds on Brief
+  // #N` exists to encourage. A `Set` tracks every id this component
+  // instance has EVER fired for, in this session, matching the stated
+  // intent verbatim rather than only the most recent visit.
+  const openedFiredForRef = useRef<Set<string>>(new Set());
   useEffect(() => {
-    if (!detail || detail.body_markdown === null || openedFiredForRef.current === detail.id) {
+    if (!detail || detail.body_markdown === null || openedFiredForRef.current.has(detail.id)) {
       return;
     }
-    openedFiredForRef.current = detail.id;
+    openedFiredForRef.current.add(detail.id);
     pingRead({ marker: "opened" });
   }, [detail, pingRead]);
 
