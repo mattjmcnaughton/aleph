@@ -1,6 +1,6 @@
 """Unit tests for the agent eval harness (``evals/``, TDD §11, docs/evals.md).
 
-Keyless and offline. Three things are under test:
+Keyless and offline. Four things are under test:
 
 1. **The seed set** — that ``evals/seed_set.yaml`` loads, that every case is
    complete and well-typed, and that it still carries the PRD §9 spread (~20
@@ -13,6 +13,11 @@ Keyless and offline. Three things are under test:
 3. **The CLI's exit-code classification** (``evals/__main__.py``) — that a case
    whose hard-floor check never produced a verdict (the evaluator raised, or was
    never registered) exits 1 rather than passing by omission.
+4. **The `brief` kind's Layer 1 imports** (Phase 6 TDD §10, AL-550) — that
+   ``evals/generation.py``'s pre-filters use the *same objects*
+   ``aleph.agents.researcher.cites_only_read_documents`` and
+   ``aleph.domains.novelty.filter_new`` export, by identity, never a
+   re-implementation — plus the brief seed set's own shape and smoke run.
 
 The pre-filters are exercised through the public pydantic-evals surface (an
 inline ``Dataset`` plus a task returning a hand-built sample) rather than by
@@ -33,6 +38,7 @@ import pytest
 from pydantic_evals import Case, Dataset
 from pydantic_evals.evaluators import EvaluationReason, Evaluator
 
+from aleph.agents.analyst import BriefBody, SkippedNote
 from aleph.agents.flashcard import FlashcardDraft, FlashcardDrafts
 from aleph.agents.lesson import LessonCaps, LessonContent, QuickCheck
 from aleph.agents.outline import (
@@ -43,10 +49,21 @@ from aleph.agents.outline import (
     Refusal,
     UnitOutline,
 )
+from aleph.agents.researcher import Finding
+from aleph.agents.researcher import cites_only_read_documents as agent_cites_only_read
 from aleph.config import Settings
+from aleph.domains.novelty import filter_new as domain_filter_new
 from aleph.services.generation import _lesson_caps_from, _outline_caps_from
+from evals import generation as harness_generation
 from evals.__main__ import _case_payload, _hard_floor_failures, main
 from evals.generation import (
+    BRIEF_FIXTURES_DIR,
+    BRIEF_HARD_FLOOR_EVALUATORS,
+    BRIEF_PREFILTERS,
+    BRIEF_RETRIEVAL_MAX_DOCUMENTS,
+    BRIEF_RETRIEVAL_MAX_QUERIES,
+    BRIEF_RETRIEVAL_TEXT_BUDGET_CHARS,
+    BRIEF_SEED_SET_PATH,
     FLASHCARD_CAPS,
     FLASHCARD_HARD_FLOOR_EVALUATORS,
     FLASHCARD_PREFILTERS,
@@ -56,6 +73,8 @@ from evals.generation import (
     LESSON_CAPS,
     OUTLINE_CAPS,
     PREFILTERS,
+    BriefSample,
+    BriefSeedInputs,
     FlashcardSample,
     FlashcardSeedInputs,
     GeneratedLesson,
@@ -63,8 +82,12 @@ from evals.generation import (
     RefusalBranch,
     SeedInputs,
     SeedMeta,
+    SyntheticPriorBrief,
+    build_brief_generation_task,
+    build_brief_smoke_model,
     build_flashcard_generation_task,
     build_generation_task,
+    load_brief_seed_set,
     load_flashcard_seed_set,
     load_seed_set,
     smoke_model,
@@ -882,3 +905,452 @@ def test_flashcard_smoke_refuses_a_model_sweep() -> None:
     with pytest.raises(SystemExit) as exit_info:
         main(["--smoke", "--flashcards", "--models", "anthropic/claude-haiku-4-5"])
     assert exit_info.value.code == 2  # misconfiguration, same as a missing key
+
+
+# =================================================================================
+# The `brief` eval kind (Phase 6 TDD §10, AL-550; PRD §6)
+# =================================================================================
+
+
+def test_layer1_imports_the_shipped_provenance_and_novelty_functions() -> None:
+    """TDD §10: "Layer 1 imports the shipped functions, never a second
+    spelling." An identity assertion, not a behavioural one — the harness's
+    predicates must be the *same objects* the agents/domains modules export,
+    not merely functions that happen to behave the same way today.
+    """
+    assert harness_generation.cites_only_read_documents is agent_cites_only_read
+    assert harness_generation.filter_new is domain_filter_new
+
+
+def test_brief_retrieval_budget_matches_settings_defaults() -> None:
+    """The brief harness's retrieval budget is the §14-style discipline every
+    other CAPS constant in this module follows — pinned equal to
+    ``Settings()``'s own defaults so a config default cannot move and leave
+    this harness silently stale (mirrors
+    ``test_harness_caps_match_the_ones_the_service_builds_from_settings``).
+    """
+    config = Settings(_env_file=None)  # ty: ignore[unknown-argument]
+    assert config.brief_retrieval_max_queries == BRIEF_RETRIEVAL_MAX_QUERIES
+    assert config.brief_retrieval_max_documents == BRIEF_RETRIEVAL_MAX_DOCUMENTS
+    assert config.brief_retrieval_text_budget_chars == BRIEF_RETRIEVAL_TEXT_BUDGET_CHARS
+
+
+# --- the brief seed set ---------------------------------------------------------
+
+
+def test_brief_seed_set_loads_and_every_case_is_complete() -> None:
+    dataset = load_brief_seed_set()
+    # Four cases, TDD §10: "four cases over subjects that genuinely move".
+    assert len(dataset.cases) == 4
+
+    names = [case.name for case in dataset.cases]
+    assert len(names) == len(set(names)), "case names must be unique"
+
+    valid_levels = set(get_args(Level))
+    for case in dataset.cases:
+        assert case.name, "every case needs a name (it is the report's row id)"
+        assert case.inputs.topic.strip(), f"{case.name}: empty topic"
+        assert case.inputs.level in valid_levels, f"{case.name}: bad level"
+        assert case.inputs.beat_fixture.strip(), f"{case.name}: empty beat_fixture"
+        assert case.metadata is not None, f"{case.name}: missing metadata"
+        assert case.metadata.note.strip(), f"{case.name}: empty curation note"
+        prior = case.inputs.prior_brief
+        assert prior.claims, f"{case.name}: synthetic prior Brief has no claims"
+        assert prior.source_urls, f"{case.name}: synthetic prior Brief has no Sources"
+        assert prior.summary.strip(), f"{case.name}: prior Brief has no summary"
+
+
+def test_brief_seed_set_every_fixture_file_exists_and_is_keyed_correctly() -> None:
+    """Each case's ``beat_fixture`` is both the fixture's filename stem and the
+    ``beat`` key inside it — ``FixtureRetriever`` refuses to replay a
+    mismatched one, so a case pinned to a fixture that does not exist, or
+    that is keyed for a different beat, would fail every run for a reason
+    that has nothing to do with generation quality.
+    """
+    import yaml
+
+    for case in load_brief_seed_set().cases:
+        path = BRIEF_FIXTURES_DIR / f"{case.inputs.beat_fixture}.yaml"
+        assert path.is_file(), f"{case.name}: no fixture at {path}"
+        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+        assert raw["beat"] == case.inputs.beat_fixture, case.name
+        assert raw["queries"], f"{case.name}: fixture recorded no queries"
+        assert raw["results"], f"{case.name}: fixture recorded no results"
+
+
+def test_brief_seed_set_registers_every_hard_floor_prefilter() -> None:
+    dataset = load_brief_seed_set()
+    registered = {type(evaluator).__name__ for evaluator in dataset.evaluators}
+    assert registered >= {cls.__name__ for cls in BRIEF_PREFILTERS}
+    assert registered >= BRIEF_HARD_FLOOR_EVALUATORS
+    assert "MaxDuration" in registered
+
+
+def test_brief_seed_set_path_matches_the_file_on_disk() -> None:
+    assert BRIEF_SEED_SET_PATH.name == "brief_seed_set.yaml"
+    assert BRIEF_SEED_SET_PATH.is_file()
+
+
+# --- Layer 1: BriefProvenance (TDD D8, shared with the agents' own validators) --
+
+
+def _brief_inputs(**overrides: object) -> BriefSeedInputs:
+    defaults: dict[str, object] = {
+        "topic": "A moving subject",
+        "level": "intermediate",
+        "beat_fixture": "unused-in-this-probe",
+        "prior_brief": SyntheticPriorBrief(
+            number=1,
+            published_on="2026-01-01",  # type: ignore[arg-type]
+            claims=["An earlier claim."],
+            source_urls=["https://example.com/prior"],
+            summary="An earlier Brief's summary.",
+        ),
+    }
+    defaults.update(overrides)
+    return BriefSeedInputs.model_validate(defaults)
+
+
+def _finding(url: str, *, index: int = 1) -> Finding:
+    return Finding(
+        claim=f"Claim {index}.",
+        detail=f"Detail {index}.",
+        source_urls=[url],
+        happened_on=None,
+    )
+
+
+async def _brief_probe_report(
+    inputs: BriefSeedInputs,
+    sample: BriefSample,
+    evaluators: list[Evaluator[BriefSeedInputs, BriefSample, SeedMeta]] | None = None,
+) -> EvaluationReport[BriefSeedInputs, BriefSample, SeedMeta]:
+    """Score one hand-built brief sample through the real pydantic-evals path.
+
+    Mirrors :func:`_probe_report`/:func:`_flashcard_probe_report` above, for
+    the ``brief`` kind's own inputs/output types.
+    """
+
+    async def task(_inputs: BriefSeedInputs) -> BriefSample:
+        return sample
+
+    dataset = Dataset[BriefSeedInputs, BriefSample, SeedMeta](
+        name="brief-prefilter-probe",
+        cases=[
+            Case(
+                name="probe",
+                inputs=inputs,
+                metadata=SeedMeta(category="technical", note="unit-test probe"),
+            )
+        ],
+        evaluators=(
+            evaluators
+            if evaluators is not None
+            else [prefilter() for prefilter in BRIEF_PREFILTERS]
+        ),
+    )
+    return await dataset.evaluate(task, progress=False)
+
+
+async def _brief_assess(
+    inputs: BriefSeedInputs, sample: BriefSample
+) -> dict[str, tuple[bool, str | None]]:
+    """Run both brief Layer 1 pre-filters: ``{name: (passed, reason)}``."""
+    report = await _brief_probe_report(inputs, sample)
+    assert not report.failures, "the probe task itself errored"
+    return {
+        name: (result.value, result.reason)
+        for name, result in report.cases[0].assertions.items()
+    }
+
+
+@pytest.mark.anyio
+async def test_brief_provenance_rejects_a_finding_citing_an_unread_url() -> None:
+    finding = _finding("https://example.com/unread")
+    sample = BriefSample(
+        document_urls=["https://example.com/read"],
+        findings=[finding],
+        survivors=[finding],
+        result=SkippedNote(detail=""),
+    )
+    assertions = await _brief_assess(_brief_inputs(), sample)
+    passed, reason = assertions["BriefProvenance"]
+    assert not passed
+    assert reason is not None and "outside this run's retrieved documents" in reason
+
+
+@pytest.mark.anyio
+async def test_brief_provenance_rejects_a_finding_with_no_source_urls() -> None:
+    finding = Finding(
+        claim="Claim.", detail="Detail.", source_urls=[], happened_on=None
+    )
+    sample = BriefSample(
+        document_urls=["https://example.com/read"],
+        findings=[finding],
+        survivors=[],
+        result=SkippedNote(detail=""),
+    )
+    assertions = await _brief_assess(_brief_inputs(), sample)
+    passed, reason = assertions["BriefProvenance"]
+    assert not passed
+    assert reason is not None and "cites no URL" in reason
+
+
+@pytest.mark.anyio
+async def test_brief_provenance_rejects_a_brief_citing_an_unread_url() -> None:
+    finding = _finding("https://example.com/read")
+    sample = BriefSample(
+        document_urls=["https://example.com/read"],
+        findings=[finding],
+        survivors=[finding],
+        result=BriefBody(
+            title="A Brief",
+            body_markdown="Body.",
+            cited_urls=["https://example.com/unread"],
+        ),
+    )
+    assertions = await _brief_assess(_brief_inputs(), sample)
+    passed, reason = assertions["BriefProvenance"]
+    assert not passed
+    assert reason is not None and "outside this run's retrieved documents" in reason
+
+
+@pytest.mark.anyio
+async def test_brief_provenance_rejects_a_brief_with_no_cited_urls() -> None:
+    finding = _finding("https://example.com/read")
+    sample = BriefSample(
+        document_urls=["https://example.com/read"],
+        findings=[finding],
+        survivors=[finding],
+        result=BriefBody(title="A Brief", body_markdown="Body.", cited_urls=[]),
+    )
+    assertions = await _brief_assess(_brief_inputs(), sample)
+    passed, reason = assertions["BriefProvenance"]
+    assert not passed
+    assert reason is not None and "no cited_urls" in reason
+
+
+@pytest.mark.anyio
+async def test_brief_provenance_accepts_a_clean_brief() -> None:
+    finding = _finding("https://example.com/read")
+    sample = BriefSample(
+        document_urls=["https://example.com/read"],
+        findings=[finding],
+        survivors=[finding],
+        result=BriefBody(
+            title="A Brief",
+            body_markdown="Body.",
+            cited_urls=["https://example.com/read"],
+        ),
+    )
+    assertions = await _brief_assess(_brief_inputs(), sample)
+    assert assertions["BriefProvenance"][0]
+
+
+# --- Layer 1: BriefNoveltyGate (TDD D9, shared with domains/novelty.py) --------
+
+
+@pytest.mark.anyio
+async def test_brief_novelty_gate_rejects_a_skip_when_findings_survive() -> None:
+    """Findings that are genuinely new (not covered by the prior Brief) must
+    produce a Brief, not a SkippedNote."""
+    finding = _finding("https://example.com/brand-new")
+    inputs = _brief_inputs(
+        prior_brief=SyntheticPriorBrief(
+            number=1,
+            published_on="2026-01-01",  # type: ignore[arg-type]
+            claims=["A claim about something else entirely, unrelated in every way."],
+            source_urls=["https://example.com/prior"],
+            summary="Prior summary.",
+        )
+    )
+    sample = BriefSample(
+        document_urls=["https://example.com/brand-new"],
+        findings=[finding],
+        survivors=[finding],
+        result=SkippedNote(detail=""),
+    )
+    assertions = await _brief_assess(inputs, sample)
+    passed, reason = assertions["BriefNoveltyGate"]
+    assert not passed
+    assert reason is not None and "SkippedNote was returned" in reason
+    # Not a provenance failure: the sample is otherwise clean.
+    assert assertions["BriefProvenance"][0]
+
+
+@pytest.mark.anyio
+async def test_brief_novelty_gate_rejects_a_brief_when_nothing_survives() -> None:
+    """A finding whose only URL was already cited by the prior Brief must
+    produce a SkippedNote, never a Brief written anyway."""
+    finding = _finding("https://example.com/prior")
+    inputs = _brief_inputs(
+        prior_brief=SyntheticPriorBrief(
+            number=1,
+            published_on="2026-01-01",  # type: ignore[arg-type]
+            claims=["An earlier claim."],
+            source_urls=["https://example.com/prior"],
+            summary="Prior summary.",
+        )
+    )
+    sample = BriefSample(
+        document_urls=["https://example.com/prior"],
+        findings=[finding],
+        survivors=[],
+        result=BriefBody(
+            title="A Brief",
+            body_markdown="Body.",
+            cited_urls=["https://example.com/prior"],
+        ),
+    )
+    assertions = await _brief_assess(inputs, sample)
+    passed, reason = assertions["BriefNoveltyGate"]
+    assert not passed
+    assert reason is not None and "written anyway" in reason
+
+
+@pytest.mark.anyio
+async def test_brief_novelty_gate_accepts_a_skip_when_nothing_survives() -> None:
+    finding = _finding("https://example.com/prior")
+    inputs = _brief_inputs(
+        prior_brief=SyntheticPriorBrief(
+            number=1,
+            published_on="2026-01-01",  # type: ignore[arg-type]
+            claims=[],
+            source_urls=["https://example.com/prior"],
+            summary="Prior summary.",
+        )
+    )
+    sample = BriefSample(
+        document_urls=["https://example.com/prior"],
+        findings=[finding],
+        survivors=[],
+        result=SkippedNote(detail=""),
+    )
+    assertions = await _brief_assess(inputs, sample)
+    assert assertions["BriefNoveltyGate"][0]
+
+
+@pytest.mark.anyio
+async def test_brief_novelty_gate_accepts_a_brief_when_something_survives() -> None:
+    finding = _finding("https://example.com/brand-new")
+    sample = BriefSample(
+        document_urls=["https://example.com/brand-new"],
+        findings=[finding],
+        survivors=[finding],
+        result=BriefBody(
+            title="A Brief",
+            body_markdown="Body.",
+            cited_urls=["https://example.com/brand-new"],
+        ),
+    )
+    assertions = await _brief_assess(_brief_inputs(), sample)
+    assert assertions["BriefNoveltyGate"][0]
+
+
+# --- the brief smoke run ---------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_brief_smoke_run_passes_every_assertion() -> None:
+    """The same path ``just evals --smoke --briefs`` takes, in the gate.
+
+    Real agents, real prompts, real output validators, real seed set, real
+    fixture replay (never Exa) — only the researcher/analyst model is the
+    deterministic stub. Harness breakage is therefore caught by ``just gate``
+    while real eval runs stay opt-in and offline-free.
+    """
+    dataset = load_brief_seed_set()
+    stub = build_brief_smoke_model()
+    report = await dataset.evaluate(
+        build_brief_generation_task(stub, stub),
+        name="brief-smoke-unit",
+        progress=False,
+    )
+    assert not report.failures
+    assert len(report.cases) == len(dataset.cases)
+    for case in report.cases:
+        for name, result in case.assertions.items():
+            assert result.value, f"{case.name} / {name}: {result.reason}"
+        # researcher + analyst: exactly 2 requests for a clean case.
+        assert case.metrics["model_requests"] >= 2
+
+
+@pytest.mark.anyio
+async def test_brief_generation_task_replays_the_fixture_and_gates_novelty() -> None:
+    """The task's output really comes from the fixture, and the novelty gate
+    really drops the finding backed only by an already-cited URL."""
+    dataset = load_brief_seed_set()
+    stub = build_brief_smoke_model()
+    task = build_brief_generation_task(stub, stub)
+
+    case = dataset.cases[0]
+    sample = await task(case.inputs)
+    assert sample.document_urls, "the fixture must have produced documents"
+    assert sample.findings, "the stub must have produced at least one finding"
+    # The prior Brief's own Source URL, reused in the fixture, must be dropped
+    # by the novelty gate — never surviving into what the analyst may cite.
+    prior_urls = set(case.inputs.prior_brief.source_urls)
+    surviving_urls = {
+        url for finding in sample.survivors for url in finding.source_urls
+    }
+    assert not (surviving_urls & prior_urls)
+    assert len(sample.survivors) < len(sample.findings)
+
+
+def test_brief_smoke_refuses_a_model_sweep() -> None:
+    with pytest.raises(SystemExit) as exit_info:
+        main(["--smoke", "--briefs", "--models", "anthropic/claude-haiku-4-5"])
+    assert exit_info.value.code == 2  # misconfiguration, same as a missing key
+
+
+def test_briefs_and_flashcards_are_mutually_exclusive() -> None:
+    with pytest.raises(SystemExit) as exit_info:
+        main(["--smoke", "--briefs", "--flashcards"])
+    assert exit_info.value.code == 2
+
+
+@pytest.mark.anyio
+async def test_brief_stale_fixture_errors_the_case_rather_than_scoring_a_pass() -> None:
+    """The stale-fixture / RetrievalUnavailableError hazard, pinned directly.
+
+    ``FixtureRetriever`` raises ``RetrievalUnavailableError`` on a miss (a
+    stale or mistyped ``beat_fixture``, src/aleph/services/retrieval.py) —
+    exactly the error a real research run maps to a ``failed`` state for
+    (§5.7's "never Skipped" row). This harness never catches it anywhere
+    (``evals/__main__.py``/``evals/generation.py``): it propagates out of
+    ``build_brief_generation_task``'s task, so pydantic-evals records the
+    case as an outright task failure (``report.failures``, zero scored
+    ``report.cases``) rather than any assertion being scored at all. A stale
+    fixture can therefore never present as a PASS — ``_hard_floor_failures``
+    counts every ``report.failures`` entry unconditionally, so the CLI exits
+    1 exactly as it would for a hard-floor rejection.
+    """
+    inputs = _brief_inputs(beat_fixture="this-fixture-does-not-exist")
+    stub = build_brief_smoke_model()
+    task = build_brief_generation_task(stub, stub)
+
+    dataset = Dataset[BriefSeedInputs, BriefSample, SeedMeta](
+        name="stale-fixture-probe",
+        cases=[
+            Case(
+                name="stale",
+                inputs=inputs,
+                metadata=SeedMeta(category="technical", note="unit-test probe"),
+            )
+        ],
+        evaluators=[prefilter() for prefilter in BRIEF_PREFILTERS],
+    )
+    report = await dataset.evaluate(task, progress=False)
+
+    # No case was ever scored — a stale fixture never reaches an assertion,
+    # passing or failing.
+    assert report.cases == []
+    assert len(report.failures) == 1
+    assert "RetrievalUnavailableError" in report.failures[0].error_message
+
+    failures = _hard_floor_failures(
+        report,
+        BRIEF_HARD_FLOOR_EVALUATORS,
+        assertions_map=harness_generation.BRIEF_EVALUATOR_ASSERTIONS,
+    )
+    assert any("errored" in failure for failure in failures)

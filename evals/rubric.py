@@ -45,6 +45,24 @@ the Quick check's stem — is answered entirely in Layer 1
 (:func:`aleph.agents.flashcard.restates_stem`, TDD §10): it is the one
 dimension of the four that is honestly deterministic, so it never reaches the
 judge at all.
+
+**`brief` is the fourth kind** (Phase 6 TDD §10, AL-550; ``brief_findings``
+stays deferred, PRD §7.1). Judged on five items — ``accurate``,
+``level_appropriate``, ``in_scope``, ``continuous``, ``safe`` — never six:
+``check_validity`` is **omitted, not auto-passed**, on the outline's own
+precedent, because a Brief has no Quick check (CONTEXT.md: **Brief** — "not a
+Lesson: no Quick check"). Again no new :data:`RubricItem`: PRD §6's two new
+Phase 6 dimensions map onto existing items through :data:`ARTIFACT_NOTES` —
+**Grounded** onto ``accurate`` (every claim traces to a cited Source, and none
+exceeds what that Source supports — CONTEXT.md's existing **Grounded**,
+pointed at a Source instead of a Read passage) and **Delta** onto
+``continuous`` (a Brief reports change against the prior Briefs it is shown,
+never re-establishing the subject — lesson continuity prevents re-*teaching*,
+Brief continuity prevents re-*reporting*). Layer 1's own predicates
+(``evals/generation.py``'s ``BriefProvenance``/``BriefNoveltyGate``) import
+:func:`aleph.agents.researcher.cites_only_read_documents` and
+:func:`aleph.domains.novelty.filter_new` directly rather than re-implementing
+either — never a second spelling of the provenance rule or the novelty gate.
 """
 
 from __future__ import annotations
@@ -63,8 +81,9 @@ if TYPE_CHECKING:
 #: they relate to each other and to the lessons before them, so splitting them
 #: would score half a rubric twice. ``flashcard_draft`` is the Phase 3 addition
 #: (D14/§10, module docstring): one drafted card, judged on four of the six
-#: items.
-ArtifactKind = Literal["outline", "lesson", "flashcard_draft"]
+#: items. ``brief`` is the Phase 6 addition (TDD §10, AL-550): one published
+#: Brief, judged on five.
+ArtifactKind = Literal["outline", "lesson", "flashcard_draft", "brief"]
 
 #: The rubric's six item ids (PRD §9, in the PRD's order).
 RubricItem = Literal[
@@ -140,6 +159,13 @@ APPLICABLE_ITEMS: dict[ArtifactKind, tuple[RubricItem, ...]] = {
         "in_scope",
         "safe",
     ),
+    "brief": (
+        "accurate",
+        "level_appropriate",
+        "in_scope",
+        "continuous",
+        "safe",
+    ),
 }
 
 #: Per-artifact readings of an item, appended to the shared :data:`RUBRIC` text
@@ -183,6 +209,26 @@ ARTIFACT_NOTES: dict[ArtifactKind, dict[RubricItem, str]] = {
             "back that points back into the passage ('as described above', "
             "'as mentioned in the lesson') fails this even if the front is "
             "fine."
+        ),
+    },
+    "brief": {
+        "accurate": (
+            "For a Brief (Phase 6 PRD §6: Grounded): every claim about the "
+            "world must trace to one of the cited Sources given to you below, "
+            "and none may exceed what that Source actually supports — a "
+            "Source that reports a proposal cannot be stretched into a Brief "
+            "claiming it is decided. This is CONTEXT.md's existing Grounded, "
+            "pointed at a Source instead of a Read passage."
+        ),
+        "continuous": (
+            "For a Brief (Phase 6 PRD §6: Delta): judge it against the prior "
+            "Brief you are given below, not general background. It must "
+            "report what changed since that Brief — new developments, or a "
+            "materially updated status on an open thread — never "
+            "re-establish the subject from scratch or restate a claim the "
+            "prior Brief already made in new words. Lesson continuity "
+            "prevents re-teaching a path's own earlier lessons; this item, "
+            "for a Brief, prevents re-reporting an earlier Brief."
         ),
     },
 }

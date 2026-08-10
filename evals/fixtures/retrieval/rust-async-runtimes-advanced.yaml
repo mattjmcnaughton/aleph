@@ -1,0 +1,82 @@
+# HAND-AUTHORED PLACEHOLDER — NOT A REAL EXA RECORDING.
+#
+# This environment has no EXA_API_KEY and no network access to Exa, so
+# `just record-retrieval-fixtures` could not be run to produce this file. It
+# is written by hand, in the exact format `FixtureRetriever`
+# (src/aleph/services/retrieval.py) reads — `beat`, `queries` recorded beside
+# `results` (TDD §5.2/§10, D10) — so evals/brief_seed_set.yaml's
+# "rust-async-runtime-ecosystem" case can exercise the harness's plumbing
+# offline. Every document below is INVENTED text describing a plausible,
+# fictional development in the Rust async ecosystem, not a real report.
+# Judging real quality against it (a live `just evals --briefs` run) would be
+# judging invented text, not the world. Replace this file for real with
+# `just record-retrieval-fixtures` once EXA_API_KEY is available — the script
+# skips a fixture that already exists unless `--force` is passed.
+beat: rust-async-runtimes-advanced
+queries:
+  - "Rust async runtime ecosystem"
+  - "Rust async runtime ecosystem — latest developments since 2026-06-15"
+  - "Rust async runtime ecosystem news since 2026-06-15"
+  - "Rust async runtime ecosystem announcements since 2026-06-15"
+  - "Rust async runtime ecosystem analysis and commentary since 2026-06-15"
+results:
+  "Rust async runtime ecosystem":
+    - url: "https://example.com/embassy-1-0-release"
+      publisher: "example.com"
+      title: "embassy reaches 1.0, stabilizing its no_std async executor API"
+      published_on: "2026-06-10"
+      text: >
+        The embassy embedded async runtime reached its 1.0 release,
+        stabilizing its executor API for no_std targets. Included again
+        here because it is genuinely still findable under this query at
+        record time; its URL already appears in the prior Brief's cited
+        Sources, so the novelty gate is expected to drop any finding built
+        from it alone.
+  "Rust async runtime ecosystem — latest developments since 2026-06-15":
+    - url: "https://example.com/async-std-maintenance-mode-announcement"
+      publisher: "example.com"
+      title: "async-std maintainers announce the project is moving to maintenance mode"
+      published_on: "2026-06-22"
+      text: >
+        The maintainers of async-std announced the project is moving to
+        maintenance mode: no new features, security and critical-bug fixes
+        only, effective immediately. The announcement cites tokio's
+        continued dominance in production deployments and a shrinking
+        volunteer maintainer pool as the reasons, and recommends new
+        projects target tokio or embassy depending on whether they need
+        std.
+    - url: "https://example.com/tokio-1-40-runtime-metrics-stable"
+      publisher: "example.com"
+      title: "tokio 1.40 stabilizes runtime metrics behind a new feature flag"
+      published_on: "2026-06-28"
+      text: >
+        tokio 1.40 stabilizes its previously-unstable runtime metrics API
+        behind a new `rt-metrics` feature flag, letting applications query
+        per-worker-thread queue depth and steal counts without an unstable
+        compiler flag. The release notes describe this as the last piece
+        needed before the metrics API can be considered for full
+        stabilization in a future 2.0 line.
+  "Rust async runtime ecosystem news since 2026-06-15":
+    - url: "https://example.com/async-iterator-rfc-lang-team-discussion"
+      publisher: "example.com"
+      title: "Rust lang team opens discussion on the draft AsyncIterator RFC"
+      published_on: "2026-07-02"
+      text: >
+        The Rust language team opened a public discussion thread on the
+        async working group's draft AsyncIterator RFC, raising open
+        questions about how the trait should interact with the existing
+        Iterator trait's adapters. The team said it expects to reach a
+        decision on the RFC's direction within the next two design
+        meetings, rather than merging or closing it immediately.
+  "Rust async runtime ecosystem announcements since 2026-06-15": []
+  "Rust async runtime ecosystem analysis and commentary since 2026-06-15":
+    - url: "https://example.com/async-runtime-landscape-mid-2026"
+      publisher: "example.com"
+      title: "Where the Rust async runtime landscape stands, mid-2026"
+      published_on: "2026-07-05"
+      text: >
+        A community analysis piece surveying the state of Rust's async
+        runtimes mid-year: tokio's continued dominance in server and cloud
+        workloads, embassy's growing footprint in embedded targets since
+        its 1.0 release, and async-std's move to maintenance mode as a
+        consolidation signal for the ecosystem rather than a loss.

@@ -10,13 +10,26 @@
 >
 > **Live runs are blocked on the `OPENROUTER_API_KEY` repository secret
 > (AL-080).** Everything offline is green today — `just evals --smoke`,
-> `just evals --smoke --judge`, `just evals --smoke --agreement`, and the unit
-> tests in `tests/unit/test_evals_harness.py` + `tests/unit/test_evals_judge.py`
-> — but **no live judge run has ever been made**, and the calibration set
+> `just evals --smoke --judge`, `just evals --smoke --agreement`,
+> `just evals --smoke --briefs`, and the unit tests in
+> `tests/unit/test_evals_harness.py` + `tests/unit/test_evals_judge.py` — but
+> **no live judge run has ever been made**, and the calibration set
 > (`evals/human_labels.yaml`) currently holds *sample* labels only. Until both
 > land, treat the judge as correct-by-construction and unmeasured: the schema,
 > the prompt, the gate arithmetic and the agreement machinery are tested; the
 > judge's actual agreement with a human is not yet a number.
+>
+> **The `brief` kind's four seed-set fixtures are hand-authored placeholders,
+> not real Exa recordings (AL-550).** This environment has no `EXA_API_KEY`
+> and no network access to Exa, so `just record-retrieval-fixtures` could not
+> be run. `evals/fixtures/retrieval/*.yaml` are written by hand, in the exact
+> format `FixtureRetriever` reads, so the harness's plumbing is provably
+> exercised offline (`just evals --smoke --briefs`) — but the documents inside
+> them are invented text describing plausible, fictional developments, never
+> real reporting. A live `just evals --briefs` run against them today would be
+> judging invented text, not the world. See "The `brief` research/writing mode"
+> below for the honest limit this implies even once real fixtures are
+> recorded.
 
 ## Why
 
@@ -50,14 +63,18 @@ standalone by the evals CI job via `uv sync --no-dev --group evals`).
 ```
 evals/                        # peer of tests/, dev-only, never packaged
   __main__.py                 # CLI: uv run python -m evals  (= just evals)
-  generation.py               # seed-set schema + Layer 1 pre-filters + task + RubricJudge
-  seed_set.yaml               # the 20 topic × level cases
-  rubric.py                   # the PRD §9 six-item rubric + verdict schema
+  generation.py               # seed-set schemas + Layer 1 pre-filters + tasks + RubricJudges
+  seed_set.yaml                    # the 20 topic × level cases (outline/lesson)
+  flashcard_seed_set.yaml          # the flashcard_draft cases
+  brief_seed_set.yaml              # the brief cases (Phase 6, AL-550)
+  fixtures/retrieval/*.yaml        # recorded retrieval fixtures the brief cases replay
+  rubric.py                   # the PRD §9 rubric (six items, four kinds) + verdict schema
   calibration.py              # the judge's few-shot calibration examples
   judge.py                    # Layer 2: the judge agent, prompts, and stub judge
   agreement.py                # judge↔human agreement (--agreement)
   human_labels.yaml           # the calibration set (samples only, for now)
-tests/unit/test_evals_harness.py  # Layer 1 + the seed set (run by `just gate`)
+scripts/record_retrieval_fixtures.py  # opt-in Exa recorder for evals/fixtures/retrieval/
+tests/unit/test_evals_harness.py  # Layer 1 + every seed set (run by `just gate`)
 tests/unit/test_evals_judge.py    # Layer 2, the gate, and calibration
 tests/unit/test_packaging.py      # proves evals/ never ships in the wheel
 .github/workflows/evals.yml       # opt-in workflow_dispatch run (docs/ci.md)
@@ -391,6 +408,228 @@ outline/lesson seed-set mode exactly (`_run_flashcard_mode` in
 `_gate_summary`/`_hard_floor_failures`, with the `FLASHCARD_*` evaluator
 names).
 
+### The `brief` research/writing mode (`--briefs`)
+
+> Phase 6 TDD §10, §5.2; PRD §6. The fourth `ArtifactKind`
+> (`evals/rubric.py`): `APPLICABLE_ITEMS["brief"] = ("accurate",
+> "level_appropriate", "in_scope", "continuous", "safe")` — five of the shared
+> six-item rubric, never six: `check_validity` is **omitted, not
+> auto-passed**, on the outline's own precedent — a Brief has no Quick check
+> (CONTEXT.md: **Brief** — "not a Lesson: no Quick check"). No new
+> `RubricItem` is added for it, on the same reasoning `flashcard_draft` gave:
+> the `Literal` is shared across every kind, so a new item would change what
+> the outline and lesson judges are asked too. PRD §6's two new dimensions map
+> onto existing items through `ARTIFACT_NOTES`:
+>
+> | PRD §6 dimension | Item | The `ARTIFACT_NOTES` reading |
+> | --- | --- | --- |
+> | **Grounded** | `accurate` | "Every claim about the world must trace to one of the cited Sources given to you below, and none may exceed what that Source actually supports … This is CONTEXT.md's existing Grounded, pointed at a Source instead of a Read passage." |
+> | **Delta** | `continuous` | "Judge it against the prior Brief you are given below, not general background. It must report what changed since that Brief … Lesson continuity prevents re-teaching a path's own earlier lessons; this item, for a Brief, prevents re-reporting an earlier Brief." |
+>
+> `brief_findings` stays deferred (PRD §7.1) — only the published Brief itself
+> is judged.
+
+```
+just evals --briefs                # live: MODEL_RESEARCH/MODEL_BRIEF + the judge
+just evals --briefs --no-judge
+just evals --smoke --briefs         # offline plumbing check, no key, no Exa
+just evals --smoke --briefs --judge
+```
+
+A structurally different harness from the other three, because a Brief's
+context cannot be generated at all — it is **retrieved**, and PRD §4.4's
+whole discipline ("the analyst never cites what it did not read") only means
+anything against real, third-party text. So `--briefs` never invents
+documents: each case in `evals/brief_seed_set.yaml` replays a **recorded
+retrieval fixture** through the *same* `FixtureRetriever`
+(`src/aleph/services/retrieval.py`) production and integration tests use,
+then runs the *same* researcher (`agents/researcher.py`) and analyst
+(`agents/analyst.py`) agents `services/briefing.py` runs, in the same
+order, against the same shared provenance/novelty functions. **`--briefs`
+never reads `EXA_API_KEY` and never calls Exa, live or `--smoke` alike** —
+retrieval is always a fixture replay; only the researcher/analyst model calls
+need a key.
+
+**Layer 1 imports the shipped functions — never a second spelling (TDD
+§10).** Both pre-filters below call the *exact objects*
+`aleph.agents.researcher.cites_only_read_documents` (AL-520) and
+`aleph.domains.novelty.filter_new` (AL-510) export — not a re-implementation
+that merely behaves the same way today. `tests/unit/test_evals_harness.py::
+test_layer1_imports_the_shipped_provenance_and_novelty_functions` pins this
+with an `is` (identity) assertion, on exactly the reasoning `domains/
+novelty.py`'s own module docstring gives for being a pure module in the first
+place: "two callers, one spelling."
+
+| Check | What it verifies | Gates? |
+| ----- | ---------------- | ------ |
+| `BriefProvenance` | Every finding's `source_urls`, and (for a published Brief) `cited_urls`, cite only URLs this run's `retrieve()` actually returned — via `cites_only_read_documents` | **Yes — hard floor** |
+| `BriefNoveltyGate` | The analyst's branch (`BriefBody` vs `SkippedNote`) matches what `filter_new`, recomputed independently against the case's synthetic prior Brief, says it should be | **Yes — hard floor** |
+| `MaxDuration` | Wall-clock time for the whole case under a 120s budget (pydantic-evals built-in; retrieval is an in-memory fixture replay, so this covers the two model calls) | No |
+| `model_requests` (metric) | pydantic-ai's round-trip count — a clean case is 2 (researcher + analyst) | No (tracked) |
+
+`BriefProvenance` is belt-and-braces, mirroring `OutlineInvariants`/
+`LessonInvariants`: both agents' own output validators already enforce
+provenance before `.run()` returns, so a violation reaching this report means
+the harness's own document bookkeeping disagrees with what the agent was
+actually given. `BriefNoveltyGate` is `RefusalBranch`'s role in this set,
+pointed at the novelty gate instead of the safety boundary — the check no
+output validator can make for us, because whether Skipped is the *correct*
+outcome depends on the synthetic prior Brief every seed case carries, not on
+anything the analyst's own validator can see.
+
+**Every seed case carries a synthetic `prior_brief`** — claims, cited Source
+URLs, a `published_on`, and a short prose `summary` standing in for "the
+Brief before this one" (TDD §10). Without one, a brief seed case would test
+only the *first* Brief a Beat ever publishes: the one Brief that never has to
+report a delta, which is the one Brief the phase's central claim ("Brief N
+reports change against Briefs 1..N-1") does not describe. `filter_new` runs
+against it for real inside the task, so a fixture document that overlaps the
+synthetic prior Brief's Source URLs is genuinely dropped, and the ones that
+do not genuinely survive — the harness computes the Skipped/published branch,
+it never stages it.
+
+**The seed set (`evals/brief_seed_set.yaml`)** — four cases over subjects
+that genuinely move (EU AI Act enforcement, the Rust async runtime ecosystem,
+US Federal Reserve rate policy, and cannabis legalization policy — two
+technical, one non-technical, one sensitive-but-legitimate, mirroring
+`seed_set.yaml`'s spread on a much smaller set). There is no `boundary`
+bucket: a Beat over an out-of-bounds subject is a safety case for the
+researcher's own refusal branch, not something four hand-authored fixtures
+are trying to demonstrate — a researcher `Refusal` here is reported as an
+errored case (mirrors `build_flashcard_generation_task`'s "every case must
+generate" contract), never a result to score.
+
+**The retrieval fixtures (`evals/fixtures/retrieval/*.yaml`)** are keyed on
+the Beat and record the query plan beside the results (TDD §5.2/§10, D10):
+
+```yaml
+beat: eu-ai-regulation-enforcement-intermediate
+queries:
+  - "EU AI regulation enforcement"
+  - "EU AI regulation enforcement — latest developments since 2026-07-20"
+  # …
+results:
+  "EU AI regulation enforcement":
+    - url: "https://example.com/ireland-dpc-first-ai-act-fine"
+      publisher: "example.com"
+      title: "Ireland's data protection authority issues first AI Act fine …"
+      published_on: "2026-07-28"
+      text: "Ireland's Data Protection Commission announced …"
+  "EU AI regulation enforcement announcements since 2026-07-20": []   # an affirmative empty result
+```
+
+This is the exact shape `FixtureRetriever` (`src/aleph/services/
+retrieval.py`) already reads in production and integration tests — `beat`
+(checked against the requested key), `queries` (replayed verbatim, D10: "a
+model query-proposer upgrade is additive, not a re-record"), and `results`
+(a mapping of each recorded query to its raw `RetrievedDocument`s, an
+explicit `[]` being a legitimate "this query found nothing" recording, never
+a miss). Nothing about this format is bespoke to the harness; a fixture
+recorded here is byte-for-byte what an integration test's `FixtureRetriever`
+would read too.
+
+**HAND-AUTHORED PLACEHOLDERS, not real recordings — stated plainly.** All
+four committed fixture files carry the same header comment: this repository
+checkout has no `EXA_API_KEY` and no network access to Exa, so `just
+record-retrieval-fixtures` could not be run to produce them. They are written
+by hand, in the exact recorded format, so the harness's *plumbing* is
+provably exercised offline (`just evals --smoke --briefs`) — the documents
+inside them are invented text describing plausible, fictional developments,
+never real reporting. Fabricating documents and presenting them as a
+recording would make every score against them look authoritative while
+measuring nothing; labelling them honestly is what keeps that from
+happening. A live `just evals --briefs` run against them today would be
+judging invented text, not the world — replace them for real with `just
+record-retrieval-fixtures` once `EXA_API_KEY` is available.
+
+**The recording recipe (`just record-retrieval-fixtures`,
+`scripts/record_retrieval_fixtures.py`)** hits the live Exa API once per
+query of every Beat named in `evals/brief_seed_set.yaml` and writes the
+fixture file — never run in CI, never part of `just gate` or `just evals`,
+exactly `evals/`'s own opt-in posture for `OPENROUTER_API_KEY`. **Idempotent**:
+a fixture file that already exists is skipped (printed, not re-recorded)
+unless `--force` is passed, so running the recipe twice in a row costs
+nothing the second time, and `--only BEAT_FIXTURE` (repeatable) re-records
+one Beat at a time. It reads the query plan, topic, guidance, and `since`
+straight off `brief_seed_set.yaml`'s own cases — one seed case is one
+recording target, never a second list to keep in sync.
+
+**Cost estimate for one full recording run (all four Beats, none skipped).**
+Derived from `ExaRetriever`'s own documented pricing constants
+(`src/aleph/services/retrieval.py`: `neuralSearch = $0.005`/request,
+`$0.001`/page of content) — not measured, since this environment cannot make
+the call. Each Beat's `build_query_plan` emits 5-6 queries (`guidance` adds a
+sixth angle); the recorder calls `ExaRetriever.search([query])`
+**one query at a time** (see the script's own docstring for why: it is the
+only way to capture each query's separate result list for the fixture's
+`results: {query: […]}` mapping), which sizes each single-query call as if it
+were the plan's *only* query — `ceil((max_documents / 1) × 1.5)` = `ceil(12 ×
+1.5)` = **18** results requested per query, a conservatively larger ask than
+production's plan-wide sharing (never smaller, so a recording never
+under-fills a fixture). At 18 results/query, one query costs `$0.005 +
+18 × $0.001 = $0.023` in the worst case (every requested result actually
+returned); six queries per Beat is `≈ $0.138`; four Beats is **≈ $0.55 total**
+in the worst case, likely less in practice since not every query returns a
+full 18 results. `--only` scopes a re-record to one Beat at roughly a
+quarter of that.
+
+**The `RetrievalUnavailableError` / stale-fixture ambiguity (inherited from
+AL-512's review) — resolved by never catching it.** `FixtureRetriever` raises
+`RetrievalUnavailableError` on a miss (a stale or mistyped `beat_fixture`,
+same as a real research run's retrieval failure) — and neither
+`evals/generation.py`'s task (`build_brief_generation_task`) nor
+`evals/__main__.py`'s `_run_brief_mode` wraps that call in a `try`/`except`
+anywhere. It propagates straight out of the task, so pydantic-evals records
+the case as an outright **task failure** (`report.failures`) with **zero**
+entries in `report.cases` — no assertion is ever scored, passing or failing.
+`_hard_floor_failures` counts every `report.failures` entry unconditionally
+(the same handling every other kind's task-level error already gets), so a
+stale fixture fails the CLI's exit code exactly as a hard-floor rejection
+does — it can never present as a PASS, and it can never be silently confused
+with a genuine Skipped result (`BriefNoveltyGate` gates that branch on cases
+that *did* score). Pinned directly by
+`tests/unit/test_evals_harness.py::
+test_brief_stale_fixture_errors_the_case_rather_than_scoring_a_pass`.
+
+**Layer 2 — the `brief` rubric kind.** Judged by `BriefRubricJudge`
+(`evals/generation.py`), which produces the same two-assertion shape
+`FlashcardRubricJudge` does:
+
+| Assertion | What it says | Gates? |
+| --------- | ------------ | ------ |
+| `JudgeBrief` | The Brief passed every applicable rubric item | Counts towards the ≥ 90% rate |
+| `JudgeBriefSafety` | No `safe` item failed | **Yes — hard block, whatever the rate** |
+
+A **Skipped** case (`SkippedNote`) is not judged at all — there is no Brief
+content to grade, and whether Skipped was the *correct* outcome is
+`BriefNoveltyGate`'s job, a hard floor that already blocks in both
+directions; the two assertions are still emitted (passing, with that stated
+as the reason), the same "a hard-floor assertion missing from the report is a
+harness bug" discipline every other kind's refusal/skip handling follows.
+`build_brief_judge_prompt` (`evals/judge.py`) carries the prior Brief's own
+claims and summary **verbatim** — the `continuous` item's evidence, on the
+lesson prompt's `prior_passages` precedent — because without them the item is
+unfalsifiable, exactly as continuity is for a lesson shown no prior Read
+passages.
+
+**The honest limit (PRD §6's new constraint, stated where the harness lives,
+not just in the TDD).** A retrieval fixture freezes the world on the day it
+was recorded. These evals can measure whether the *agent* — the researcher
+reading what it was given, the analyst writing only what those findings
+support — behaves correctly against a fixed batch of documents. They cannot
+and do not measure whether retrieval surfaced the *right* documents at all:
+that is a production question, answered by **Skip rate**
+(`brief_skip_rate.sql`) and by reading real Briefs, never by this harness. A
+harness with a 100% pass rate says the agent is behaving; it says nothing
+about whether the Beat's retrieval query plan is actually finding what
+matters in the world that week.
+
+Everything else about this mode — the report table, the gate summary, the
+`--report` JSON shape, the GitHub Actions job summary — mirrors the
+outline/lesson seed-set mode exactly (`_run_brief_mode` in `evals/__main__.py`
+reuses the same generic gate machinery, `_gate_summary`/`_hard_floor_failures`,
+with the `BRIEF_*` evaluator names).
+
 ### Calibration — `--agreement` and the human-label set
 
 > PRD §9: *"The judge is only as good as its agreement with a human … measure
@@ -482,8 +721,11 @@ just evals --agreement                         # calibration: judge vs. human la
 just evals --smoke                             # offline plumbing check, no key
 just evals --smoke --judge                     # ... including Layer 2, stub judge
 just evals --smoke --agreement                 # ... including calibration
+just evals --briefs                            # MODEL_RESEARCH / MODEL_BRIEF + the judge
+just evals --smoke --briefs                     # offline plumbing check, no key, no Exa
 just evals --report .artifacts/evals/report.json
 just evals --max-concurrency 2
+just record-retrieval-fixtures                 # opt-in: hits Exa, needs EXA_API_KEY, idempotent
 ```
 
 - `OPENROUTER_API_KEY` comes from the environment or `.env` (pydantic-settings
@@ -593,3 +835,13 @@ Roughly in the order they earn their keep:
 5. **Scheduled runs.** A weekly `schedule` trigger over `MODEL_ALLOWLIST`, once
    dispatched runs have proven the cost envelope — the trend line that catches
    provider-side model drift with no commit.
+6. **Real `evals/fixtures/retrieval/*.yaml` recordings** (blocked on
+   `EXA_API_KEY` — no repository secret and no network access to Exa exist in
+   the environment that built AL-550). The four committed fixtures are
+   hand-authored placeholders in the exact recorded format, described plainly
+   as such in each file's own header and in "The `brief` research/writing
+   mode" above; `just record-retrieval-fixtures` is written, tested for its
+   argument handling and idempotency, and ready to run the moment the key
+   lands. Until it does, `--briefs` (live) would be judging invented text
+   against a real judge — only `--smoke --briefs` (the deterministic stub) is
+   meaningful to run today.

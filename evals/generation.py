@@ -39,15 +39,27 @@ exercised").
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
+from datetime import date  # noqa: TC003 - pydantic resolves annotations at runtime.
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel
 from pydantic_ai import ModelRetry
+from pydantic_ai.messages import ModelResponse, ToolCallPart, UserPromptPart
+from pydantic_ai.models.function import FunctionModel
 from pydantic_evals import Dataset, increment_eval_metric
 from pydantic_evals.evaluators import EvaluationReason, Evaluator, EvaluatorContext
 
+from aleph.agents.analyst import (
+    AnalystDeps,
+    BriefBody,
+    BriefResult,
+    SkippedNote,
+    build_analyst_agent,
+    build_analyst_prompt,
+)
 from aleph.agents.flashcard import (
     FlashcardCaps,
     FlashcardDeps,
@@ -80,19 +92,37 @@ from aleph.agents.outline import (
     build_outline_prompt,
     validate_outline,
 )
+from aleph.agents.researcher import (
+    Finding,
+    Findings,
+    ResearcherDeps,
+    RetrievedDocument,
+    build_researcher_agent,
+    build_researcher_prompt,
+    cites_only_read_documents,
+)
+from aleph.domains.novelty import filter_new
+from aleph.services.retrieval import FixtureRetriever, build_query_plan, retrieve
 from aleph.services.stub_model import FORCE_REFUSAL, build_stub_model
 from evals.rubric import SAFETY_ITEM
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
+    from collections.abc import Awaitable, Callable, Sequence
 
+    from pydantic_ai.messages import ModelMessage
     from pydantic_ai.models import Model
+    from pydantic_ai.models.function import AgentInfo
+    from pydantic_ai.tools import ToolDefinition
 
     from evals.judge import Judge
     from evals.rubric import JudgeVerdict
 
 SEED_SET_PATH = Path(__file__).resolve().parent / "seed_set.yaml"
 FLASHCARD_SEED_SET_PATH = Path(__file__).resolve().parent / "flashcard_seed_set.yaml"
+BRIEF_SEED_SET_PATH = Path(__file__).resolve().parent / "brief_seed_set.yaml"
+#: Where `just record-retrieval-fixtures` writes, and `FixtureRetriever` reads
+#: from (Phase 6 TDD §10, AL-550): `evals/fixtures/retrieval/{beat}.yaml`.
+BRIEF_FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures" / "retrieval"
 
 # The caps the harness evaluates against. Constructed directly (the agents take
 # them as run-time deps, never from config — see agents/outline.py), so an eval
@@ -102,6 +132,23 @@ FLASHCARD_SEED_SET_PATH = Path(__file__).resolve().parent / "flashcard_seed_set.
 OUTLINE_CAPS = OutlineCaps()
 LESSON_CAPS = LessonCaps()
 FLASHCARD_CAPS = FlashcardCaps()
+
+# The retrieval budget the brief harness evaluates against (Phase 6 TDD §5.2/
+# §13/§10) — constructed directly, exactly the §14-style discipline
+# OUTLINE_CAPS/LESSON_CAPS/FLASHCARD_CAPS already follow, so a brief run is
+# reproducible from the repo alone rather than from a deployment's
+# environment. Pinned equal to ``Settings()``'s own defaults by
+# ``tests/unit/test_evals_harness.py`` (mirroring
+# ``test_harness_caps_match_the_ones_the_service_builds_from_settings``), so a
+# config default cannot move and leave this harness scoring against stale
+# numbers. These are irrelevant to what `FixtureRetriever` actually returns
+# (D10: replay executes the fixture's own recorded `queries`, and its
+# `results` are the raw, already-fetched documents) but still gate the same
+# `retrieve()` invariants (dedupe, dated-only, the character budget) a live
+# run would.
+BRIEF_RETRIEVAL_MAX_QUERIES = 6
+BRIEF_RETRIEVAL_MAX_DOCUMENTS = 12
+BRIEF_RETRIEVAL_TEXT_BUDGET_CHARS = 160_000
 
 # The branch the seed case expects the outline agent to take (TDD §11 / D12).
 Branch = Literal["generate", "refuse"]
@@ -955,3 +1002,546 @@ def build_flashcard_generation_task(
         )
 
     return run_case
+
+
+# =================================================================================
+# Phase 6 — the `brief` eval kind (TDD §10, AL-550; PRD §6)
+# =================================================================================
+#
+# The fourth eval kind, and structurally the odd one out: the outline/lesson and
+# flashcard_draft harnesses both generate their own context (an outline, then a
+# lesson) before judging it. A Brief's context — the documents a Beat's research
+# run actually read — cannot be generated at all: it is retrieved, and PRD §4.4's
+# whole discipline ("the analyst never cites what it did not read") only means
+# anything against real, dated, third-party text. So this harness never invents
+# documents; it replays a **recorded retrieval fixture** through the *same*
+# `FixtureRetriever` production and integration tests use (`services/
+# retrieval.py`), then runs the *same* researcher/analyst agents
+# `services/briefing.py` runs, in the same order, against the same shared
+# provenance/novelty functions.
+#
+# **Layer 1 imports the shipped functions, never a second spelling** (TDD §10):
+# `cites_only_read_documents` (`aleph.agents.researcher`, AL-520) and
+# `filter_new` (`aleph.domains.novelty`, AL-510) are used directly below — by
+# identity, not by a re-implementation — which is the entire reason
+# `domains/novelty.py` is a pure module in the first place (its own docstring:
+# "two callers, one spelling"). `tests/unit/test_evals_harness.py` pins this
+# with an identity assertion (`is`), not a behavioural one.
+#
+# **A seed case carries a synthetic prior Brief** (claims + Source URLs, plus a
+# short prose summary and a `published_on`) because a real Beat's second Brief
+# does not exist offline — TDD §10: "a seed set without prior Briefs would test
+# the first Brief forever, which is the one Brief the phase's central claim does
+# not describe." The novelty gate (`filter_new`) runs against it for real, so a
+# fixture's documents that overlap the synthetic prior Brief's Source URLs are
+# genuinely dropped, and the ones that do not genuinely survive — the harness
+# does not stage the "already covered" outcome, it computes it.
+
+
+class SyntheticPriorBrief(BaseModel):
+    """A hand-authored stand-in for "the Brief before this one" (TDD §10).
+
+    Exists only so `filter_new` (the novelty gate) and the `continuous` rubric
+    item have something to be a delta *of* — it is never itself judged, and it
+    is not claimed to be a real, previously-published Brief. `claims` and
+    `source_urls` feed the *same* novelty gate `services/briefing.py` runs in
+    production; `summary` is prose context handed to the analyst as an open
+    thread and to the judge as continuity evidence, mirroring how a real prior
+    Brief's own body would read to both.
+    """
+
+    number: int
+    published_on: date
+    claims: list[str]
+    source_urls: list[str]
+    summary: str
+
+
+class BriefSeedInputs(BaseModel):
+    """One `brief` seed case: a Beat's frozen standing orders, the retrieval
+    fixture it is pinned to, and the synthetic prior Brief it must report a
+    delta against (TDD §10).
+
+    `beat_fixture` is both the fixture's filename stem
+    (`evals/fixtures/retrieval/{beat_fixture}.yaml`) and the `beat` key
+    `FixtureRetriever` checks the file against (D10) — one identifier, not two
+    that could drift apart.
+    """
+
+    topic: str
+    level: Level
+    guidance: str | None = None
+    beat_fixture: str
+    prior_brief: SyntheticPriorBrief
+
+
+class BriefSample(BaseModel):
+    """What one brief case produced: the raw findings, the survivors the
+    novelty gate actually let through, and the analyst's final result.
+
+    `document_urls` are every URL `retrieve()` returned this run (deduped,
+    dated, budgeted) — the permitted set both Layer 1 predicates below check
+    citations against. `findings` and `survivors` both ride along (not just
+    the final `result`) because `BriefNoveltyGate` needs the raw findings to
+    recompute the gate, and a report row is unreadable without seeing how many
+    of them survived.
+    """
+
+    document_urls: list[str]
+    findings: list[Finding]
+    survivors: list[Finding]
+    result: BriefResult
+
+
+# --- Layer 1: deterministic pre-filters, importing the shipped functions -------
+
+
+@dataclass(repr=False)
+class BriefProvenance(Evaluator[BriefSeedInputs, BriefSample, SeedMeta]):
+    """HARD FLOOR: nothing here cites a URL this run did not read (TDD D8/§10).
+
+    Calls :func:`aleph.agents.researcher.cites_only_read_documents` — the
+    *same* predicate both the researcher's and the analyst's own output
+    validators call in production — against every finding's `source_urls` and,
+    for a published Brief, `cited_urls`. Belt-and-braces by design, mirroring
+    `OutlineInvariants`/`LessonInvariants` above: both agents' output
+    validators already enforce this before their `.run()` returns, so a
+    violation reaching this report means the harness's own document set
+    disagrees with what the agent was actually given — a harness bug, not a
+    quality question.
+    """
+
+    def evaluate(
+        self, ctx: EvaluatorContext[BriefSeedInputs, BriefSample, SeedMeta]
+    ) -> EvaluationReason:
+        sample = ctx.output
+        available = set(sample.document_urls)
+        for index, finding in enumerate(sample.findings, start=1):
+            if not finding.source_urls:
+                return EvaluationReason(
+                    value=False, reason=f"finding {index} cites no URL"
+                )
+            if not cites_only_read_documents(finding.source_urls, available):
+                return EvaluationReason(
+                    value=False,
+                    reason=f"finding {index} cites a URL outside this run's "
+                    "retrieved documents",
+                )
+        result = sample.result
+        if isinstance(result, BriefBody):
+            if not result.cited_urls:
+                return EvaluationReason(value=False, reason="Brief has no cited_urls")
+            if not cites_only_read_documents(result.cited_urls, available):
+                return EvaluationReason(
+                    value=False,
+                    reason="Brief cites a URL outside this run's retrieved documents",
+                )
+        return EvaluationReason(
+            value=True,
+            reason=f"{len(sample.findings)} finding(s), all provenance-clean",
+        )
+
+
+@dataclass(repr=False)
+class BriefNoveltyGate(Evaluator[BriefSeedInputs, BriefSample, SeedMeta]):
+    """HARD FLOOR: the analyst's branch matches what the novelty gate says
+    (TDD D9/§5.4/§10).
+
+    Recomputes survivors from this case's raw `findings` against its synthetic
+    `prior_brief` with :func:`aleph.domains.novelty.filter_new` — imported
+    directly, never re-implemented — and checks the branch: survivors present
+    must mean a `BriefBody`; no survivors must mean a `SkippedNote` (PRD §4.6:
+    Skipped is *"the analyst found nothing"*, never a laundry slot for
+    anything else). This is `RefusalBranch`'s role in the outline/lesson set,
+    pointed at the novelty gate instead of the safety boundary — the check no
+    output validator can make for us, because `AnalystDeps.survivors` is
+    itself computed with the same call the harness's task already made
+    (`build_brief_generation_task`); this evaluator recomputes it
+    independently rather than trusting the task's own bookkeeping.
+    """
+
+    def evaluate(
+        self, ctx: EvaluatorContext[BriefSeedInputs, BriefSample, SeedMeta]
+    ) -> EvaluationReason:
+        inputs, sample = ctx.inputs, ctx.output
+        expected_survivors = filter_new(
+            sample.findings,
+            frozenset(inputs.prior_brief.source_urls),
+            tuple(inputs.prior_brief.claims),
+        )
+        has_survivors = bool(expected_survivors)
+        result = sample.result
+        if has_survivors and not isinstance(result, BriefBody):
+            return EvaluationReason(
+                value=False,
+                reason=(
+                    f"{len(expected_survivors)} finding(s) survived the novelty "
+                    "gate against the prior Brief, but a SkippedNote was "
+                    "returned instead of a Brief"
+                ),
+            )
+        if not has_survivors and isinstance(result, BriefBody):
+            return EvaluationReason(
+                value=False,
+                reason=(
+                    "no findings survived the novelty gate against the prior "
+                    "Brief, but a Brief was written anyway"
+                ),
+            )
+        return EvaluationReason(
+            value=True,
+            reason=(
+                f"{len(expected_survivors)} of {len(sample.findings)} finding(s) "
+                "survived the novelty gate; branch matches"
+            ),
+        )
+
+
+BRIEF_PREFILTERS: tuple[
+    type[Evaluator[BriefSeedInputs, BriefSample, SeedMeta]], ...
+] = (
+    BriefProvenance,
+    BriefNoveltyGate,
+)
+
+#: Mirrors :data:`HARD_FLOOR_EVALUATORS`/:data:`FLASHCARD_HARD_FLOOR_EVALUATORS`:
+#: every brief Layer 1 pre-filter gates the run.
+BRIEF_HARD_FLOOR_EVALUATORS = frozenset(cls.__name__ for cls in BRIEF_PREFILTERS)
+
+
+def load_brief_seed_set() -> Dataset[BriefSeedInputs, BriefSample, SeedMeta]:
+    """Load ``brief_seed_set.yaml`` with the Layer 1 pre-filters registered."""
+    return Dataset[BriefSeedInputs, BriefSample, SeedMeta].from_file(
+        BRIEF_SEED_SET_PATH, custom_evaluator_types=BRIEF_PREFILTERS
+    )
+
+
+# --- Layer 2: the binary judge --------------------------------------------------
+
+#: Mirrors :data:`JUDGE_FLASHCARDS`/:data:`JUDGE_FLASHCARD_SAFETY`: one case is
+#: one Brief (or one Skipped run, which is not judged — see below).
+JUDGE_BRIEF = "JudgeBrief"
+JUDGE_BRIEF_SAFETY = "JudgeBriefSafety"
+
+BRIEF_JUDGE_ASSERTIONS = frozenset({JUDGE_BRIEF, JUDGE_BRIEF_SAFETY})
+
+#: The hard floor among the two: PRD §9/§10's safety rule applies to a Brief
+#: exactly as it applies to an outline, a lesson, or a drafted card.
+BRIEF_JUDGE_HARD_FLOOR = frozenset({JUDGE_BRIEF_SAFETY})
+
+
+@dataclass(repr=False)
+class BriefRubricJudge(Evaluator[BriefSeedInputs, BriefSample, SeedMeta]):
+    """Layer 2: score a published Brief against its five applicable rubric items.
+
+    A **Skipped** case is not judged at all — mirroring `RubricJudge`'s own
+    refusal handling above: there is no Brief content to grade, and whether
+    Skipped was the *correct* outcome is `BriefNoveltyGate`'s job, a hard floor
+    that already blocks in both directions. The two assertions are still
+    emitted (passing, with that stated as the reason) so a hard-floor
+    assertion missing from the report stays synonymous with "harness bug"
+    uniformly across every kind.
+    """
+
+    judge: Judge
+
+    def build_serialization_arguments(self) -> dict[str, object]:
+        """Serialize as the judge's *label*, mirroring :class:`RubricJudge`."""
+        return {"judge": self.judge.label}
+
+    async def evaluate(
+        self, ctx: EvaluatorContext[BriefSeedInputs, BriefSample, SeedMeta]
+    ) -> dict[str, EvaluationReason]:
+        result = ctx.output.result
+        if isinstance(result, SkippedNote):
+            reason = (
+                "skipped case: no Brief content to judge (BriefNoveltyGate "
+                "gates the branch)"
+            )
+            return {
+                JUDGE_BRIEF: EvaluationReason(value=True, reason=reason),
+                JUDGE_BRIEF_SAFETY: EvaluationReason(value=True, reason=reason),
+            }
+
+        prior = ctx.inputs.prior_brief
+        verdict = await self.judge.judge_brief(
+            topic=ctx.inputs.topic,
+            level=ctx.inputs.level,
+            guidance=ctx.inputs.guidance,
+            prior_brief_number=prior.number,
+            prior_brief_summary=prior.summary,
+            prior_brief_claims=prior.claims,
+            title=result.title,
+            body_markdown=result.body_markdown,
+        )
+        safety_entry = verdict.verdict_for(SAFETY_ITEM)
+        safety_failed = safety_entry is not None and not safety_entry.passed
+        safety_reason = (
+            f"SAFETY FAILURE (hard block) — {safety_entry.reason.strip()}"
+            if safety_failed and safety_entry is not None
+            else "no safety-item failure"
+        )
+        return {
+            JUDGE_BRIEF: EvaluationReason(
+                value=verdict.overall, reason=verdict.summary()
+            ),
+            JUDGE_BRIEF_SAFETY: EvaluationReason(
+                value=not safety_failed, reason=safety_reason
+            ),
+        }
+
+
+#: Mirrors :data:`EVALUATOR_ASSERTIONS`/:data:`FLASHCARD_EVALUATOR_ASSERTIONS`:
+#: which assertion names :class:`BriefRubricJudge` owns, for the CLI's crashed-
+#: evaluator attribution (``evals/__main__.py``).
+BRIEF_EVALUATOR_ASSERTIONS: dict[str, frozenset[str]] = {
+    **{cls.__name__: frozenset({cls.__name__}) for cls in BRIEF_PREFILTERS},
+    BriefRubricJudge.__name__: BRIEF_JUDGE_ASSERTIONS,
+}
+
+
+# --- the task under evaluation ---------------------------------------------------
+
+
+def _documents_for_survivors(
+    documents: Sequence[RetrievedDocument], survivors: Sequence[Finding]
+) -> list[RetrievedDocument]:
+    """The ``AnalystDeps.documents`` this run's survivors are allowed to cite.
+
+    A small, self-contained mirror of ``services/briefing.py``'s
+    ``_documents_for_survivors`` — not imported, because that name is private
+    to its module and this is three lines of the same filter-by-URL logic
+    `_materialize_sources`-adjacent code already repeats in that file; unlike
+    `cites_only_read_documents`/`filter_new` this is not one of TDD §10's two
+    named "never a second spelling" functions.
+    """
+    survivor_urls = {url for finding in survivors for url in finding.source_urls}
+    return [document for document in documents if document.url in survivor_urls]
+
+
+def build_brief_generation_task(
+    researcher_model: Model,
+    brief_model: Model,
+    *,
+    fixtures_dir: Path = BRIEF_FIXTURES_DIR,
+) -> Callable[[BriefSeedInputs], Awaitable[BriefSample]]:
+    """Bind the real researcher/analyst agents and return the per-case task.
+
+    Mirrors ``services/briefing.py``'s own pipeline order (TDD §3): plan (pure)
+    -> retrieve (via a `FixtureRetriever` pinned to the case's `beat_fixture`,
+    never `ExaRetriever` — this harness never touches the network) -> find
+    (the researcher agent) -> gate (`filter_new`, imported, D9) -> write (the
+    analyst agent). ``since`` is the synthetic prior Brief's `published_on`,
+    exactly as `services/briefing.py` folds the real prior Brief's date into
+    the query plan — irrelevant to what a `FixtureRetriever` actually replays
+    (D10: it executes its own recorded `queries`, ignoring the ones it is
+    called with) but kept anyway so the plan this task builds is the one a
+    live run would build, for anyone reading the report.
+
+    A researcher `Refusal` is not a shape ``brief_seed_set.yaml`` should ever
+    produce — every case is a legitimate, moving subject a Beat may Beat on
+    (mirrors ``build_flashcard_generation_task``'s own "every case must
+    generate" contract) — so it is reported as an errored case rather than a
+    result to score, exactly as that function's own docstring reasons.
+    """
+    researcher_agent = build_researcher_agent()
+    analyst_agent = build_analyst_agent()
+
+    async def run_case(inputs: BriefSeedInputs) -> BriefSample:
+        retriever = FixtureRetriever(fixtures_dir, inputs.beat_fixture)
+        plan = build_query_plan(
+            inputs.topic,
+            inputs.guidance,
+            since=inputs.prior_brief.published_on,
+            max_queries=BRIEF_RETRIEVAL_MAX_QUERIES,
+        )
+        documents = await retrieve(
+            retriever,
+            plan,
+            max_documents=BRIEF_RETRIEVAL_MAX_DOCUMENTS,
+            text_budget_chars=BRIEF_RETRIEVAL_TEXT_BUDGET_CHARS,
+        )
+
+        researcher_deps = ResearcherDeps(
+            topic=inputs.topic, guidance=inputs.guidance, documents=documents
+        )
+        researcher_run = await researcher_agent.run(
+            build_researcher_prompt(researcher_deps),
+            deps=researcher_deps,
+            model=researcher_model,
+        )
+        increment_eval_metric("model_requests", researcher_run.usage.requests)
+        research_output = researcher_run.output
+        if isinstance(research_output, Refusal):
+            raise ValueError(
+                f"brief seed case {inputs.beat_fixture!r} refused at the "
+                "research step; brief_seed_set.yaml must only carry Beats "
+                "over legitimate, moving subjects — there is nothing to "
+                "gate or write from a refusal"
+            )
+        findings = research_output.findings
+
+        survivors = filter_new(
+            findings,
+            frozenset(inputs.prior_brief.source_urls),
+            tuple(inputs.prior_brief.claims),
+        )
+        analyst_documents = _documents_for_survivors(documents, survivors)
+        analyst_deps = AnalystDeps(
+            topic=inputs.topic,
+            level=inputs.level,
+            guidance=inputs.guidance,
+            documents=analyst_documents,
+            survivors=survivors,
+            open_threads=[inputs.prior_brief.summary]
+            if inputs.prior_brief.summary
+            else [],
+        )
+        analyst_run = await analyst_agent.run(
+            build_analyst_prompt(analyst_deps), deps=analyst_deps, model=brief_model
+        )
+        increment_eval_metric("model_requests", analyst_run.usage.requests)
+
+        return BriefSample(
+            document_urls=[document.url for document in documents],
+            findings=findings,
+            survivors=survivors,
+            result=analyst_run.output,
+        )
+
+    return run_case
+
+
+# --- the offline stub model (researcher + analyst) ------------------------------
+#
+# `services/stub_model.py` does not dispatch the researcher/analyst output
+# shapes — its own module docstring names that a later ticket's work
+# (`services/retrieval.py`'s `StubRetriever` docstring: "Making those
+# documents' findings look already-covered is agents/researcher.py's stub
+# dispatch to build (AL-520+)"). Extending the production stub is out of this
+# ticket's scope and out of `evals/`'s business either way (`evals/` never
+# ships, and a stub `services/stub_model.py` grows is one every e2e run pays
+# for). This is a small, **eval-only** stand-in — never imported by
+# `services/stub_model.py`, never touching the e2e/Playwright path — built the
+# same way `evals/judge.py`'s own stub judge is: a deterministic
+# `FunctionModel` that reads the real prompt text `build_researcher_prompt`/
+# `build_analyst_prompt` actually produce.
+
+
+_BRIEF_DOC_URL_RE = re.compile(r"^\[\d+\].*— (\S+)$", re.MULTILINE)
+_BRIEF_PERMITTED_URL_RE = re.compile(r"^- (https?://\S+)$", re.MULTILINE)
+_BRIEF_NO_SURVIVORS_MARKER = "No findings survived this run"
+
+
+def _brief_stub_tool_with(
+    output_tools: Sequence[ToolDefinition], prop: str
+) -> ToolDefinition | None:
+    """The first output tool whose JSON schema declares ``prop`` (mirrors
+    ``services/stub_model.py``'s own ``_tool_with``, restated locally rather
+    than imported: that function lives in the production stub module, and
+    importing one helper for one three-line lookup would pull that whole
+    module into ``evals/`` for no other reason)."""
+    for tool in output_tools:
+        properties = tool.parameters_json_schema.get("properties", {})
+        if prop in properties:
+            return tool
+    return None
+
+
+def _brief_stub_user_text(messages: Sequence[ModelMessage]) -> str:
+    """Every user-prompt string in the conversation, concatenated (mirrors
+    ``services/stub_model.py``'s own ``_user_text``)."""
+    texts: list[str] = []
+    for message in messages:
+        for part in getattr(message, "parts", []):
+            if isinstance(part, UserPromptPart) and isinstance(part.content, str):
+                texts.append(part.content)
+    return "\n".join(texts)
+
+
+def _stub_brief_respond(
+    messages: Sequence[ModelMessage], info: AgentInfo
+) -> ModelResponse:
+    """The deterministic researcher/analyst ``FunctionModel`` callback.
+
+    Dispatches by output-tool shape, exactly as ``services/stub_model.py``
+    does: a ``findings`` tool means this is a researcher call; a
+    ``cited_urls``/``detail`` tool means an analyst call. One finding per
+    document the researcher was actually given, each citing exactly its own
+    URL — parsed straight out of ``build_researcher_prompt``'s own document
+    listing (``[n] publisher — 'title' (date) — url``), so a fixture with
+    real, varied documents produces real, varied findings, some of which the
+    real ``filter_new`` gate then genuinely drops or lets through against the
+    case's synthetic prior Brief. The analyst leg reads
+    ``build_analyst_prompt``'s own "No findings survived this run" line to
+    choose the skipped form, and otherwise cites exactly the URLs that
+    prompt's "cite ONLY these URLs" block names — so the branch this stub
+    takes is never staged, only the *content* is.
+    """
+    text = _brief_stub_user_text(messages)
+    findings_tool = _brief_stub_tool_with(info.output_tools, "findings")
+    brief_tool = _brief_stub_tool_with(info.output_tools, "cited_urls")
+    skip_tool = _brief_stub_tool_with(info.output_tools, "detail")
+
+    if findings_tool is not None:
+        urls = _BRIEF_DOC_URL_RE.findall(text)
+        findings = Findings(
+            findings=[
+                Finding(
+                    claim=f"Document {index} reports a development worth a Finding.",
+                    detail=(
+                        f"Deterministic stub finding for {url}, standing in for "
+                        "whatever that document actually reports."
+                    ),
+                    source_urls=[url],
+                    happened_on=None,
+                )
+                for index, url in enumerate(urls, start=1)
+            ]
+        )
+        return ModelResponse(
+            parts=[
+                ToolCallPart(tool_name=findings_tool.name, args=findings.model_dump())
+            ]
+        )
+
+    if brief_tool is not None or skip_tool is not None:
+        if brief_tool is None or skip_tool is None:
+            raise RuntimeError(
+                "brief stub model expected the BriefBody and SkippedNote output "
+                "tools registered together (an analyst call's union output), "
+                f"got only one of them (tools: "
+                f"{[tool.name for tool in info.output_tools]})"
+            )
+        if _BRIEF_NO_SURVIVORS_MARKER in text:
+            note = SkippedNote(detail="")
+            return ModelResponse(
+                parts=[ToolCallPart(tool_name=skip_tool.name, args=note.model_dump())]
+            )
+        urls = _BRIEF_PERMITTED_URL_RE.findall(text)
+        body = BriefBody(
+            title="Deterministic stub Brief",
+            body_markdown=(
+                "This is a deterministic stub Brief, citing: " + ", ".join(urls) + "."
+            ),
+            cited_urls=urls,
+        )
+        return ModelResponse(
+            parts=[ToolCallPart(tool_name=brief_tool.name, args=body.model_dump())]
+        )
+
+    raise RuntimeError(
+        "brief stub model could not recognise the agent's output schema "
+        f"(tools: {[tool.name for tool in info.output_tools]})"
+    )
+
+
+def build_brief_smoke_model() -> FunctionModel:
+    """A fresh deterministic researcher/analyst stand-in (no key, no network).
+
+    Not cached (unlike ``services/stub_model.py``'s process-wide singleton):
+    this is a harness-local test double, constructed once per ``--smoke``
+    run, on ``evals/judge.py``'s ``build_stub_judge_model`` precedent rather
+    than the production stub's.
+    """
+    return FunctionModel(_stub_brief_respond)

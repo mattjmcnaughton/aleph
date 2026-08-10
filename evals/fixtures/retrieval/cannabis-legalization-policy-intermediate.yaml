@@ -1,0 +1,71 @@
+# HAND-AUTHORED PLACEHOLDER — NOT A REAL EXA RECORDING.
+#
+# This environment has no EXA_API_KEY and no network access to Exa, so
+# `just record-retrieval-fixtures` could not be run to produce this file. It
+# is written by hand, in the exact format `FixtureRetriever`
+# (src/aleph/services/retrieval.py) reads — `beat`, `queries` recorded beside
+# `results` (TDD §5.2/§10, D10) — so evals/brief_seed_set.yaml's
+# "cannabis-legalization-policy" case can exercise the harness's plumbing
+# offline. Every document below is INVENTED text describing a plausible,
+# fictional policy development, not a real report. Judging real quality
+# against it (a live `just evals --briefs` run) would be judging invented
+# text, not the world. Replace this file for real with `just
+# record-retrieval-fixtures` once EXA_API_KEY is available — the script
+# skips a fixture that already exists unless `--force` is passed.
+beat: cannabis-legalization-policy-intermediate
+queries:
+  - "Cannabis legalization policy in the United States"
+  - "Cannabis legalization policy in the United States — latest developments since 2026-06-01"
+  - "Cannabis legalization policy in the United States: state and federal policy developments, not health effects — since 2026-06-01"
+  - "Cannabis legalization policy in the United States news since 2026-06-01"
+  - "Cannabis legalization policy in the United States announcements since 2026-06-01"
+  - "Cannabis legalization policy in the United States analysis and commentary since 2026-06-01"
+results:
+  "Cannabis legalization policy in the United States":
+    - url: "https://example.com/dea-rescheduling-hearing-postponed"
+      publisher: "example.com"
+      title: "DEA cannabis rescheduling hearing postponed a second time"
+      published_on: "2026-05-28"
+      text: >
+        The Drug Enforcement Administration's proposed rule to reschedule
+        cannabis from Schedule I to Schedule III remained pending after its
+        administrative hearing was postponed. Included again here because
+        it is genuinely still findable under this query at record time; its
+        URL already appears in the prior Brief's cited Sources, so the
+        novelty gate is expected to drop any finding built from it alone.
+  "Cannabis legalization policy in the United States — latest developments since 2026-06-01":
+    - url: "https://example.com/dea-rescheduling-hearing-resumes-ruling-date"
+      publisher: "example.com"
+      title: "DEA rescheduling hearing resumes; administrative law judge sets ruling date"
+      published_on: "2026-08-04"
+      text: >
+        The DEA's administrative hearing on rescheduling cannabis resumed
+        after its earlier postponement, and the presiding administrative
+        law judge set a ruling date in early 2027. Parties on both sides of
+        the rescheduling question presented closing arguments, with a
+        formal recommendation expected to follow the ruling.
+  "Cannabis legalization policy in the United States: state and federal policy developments, not health effects — since 2026-06-01":
+    - url: "https://example.com/new-state-recreational-sales-begin"
+      publisher: "example.com"
+      title: "Recreational cannabis sales begin in a new state after a two-year phase-in"
+      published_on: "2026-07-15"
+      text: >
+        Licensed recreational cannabis sales began in a state that legalized
+        the drug via ballot initiative two years earlier, following the
+        completion of its regulatory phase-in period covering licensing,
+        testing standards, and tax collection. State officials said the
+        delay was deliberate, meant to avoid the supply and enforcement
+        problems seen in some earlier legalizing states.
+  "Cannabis legalization policy in the United States news since 2026-06-01":
+    - url: "https://example.com/safer-banking-act-advances-senate-committee"
+      publisher: "example.com"
+      title: "Cannabis banking-access bill advances out of Senate committee"
+      published_on: "2026-07-22"
+      text: >
+        A bill granting cannabis businesses access to standard banking
+        services advanced out of a Senate committee on a bipartisan vote,
+        the furthest the long-stalled legislation has progressed in three
+        prior sessions of Congress. The bill's sponsors said they expect a
+        full Senate floor vote before the end of the year.
+  "Cannabis legalization policy in the United States announcements since 2026-06-01": []
+  "Cannabis legalization policy in the United States analysis and commentary since 2026-06-01": []

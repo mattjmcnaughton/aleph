@@ -1,0 +1,69 @@
+# HAND-AUTHORED PLACEHOLDER — NOT A REAL EXA RECORDING.
+#
+# This environment has no EXA_API_KEY and no network access to Exa, so
+# `just record-retrieval-fixtures` could not be run to produce this file. It
+# is written by hand, in the exact format `FixtureRetriever`
+# (src/aleph/services/retrieval.py) reads — `beat`, `queries` recorded beside
+# `results` (TDD §5.2/§10, D10) — so evals/brief_seed_set.yaml's
+# "fed-interest-rate-policy" case can exercise the harness's plumbing
+# offline. Every document below is INVENTED text describing a plausible,
+# fictional Federal Reserve development, not a real report. Judging real
+# quality against it (a live `just evals --briefs` run) would be judging
+# invented text, not the world. Replace this file for real with `just
+# record-retrieval-fixtures` once EXA_API_KEY is available — the script
+# skips a fixture that already exists unless `--force` is passed.
+beat: fed-rate-policy-beginner
+queries:
+  - "US Federal Reserve interest rate policy"
+  - "US Federal Reserve interest rate policy — latest developments since 2026-07-29"
+  - "US Federal Reserve interest rate policy: explain plainly for someone with no economics background — since 2026-07-29"
+  - "US Federal Reserve interest rate policy news since 2026-07-29"
+  - "US Federal Reserve interest rate policy announcements since 2026-07-29"
+  - "US Federal Reserve interest rate policy analysis and commentary since 2026-07-29"
+results:
+  "US Federal Reserve interest rate policy":
+    - url: "https://example.com/fed-july-fomc-statement"
+      publisher: "example.com"
+      title: "Federal Reserve holds rates steady at July meeting"
+      published_on: "2026-07-29"
+      text: >
+        The Federal Reserve held its benchmark interest rate steady at its
+        July meeting, citing inflation still above its 2% target. Included
+        again here because it is genuinely still findable under this query
+        at record time; its URL already appears in the prior Brief's cited
+        Sources, so the novelty gate is expected to drop any finding built
+        from it alone.
+  "US Federal Reserve interest rate policy — latest developments since 2026-07-29":
+    - url: "https://example.com/fed-september-fomc-rate-cut"
+      publisher: "example.com"
+      title: "Federal Reserve cuts benchmark rate by a quarter point at September meeting"
+      published_on: "2026-09-17"
+      text: >
+        The Federal Reserve cut its benchmark interest rate by a quarter
+        percentage point at its September meeting, its first cut of the
+        year, bringing the target range to 4.00-4.25%. In a statement, the
+        Fed said recent data showed inflation cooling toward its target
+        while the labor market had softened enough to justify easing.
+  "US Federal Reserve interest rate policy: explain plainly for someone with no economics background — since 2026-07-29":
+    - url: "https://example.com/fed-chair-press-conference-recap-september"
+      publisher: "example.com"
+      title: "Fed chair press conference: what the September rate cut means for borrowers"
+      published_on: "2026-09-17"
+      text: >
+        At the press conference following September's rate decision, the
+        Fed chair said the quarter-point cut reflects growing confidence
+        that inflation is on a sustainable path back to 2%, while
+        cautioning that further cuts are not on a preset course and will
+        depend on incoming data meeting by meeting.
+  "US Federal Reserve interest rate policy news since 2026-07-29":
+    - url: "https://example.com/august-jobs-report-labor-market-cooling"
+      publisher: "example.com"
+      title: "August jobs report shows hiring slowed for a third straight month"
+      published_on: "2026-09-05"
+      text: >
+        The Labor Department's August jobs report showed hiring slowed for
+        a third straight month, with the unemployment rate ticking up to
+        4.3%. Economists widely cited the report as the clearest signal yet
+        that the Fed would cut rates at its September meeting.
+  "US Federal Reserve interest rate policy announcements since 2026-07-29": []
+  "US Federal Reserve interest rate policy analysis and commentary since 2026-07-29": []
