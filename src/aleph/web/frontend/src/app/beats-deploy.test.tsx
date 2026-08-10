@@ -5,6 +5,7 @@ import { API_V1_BASE, type AuthSession } from "../lib/api";
 import {
   FAILED_BEAT_TOPIC_SENTINEL,
   REFUSED_BEAT_TOPIC_SENTINEL,
+  beatDetailPollRequestCount,
   configureBeats,
   createBeatBodies,
 } from "../mocks/beats";
@@ -44,6 +45,22 @@ function submit() {
 }
 
 describe("Deploy an analyst — /beats/new", () => {
+  it("[FIX 3, flag off] renders a dead end, not the enabled form — no request", async () => {
+    // Default fake session ships `analyst: false` (no `useAnalystSession()`
+    // override) — the D10 dead end, matching `routes/cards.tsx`/
+    // `routes/review.tsx`'s own flag-off shape. Before this fix the whole
+    // form rendered anyway, submit button included, and tapping "Deploy
+    // analyst" silently did nothing (`onSubmit`'s own `!analystEnabled`
+    // early return).
+    window.history.pushState({}, "", "/beats/new");
+    render(<App />);
+
+    await screen.findByTestId("beats-new-unavailable");
+    expect(screen.queryByRole("textbox", { name: /topic/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /deploy analyst/i })).toBeNull();
+    expect(createBeatBodies()).toEqual([]);
+  });
+
   it("[AL-530] shows the deploy form: topic, level, Reports on, guidance", async () => {
     await gotoDeployAnalyst();
 
@@ -99,6 +116,30 @@ describe("Deploy an analyst — /beats/new", () => {
     await screen.findByTestId("standing-orders");
     const bodies = createBeatBodies();
     expect("guidance" in (bodies[bodies.length - 1] ?? {})).toBe(false);
+  });
+
+  it("[FIX 4] the seed-then-poll handoff: the 202 body seeds a non-terminal cache entry, so the Beat view's own detail poll actually runs and the rail arrives", async () => {
+    // The shipped route's `entries=[]` is unconditional — a fresh claim is
+    // spawned, never awaited, so the 202 body can never carry a published
+    // Brief. This is the coverage the original mock hid entirely: with
+    // `settle()` running inside the `POST` handler itself, every deploy test
+    // got a terminal 202 body and `routes/beats.new.tsx`'s `setQueryData`
+    // seed meant the Beat view never issued a single `GET /beats/{id}` —
+    // this test is the one that would have caught that regression.
+    const topic = await gotoDeployAnalyst();
+
+    fireEvent.change(topic, { target: { value: "EU AI regulation" } });
+    pickLevel(/some experience/i);
+    submit();
+
+    await screen.findByTestId("standing-orders");
+    const beatId = window.location.pathname.split("/").pop() as string;
+
+    // The rail can only arrive through a real poll settling the Beat — the
+    // seeded 202 body carried no entries at all.
+    const rail = await screen.findByTestId("beat-rail");
+    expect(rail.querySelector('[data-testid="beat-rail-published"]')).not.toBeNull();
+    expect(beatDetailPollRequestCount(beatId)).toBeGreaterThan(0);
   });
 
   it("[AL-530] a Beat that refuses on research still navigates — the refusal renders on the Beat view", async () => {

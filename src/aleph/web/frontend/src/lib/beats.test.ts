@@ -95,9 +95,7 @@ describe("formatElapsed", () => {
   it("[minutes branch] reads 'Nm ago' from a minute up to an hour", () => {
     expect(formatElapsed(new Date(now.getTime() - 60_000).toISOString(), now)).toBe("1m ago");
     expect(formatElapsed(new Date(now.getTime() - 90_000).toISOString(), now)).toBe("2m ago");
-    expect(formatElapsed(new Date(now.getTime() - 40 * 60_000).toISOString(), now)).toBe(
-      "40m ago",
-    );
+    expect(formatElapsed(new Date(now.getTime() - 40 * 60_000).toISOString(), now)).toBe("40m ago");
   });
 
   it("[hours branch] reads 'Nh ago' from an hour onward", () => {
@@ -105,8 +103,6 @@ describe("formatElapsed", () => {
     expect(formatElapsed(new Date(now.getTime() - 7200_000).toISOString(), now)).toBe("2h ago");
     // Just past the minutes ceiling: 61 real minutes still rounds to 1h, not
     // 61m — proving the branch boundary is on `minutes < 60`, not seconds.
-    expect(formatElapsed(new Date(now.getTime() - 61 * 60_000).toISOString(), now)).toBe(
-      "1h ago",
-    );
+    expect(formatElapsed(new Date(now.getTime() - 61 * 60_000).toISOString(), now)).toBe("1h ago");
   });
 });

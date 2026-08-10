@@ -344,7 +344,7 @@ describe("Beats & Briefs: tz_offset_minutes rides on every call (FIX 1)", () => 
     expect(beatRetryReceivedOffsets()).toEqual([-120]);
   });
 
-  it("never rides in the cache key — TDD §7 fixes it as [\"beats\"] / [\"beats\", id]", () => {
+  it('never rides in the cache key — TDD §7 fixes it as ["beats"] / ["beats", id]', () => {
     expect(beatsListQueryOptions(true).queryKey).toEqual(["beats"]);
     expect(beatQueryOptions("beat-offset", true).queryKey).toEqual(["beats", "beat-offset"]);
   });

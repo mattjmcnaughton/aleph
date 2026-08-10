@@ -9,10 +9,11 @@ import {
   isRateLimited,
 } from "../lib/api";
 import { Breadcrumbs } from "../components/breadcrumbs";
+import { LevelFieldset } from "../components/level-fieldset";
 import { PRIMARY_CTA, StateCard } from "../components/state-card";
 import { ANCHOR_WEEKDAYS, DEFAULT_ANCHOR_WEEKDAY } from "../lib/beats";
 import { useFeatureFlag } from "../lib/feature-flags";
-import { GUIDANCE_MAX_LENGTH, LEVELS, TOPIC_MAX_LENGTH, canSubmitTopic } from "../lib/onboarding";
+import { GUIDANCE_MAX_LENGTH, TOPIC_MAX_LENGTH, canSubmitTopic } from "../lib/onboarding";
 
 export const Route = createFileRoute("/beats/new")({
   component: DeployAnalyst,
@@ -145,37 +146,7 @@ function DeployAnalyst() {
           className="w-full rounded-md border border-divider bg-surface px-4 py-3 text-base text-porcelain placeholder:text-slate focus:border-teal focus:outline-none"
         />
 
-        <fieldset className="mt-6">
-          <legend className="kicker">How much do you know already?</legend>
-          <div className="mt-3 grid gap-2">
-            {LEVELS.map((option) => {
-              const id = `beat-level-${option.value}`;
-              const selected = level === option.value;
-              return (
-                <label
-                  key={option.value}
-                  htmlFor={id}
-                  className={`flex cursor-pointer items-center rounded-md border px-4 py-3 text-sm font-medium transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-teal has-[:focus-visible]:ring-offset-2 has-[:focus-visible]:ring-offset-night ${
-                    selected
-                      ? "border-teal bg-teal/10 text-porcelain"
-                      : "border-divider bg-surface text-mist hover:text-porcelain"
-                  }`}
-                >
-                  <input
-                    id={id}
-                    type="radio"
-                    name="level"
-                    value={option.value}
-                    checked={selected}
-                    onChange={() => setLevel(option.value)}
-                    className="sr-only"
-                  />
-                  {option.label}
-                </label>
-              );
-            })}
-          </div>
-        </fieldset>
+        <LevelFieldset level={level} onChange={setLevel} idPrefix="beat-level" />
 
         <div className="mt-6">
           <label htmlFor="beat-anchor-weekday" className="text-sm font-medium text-porcelain">

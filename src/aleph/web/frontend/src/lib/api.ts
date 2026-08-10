@@ -1218,9 +1218,7 @@ export function deployBeat(input: DeployBeatInput): Promise<BeatDetail> {
  * learner who never passes their own offset.
  */
 export function getBeat(id: string, tzOffsetMinutes: number): Promise<BeatDetail> {
-  return apiFetch<BeatDetail>(
-    apiV1Path(`/beats/${id}?tz_offset_minutes=${tzOffsetMinutes}`),
-  );
+  return apiFetch<BeatDetail>(apiV1Path(`/beats/${id}?tz_offset_minutes=${tzOffsetMinutes}`));
 }
 
 /**
@@ -1337,8 +1335,7 @@ export function beatQueryOptions(id: string | null, enabled: boolean) {
     // `tz_offset_minutes` rides on the request (code-review FIX 1), never on
     // the key above — TDD §7 fixes `beatQueryKey` as `["beats", id]`, unlike
     // `progressSummaryQueryKey`'s own offset-bearing key.
-    queryFn:
-      id !== null && enabled ? () => getBeat(id, clientTimezoneOffsetMinutes()) : skipToken,
+    queryFn: id !== null && enabled ? () => getBeat(id, clientTimezoneOffsetMinutes()) : skipToken,
   });
 }
 

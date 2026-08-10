@@ -89,7 +89,10 @@ function BeatView() {
       ) : (
         <>
           <p className="kicker">Beat</p>
-          <h1 className="mt-2 text-3xl font-semibold leading-tight tracking-tight">
+          {/* min-w-0 + truncate (code-review FIX 6): the project's
+              convention for user text (`paths.$pathId.tsx`, `sidebar.tsx`)
+              — a pasted URL as a Topic must not overflow 390px. */}
+          <h1 className="mt-2 min-w-0 truncate text-3xl font-semibold leading-tight tracking-tight">
             {detail.topic}
           </h1>
           <div className="mt-3">

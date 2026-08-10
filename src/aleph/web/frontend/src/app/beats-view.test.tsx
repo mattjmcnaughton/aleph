@@ -40,6 +40,21 @@ async function gotoBeat(beatId: string) {
 }
 
 describe("Beat view — /beats/$beatId", () => {
+  it("[FIX 3, flag off] renders a dead end rather than 'Loading your Beat…' forever", async () => {
+    // Before this fix, `beatQueryOptions`'s `skipToken` meant `data` never
+    // resolved and `isError` never flipped true, so this route rendered
+    // "Loading your Beat…" forever with the flag off. Default fake session
+    // ships `analyst: false` — no `useAnalystSession()` override.
+    seedBeat({ id: "beat-flag-off", topic: "EU AI regulation", level: "some_experience" });
+    window.history.pushState({}, "", "/beats/beat-flag-off");
+    render(<App />);
+
+    await screen.findByTestId("beat-unavailable");
+    expect(screen.queryByText(/loading your beat/i)).toBeNull();
+    expect(screen.queryByTestId("standing-orders")).toBeNull();
+    expect(beatDetailPollRequestCount("beat-flag-off")).toBe(0);
+  });
+
   it("[PRD §3] renders the standing orders one-liner: cadence · topic · guidance", async () => {
     seedBeat({
       id: "beat-orders",
@@ -172,21 +187,52 @@ describe("Beat view — /beats/$beatId", () => {
     expect(read?.getAttribute("data-unread")).toBeNull();
   });
 
-  it("[TDD §7] a fresh researching Beat renders the researching state on the very first fetch", async () => {
-    // `pollsRemaining` starts > 0, so even the initial (non-poll) fetch
-    // already reports `research_state: "researching"` — the shipped
-    // router's own drain-then-read fix, mirrored here.
-    seedBeat({
-      id: "beat-researching",
-      topic: "EU AI regulation",
-      level: "some_experience",
-      pollsRemaining: 3,
-    });
+  it("[TDD §7] a fresh researching Beat renders the researching state on the very first fetch, the rail renders unconditionally beside it, and polling genuinely continues to a second fetch", async () => {
+    vi.useFakeTimers();
+    try {
+      // `pollsRemaining` starts > 0, so even the initial (non-poll) fetch
+      // already reports `research_state: "researching"` — the shipped
+      // router's own drain-then-read fix, mirrored here.
+      seedBeat({
+        id: "beat-researching",
+        topic: "EU AI regulation",
+        level: "some_experience",
+        pollsRemaining: 3,
+      });
 
-    await gotoBeat("beat-researching");
+      useAnalystSession();
+      window.history.pushState({}, "", "/beats/beat-researching");
+      render(<App />);
 
-    await screen.findByTestId("beat-researching");
-    expect(screen.queryByTestId("beat-rail")).toBeNull();
+      // Let the auth gate and the initial (non-poll) fetch land.
+      await vi.advanceTimersByTimeAsync(1000);
+
+      expect(screen.getByTestId("beat-researching")).toBeTruthy();
+      // `<BeatRail>` renders unconditionally, regardless of `research_state`
+      // — its own comment says entries render regardless — so this is NOT
+      // "the rail is hidden while researching" (code-review FIX 8,
+      // correcting this test's own prior assertion, which passed for the
+      // wrong reason: it only ever checked the null case). This seeded Beat
+      // has zero entries, so `BeatRail`'s own empty state renders instead of
+      // the `<ol data-testid="beat-rail">` — a genuinely empty rail, never a
+      // hidden one.
+      expect(screen.getByTestId("beat-rail-empty")).toBeTruthy();
+      expect(screen.queryByTestId("beat-rail")).toBeNull();
+
+      const firstFetchCount = beatDetailPollRequestCount("beat-researching");
+      expect(firstFetchCount).toBeGreaterThanOrEqual(1);
+
+      // The second-fetch proof, made explicit rather than incidental (FIX
+      // 8): the reviewer confirmed the client DOES start polling from a
+      // `researching` first response, but only via tests that reach a
+      // settled state — this asserts the request count directly, on a Beat
+      // that is deliberately never allowed to settle within this test
+      // (`pollsRemaining: 3`, only ~1s of fake time advanced).
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(beatDetailPollRequestCount("beat-researching")).toBeGreaterThanOrEqual(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("[TDD §7, refused] the researching poll STOPS once the run refuses — the graceful message, not a retry", async () => {

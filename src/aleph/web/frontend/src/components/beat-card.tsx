@@ -68,7 +68,13 @@ export function BeatCard({ beat, now = new Date() }: { beat: BeatSummary; now?: 
       data-variant={BEAT_ROW_VARIANT[beat.research_state]}
       className={`block min-h-[44px] rounded-lg border p-4 shadow-sm transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-teal ${BEAT_ROW_TONE[variant]}`}
     >
-      <p data-testid="beat-item-topic" className="text-base font-semibold leading-snug">
+      {/* min-w-0 + truncate (code-review FIX 6): the project's convention
+          for user text (`paths.$pathId.tsx`, `sidebar.tsx`) — a pasted URL
+          or an over-long Topic must not overflow the card at 390px. */}
+      <p
+        data-testid="beat-item-topic"
+        className="min-w-0 truncate text-base font-semibold leading-snug"
+      >
         {beat.topic}
       </p>
       <p data-testid="beat-item-status" className={`mt-1 text-sm ${BEAT_ROW_STATUS_TONE[variant]}`}>

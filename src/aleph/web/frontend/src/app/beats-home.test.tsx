@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { API_V1_BASE, type AuthSession } from "../lib/api";
 import { beatsListRequestCount, seedBeat } from "../mocks/beats";
 import { learnerUser } from "../mocks/handlers";
@@ -97,6 +97,41 @@ describe("Home — the Beats section (PRD §3/§4.10, TDD §8)", () => {
     }
     const beatsSection = screen.getByTestId("beats-section");
     expect(beatsSection.querySelector('[data-testid="beat-list-item"]')).not.toBeNull();
+  });
+
+  it("[TDD §7, FIX 7] nothing ever polls the list — the request count stays flat across time", async () => {
+    // `mocks/beats.ts` has documented `beatsListRequestCount` as proving
+    // this "when a test asserts this stays at 1 across fake time" since
+    // AL-530 shipped, but nothing did — the code was already right (no
+    // `refetchInterval` on `beatsListQueryOptions`), this is only the
+    // missing regression test TDD §7 itself names as the risk: "adding one
+    // would break nothing."
+    vi.useFakeTimers();
+    try {
+      useAnalystSession();
+      seedBeat({
+        id: "beat-researching",
+        topic: "EU AI regulation",
+        level: "some_experience",
+        pollsRemaining: 5,
+      });
+
+      window.history.pushState({}, "", "/");
+      render(<App />);
+
+      await vi.advanceTimersByTimeAsync(1000);
+      const initialCount = beatsListRequestCount();
+      expect(initialCount).toBeGreaterThan(0);
+
+      // Advance well past several of the detail poll's own backoff cycles —
+      // the list's own count must not move even though the Beat on it is
+      // still researching.
+      for (let i = 0; i < 10; i++) await vi.advanceTimersByTimeAsync(3000);
+
+      expect(beatsListRequestCount()).toBe(initialCount);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("[AL-530] the empty state offers Deploy analyst, with no Beats yet", async () => {
