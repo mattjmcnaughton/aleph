@@ -1,6 +1,6 @@
 """Eval harness CLI: ``uv run python -m evals`` (or ``just evals``).
 
-Three modes:
+Four modes:
 
 - **seed set** (default) — runs ``evals/seed_set.yaml`` through the outline and
   lesson agents against one or more model bindings, scores each case with the
@@ -12,6 +12,13 @@ Three modes:
   in sequence (a card is drafted from a freshly generated lesson, TDD D14/§10),
   scored the same two-layer way against the ``flashcard_draft`` rubric
   (``evals/rubric.py``). One binding, not a sweep — see ``--flashcards``' help.
+- **brief research/writing** (``--briefs``, Phase 6 TDD §10) — runs ``evals/
+  brief_seed_set.yaml`` through the researcher and analyst agents, replaying
+  its ``evals/fixtures/retrieval/*.yaml`` fixture instead of a live
+  retrieval call (never Exa, live or ``--smoke``), scored against the
+  ``brief`` rubric. Today those fixtures are hand-authored placeholders, not
+  real recordings — a run prints a banner naming which ones (docs/evals.md).
+  One binding, not a sweep — see ``--briefs``' help.
 - **calibration** (``--agreement``) — runs the judge over
   ``evals/human_labels.yaml`` and reports judge↔human agreement. No generation
   happens; this mode measures the measuring instrument.
@@ -21,23 +28,28 @@ See docs/evals.md for the strategy and docs/ci.md for the GitHub Actions wiring.
 Exit codes:
     0  ran; every hard floor held and the ≥ 90% pass-rate gate was met
     1  a case failed a hard floor (branch / outline caps / lesson bands / a
-       flashcard's structural or non-triviality check / the safety rubric
-       item), the judged pass rate fell below the gate, judge↔human agreement
-       fell below the trust threshold, or a case errored outright
+       flashcard's structural or non-triviality check / a brief's provenance
+       or novelty-gate-branch check / the safety rubric item), the judged pass
+       rate fell below the gate, judge↔human agreement fell below the trust
+       threshold, or a case errored outright
     2  misconfiguration (no OPENROUTER_API_KEY and not --smoke; --models
-       combined with --smoke, --agreement, or --flashcards; --agreement with
-       --no-judge or --flashcards; bad arguments; a ``seed_set.yaml`` /
-       ``flashcard_seed_set.yaml`` / ``human_labels.yaml`` that does not parse
-       or validate — a broken data file says nothing about the models under
-       evaluation, so it must not be reported as a failed gate)
+       combined with --smoke, --agreement, --flashcards, or --briefs;
+       --agreement combined with --no-judge, --flashcards, or --briefs;
+       --flashcards combined with --briefs; bad arguments; a ``seed_set.yaml``
+       / ``flashcard_seed_set.yaml`` / ``brief_seed_set.yaml`` /
+       ``human_labels.yaml`` that does not parse or validate — a broken data
+       file says nothing about the models under evaluation, so it must not be
+       reported as a failed gate)
 
 Reads ``OPENROUTER_API_KEY`` and the ``MODEL_OUTLINE`` / ``MODEL_LESSON`` /
-``MODEL_JUDGE`` / ``MODEL_FLASHCARD`` slots via ``aleph.config.settings``
-(environment or ``.env``) — imported lazily, so ``--smoke`` needs no
-configuration at all. ``MODEL_JUDGE`` is read *here and nowhere else in the
-repo*: the judge is eval-only and never touches the request path. When
-``$GITHUB_STEP_SUMMARY`` is set (GitHub Actions), the same tables are appended
-there as the job summary.
+``MODEL_JUDGE`` / ``MODEL_FLASHCARD`` / ``MODEL_RESEARCH`` / ``MODEL_BRIEF``
+slots via ``aleph.config.settings`` (environment or ``.env``) — imported
+lazily, so ``--smoke`` needs no configuration at all. ``MODEL_JUDGE`` is read
+*here and nowhere else in the repo*: the judge is eval-only and never touches
+the request path. ``--briefs`` never reads ``EXA_API_KEY`` at all — retrieval
+is always a fixture replay, live and ``--smoke`` alike (see
+``_resolve_brief_binding``). When ``$GITHUB_STEP_SUMMARY`` is set (GitHub
+Actions), the same tables are appended there as the job summary.
 """
 
 from __future__ import annotations
@@ -61,6 +73,11 @@ from evals.agreement import (
     run_agreement,
 )
 from evals.generation import (
+    BRIEF_EVALUATOR_ASSERTIONS,
+    BRIEF_HARD_FLOOR_EVALUATORS,
+    BRIEF_JUDGE_ASSERTIONS,
+    BRIEF_JUDGE_HARD_FLOOR,
+    BRIEF_SEED_SET_PATH,
     EVALUATOR_ASSERTIONS,
     FLASHCARD_EVALUATOR_ASSERTIONS,
     FLASHCARD_HARD_FLOOR_EVALUATORS,
@@ -70,15 +87,21 @@ from evals.generation import (
     FULL_PATH_LESSONS,
     HARD_FLOOR_EVALUATORS,
     JUDGE_ASSERTIONS,
+    JUDGE_BRIEF_SAFETY,
     JUDGE_FLASHCARD_SAFETY,
     JUDGE_HARD_FLOOR,
     JUDGE_SAFETY,
     SEED_SET_PASS_RATE_GATE,
     SEED_SET_PATH,
+    BriefRubricJudge,
     FlashcardRubricJudge,
     RubricJudge,
+    build_brief_generation_task,
+    build_brief_smoke_model,
     build_flashcard_generation_task,
     build_generation_task,
+    is_placeholder_fixture,
+    load_brief_seed_set,
     load_flashcard_seed_set,
     load_seed_set,
     smoke_model,
@@ -86,13 +109,15 @@ from evals.generation import (
 from evals.judge import Judge, build_stub_judge
 
 if TYPE_CHECKING:
-    from collections.abc import Collection
+    from collections.abc import Callable, Collection, Sequence
 
     from pydantic_ai.models import Model
     from pydantic_evals.reporting import EvaluationReport, ReportCase
 
     from evals.agreement import AgreementSummary
     from evals.generation import (
+        BriefSample,
+        BriefSeedInputs,
         FlashcardSample,
         FlashcardSeedInputs,
         GenerationSample,
@@ -105,6 +130,7 @@ if TYPE_CHECKING:
     # (``case.output.lesson_slot``) instead of guessing at run time.
     SeedReport = EvaluationReport[SeedInputs, GenerationSample, SeedMeta]
     FlashcardReport = EvaluationReport[FlashcardSeedInputs, FlashcardSample, SeedMeta]
+    BriefReport = EvaluationReport[BriefSeedInputs, BriefSample, SeedMeta]
     #: Both report shapes share ``SeedMeta``, and every gate-arithmetic helper
     #: below only ever reads ``case.name``/``case.assertions``/
     #: ``case.evaluator_failures``/``report.failures``/``report.cases`` — none of
@@ -285,6 +311,63 @@ def _resolve_flashcard_binding(
     )
 
 
+@dataclass(frozen=True)
+class BriefModelBinding:
+    """One evaluated configuration for the ``brief`` harness (Phase 6 TDD §10).
+
+    A single binding, not a sweep, mirroring :class:`FlashcardModelBinding` —
+    ``--models`` is rejected alongside ``--briefs`` (``main``) for the same
+    reason: this mode scores the configured ``model_research``/``model_brief``
+    slots' quality, not a swept model's.
+    """
+
+    label: str
+    researcher: Model
+    brief: Model
+    judge: Judge | None = None
+
+
+def _resolve_brief_binding(args: argparse.Namespace) -> BriefModelBinding | None:
+    """The brief model binding to evaluate, or None on misconfiguration.
+
+    **Never reads ``EXA_API_KEY``.** The `brief` harness always replays a
+    recorded fixture through `FixtureRetriever` — live and ``--smoke`` alike —
+    so retrieval itself needs no key at all; only the researcher/analyst model
+    calls do (mirroring the flashcard harness's own `OPENROUTER_API_KEY`-only
+    posture).
+    """
+    judging = _judging_enabled(args)
+
+    if args.smoke:
+        stub = build_brief_smoke_model()
+        return BriefModelBinding(
+            label="smoke",
+            researcher=stub,
+            brief=stub,
+            judge=build_stub_judge() if judging else None,
+        )
+
+    from aleph.config import settings
+
+    if not settings.openrouter_api_key:
+        _missing_key_message()
+        return None
+
+    from aleph.services.openrouter import resolve_model
+
+    judge = _live_judge(settings.model_judge) if judging else None
+    return BriefModelBinding(
+        label=(
+            settings.model_research
+            if settings.model_research == settings.model_brief
+            else f"research={settings.model_research} brief={settings.model_brief}"
+        ),
+        researcher=resolve_model(settings.model_research),
+        brief=resolve_model(settings.model_brief),
+        judge=judge,
+    )
+
+
 def _case_payload(report: SeedReport) -> dict[str, Any]:
     """JSON-friendly per-case results for the --report artifact."""
     return {
@@ -332,6 +415,60 @@ def _flashcard_case_payload(report: FlashcardReport) -> dict[str, Any]:
                     {"front": card.front, "back": card.back}
                     for card in case.output.drafts.cards
                 ],
+                "assertions": {
+                    name: {"value": result.value, "reason": result.reason}
+                    for name, result in case.assertions.items()
+                },
+                "evaluator_failures": [
+                    {"name": failure.name, "error": failure.error_message}
+                    for failure in case.evaluator_failures
+                ],
+                "metrics": dict(case.metrics),
+                "task_duration": case.task_duration,
+            }
+            for case in report.cases
+        ],
+        "errors": [failure.name for failure in report.failures],
+    }
+
+
+def _brief_case_payload(report: BriefReport) -> dict[str, Any]:
+    """JSON-friendly per-case results for the --report artifact (brief mode).
+
+    Mirrors :func:`_flashcard_case_payload`'s shape. A case's ``result`` is
+    either a published Brief (``BriefBody``) or a Skipped run
+    (``SkippedNote``, ``BriefNoveltyGate`` gates that branch) — both reported,
+    distinguished by ``kind``, rather than only ever assuming a Brief was
+    written.
+
+    ``fixture`` (code-review FIX 2, AL-550) carries per-case retrieval
+    provenance — ``beat_fixture`` and whether ``is_placeholder_fixture``
+    reports it as a hand-authored placeholder — so a ``--report`` JSON
+    artifact is never indistinguishable from one produced against real
+    recordings, on top of the run-level ``placeholder_fixtures`` list
+    :func:`_run_brief_mode` adds to the payload.
+    """
+    from aleph.agents.analyst import BriefBody
+
+    return {
+        "cases": [
+            {
+                "name": case.name,
+                "fixture": {
+                    "beat_fixture": case.inputs.beat_fixture,
+                    "placeholder": is_placeholder_fixture(case.inputs.beat_fixture),
+                },
+                "findings": len(case.output.findings),
+                "survivors": len(case.output.survivors),
+                "result": (
+                    {
+                        "kind": "published",
+                        "title": case.output.result.title,
+                        "cited_urls": case.output.result.cited_urls,
+                    }
+                    if isinstance(case.output.result, BriefBody)
+                    else {"kind": "skipped", "detail": case.output.result.detail}
+                ),
                 "assertions": {
                     name: {"value": result.value, "reason": result.reason}
                     for name, result in case.assertions.items()
@@ -494,11 +631,29 @@ class GateSummary:
     (``MaxDuration``) are excluded on purpose: a slow case on a noisy shared CI
     runner is not a quality failure, and letting it move the pass rate would
     quietly turn the ship gate into a latency measurement.
+
+    ``skipped`` (code-review FIX 5, AL-550) names cases excluded from
+    ``rows`` entirely — currently only a Brief's **Skipped** outcome
+    (``BriefRubricJudge`` is not asked to judge one: there is no Brief
+    content to grade). Excluded rather than counted as a free pass: before
+    this fix a Skipped case scored ``passed=True`` on both judge assertions
+    and moved the rate exactly like a judged, passing Brief, so an all-Skip
+    run (every case's synthetic prior Brief already covers every fixture
+    document — reachable simply by updating the seed set to match freshly
+    re-recorded fixtures) printed ``4/4 (100.0%)`` with **zero** rubric items
+    ever scored — the same "green means nothing" shape FIX 2 names for the
+    placeholder fixtures, reachable with real ones. A Skip excluded from
+    ``rows`` still fails an *empty* gate (``total == 0`` → ``meets_gate`` is
+    ``False``, :func:`test_an_empty_run_never_counts_as_meeting_the_gate`'s
+    own rule), so an all-Skip run now reads as "no scoreable cases" rather
+    than a clean pass — and every excluded case is still named here so it is
+    reported, never silently dropped from view.
     """
 
     rows: tuple[CaseGateRow, ...]
     judged: bool
     safety_failures: tuple[str, ...]
+    skipped: tuple[str, ...] = ()
 
     @property
     def total(self) -> int:
@@ -537,6 +692,7 @@ def _gate_summary(
     judge_assertions: Collection[str] = JUDGE_ASSERTIONS,
     assertions_map: dict[str, frozenset[str]] = EVALUATOR_ASSERTIONS,
     safety_assertion: str = JUDGE_SAFETY,
+    skip: Callable[[AnyEvalCase], bool] | None = None,
 ) -> GateSummary:
     """Compute the gate figures for one binding's report.
 
@@ -545,12 +701,21 @@ def _gate_summary(
     flashcard CLI mode passes the ``FLASHCARD_*`` equivalents
     (``evals/generation.py``) so this one function computes both kinds' gates
     rather than each kind carrying its own copy.
+
+    ``skip`` (code-review FIX 5, AL-550) — a predicate a case must NOT count
+    toward the pass-rate denominator at all, not even as a scored pass. The
+    brief mode passes one that matches a Skipped result: there is no Brief
+    content for the judge to grade, so counting it as a pass would let an
+    all-Skip run read as a 100% ship-gate pass with zero rubric items ever
+    scored (see :class:`GateSummary`'s own docstring). ``None`` (every other
+    mode) preserves the exact previous behaviour — every case becomes a row.
     """
     gating: set[str] = set(hard_floor_evaluators)
     if judged:
         gating |= set(judge_assertions)
 
     rows: list[CaseGateRow] = []
+    skipped: list[str] = []
     safety_failures: list[str] = []
 
     # A task that errored produces no case at all; it is a failure, and leaving
@@ -561,6 +726,9 @@ def _gate_summary(
         )
 
     for case in report.cases:
+        if skip is not None and skip(case):
+            skipped.append(case.name)
+            continue
         checks = _case_checks(case, gating, assertions_map=assertions_map)
         failed_checks = [check.label() for check in checks if not check.ok]
         # Only a real verdict of "unsafe" is a safety *failure*; a safety check
@@ -580,7 +748,10 @@ def _gate_summary(
         )
 
     return GateSummary(
-        rows=tuple(rows), judged=judged, safety_failures=tuple(safety_failures)
+        rows=tuple(rows),
+        judged=judged,
+        safety_failures=tuple(safety_failures),
+        skipped=tuple(skipped),
     )
 
 
@@ -603,6 +774,15 @@ def _render_gate_summary(label: str, summary: GateSummary) -> str:
         f"pass rate: {summary.passed}/{summary.total} ({summary.pass_rate:.1%}); "
         f"gate {SEED_SET_PASS_RATE_GATE:.0%}"
     )
+    if summary.skipped:
+        # FIX 5 (code review, AL-550): named explicitly and EXCLUDED from the
+        # rate above (GateSummary's own docstring) — a Skipped case has no
+        # Brief content to judge, so it must never read as a free pass.
+        lines.append(
+            f"skipped: {len(summary.skipped)} (excluded from the rate above — "
+            "no Brief content to judge):"
+        )
+        lines.extend(f"  - {name}" for name in summary.skipped)
     if summary.safety_failures:
         lines.append(f"SAFETY FAILURES (hard block, {len(summary.safety_failures)}):")
         lines.extend(f"  - {failure}" for failure in summary.safety_failures)
@@ -626,6 +806,9 @@ def _gate_payload(summary: GateSummary) -> dict[str, Any]:
         "gate": SEED_SET_PASS_RATE_GATE,
         "meets_gate": summary.meets_gate,
         "safety_failures": list(summary.safety_failures),
+        # FIX 5 (code review, AL-550): named but never counted in `total` —
+        # see `GateSummary`'s own docstring.
+        "skipped": list(summary.skipped),
         "failed_cases": {
             row.name: list(row.failed_checks) for row in summary.rows if not row.passed
         },
@@ -642,6 +825,64 @@ def _append_step_summary(label: str, report: AnyEvalReport, gate: GateSummary) -
             f"## Seed-set evals — {label}\n\n"
             f"```\n{report.render(width=_REPORT_WIDTH, include_reasons=True)}```\n\n"
             f"```\n{_render_gate_summary(label, gate)}\n```\n\n"
+        )
+
+
+# --- brief mode's placeholder-fixture disclosure (code-review FIX 2, AL-550) ---
+#
+# The disclosure was already thorough in the *artifacts* — every fixture file's
+# header comment, `brief_seed_set.yaml`, three places in docs/evals.md — but
+# none of it survived into what a person running the command actually sees:
+# `--briefs`' own argparse help said fixtures are "recorded", `_run_brief_mode`
+# printed no banner, `_brief_case_payload` put no provenance in the `--report`
+# JSON, and the GitHub step summary attributed a 100% pass rate to a named
+# production model with no caveat. A reader could take a passing score as
+# evidence about the real agent with no carelessness at all. This section is
+# what makes the disclosure ACTIVE — printed, not just written down — and it
+# disappears on its own the moment a fixture is genuinely re-recorded, because
+# `just record-retrieval-fixtures` never writes the `placeholder: true` marker
+# it keys off (`evals.generation.is_placeholder_fixture`).
+
+_PLACEHOLDER_BANNER_RULE = "=" * 78
+
+
+def _placeholder_fixture_banner(placeholder_beats: Sequence[str]) -> str:
+    """The prominent, runtime banner naming which of this run's cases replay a
+    hand-authored placeholder fixture rather than a real Exa recording."""
+    names = ", ".join(placeholder_beats)
+    word = "fixture" if len(placeholder_beats) == 1 else "fixtures"
+    return "\n".join(
+        [
+            _PLACEHOLDER_BANNER_RULE,
+            f"PLACEHOLDER RETRIEVAL FIXTURES — NOT REAL RECORDINGS "
+            f"({len(placeholder_beats)} {word})",
+            _PLACEHOLDER_BANNER_RULE,
+            f"The following case(s) replay a HAND-AUTHORED PLACEHOLDER fixture, "
+            f"not a real Exa recording: {names}.",
+            "Every score below measures the harness's plumbing against invented "
+            "text describing plausible, fictional developments — NOT the world. "
+            "Run `just record-retrieval-fixtures` once EXA_API_KEY is available, "
+            "then re-run this mode. See docs/evals.md.",
+            _PLACEHOLDER_BANNER_RULE,
+        ]
+    )
+
+
+def _append_placeholder_step_summary_caveat(placeholder_beats: Sequence[str]) -> None:
+    """Mirror the placeholder-fixture caveat into the Actions job summary — a
+    reader skimming only the job summary (never the raw log) must see it too.
+    """
+    summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not summary_path:
+        return
+    names = ", ".join(placeholder_beats)
+    with Path(summary_path).open("a", encoding="utf-8") as summary:
+        summary.write(
+            f"> **PLACEHOLDER FIXTURES:** {len(placeholder_beats)} "
+            f"beat_fixture(s) above replay hand-authored placeholders, not "
+            f"real Exa recordings ({names}). This score measures the "
+            "harness's plumbing against invented text — never the agent "
+            "against real reporting. See docs/evals.md.\n\n"
         )
 
 
@@ -962,6 +1203,115 @@ def _run_flashcard_mode(args: argparse.Namespace) -> int:
     return 1 if (failed_cases or gate_failed) else 0
 
 
+def _run_brief_mode(args: argparse.Namespace) -> int:
+    """``--briefs``: run the ``brief`` seed set and gate on it (Phase 6 TDD §10).
+
+    The fourth eval kind's own mode — mirrors :func:`_run_flashcard_mode`
+    structurally: one binding rather than a sweep (``--models`` is rejected
+    alongside ``--briefs``, ``main`` below), and the same generic gate
+    machinery (:func:`_gate_summary`, :func:`_hard_floor_failures`) with the
+    brief evaluator names. Retrieval is always a fixture replay
+    (`FixtureRetriever`) — this mode never touches Exa, live or ``--smoke``.
+
+    **Placeholder fixtures (code-review FIX 2) get a runtime banner, printed
+    before and after the report, mirrored into the GitHub step summary, and
+    recorded in the ``--report`` JSON** — see the module-level "brief mode's
+    placeholder-fixture disclosure" section above ``_append_step_summary``.
+
+    **A Skipped case is excluded from the pass-rate denominator (code-review
+    FIX 5)** — ``skip=`` on :func:`_gate_summary` — rather than scored as a
+    free pass: see :class:`GateSummary`'s own docstring for why counting it
+    as a pass let an all-Skip run read as a clean 100%.
+    """
+    from aleph.agents.analyst import SkippedNote
+
+    binding = _resolve_brief_binding(args)
+    if binding is None:
+        return 2
+
+    try:
+        dataset = load_brief_seed_set()
+    except _DATA_FILE_ERRORS as error:
+        _unreadable_data_file(BRIEF_SEED_SET_PATH, error)
+        return 2
+
+    placeholder_beats = sorted(
+        {
+            case.inputs.beat_fixture
+            for case in dataset.cases
+            if is_placeholder_fixture(case.inputs.beat_fixture)
+        }
+    )
+    if placeholder_beats:
+        print(_placeholder_fixture_banner(placeholder_beats))
+        print()
+
+    judged = binding.judge is not None
+    if binding.judge is not None:
+        dataset.add_evaluator(BriefRubricJudge(judge=binding.judge))
+
+    report = asyncio.run(
+        dataset.evaluate(
+            build_brief_generation_task(binding.researcher, binding.brief),
+            name=f"brief-seed-set ({binding.label})",
+            max_concurrency=args.max_concurrency,
+        )
+    )
+    report.print(width=_REPORT_WIDTH, include_reasons=True)
+
+    gate = _gate_summary(
+        report,
+        judged=judged,
+        hard_floor_evaluators=BRIEF_HARD_FLOOR_EVALUATORS,
+        judge_assertions=BRIEF_JUDGE_ASSERTIONS,
+        assertions_map=BRIEF_EVALUATOR_ASSERTIONS,
+        safety_assertion=JUDGE_BRIEF_SAFETY,
+        skip=lambda case: isinstance(case.output.result, SkippedNote),
+    )
+    print()
+    print(_render_gate_summary(binding.label, gate))
+    if placeholder_beats:
+        # Printed again, right after the numbers a person is most likely to
+        # be looking at when the run finishes — the top banner is easy to
+        # scroll past on a long run.
+        print()
+        print(_placeholder_fixture_banner(placeholder_beats))
+    _append_step_summary(f"brief — {binding.label}", report, gate)
+    if placeholder_beats:
+        _append_placeholder_step_summary_caveat(placeholder_beats)
+
+    if args.report is not None:
+        payload = _brief_case_payload(report)
+        payload["gate"] = _gate_payload(gate)
+        payload["judge"] = binding.judge.label if binding.judge else None
+        payload["placeholder_fixtures"] = placeholder_beats
+        _write_report(args.report, {"brief_seed_set": {binding.label: payload}})
+
+    hard_floor = set(BRIEF_HARD_FLOOR_EVALUATORS)
+    if judged:
+        hard_floor |= BRIEF_JUDGE_HARD_FLOOR
+    failed_cases = _hard_floor_failures(
+        report, hard_floor, assertions_map=BRIEF_EVALUATOR_ASSERTIONS
+    )
+    if failed_cases:
+        print(f"HARD FLOOR FAILED [{binding.label}]:", file=sys.stderr)
+        for failure in failed_cases:
+            print(f"  - {failure}", file=sys.stderr)
+
+    # Same rule as the outline/lesson gate: the rate only means anything once
+    # the judge has run.
+    gate_failed = judged and not gate.meets_gate
+    if gate_failed:
+        print("SHIP GATE FAILED:", file=sys.stderr)
+        print(
+            f"  - {binding.label}: pass rate {gate.pass_rate:.1%} "
+            f"(gate {SEED_SET_PASS_RATE_GATE:.0%}), "
+            f"{len(gate.safety_failures)} safety failure(s)",
+            file=sys.stderr,
+        )
+    return 1 if (failed_cases or gate_failed) else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="evals", description="Run the Aleph agent eval harness."
@@ -1000,6 +1350,17 @@ def main(argv: list[str] | None = None) -> int:
         "cards from a freshly generated lesson per case) instead of the "
         "outline/lesson seed set. The judge stays MODEL_JUDGE, generation "
         "stays the configured MODEL_OUTLINE/MODEL_LESSON/MODEL_FLASHCARD.",
+    )
+    parser.add_argument(
+        "--briefs",
+        action="store_true",
+        help="brief mode (Phase 6): run evals/brief_seed_set.yaml (research + "
+        "write a Brief per case, replaying its evals/fixtures/retrieval/"
+        "*.yaml fixture — never a live Exa call) instead of the "
+        "outline/lesson seed set. TODAY those fixtures are hand-authored "
+        "placeholders, not real recordings (see docs/evals.md; a run says "
+        "so). The judge stays MODEL_JUDGE, generation stays the configured "
+        "MODEL_RESEARCH/MODEL_BRIEF.",
     )
     parser.add_argument(
         "--full-path-lessons",
@@ -1054,11 +1415,31 @@ def main(argv: list[str] | None = None) -> int:
             "harness always scores drafting quality against the configured "
             "MODEL_OUTLINE/MODEL_LESSON/MODEL_FLASHCARD, not a swept model."
         )
+    if args.briefs and args.agreement:
+        parser.error(
+            "--briefs cannot be combined with --agreement: they are two "
+            "different modes, and each already replaces the default seed-set "
+            "run on its own."
+        )
+    if args.briefs and args.models:
+        parser.error(
+            "--models cannot be combined with --briefs: the brief harness "
+            "always scores research/writing quality against the configured "
+            "MODEL_RESEARCH/MODEL_BRIEF, not a swept model."
+        )
+    if args.briefs and args.flashcards:
+        parser.error(
+            "--briefs cannot be combined with --flashcards: they are two "
+            "different modes, and each already replaces the default seed-set "
+            "run on its own."
+        )
 
     if args.agreement:
         return _run_agreement_mode(args)
     if args.flashcards:
         return _run_flashcard_mode(args)
+    if args.briefs:
+        return _run_brief_mode(args)
     return _run_seed_set_mode(args)
 
 

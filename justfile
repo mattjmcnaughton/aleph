@@ -114,6 +114,10 @@ test-external:
 evals *ARGS:
     uv run python -m evals {{ARGS}}
 
+# Record evals/fixtures/retrieval/*.yaml from the live Exa API (opt-in, costs money; needs EXA_API_KEY). Idempotent — see docs/evals.md
+record-retrieval-fixtures *ARGS:
+    uv run python -m scripts.record_retrieval_fixtures {{ARGS}}
+
 # Fast pre-push check (backend + frontend)
 gate: gate-be gate-fe
 

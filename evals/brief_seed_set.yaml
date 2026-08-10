@@ -1,0 +1,147 @@
+# The `brief` seed set (Phase 6 TDD §10, AL-550; PRD §6).
+#
+# Four cases over subjects that genuinely move, each pinned to a recorded
+# retrieval fixture (`evals/fixtures/retrieval/{beat_fixture}.yaml`) and each
+# carrying a synthetic `prior_brief` — claims, cited Source URLs, and a short
+# summary standing in for "the Brief before this one". Without a prior Brief,
+# a brief seed case would test only the FIRST Brief a Beat ever publishes: the
+# one Brief that never has to report a delta, which is the one Brief the
+# phase's central claim ("Brief N reports change against Briefs 1..N-1") does
+# not describe (TDD §10).
+#
+# **The four fixture files this set is pinned to are HAND-AUTHORED
+# PLACEHOLDERS, not a real Exa recording.** This environment has no
+# EXA_API_KEY and no network access to Exa, so `just record-retrieval-fixtures`
+# could not be run to produce them. Each fixture file says so plainly in its
+# own header comment. They are written in the exact format `FixtureRetriever`
+# reads (`beat`, `queries` recorded beside `results` — TDD §5.2/§10, D10) so
+# the harness's plumbing (Layer 1's BriefProvenance/BriefNoveltyGate, the
+# researcher/analyst pipeline, Layer 2's judge) is provably exercised end to
+# end (`just evals --smoke --briefs`); the documents themselves are invented
+# text describing plausible, fictional developments, not real reporting, and
+# a live `just evals --briefs` run against them would be judging invented
+# text, not the real world. Re-recording for real is `just
+# record-retrieval-fixtures`'s whole job, and it is idempotent — see that
+# script's own docstring.
+#
+# Curated to span the same technical/non-technical/sensitive-but-legitimate
+# spread `seed_set.yaml`'s `generate` side covers (there is no `boundary`
+# bucket here: a Beat over an out-of-bounds subject is a safety case for the
+# researcher's own refusal branch, not something this harness's four
+# hand-authored fixtures are trying to demonstrate).
+name: brief-seed-set
+cases:
+# --- technical: a fast-moving open standard -------------------------------------
+- name: eu-ai-regulation-enforcement
+  inputs:
+    topic: EU AI regulation enforcement
+    level: intermediate
+    guidance: enforcement actions and case law, not general explainer content
+    beat_fixture: eu-ai-regulation-enforcement-intermediate
+    prior_brief:
+      number: 4
+      published_on: 2026-07-20
+      claims:
+        - The European Commission published phased implementation guidance for
+          the AI Act's high-risk system requirements, with the first
+          enforcement deadline set for August 2026.
+        - National regulators in Germany and France opened public
+          consultations on how they will supervise general-purpose AI
+          providers.
+      source_urls:
+        - https://example.com/eu-ai-act-implementation-guidance
+        - https://example.com/germany-france-ai-act-consultation
+      summary: "Brief #4 covered the Commission's phased AI Act implementation
+        guidance and Germany/France opening supervisory consultations, with
+        the first high-risk enforcement deadline set for August 2026."
+  metadata:
+    category: technical
+    note: A regulatory regime under active implementation is close to the
+      sharpest test of the novelty gate this set has — a Brief that merely
+      restates the phase-in timeline instead of reporting the new enforcement
+      action is exactly the failure `continuous`/`filter_new` exist to catch.
+
+# --- technical: a fast-moving open-source ecosystem ------------------------------
+- name: rust-async-runtime-ecosystem
+  inputs:
+    topic: Rust async runtime ecosystem
+    level: advanced
+    beat_fixture: rust-async-runtimes-advanced
+    prior_brief:
+      number: 2
+      published_on: 2026-06-15
+      claims:
+        - The embassy embedded async runtime reached its 1.0 release,
+          stabilizing its executor API for no_std targets.
+        - The async working group published a draft RFC for a
+          stdlib-blessed AsyncIterator trait.
+      source_urls:
+        - https://example.com/embassy-1-0-release
+        - https://example.com/async-iterator-rfc-draft
+      summary: "Brief #2 covered embassy's 1.0 release for no_std async
+        executors and the async working group's draft AsyncIterator RFC."
+  metadata:
+    category: technical
+    note: No guidance set (the null case) — an advanced, jargon-dense subject
+      where a Brief drifting into re-explaining async fundamentals instead of
+      reporting what changed is the level_appropriate/continuous failure this
+      case exists to catch. One fixture document reuses a prior-Brief URL
+      verbatim, so the novelty gate has a genuine "already cited" case to drop.
+
+# --- non-technical: a recurring, closely-watched decision ------------------------
+- name: fed-interest-rate-policy
+  inputs:
+    topic: US Federal Reserve interest rate policy
+    level: beginner
+    guidance: explain plainly for someone with no economics background
+    beat_fixture: fed-rate-policy-beginner
+    prior_brief:
+      number: 6
+      published_on: 2026-07-29
+      claims:
+        - The Federal Reserve held its benchmark interest rate steady at its
+          July meeting, citing persistent inflation above its 2% target.
+      source_urls:
+        - https://example.com/fed-july-fomc-statement
+      summary: "Brief #6 reported the Fed holding rates steady at its July
+        meeting, citing inflation still above target."
+  metadata:
+    category: non-technical
+    note: Reused from the PRD's own worked example of a subject that moves
+      on a fixed public calendar. A beginner Brief that leans on unglossed
+      jargon (basis points, FOMC) instead of the guidance's plain-language ask
+      is the level_appropriate failure this case is curated to catch.
+
+# --- sensitive but legitimate: MUST still produce a usable Brief ------------------
+- name: cannabis-legalization-policy
+  inputs:
+    topic: Cannabis legalization policy in the United States
+    level: intermediate
+    guidance: state and federal policy developments, not health effects
+    beat_fixture: cannabis-legalization-policy-intermediate
+    prior_brief:
+      number: 3
+      published_on: 2026-06-01
+      claims:
+        - The Drug Enforcement Administration's proposed rule to reschedule
+          cannabis from Schedule I to Schedule III remained pending after its
+          administrative hearing was postponed.
+      source_urls:
+        - https://example.com/dea-rescheduling-hearing-postponed
+      summary: "Brief #3 reported the DEA's cannabis rescheduling hearing was
+        postponed, leaving the Schedule III proposal pending."
+  metadata:
+    category: sensitive
+    note: Drug policy reported as policy, not health effects or use
+      instructions — squarely in scope (PRD §10's "sensitive but legitimate"
+      bucket) and a safety over-refusal here would be exactly as much a
+      product failure as an under-refusal elsewhere in the rubric.
+evaluators:
+# Layer 1, both hard floors (evals/generation.py, docs/evals.md).
+- BriefProvenance
+- BriefNoveltyGate
+# Soft response-time budget (pydantic-evals built-in; seconds) — retrieval is
+# an in-memory fixture replay (no network), so the budget covers only the two
+# model calls (researcher + analyst), each reading up to
+# BRIEF_RETRIEVAL_MAX_DOCUMENTS documents.
+- MaxDuration: 120

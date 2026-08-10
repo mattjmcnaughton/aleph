@@ -25,6 +25,7 @@ Five groups:
 
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 from typing import TYPE_CHECKING, get_args
 
@@ -36,6 +37,7 @@ from pydantic_evals import Case, Dataset
 from aleph.agents.flashcard import FlashcardDraft, FlashcardDrafts
 from aleph.agents.lesson import LessonContent, QuickCheck
 from aleph.agents.outline import LessonOutline, PathOutline, Refusal, UnitOutline
+from aleph.agents.researcher import RetrievedDocument
 from evals.__main__ import (
     CaseGateRow,
     GateSummary,
@@ -82,6 +84,7 @@ from evals.generation import (
     SeedMeta,
 )
 from evals.judge import (
+    build_brief_judge_prompt,
     build_flashcard_judge_prompt,
     build_judge_agent,
     build_lesson_judge_prompt,
@@ -1024,6 +1027,63 @@ def test_flashcard_judge_prompt_carries_the_passage_and_the_card() -> None:
     assert "An annotation is a colon and a type after a name." in prompt
     assert "What syntax marks a type annotation?" in prompt
     assert "A colon and a type after the name." in prompt
+
+
+def test_brief_judge_prompt_carries_the_cited_sources() -> None:
+    """Code-review FIX 1: PRD §6's Grounded item is unfalsifiable without the
+    cited Sources' own text — the judge must see exactly what the Brief
+    claims to draw on, on ``build_flashcard_judge_prompt``'s own "grounding
+    is unfalsifiable without [the evidence]" precedent."""
+    sources = [
+        RetrievedDocument(
+            url="https://example.com/rate-cut",
+            publisher="example.com",
+            title="Fed cuts rates a quarter point",
+            published_on=date(2026, 8, 3),
+            text="The Federal Reserve cut its benchmark rate by 25 basis points.",
+        )
+    ]
+    prompt = build_brief_judge_prompt(
+        topic="US Federal Reserve rate policy",
+        level="beginner",
+        guidance=None,
+        prior_brief_number=6,
+        prior_brief_summary="Brief #6 reported the Fed holding rates steady.",
+        prior_brief_claims=["The Fed held its benchmark rate steady."],
+        title="The Fed cuts rates",
+        body_markdown="The Fed cut its benchmark rate by a quarter point.",
+        cited_urls=["https://example.com/rate-cut"],
+        sources=sources,
+    )
+    assert prompt.startswith("artifact=brief")
+    # The cited URL is named explicitly...
+    assert "https://example.com/rate-cut" in prompt
+    # ...and so is the Source's full text — the actual evidence the accurate/
+    # grounding item needs, not just the URL that claims to back it.
+    assert "The Federal Reserve cut its benchmark rate by 25 basis points." in prompt
+    assert "example.com" in prompt
+    assert "Fed cuts rates a quarter point" in prompt
+
+
+def test_brief_judge_prompt_with_no_matching_source_says_so_explicitly() -> None:
+    """An empty ``sources`` list (every cited URL failed to match a
+    retrieved document — should never happen given the agents' own
+    invariants, but the prompt must not silently render nothing) states the
+    gap in words rather than leaving a blank section."""
+    prompt = build_brief_judge_prompt(
+        topic="Anything",
+        level="beginner",
+        guidance=None,
+        prior_brief_number=1,
+        prior_brief_summary="Prior summary.",
+        prior_brief_claims=[],
+        title="A Brief",
+        body_markdown="Body.",
+        cited_urls=["https://example.com/orphaned"],
+        sources=[],
+    )
+    assert "https://example.com/orphaned" in prompt
+    assert "treat every claim as ungrounded" in prompt
 
 
 # --- 6c. the stub judge and the evaluator -----------------------------------------

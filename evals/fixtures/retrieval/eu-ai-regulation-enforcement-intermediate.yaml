@@ -1,0 +1,97 @@
+# HAND-AUTHORED PLACEHOLDER — NOT A REAL EXA RECORDING.
+#
+# This environment has no EXA_API_KEY and no network access to Exa, so
+# `just record-retrieval-fixtures` could not be run to produce this file. It
+# is written by hand, in the exact format `FixtureRetriever`
+# (src/aleph/services/retrieval.py) reads — `beat`, `queries` recorded beside
+# `results` (TDD §5.2/§10, D10) — so evals/brief_seed_set.yaml's
+# "eu-ai-regulation-enforcement" case can exercise the harness's plumbing
+# offline. Every document below is INVENTED text describing a plausible,
+# fictional regulatory development, not a real news report. Judging real
+# quality against it (a live `just evals --briefs` run) would be judging
+# invented text, not the world. Replace this file for real with `just
+# record-retrieval-fixtures` once EXA_API_KEY is available — the script skips
+# a fixture that already exists unless `--force` is passed, so re-recording
+# for real is a deliberate, explicit action, never an accidental overwrite.
+beat: eu-ai-regulation-enforcement-intermediate
+# Runtime marker (code-review FIX 2, AL-550): read by
+# `evals.generation.is_placeholder_fixture` to print a banner and record
+# provenance whenever this fixture is used — `FixtureRetriever` ignores any
+# key it does not itself read, so this costs it nothing. `just
+# record-retrieval-fixtures` never writes this key, so a real recording is
+# indistinguishable from having no marker at all.
+placeholder: true
+queries:
+  - "EU AI regulation enforcement"
+  - "EU AI regulation enforcement — latest developments since 2026-07-20"
+  - "EU AI regulation enforcement: enforcement actions and case law, not general explainer content — since 2026-07-20"
+  - "EU AI regulation enforcement news since 2026-07-20"
+  - "EU AI regulation enforcement announcements since 2026-07-20"
+  - "EU AI regulation enforcement analysis and commentary since 2026-07-20"
+results:
+  "EU AI regulation enforcement":
+    - url: "https://example.com/ireland-dpc-first-ai-act-fine"
+      publisher: "example.com"
+      title: "Ireland's data protection authority issues first AI Act fine against a facial-recognition vendor"
+      published_on: "2026-07-28"
+      text: >
+        Ireland's Data Protection Commission announced it has fined a
+        facial-recognition vendor two million euro for deploying a
+        high-risk AI system without the conformity assessment the AI Act
+        requires. The DPC said the vendor had been operating the system in
+        retail stores since March without registering it in the EU's
+        high-risk database, and gave the company 60 days to either bring
+        the system into compliance or withdraw it from the market. This is
+        the first monetary penalty issued under the Act's high-risk
+        enforcement provisions since they took effect.
+  "EU AI regulation enforcement — latest developments since 2026-07-20":
+    - url: "https://example.com/eu-ai-act-implementation-guidance"
+      publisher: "example.com"
+      title: "European Commission publishes phased AI Act implementation guidance"
+      published_on: "2026-07-18"
+      text: >
+        The European Commission published guidance describing a phased
+        rollout of the AI Act's high-risk system obligations, with the
+        first enforcement deadline set for August 2026. This document is
+        included again here because it is genuinely still findable under
+        this query at record time; the novelty gate is expected to drop it
+        since its URL already appears in the prior Brief's cited Sources.
+    - url: "https://example.com/france-cnil-ai-act-supervisory-notice"
+      publisher: "example.com"
+      title: "France's CNIL issues its first supervisory notice under the AI Act"
+      published_on: "2026-07-30"
+      text: >
+        The Commission Nationale de l'Informatique et des Libertes (CNIL)
+        issued its first formal supervisory notice under the AI Act,
+        ordering a hiring-screening AI provider to suspend deployment
+        pending a bias audit. CNIL said the notice follows up on the public
+        consultation it opened last month on supervising general-purpose AI
+        providers, and marks its first concrete enforcement step rather
+        than a further round of guidance.
+  "EU AI regulation enforcement: enforcement actions and case law, not general explainer content — since 2026-07-20": []
+  "EU AI regulation enforcement news since 2026-07-20":
+    - url: "https://example.com/germany-bundesnetzagentur-ai-act-staffing"
+      publisher: "example.com"
+      title: "Germany's Bundesnetzagentur adds a dedicated AI Act enforcement unit"
+      published_on: "2026-07-26"
+      text: >
+        Germany's federal network regulator, the Bundesnetzagentur, said it
+        has stood up a dedicated unit of twelve staff to handle AI Act
+        enforcement complaints, following the consultation it opened
+        alongside France's CNIL. The regulator said the unit's first cases
+        will focus on high-risk systems used in hiring and credit
+        decisions, and that it expects to issue its first enforcement
+        decisions before the end of the year.
+  "EU AI regulation enforcement announcements since 2026-07-20": []
+  "EU AI regulation enforcement analysis and commentary since 2026-07-20":
+    - url: "https://example.com/ai-act-enforcement-analysis-first-quarter"
+      publisher: "example.com"
+      title: "Analysis: the AI Act's first enforcement quarter, in four cases"
+      published_on: "2026-07-31"
+      text: >
+        A policy analysis piece rounding up the AI Act's first enforcement
+        actions — Ireland's DPC fine, France's CNIL notice, and Germany's
+        new enforcement unit — arguing that national regulators are moving
+        faster and more independently than the Commission's own phased
+        guidance anticipated, and that the AI Office's coordinating role is
+        being tested earlier than expected.

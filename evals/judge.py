@@ -64,6 +64,7 @@ if TYPE_CHECKING:
 
     from aleph.agents.lesson import LessonContent, PriorPassage
     from aleph.agents.outline import Level, PathOutline
+    from aleph.agents.researcher import RetrievedDocument
     from evals.rubric import RubricItem
 
 
@@ -72,9 +73,11 @@ if TYPE_CHECKING:
 SYSTEM_PROMPT = """\
 You are the quality gate for a self-directed adult learning app. You are given \
 one generated artifact — a path OUTLINE, a single LESSON (a Read passage plus a \
-Quick check), or a single drafted FLASHCARD (a front and a back, drafted from \
-one lesson's Read passage) — together with the context it was generated in, \
-and you score it against a fixed rubric.
+Quick check), a single drafted FLASHCARD (a front and a back, drafted from one \
+lesson's Read passage), or a published BRIEF (a short cited report from a \
+standing research assignment, shown together with the prior Brief it follows) \
+— together with the context it was generated in, and you score it against a \
+fixed rubric.
 
 Every rubric item is BINARY: it passes or it fails, with no middle grade. The \
 artifact passes overall only if every item passes, so a fail is a real claim \
@@ -168,7 +171,7 @@ def build_judge_agent() -> Agent[JudgeDeps, JudgeVerdict]:
 # emit. First line, exactly once, ahead of any free text.
 _ARTIFACT_TOKEN = "artifact"
 _ARTIFACT_RE = re.compile(
-    rf"{_ARTIFACT_TOKEN}\s*=\s*(outline|lesson|flashcard_draft)", re.IGNORECASE
+    rf"{_ARTIFACT_TOKEN}\s*=\s*(outline|lesson|flashcard_draft|brief)", re.IGNORECASE
 )
 
 
@@ -303,6 +306,108 @@ def build_flashcard_judge_prompt(
     )
 
 
+def _serialize_sources(sources: Sequence[RetrievedDocument]) -> str:
+    """The cited Sources as prompt text — one block per document, in order,
+    each carrying its **full retrieved text** (mirrors ``_serialize_lesson``'s
+    "give the judge the whole thing, never a snippet" discipline: a judge
+    that only sees a snippet cannot tell "exceeds what the Source supports"
+    from "the missing part would have supported it").
+    """
+    blocks: list[str] = []
+    for source in sources:
+        published = (
+            source.published_on.isoformat()
+            if source.published_on is not None
+            else "date unknown"
+        )
+        blocks.append(
+            f"[{source.url}]\n{source.publisher} — {source.title!r} ({published})\n"
+            f"{source.text}"
+        )
+    return "\n\n".join(blocks)
+
+
+def build_brief_judge_prompt(
+    *,
+    topic: str,
+    level: Level,
+    guidance: str | None,
+    prior_brief_number: int,
+    prior_brief_summary: str,
+    prior_brief_claims: Sequence[str],
+    title: str,
+    body_markdown: str,
+    cited_urls: Sequence[str],
+    sources: Sequence[RetrievedDocument],
+) -> str:
+    """The judge's user prompt for one published Brief (Phase 6 TDD §10).
+
+    Carries the **prior Brief's own claims and a short summary, verbatim** —
+    the ``continuous`` item's evidence, on the lesson prompt's own
+    ``prior_passages`` precedent: without them the item (PRD §6's *Delta*) is
+    unfalsifiable, exactly as continuity is for a lesson with no prior Read
+    passages shown. There is no path outline here (a Brief has no position in
+    an ordered curriculum, CONTEXT.md).
+
+    **Also carries the Brief's ``cited_urls`` and the full text of the Sources
+    behind them — code-review FIX 1.** An earlier version of this function
+    argued a Brief needs no Sources block because "the judge scores the
+    Brief's prose against what it was given", but never actually gave it
+    anything to check the prose against: the ``accurate`` item's
+    :data:`~evals.rubric.ARTIFACT_NOTES` reading (PRD §6's *Grounded*)
+    explicitly promises the cited Sources are "given to you below", and
+    without them the judge can only score from its own world knowledge or
+    pass by default — PRD §6's Grounded dimension was not being measured at
+    all. This is exactly ``build_flashcard_judge_prompt``'s own reasoning
+    ("grounding is unfalsifiable without [the Read passage]"), applied to the
+    item this function had dropped it for. ``sources`` is the set of
+    ``RetrievedDocument``s backing ``cited_urls`` — never the full retrieved
+    batch — so the judge sees exactly the evidence the Brief claims to draw
+    on, mirroring the flashcard prompt's one-source-passage shape rather than
+    handing over documents the Brief never cited.
+    """
+    sections = [
+        f"{_ARTIFACT_TOKEN}=brief",
+        f"Topic (the Beat's standing research assignment): {topic}",
+        f"Learner level: {level}",
+    ]
+    if guidance:
+        sections.append(f"Guidance from the learner: {guidance}")
+    sections.append(
+        f"Prior Brief #{prior_brief_number} — the one this Brief must report a "
+        "DELTA against (this is the evidence for the continuous item; judge "
+        "against this, not general background the topic already had):"
+    )
+    sections.append(prior_brief_summary)
+    if prior_brief_claims:
+        sections.append(
+            "Prior Brief's claims, verbatim:\n- " + "\n- ".join(prior_brief_claims)
+        )
+    sections.append(
+        "Cited Sources — the evidence for the accurate/grounding item. The "
+        "Brief below claims these URLs as its sources:\n- " + "\n- ".join(cited_urls)
+    )
+    sections.append(
+        "Full text of the cited Sources, verbatim — every claim about the "
+        "world in the Brief must trace to one of these, and none may exceed "
+        "what its text actually supports (Phase 6 PRD §6: Grounded):"
+    )
+    sections.append(
+        _serialize_sources(sources)
+        if sources
+        else "(none of the cited URLs matched a retrieved Source — treat "
+        "every claim as ungrounded)"
+    )
+    sections.extend(
+        [
+            "BRIEF UNDER REVIEW:",
+            f"Title: {title}",
+            body_markdown,
+        ]
+    )
+    return "\n\n".join(sections)
+
+
 # --- the runner ----------------------------------------------------------------
 
 
@@ -387,6 +492,39 @@ class Judge:
         )
         return run.output
 
+    async def judge_brief(
+        self,
+        *,
+        topic: str,
+        level: Level,
+        guidance: str | None,
+        prior_brief_number: int,
+        prior_brief_summary: str,
+        prior_brief_claims: Sequence[str],
+        title: str,
+        body_markdown: str,
+        cited_urls: Sequence[str],
+        sources: Sequence[RetrievedDocument],
+    ) -> JudgeVerdict:
+        """Score one published Brief against its five applicable rubric items."""
+        run = await self.agent.run(
+            build_brief_judge_prompt(
+                topic=topic,
+                level=level,
+                guidance=guidance,
+                prior_brief_number=prior_brief_number,
+                prior_brief_summary=prior_brief_summary,
+                prior_brief_claims=prior_brief_claims,
+                title=title,
+                body_markdown=body_markdown,
+                cited_urls=cited_urls,
+                sources=sources,
+            ),
+            deps=JudgeDeps(artifact="brief"),
+            model=self.model,
+        )
+        return run.output
+
 
 # --- the offline stub judge ----------------------------------------------------
 
@@ -447,8 +585,8 @@ def _stub_judge_respond(
     if match is None:
         raise StubJudgeError(
             "judge prompt is missing its "
-            "'artifact=<outline|lesson|flashcard_draft>' token, so the stub "
-            "judge cannot tell which rubric item set to score"
+            "'artifact=<outline|lesson|flashcard_draft|brief>' token, so the "
+            "stub judge cannot tell which rubric item set to score"
         )
     kind: ArtifactKind = cast("ArtifactKind", match.group(1).lower())
     applicable = APPLICABLE_ITEMS[kind]
