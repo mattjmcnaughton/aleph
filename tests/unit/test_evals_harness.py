@@ -38,7 +38,7 @@ import pytest
 from pydantic_evals import Case, Dataset
 from pydantic_evals.evaluators import EvaluationReason, Evaluator
 
-from aleph.agents.analyst import BriefBody, SkippedNote
+from aleph.agents.analyst import AnalystDeps, BriefBody, SkippedNote
 from aleph.agents.flashcard import FlashcardDraft, FlashcardDrafts
 from aleph.agents.lesson import LessonCaps, LessonContent, QuickCheck
 from aleph.agents.outline import (
@@ -54,8 +54,16 @@ from aleph.agents.researcher import cites_only_read_documents as agent_cites_onl
 from aleph.config import Settings
 from aleph.domains.novelty import filter_new as domain_filter_new
 from aleph.services.generation import _lesson_caps_from, _outline_caps_from
+from aleph.services.retrieval import FixtureRetriever, build_query_plan, retrieve
 from evals import generation as harness_generation
-from evals.__main__ import _case_payload, _hard_floor_failures, main
+from evals.__main__ import (
+    GateSummary,
+    _case_payload,
+    _gate_summary,
+    _hard_floor_failures,
+    _render_gate_summary,
+    main,
+)
 from evals.generation import (
     BRIEF_FIXTURES_DIR,
     BRIEF_HARD_FLOOR_EVALUATORS,
@@ -87,6 +95,7 @@ from evals.generation import (
     build_brief_smoke_model,
     build_flashcard_generation_task,
     build_generation_task,
+    is_placeholder_fixture,
     load_brief_seed_set,
     load_flashcard_seed_set,
     load_seed_set,
@@ -94,6 +103,8 @@ from evals.generation import (
 )
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from pydantic_evals.evaluators import EvaluatorContext
     from pydantic_evals.reporting import EvaluationReport
 
@@ -1354,3 +1365,154 @@ async def test_brief_stale_fixture_errors_the_case_rather_than_scoring_a_pass() 
         assertions_map=harness_generation.BRIEF_EVALUATOR_ASSERTIONS,
     )
     assert any("errored" in failure for failure in failures)
+
+
+# --- FIX 2: the placeholder-fixture marker (code-review, AL-550) -----------------
+
+
+def test_every_committed_brief_fixture_is_marked_a_placeholder() -> None:
+    """All four committed fixtures are hand-authored placeholders today
+    (docs/evals.md); each must carry the marker the runtime banner keys off,
+    or the disclosure silently stops firing."""
+    for case in load_brief_seed_set().cases:
+        assert is_placeholder_fixture(case.inputs.beat_fixture), (
+            case.inputs.beat_fixture
+        )
+
+
+def test_is_placeholder_fixture_is_false_once_the_marker_is_gone(
+    tmp_path: Path,
+) -> None:
+    """A real recording (``just record-retrieval-fixtures`` never writes
+    ``placeholder: true``) must read as NOT a placeholder — the disclosure
+    has to disappear on its own, with nothing to remember to update."""
+    (tmp_path / "real-beat.yaml").write_text(
+        "beat: real-beat\nqueries: [q]\nresults: {q: []}\n"
+    )
+    assert is_placeholder_fixture("real-beat", fixtures_dir=tmp_path) is False
+
+
+def test_is_placeholder_fixture_is_false_for_a_missing_file(tmp_path: Path) -> None:
+    """Not this function's problem to raise on — ``FixtureRetriever`` is what
+    turns a missing/stale fixture into a hard failure."""
+    assert is_placeholder_fixture("does-not-exist", fixtures_dir=tmp_path) is False
+
+
+# --- FIX 3: open_threads mirrors production's open_thread_claims -----------------
+
+
+@pytest.mark.anyio
+async def test_open_threads_carries_the_prior_briefs_claims_not_its_summary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Code-review FIX 3: the harness's ``AnalystDeps.open_threads`` must be
+    the synthetic prior Brief's ``claims`` — matching
+    ``services/briefing.py``'s ``open_threads=list(context.
+    open_thread_claims)`` — never its prose ``summary``. The old behaviour
+    handed the analyst a recap that opens by naming the prior Brief ("Brief
+    #6 reported…"), a shape production's own ``open_thread_claims`` never
+    produces, and then judged ``continuous`` against a prompt that told the
+    analyst to address it explicitly.
+    """
+    captured: list[list[str]] = []
+    real_build_analyst_prompt = harness_generation.build_analyst_prompt
+
+    def _spy(deps: AnalystDeps) -> str:
+        captured.append(list(deps.open_threads))
+        return real_build_analyst_prompt(deps)
+
+    monkeypatch.setattr(harness_generation, "build_analyst_prompt", _spy)
+
+    dataset = load_brief_seed_set()
+    case = dataset.cases[0]
+    stub = build_brief_smoke_model()
+    task = build_brief_generation_task(stub, stub)
+    await task(case.inputs)
+
+    assert captured, "build_analyst_prompt was never called"
+    (open_threads,) = captured
+    assert open_threads == list(case.inputs.prior_brief.claims)
+    assert case.inputs.prior_brief.summary not in open_threads
+
+
+# --- FIX 5: a Skipped case is excluded from the pass-rate denominator ------------
+
+
+async def _all_skip_inputs(inputs: BriefSeedInputs) -> BriefSeedInputs:
+    """``inputs``, but with its synthetic prior Brief widened to cite every
+    URL its own fixture actually returns — forcing ``filter_new`` to drop
+    every finding, so the case Skips (the concrete FIX 5 scenario: someone
+    updates the seed set's ``prior_brief`` to match freshly re-recorded
+    fixtures)."""
+    retriever = FixtureRetriever(BRIEF_FIXTURES_DIR, inputs.beat_fixture)
+    plan = build_query_plan(
+        inputs.topic,
+        inputs.guidance,
+        since=inputs.prior_brief.published_on,
+        max_queries=BRIEF_RETRIEVAL_MAX_QUERIES,
+    )
+    documents = await retrieve(
+        retriever,
+        plan,
+        max_documents=BRIEF_RETRIEVAL_MAX_DOCUMENTS,
+        text_budget_chars=BRIEF_RETRIEVAL_TEXT_BUDGET_CHARS,
+    )
+    return inputs.model_copy(
+        update={
+            "prior_brief": inputs.prior_brief.model_copy(
+                update={"source_urls": [document.url for document in documents]}
+            )
+        }
+    )
+
+
+@pytest.mark.anyio
+async def test_an_all_skip_brief_run_is_excluded_and_fails_the_gate() -> None:
+    """Code-review FIX 5: a Skipped case must never score a free pass.
+
+    Before the fix, ``BriefRubricJudge`` returned ``passed=True`` for both
+    judge assertions on a Skipped case, and ``_gate_summary`` counted that as
+    a scored pass — so an all-Skip run (reachable simply by updating the seed
+    set's ``prior_brief`` to match freshly re-recorded fixtures) printed
+    ``4/4 (100.0%)``, gate met, exit 0, with zero Briefs written and zero
+    rubric items ever scored. After the fix a Skipped case is excluded from
+    the denominator entirely, so an all-Skip run has ``total == 0`` and
+    ``meets_gate`` is ``False`` — "no scoreable cases", never a clean pass.
+    """
+    dataset = load_brief_seed_set()
+    for case in dataset.cases:
+        case.inputs = await _all_skip_inputs(case.inputs)
+
+    stub = build_brief_smoke_model()
+    report = await dataset.evaluate(
+        build_brief_generation_task(stub, stub), progress=False
+    )
+    assert not report.failures
+    assert len(report.cases) == len(dataset.cases)
+    for case in report.cases:
+        assert isinstance(case.output.result, SkippedNote), (
+            f"{case.name}: expected every case to Skip, got a published Brief"
+        )
+
+    gate = _gate_summary(
+        report,
+        judged=False,
+        hard_floor_evaluators=BRIEF_HARD_FLOOR_EVALUATORS,
+        assertions_map=harness_generation.BRIEF_EVALUATOR_ASSERTIONS,
+        skip=lambda c: isinstance(c.output.result, SkippedNote),
+    )
+    assert gate.total == 0
+    assert gate.passed == 0
+    assert set(gate.skipped) == {case.name for case in report.cases}
+    assert gate.meets_gate is False
+
+    rendered = _render_gate_summary("all-skip-probe", gate)
+    assert "skipped: 4" in rendered
+    assert "pass rate: 0/0" in rendered
+
+
+def test_gate_summary_skip_is_a_no_op_for_every_other_kind() -> None:
+    """``skip=None`` (the default, used by every non-brief CLI mode) must
+    preserve the exact previous behaviour: every case becomes a row."""
+    summary = GateSummary(rows=(), judged=True, safety_failures=())
+    assert summary.skipped == ()

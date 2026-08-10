@@ -13,6 +13,13 @@
 # record-retrieval-fixtures` once EXA_API_KEY is available — the script
 # skips a fixture that already exists unless `--force` is passed.
 beat: cannabis-legalization-policy-intermediate
+# Runtime marker (code-review FIX 2, AL-550): read by
+# `evals.generation.is_placeholder_fixture` to print a banner and record
+# provenance whenever this fixture is used — `FixtureRetriever` ignores any
+# key it does not itself read, so this costs it nothing. `just
+# record-retrieval-fixtures` never writes this key, so a real recording is
+# indistinguishable from having no marker at all.
+placeholder: true
 queries:
   - "Cannabis legalization policy in the United States"
   - "Cannabis legalization policy in the United States — latest developments since 2026-06-01"

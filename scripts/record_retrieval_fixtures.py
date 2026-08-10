@@ -36,6 +36,30 @@ simple and against :class:`ExaRetriever`'s public ``search()`` method rather
 than reaching into its private per-query sizing helper, so this script does
 not need to track that method's internals across a refactor.
 
+**Fixture size (code-review FIX 6, AL-550).** The sizing note above means one
+Beat's six single-query calls can return up to ``ceil(12 * 1.5) = 18`` raw
+results EACH — up to 108 raw extractions, un-deduped, before this section's
+two mitigations: **(1)** every document's ``text`` is truncated to
+``BRIEF_RETRIEVAL_TEXT_BUDGET_CHARS`` (160 000 chars, D14a) before it is
+written — a live replay would truncate it further anyway (that budget is
+divided across at most ``BRIEF_RETRIEVAL_MAX_DOCUMENTS`` = 12 documents), so
+nothing a real run would have read is lost; **(2)** a document already
+recorded under an earlier query in this Beat's plan is **not written again**
+under a later query that also returned it — deduped by URL, first occurrence
+wins, exactly `retrieve()`'s own ``_dedupe_by_url`` order — while every
+query still gets its own ``results`` entry (an explicit ``[]`` when every one
+of its documents was already claimed), so ``queries``/``results`` stay keyed
+1:1 and `FixtureRetriever` cannot tell the difference from a query that
+genuinely found nothing new. **Expected size:** real news/reference articles
+run a few KB to a few tens of KB of extracted text, so a typical Beat
+(6 queries, meaningful cross-query overlap on one subject) is expected to
+land in the **tens to low hundreds of KB**, not megabytes; the 160 000-char
+per-document ceiling only binds against a pathological single extraction, and
+the true worst case — 108 entirely distinct URLs, each hitting the full
+160 000-char ceiling — is a **~17 MB theoretical bound** no real Beat here
+approaches. `docs/evals.md`'s cost-estimate section repeats this so it is a
+decision made in advance, not a surprise discovered at commit time.
+
 Usage::
 
     just record-retrieval-fixtures
@@ -61,10 +85,18 @@ if TYPE_CHECKING:
     from aleph.agents.researcher import RetrievedDocument
 
 
-def _document_to_mapping(document: RetrievedDocument) -> dict[str, object]:
+def _document_to_mapping(
+    document: RetrievedDocument, *, text_budget_chars: int
+) -> dict[str, object]:
     """One ``results[query][i]`` entry, matching what
     :class:`~aleph.services.retrieval.FixtureRetriever`'s own
-    ``_document_from_mapping`` reads back."""
+    ``_document_from_mapping`` reads back.
+
+    ``text`` is truncated to ``text_budget_chars`` — a plain prefix, mirroring
+    ``retrieve()``'s own ``_apply_text_budget`` (code-review FIX 6, AL-550;
+    see the module docstring's "Fixture size" section for why nothing a real
+    replay would have read is lost by capping here too).
+    """
     return {
         "url": document.url,
         "publisher": document.publisher,
@@ -74,7 +106,7 @@ def _document_to_mapping(document: RetrievedDocument) -> dict[str, object]:
             if document.published_on is not None
             else None
         ),
-        "text": document.text,
+        "text": document.text[:text_budget_chars],
     }
 
 
@@ -86,6 +118,7 @@ async def _record_one(
     since: date,
     max_queries: int,
     max_documents: int,
+    text_budget_chars: int,
     out_path: Path,
     api_key: str,
 ) -> None:
@@ -98,20 +131,43 @@ async def _record_one(
     plan = build_query_plan(topic, guidance, since=since, max_queries=max_queries)
     retriever = ExaRetriever(api_key, since=since, max_documents=max_documents)
 
+    # FIX 6 (code review, AL-550): dedupe by URL ACROSS this Beat's queries —
+    # first occurrence wins, in `plan.queries` order, matching `retrieve()`'s
+    # own `_dedupe_by_url` — and truncate every kept document's text. Every
+    # query still gets its own `results[query]` entry, even when every one of
+    # its documents was already claimed by an earlier query: an explicit
+    # `[]` is the same affirmative-empty-result shape `FixtureRetriever`
+    # already treats as legitimate, so `queries`/`results` stay keyed 1:1 and
+    # a query fully deduped away reads identically to one Exa returned
+    # nothing for. See the module docstring's "Fixture size" section.
+    seen_urls: set[str] = set()
     results: dict[str, list[dict[str, object]]] = {}
-    total_documents = 0
+    raw_documents = 0
+    recorded_documents = 0
     for query in plan.queries:
         documents = await retriever.search([query])
-        results[query] = [_document_to_mapping(document) for document in documents]
-        total_documents += len(documents)
+        raw_documents += len(documents)
+        kept: list[dict[str, object]] = []
+        for document in documents:
+            if document.url in seen_urls:
+                continue
+            seen_urls.add(document.url)
+            kept.append(
+                _document_to_mapping(document, text_budget_chars=text_budget_chars)
+            )
+        results[query] = kept
+        recorded_documents += len(kept)
 
     payload = {"beat": beat, "queries": list(plan.queries), "results": results}
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
     query_word = "query" if len(plan.queries) == 1 else "queries"
+    duplicates = raw_documents - recorded_documents
     print(
         f"recorded {out_path} ({len(plan.queries)} {query_word}, "
-        f"{total_documents} document(s))"
+        f"{recorded_documents} document(s) after cross-query dedupe "
+        f"({duplicates} duplicate(s) dropped), each capped at "
+        f"{text_budget_chars:,} chars)"
     )
 
 
@@ -163,6 +219,7 @@ async def _main_async(args: argparse.Namespace) -> int:
             since=case.inputs.prior_brief.published_on,
             max_queries=settings.brief_retrieval_max_queries,
             max_documents=settings.brief_retrieval_max_documents,
+            text_budget_chars=settings.brief_retrieval_text_budget_chars,
             out_path=out_path,
             api_key=settings.exa_api_key,
         )

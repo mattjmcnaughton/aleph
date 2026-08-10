@@ -1018,7 +1018,15 @@ def build_flashcard_generation_task(
 # `FixtureRetriever` production and integration tests use (`services/
 # retrieval.py`), then runs the *same* researcher/analyst agents
 # `services/briefing.py` runs, in the same order, against the same shared
-# provenance/novelty functions.
+# provenance/novelty functions — **and, since code-review FIX 3, the same
+# shape of `AnalystDeps` too**: `open_threads` is built from the synthetic
+# prior Brief's own `claims`, exactly as `services/briefing.py` builds it from
+# `context.open_thread_claims` (the latest *published* Brief's claims), never
+# from a prose summary the production analyst is never shown. What still
+# differs from production is retrieval itself (a fixture replay, never a live
+# `Retriever`) and the *history* a real Beat's `prior_claims`/
+# `open_thread_claims` may carry — the synthetic prior Brief is always
+# exactly one Brief, standing in for both.
 #
 # **Layer 1 imports the shipped functions, never a second spelling** (TDD §10):
 # `cites_only_read_documents` (`aleph.agents.researcher`, AL-520) and
@@ -1045,9 +1053,18 @@ class SyntheticPriorBrief(BaseModel):
     item have something to be a delta *of* — it is never itself judged, and it
     is not claimed to be a real, previously-published Brief. `claims` and
     `source_urls` feed the *same* novelty gate `services/briefing.py` runs in
-    production; `summary` is prose context handed to the analyst as an open
-    thread and to the judge as continuity evidence, mirroring how a real prior
-    Brief's own body would read to both.
+    production, and — since code-review FIX 3 — `claims` alone is also what
+    `build_brief_generation_task` passes as the analyst's `open_threads`,
+    matching `services/briefing.py`'s own `context.open_thread_claims`
+    (the latest *published* Brief's claims, never a prose recap). `summary`
+    is prose context handed only to the judge, as continuity evidence for the
+    `continuous` item — never to the analyst. Earlier this field also fed
+    the analyst's `open_threads`, which was wrong: the summaries here open by
+    naming the prior Brief ("Brief #6 reported…"), a shape production's own
+    `open_thread_claims` never produces, and the analyst's own prompt tells
+    it to "address explicitly" whatever `open_threads` carries — so a
+    summary-shaped `open_threads` was training the harness to fail a
+    well-behaved analyst on `continuous` for doing exactly what it was told.
     """
 
     number: int
@@ -1085,9 +1102,20 @@ class BriefSample(BaseModel):
     the final `result`) because `BriefNoveltyGate` needs the raw findings to
     recompute the gate, and a report row is unreadable without seeing how many
     of them survived.
+
+    `documents` is the full `RetrievedDocument` list `document_urls` is
+    derived from — carried alongside it, not instead of it, so existing
+    callers that only need the URLs are unaffected. It exists for
+    `BriefRubricJudge` (code-review FIX 1): the judge needs each cited
+    Source's publisher/title/text, not just its URL, to score `accurate`
+    (PRD §6's *Grounded*) against real evidence rather than its own world
+    knowledge. Defaults to `[]` so every `BriefSample(...)` constructed
+    before this field existed (this module's own Layer 1 tests) keeps
+    working unchanged — those tests never exercise the judge.
     """
 
     document_urls: list[str]
+    documents: list[RetrievedDocument] = []
     findings: list[Finding]
     survivors: list[Finding]
     result: BriefResult
@@ -1216,6 +1244,44 @@ def load_brief_seed_set() -> Dataset[BriefSeedInputs, BriefSample, SeedMeta]:
     )
 
 
+def is_placeholder_fixture(
+    beat_fixture: str, *, fixtures_dir: Path = BRIEF_FIXTURES_DIR
+) -> bool:
+    """Whether ``beat_fixture``'s recorded retrieval fixture is a
+    hand-authored placeholder, not a real Exa recording (code-review FIX 2,
+    AL-550).
+
+    Reads the fixture's own top-level ``placeholder: true`` marker directly,
+    the same way :func:`~aleph.services.retrieval._load_fixture` reads
+    ``beat``/``queries``/``results`` — a bare ``dict.get`` against the parsed
+    YAML. `FixtureRetriever` tolerates the extra key by construction: it only
+    ever reads the three keys it knows and ignores everything else in the
+    mapping, so this marker costs it nothing and needed no change there.
+    ``just record-retrieval-fixtures`` never writes this key (see its own
+    module docstring), so a real recording is indistinguishable from having
+    no marker at all — the disclosure disappears automatically the moment a
+    fixture is genuinely re-recorded, with no second place to remember to
+    update.
+
+    A missing or unreadable fixture file is **not** this function's problem
+    to raise on — that is `FixtureRetriever`'s job (§5.2's hard-floor rule),
+    and it runs on every real replay regardless of what this function
+    reports. Here, a fixture that cannot yet be read is simply not knowably
+    a placeholder, so this returns ``False`` and lets the real replay fail
+    loudly on its own terms.
+    """
+    path = fixtures_dir / f"{beat_fixture}.yaml"
+    if not path.is_file():
+        return False
+    import yaml  # local import — mirrors `_load_fixture`'s own reasoning.
+
+    try:
+        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError:
+        return False
+    return bool(raw.get("placeholder", False)) if isinstance(raw, dict) else False
+
+
 # --- Layer 2: the binary judge --------------------------------------------------
 
 #: Mirrors :data:`JUDGE_FLASHCARDS`/:data:`JUDGE_FLASHCARD_SAFETY`: one case is
@@ -1264,6 +1330,14 @@ class BriefRubricJudge(Evaluator[BriefSeedInputs, BriefSample, SeedMeta]):
             }
 
         prior = ctx.inputs.prior_brief
+        # FIX 1 (code review, AL-550): the judge needs the cited Sources'
+        # own text to score `accurate`/Grounded against evidence rather than
+        # its own world knowledge — `sources` is exactly the
+        # `RetrievedDocument`s backing `result.cited_urls`, drawn from this
+        # run's full retrieved batch (`ctx.output.documents`), never the
+        # documents the Brief did NOT cite.
+        cited = set(result.cited_urls)
+        sources = [doc for doc in ctx.output.documents if doc.url in cited]
         verdict = await self.judge.judge_brief(
             topic=ctx.inputs.topic,
             level=ctx.inputs.level,
@@ -1273,6 +1347,8 @@ class BriefRubricJudge(Evaluator[BriefSeedInputs, BriefSample, SeedMeta]):
             prior_brief_claims=prior.claims,
             title=result.title,
             body_markdown=result.body_markdown,
+            cited_urls=result.cited_urls,
+            sources=sources,
         )
         safety_entry = verdict.verdict_for(SAFETY_ITEM)
         safety_failed = safety_entry is not None and not safety_entry.passed
@@ -1393,9 +1469,13 @@ def build_brief_generation_task(
             guidance=inputs.guidance,
             documents=analyst_documents,
             survivors=survivors,
-            open_threads=[inputs.prior_brief.summary]
-            if inputs.prior_brief.summary
-            else [],
+            # FIX 3 (code review, AL-550): `open_threads` is the prior
+            # Brief's own `claims` — matching `services/briefing.py`'s
+            # `open_threads=list(context.open_thread_claims)` — never the
+            # synthetic prior Brief's prose `summary` (see
+            # `SyntheticPriorBrief`'s own docstring for why the summary was
+            # actively harmful here, not merely a divergence).
+            open_threads=list(inputs.prior_brief.claims),
         )
         analyst_run = await analyst_agent.run(
             build_analyst_prompt(analyst_deps), deps=analyst_deps, model=brief_model
@@ -1404,6 +1484,7 @@ def build_brief_generation_task(
 
         return BriefSample(
             document_urls=[document.url for document in documents],
+            documents=documents,
             findings=findings,
             survivors=survivors,
             result=analyst_run.output,

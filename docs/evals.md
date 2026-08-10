@@ -29,7 +29,10 @@
 > real reporting. A live `just evals --briefs` run against them today would be
 > judging invented text, not the world. See "The `brief` research/writing mode"
 > below for the honest limit this implies even once real fixtures are
-> recorded.
+> recorded. **This is no longer only written down (code-review FIX 2):** a
+> `--briefs` run prints a banner naming which fixtures are placeholders,
+> mirrors it into the GitHub Actions step summary, and records it in the
+> `--report` JSON — see that section's "HAND-AUTHORED PLACEHOLDERS" paragraph.
 
 ## Why
 
@@ -440,15 +443,21 @@ A structurally different harness from the other three, because a Brief's
 context cannot be generated at all — it is **retrieved**, and PRD §4.4's
 whole discipline ("the analyst never cites what it did not read") only means
 anything against real, third-party text. So `--briefs` never invents
-documents: each case in `evals/brief_seed_set.yaml` replays a **recorded
-retrieval fixture** through the *same* `FixtureRetriever`
+documents: each case in `evals/brief_seed_set.yaml` replays its own
+`evals/fixtures/retrieval/*.yaml` fixture through the *same* `FixtureRetriever`
 (`src/aleph/services/retrieval.py`) production and integration tests use,
 then runs the *same* researcher (`agents/researcher.py`) and analyst
 (`agents/analyst.py`) agents `services/briefing.py` runs, in the same
-order, against the same shared provenance/novelty functions. **`--briefs`
-never reads `EXA_API_KEY` and never calls Exa, live or `--smoke` alike** —
-retrieval is always a fixture replay; only the researcher/analyst model calls
-need a key.
+order — and, since code-review FIX 3, with `AnalystDeps` built the same shape
+too: `open_threads` is the synthetic prior Brief's own `claims`, matching
+`services/briefing.py`'s `open_threads=list(context.open_thread_claims)`,
+never a prose recap the production analyst never sees. What still differs
+from production is retrieval itself (a fixture replay, never a live
+`Retriever`) and the *history* a real Beat's `prior_claims`/
+`open_thread_claims` may carry — the synthetic prior Brief is always exactly
+one Brief, standing in for both. **`--briefs` never reads `EXA_API_KEY` and
+never calls Exa, live or `--smoke` alike** — retrieval is always a fixture
+replay; only the researcher/analyst model calls need a key.
 
 **Layer 1 imports the shipped functions — never a second spelling (TDD
 §10).** Both pre-filters below call the *exact objects*
@@ -528,19 +537,36 @@ a miss). Nothing about this format is bespoke to the harness; a fixture
 recorded here is byte-for-byte what an integration test's `FixtureRetriever`
 would read too.
 
-**HAND-AUTHORED PLACEHOLDERS, not real recordings — stated plainly.** All
-four committed fixture files carry the same header comment: this repository
-checkout has no `EXA_API_KEY` and no network access to Exa, so `just
-record-retrieval-fixtures` could not be run to produce them. They are written
-by hand, in the exact recorded format, so the harness's *plumbing* is
-provably exercised offline (`just evals --smoke --briefs`) — the documents
-inside them are invented text describing plausible, fictional developments,
-never real reporting. Fabricating documents and presenting them as a
-recording would make every score against them look authoritative while
-measuring nothing; labelling them honestly is what keeps that from
-happening. A live `just evals --briefs` run against them today would be
-judging invented text, not the world — replace them for real with `just
-record-retrieval-fixtures` once `EXA_API_KEY` is available.
+**HAND-AUTHORED PLACEHOLDERS, not real recordings — stated plainly, and now
+enforced at runtime (code-review FIX 2).** All four committed fixture files
+carry the same header comment: this repository checkout has no
+`EXA_API_KEY` and no network access to Exa, so `just record-retrieval-fixtures`
+could not be run to produce them. They are written by hand, in the exact
+recorded format, so the harness's *plumbing* is provably exercised offline
+(`just evals --smoke --briefs`) — the documents inside them are invented
+text describing plausible, fictional developments, never real reporting.
+Fabricating documents and presenting them as a recording would make every
+score against them look authoritative while measuring nothing; labelling
+them honestly is what keeps that from happening. A live `just evals --briefs`
+run against them today would be judging invented text, not the world —
+replace them for real with `just record-retrieval-fixtures` once
+`EXA_API_KEY` is available.
+
+That disclosure used to live only in the artifacts (the file headers, this
+document) — comments `yaml.safe_load` strips and a reader running the
+command never sees. It is now **active**: each committed fixture also
+carries a top-level `placeholder: true` key (`FixtureRetriever` ignores any
+key it does not itself read, so this costs it nothing there), read by
+`evals.generation.is_placeholder_fixture`. Whenever a `--briefs` run uses one,
+`_run_brief_mode` prints a banner naming which `beat_fixture`(s) — before and
+after the report, so it survives a long scroll — mirrors the caveat into the
+GitHub Actions step summary, and records per-case fixture provenance
+(`{"beat_fixture": ..., "placeholder": true}`) plus a run-level
+`placeholder_fixtures` list in the `--report` JSON. `--briefs`' own `--help`
+text no longer calls the fixtures "recorded". The marker **disappears on its
+own** the moment a fixture is genuinely re-recorded — `just
+record-retrieval-fixtures` never writes it — so there is no second place to
+remember to clear it.
 
 **The recording recipe (`just record-retrieval-fixtures`,
 `scripts/record_retrieval_fixtures.py`)** hits the live Exa API once per
@@ -572,6 +598,29 @@ returned); six queries per Beat is `≈ $0.138`; four Beats is **≈ $0.55 total
 in the worst case, likely less in practice since not every query returns a
 full 18 results. `--only` scopes a re-record to one Beat at roughly a
 quarter of that.
+
+**Fixture size (code-review FIX 6).** Un-mitigated, 18 results/query × 6
+queries is up to 108 raw extractions per Beat, un-deduped, with the *same*
+document's full text written again under every query it appeared under —
+roughly 0.5–5 MB per fixture, 2–20 MB across four, discovered only after the
+recording money was already spent. The recorder now mitigates both drivers
+of that: every document's recorded `text` is truncated to
+`BRIEF_RETRIEVAL_TEXT_BUDGET_CHARS` (160 000 chars, D14a) — a live replay
+would truncate it further anyway (that same budget is divided across at most
+`BRIEF_RETRIEVAL_MAX_DOCUMENTS` = 12 documents), so nothing a real run would
+have read is lost — and a document already recorded under an earlier query
+in the same Beat's plan is **not written again** under a later query that
+also returned it (deduped by URL, first occurrence wins, matching
+`retrieve()`'s own `_dedupe_by_url` order); every query still gets its own
+`results` entry, an explicit `[]` when every one of its documents was
+already claimed, so `FixtureRetriever` cannot tell that apart from a query
+that genuinely found nothing. **Expected size:** real article text runs a
+few KB to a few tens of KB, so a typical Beat (six queries with real
+cross-query overlap on one subject) is expected to land in the **tens to low
+hundreds of KB**, not megabytes — the true worst case (108 entirely distinct
+URLs, each hitting the 160 000-char ceiling) is a **~17 MB theoretical
+bound** no real Beat here approaches. Recorded here so it is a decision made
+in advance, not a surprise discovered in a diff.
 
 **The `RetrievalUnavailableError` / stale-fixture ambiguity (inherited from
 AL-512's review) — resolved by never catching it.** `FixtureRetriever` raises
@@ -606,11 +655,44 @@ content to grade, and whether Skipped was the *correct* outcome is
 directions; the two assertions are still emitted (passing, with that stated
 as the reason), the same "a hard-floor assertion missing from the report is a
 harness bug" discipline every other kind's refusal/skip handling follows.
+**But a Skip is excluded from the pass-rate denominator (code-review FIX
+5).** Before the fix, that `passed=True` pair was scored exactly like a
+judged, passing Brief, so an all-Skip run — reachable simply by updating the
+seed set's `prior_brief` to match freshly re-recorded fixtures, which drops
+every finding via `filter_new` — printed `4/4 (100.0%)`, gate met, exit 0,
+with **zero** Briefs written and **zero** rubric items ever scored. `_gate_
+summary` (`evals/__main__.py`) now takes a `skip=` predicate the brief mode
+sets to "is this case's result a `SkippedNote`", which removes such a case
+from `GateSummary.rows` entirely rather than counting it as a pass; the
+excluded case is still named in `GateSummary.skipped`, printed as a
+`skipped: N (excluded from the rate above — no Brief content to judge)` line
+in the gate summary, and carried into the `--report` JSON's `gate.skipped`.
+Because `meets_gate` already requires `total > 0`
+(`test_an_empty_run_never_counts_as_meeting_the_gate`), an all-Skip run now
+reads as "no scoreable cases" — `0/0`, gate not met — rather than a clean
+pass. Pinned by `tests/unit/test_evals_harness.py::
+test_an_all_skip_brief_run_is_excluded_and_fails_the_gate`.
+
 `build_brief_judge_prompt` (`evals/judge.py`) carries the prior Brief's own
 claims and summary **verbatim** — the `continuous` item's evidence, on the
 lesson prompt's `prior_passages` precedent — because without them the item is
 unfalsifiable, exactly as continuity is for a lesson shown no prior Read
-passages.
+passages. **It also now carries the Brief's `cited_urls` and the full text of
+the `RetrievedDocument`s behind them (code-review FIX 1)** — the `accurate`
+item's evidence for PRD §6's *Grounded* dimension. An earlier version argued
+a Brief needs no Sources block because "the judge scores the Brief's prose
+against what it was given", without ever actually giving it anything to
+check the prose against: the `accurate` item's `ARTIFACT_NOTES` reading
+(`evals/rubric.py`) promises the cited Sources are "given to you below", so
+without them the judge could only score from its own world knowledge or pass
+by default — PRD §6's Grounded dimension was not being measured at all, the
+same gap `build_flashcard_judge_prompt`'s own docstring already names for the
+Read passage ("grounding is unfalsifiable without it"). `BriefRubricJudge`
+supplies the `RetrievedDocument`s backing `result.cited_urls`, drawn from
+this run's full retrieved batch (`BriefSample.documents`, carried alongside
+the existing `document_urls`) — never the documents the Brief did not cite.
+Pinned by `tests/unit/test_evals_judge.py::
+test_brief_judge_prompt_carries_the_cited_sources`.
 
 **The honest limit (PRD §6's new constraint, stated where the harness lives,
 not just in the TDD).** A retrieval fixture freezes the world on the day it
@@ -841,7 +923,10 @@ Roughly in the order they earn their keep:
    hand-authored placeholders in the exact recorded format, described plainly
    as such in each file's own header and in "The `brief` research/writing
    mode" above; `just record-retrieval-fixtures` is written, tested for its
-   argument handling and idempotency, and ready to run the moment the key
-   lands. Until it does, `--briefs` (live) would be judging invented text
-   against a real judge — only `--smoke --briefs` (the deterministic stub) is
-   meaningful to run today.
+   argument handling and idempotency (`tests/unit/
+   test_record_retrieval_fixtures.py` — the no-key exit, `--only`, `--force`,
+   and the skip-when-already-recorded path, all against a fake retriever, no
+   key needed), and ready to run the moment the key lands. Until it does,
+   `--briefs` (live) would be judging invented text against a real judge —
+   only `--smoke --briefs` (the deterministic stub) is meaningful to run
+   today.

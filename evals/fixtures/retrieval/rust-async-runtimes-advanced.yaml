@@ -13,6 +13,13 @@
 # `just record-retrieval-fixtures` once EXA_API_KEY is available — the script
 # skips a fixture that already exists unless `--force` is passed.
 beat: rust-async-runtimes-advanced
+# Runtime marker (code-review FIX 2, AL-550): read by
+# `evals.generation.is_placeholder_fixture` to print a banner and record
+# provenance whenever this fixture is used — `FixtureRetriever` ignores any
+# key it does not itself read, so this costs it nothing. `just
+# record-retrieval-fixtures` never writes this key, so a real recording is
+# indistinguishable from having no marker at all.
+placeholder: true
 queries:
   - "Rust async runtime ecosystem"
   - "Rust async runtime ecosystem — latest developments since 2026-06-15"
