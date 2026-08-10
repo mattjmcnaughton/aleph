@@ -1,3 +1,10 @@
+# [1.34.0](https://github.com/mattjmcnaughton/aleph/compare/v1.33.0...v1.34.0) (2026-08-10)
+
+
+### Features
+
+* **web:** the deploy form, the Beat rail, and the home Beats section ([#191](https://github.com/mattjmcnaughton/aleph/issues/191)) ([996915e](https://github.com/mattjmcnaughton/aleph/commit/996915e6817818420272d228d3ff9a90edccdc17)), closes [#174](https://github.com/mattjmcnaughton/aleph/issues/174)
+
 # [1.33.0](https://github.com/mattjmcnaughton/aleph/compare/v1.32.0...v1.33.0) (2026-08-10)
 
 
