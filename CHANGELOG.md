@@ -1,3 +1,10 @@
+# [1.36.0](https://github.com/mattjmcnaughton/aleph/compare/v1.35.0...v1.36.0) (2026-08-10)
+
+
+### Features
+
+* **web:** the Brief reading surface, its Sources, and the read pings ([#193](https://github.com/mattjmcnaughton/aleph/issues/193)) ([024b0e6](https://github.com/mattjmcnaughton/aleph/commit/024b0e6732769783770cf58674ec52de1af5ff45)), closes [#175](https://github.com/mattjmcnaughton/aleph/issues/175)
+
 # [1.35.0](https://github.com/mattjmcnaughton/aleph/compare/v1.34.0...v1.35.0) (2026-08-10)
 
 
