@@ -990,9 +990,12 @@ async def test_retry_reclaims_a_failed_beat(
 
         resp = await client.post(f"/api/v1/beats/{beat_id}/retry")
         assert resp.status_code == 202, resp.text
-        # The response is built from the row as read BEFORE the retry is
-        # spawned (the router's documented shape) — still "failed" here.
-        assert resp.json()["research_state"] == "failed"
+        # The claim is awaited before the response is built (code-review
+        # FIX 9), so the 202 body already reflects it — "researching", never
+        # the stale, pre-claim "failed" this Beat started this test at. Only
+        # the pipeline itself (retrieval + the two model calls) is left
+        # running for `spawn.drain()` below to finish.
+        assert resp.json()["research_state"] == "researching"
 
         await spawn.drain()
 

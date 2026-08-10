@@ -7,11 +7,26 @@
 // Convention: the topic string selects the eventual resolution via
 // sentinels (`REFUSED_BEAT_TOPIC_SENTINEL`/`FAILED_BEAT_TOPIC_SENTINEL`), and
 // `configureBeats({ pollsBeforeResolve })` tunes how many polls a Beat spends
-// `researching` before it settles. The default (0) settles on the very
-// first response — mirroring the shipped router's drain-then-read ordering
-// (`routers/v1/beats.py`'s own module doc): a fresh Beat's first claim is
-// already reflected in the `202` body, never a stale pre-claim `idle` a
-// first poll would wrongly treat as terminal.
+// `researching` before it settles.
+//
+// **`POST /beats` and a real retry claim NEVER settle synchronously**
+// (code-review FIX 4, correcting this file's original shape). The shipped
+// route's own `entries=[]` is unconditional (`routers/v1/beats.py::
+// deploy_beat` builds its response from `_beat_detail_dto(beat, entries=[])`
+// — never a `BriefRepository` read) — because the pipeline is *spawned*,
+// never awaited, so no response inside the same request can ever reflect
+// work a background task has not run yet. Both handlers below force
+// `pollsRemaining` to **at least 1** for exactly this reason: even at the
+// `pollsBeforeResolve` default of `0`, the Beat this fake just claimed must
+// still read `researching` with `entries: []` in its own `202` body, and
+// settle only on a later, real `GET /beats/{id}` — the seed-then-poll
+// handoff `beats-deploy.test.tsx`'s own "the detail poll actually runs"
+// case exercises. Before this fix `settle()` ran inside the `POST`/`retry`
+// handlers themselves whenever `pollsRemaining` was already `0` (the
+// default), so a test suite that never overrode `pollsBeforeResolve` — every
+// test in `beats-deploy.test.tsx` — got a terminal `202` body every time,
+// and `routes/beats.new.tsx`'s `setQueryData` seed meant the Beat view's own
+// `GET /beats/{id}` never fired at all behind it.
 
 import { HttpResponse, http } from "msw";
 import {
@@ -110,6 +125,18 @@ let listRequests = 0;
  *  past it. */
 const detailPollRequests = new Map<string, number>();
 
+/**
+ * Every `tz_offset_minutes` query param the fake has seen, per endpoint
+ * (code-review FIX 1) — the `mocks/progress.ts::progressReceivedOffsets`
+ * precedent, one array per Beats call site since a single deploy-then-poll
+ * flow exercises three or four of them in one test and a merged list would
+ * lose which request sent what.
+ */
+const deployReceivedOffsets: number[] = [];
+const listReceivedOffsets: number[] = [];
+const detailReceivedOffsets: number[] = [];
+const retryReceivedOffsets: number[] = [];
+
 /** Reset store + config between tests (wired into tests/setup.ts). */
 export function resetBeats(): void {
   config = { ...defaultConfig };
@@ -118,6 +145,10 @@ export function resetBeats(): void {
   createBodies.length = 0;
   listRequests = 0;
   detailPollRequests.clear();
+  deployReceivedOffsets.length = 0;
+  listReceivedOffsets.length = 0;
+  detailReceivedOffsets.length = 0;
+  retryReceivedOffsets.length = 0;
 }
 
 /** Tune the fake's polling/rate-limit/settle behaviour for a single test. */
@@ -143,6 +174,31 @@ export function beatsListRequestCount(): number {
  *  matter how far fake time is advanced past it. */
 export function beatDetailPollRequestCount(id: string): number {
   return detailPollRequests.get(id) ?? 0;
+}
+
+/** Every `tz_offset_minutes` `POST /beats` received, in call order
+ *  (code-review FIX 1). */
+export function beatDeployReceivedOffsets(): number[] {
+  return [...deployReceivedOffsets];
+}
+
+/** Every `tz_offset_minutes` `GET /beats` received, in call order
+ *  (code-review FIX 1). */
+export function beatsListReceivedOffsets(): number[] {
+  return [...listReceivedOffsets];
+}
+
+/** Every `tz_offset_minutes` `GET /beats/{id}` received, in call order
+ *  (code-review FIX 1) — across every Beat id, since a test asserting this
+ *  only ever polls one at a time. */
+export function beatDetailReceivedOffsets(): number[] {
+  return [...detailReceivedOffsets];
+}
+
+/** Every `tz_offset_minutes` `POST /beats/{id}/retry` received, in call
+ *  order (code-review FIX 1). */
+export function beatRetryReceivedOffsets(): number[] {
+  return [...retryReceivedOffsets];
 }
 
 /** Directly seed a stored Beat — a rail to open without driving a research
@@ -328,8 +384,18 @@ function notFoundEnvelope() {
   );
 }
 
+/** Read `tz_offset_minutes` off a request URL and record it (code-review
+ *  FIX 1) — `undefined` when the caller omitted it (never reachable from the
+ *  wrapped `lib/api.ts` call sites, which all send it, but distinct from a
+ *  parse failure). */
+function recordOffset(request: Request, sink: number[]): void {
+  const raw = new URL(request.url).searchParams.get("tz_offset_minutes");
+  if (raw !== null) sink.push(Number(raw));
+}
+
 export const beatHandlers = [
   http.post(`${API_V1_BASE}/beats`, async ({ request }) => {
+    recordOffset(request, deployReceivedOffsets);
     const body = (await request.json()) as Record<string, unknown> & {
       topic: string;
       level: Level;
@@ -349,38 +415,46 @@ export const beatHandlers = [
       anchorWeekday: body.anchor_weekday,
       guidance: body.guidance ?? null,
       resolution: resolutionForTopic(body.topic),
-      pollsRemaining: config.pollsBeforeResolve,
+      // Forced to at least 1 (code-review FIX 4, see the module doc): the
+      // real router's `deploy_beat` claims synchronously (so this response
+      // always reads `researching`, never a stale pre-claim `idle`) but
+      // spawns the pipeline rather than awaiting it — no `202` body can ever
+      // carry a Brief the pipeline has not yet published, no matter how low
+      // `pollsBeforeResolve` is dialed.
+      pollsRemaining: Math.max(config.pollsBeforeResolve, 1),
       researchStartedAt: new Date().toISOString(),
       entries: [],
       nextNumber: 1,
     };
     store.set(id, beat);
-    // The real router drains-then-reads inside the SAME request (D15) — a
-    // fresh Beat's cadence is unconditionally claimable, so the `202` body
-    // already reflects the claim rather than a stale pre-claim `idle`.
-    if (beat.pollsRemaining === 0) settle(beat);
+    // Never settle here — see the module doc's FIX 4 note. `entries` stays
+    // `[]` and `research_state` reads `researching` (via `pollsRemaining`
+    // above), unconditionally, exactly like the real route.
     return HttpResponse.json(detailFor(beat), { status: 202 });
   }),
 
   // Registered before `/beats/:id` for readability; MSW matches the exact
   // path regardless, so the two never collide.
-  http.get(`${API_V1_BASE}/beats`, () => {
+  http.get(`${API_V1_BASE}/beats`, ({ request }) => {
     listRequests += 1;
+    recordOffset(request, listReceivedOffsets);
     for (const beat of store.values()) tick(beat);
     // Newest first (docs/api.md); the store is insertion-ordered.
     return HttpResponse.json({ beats: [...store.values()].reverse().map(summaryFor) });
   }),
 
-  http.get(`${API_V1_BASE}/beats/:id`, ({ params }) => {
+  http.get(`${API_V1_BASE}/beats/:id`, ({ params, request }) => {
     const id = params.id as string;
     detailPollRequests.set(id, (detailPollRequests.get(id) ?? 0) + 1);
+    recordOffset(request, detailReceivedOffsets);
     const beat = store.get(id);
     if (!beat) return notFoundEnvelope();
     tick(beat);
     return HttpResponse.json(detailFor(beat));
   }),
 
-  http.post(`${API_V1_BASE}/beats/:id/retry`, ({ params }) => {
+  http.post(`${API_V1_BASE}/beats/:id/retry`, ({ params, request }) => {
+    recordOffset(request, retryReceivedOffsets);
     if (config.retryRateLimited) {
       return rateLimitEnvelope();
     }
@@ -388,15 +462,24 @@ export const beatHandlers = [
       return serverErrorEnvelope();
     }
     const beat = store.get(params.id as string);
-    if (beat && beat.resolution === "failed") {
-      // A retry re-claims the failed run; this time it succeeds (mirrors
-      // `mocks/paths.ts`'s own retry handler).
-      beat.resolution = "idle";
-      beat.pollsRemaining = config.pollsBeforeResolve;
-      beat.researchStartedAt = new Date().toISOString();
-      if (beat.pollsRemaining === 0) settle(beat);
-    }
     if (!beat) return notFoundEnvelope();
+    const researching = beat.pollsRemaining > 0;
+    if (beat.resolution === "failed" && !researching) {
+      // A retry re-claims the failed run; this time it succeeds (mirrors
+      // `mocks/paths.ts`'s own retry handler) — but, exactly like `POST
+      // /beats` above (code-review FIX 4, see the module doc), never
+      // synchronously: the real route's `trigger_retry` now AWAITS only the
+      // claim before building its response (code-review FIX 9 on
+      // AL-530/AL-522) — the response already reflects `researching`, never
+      // the pipeline's outcome, which is still spawned and settles only on
+      // a later poll's own `tick()`. Before this fix the handler mutated
+      // `resolution` *and* called `settle()` in the same turn whenever
+      // `pollsBeforeResolve` was `0`, so this handler could never reproduce
+      // the real route's pre-spawn response.
+      beat.resolution = "idle";
+      beat.pollsRemaining = Math.max(config.pollsBeforeResolve, 1);
+      beat.researchStartedAt = new Date().toISOString();
+    }
     return HttpResponse.json(detailFor(beat), { status: 202 });
   }),
 ];

@@ -1,5 +1,12 @@
 import { skipToken } from "@tanstack/react-query";
 import { describe, expect, it, vi } from "vitest";
+import {
+  beatDeployReceivedOffsets,
+  beatDetailReceivedOffsets,
+  beatRetryReceivedOffsets,
+  beatsListReceivedOffsets,
+  seedBeat,
+} from "../mocks/beats";
 import { configurePaths, seedPath } from "../mocks/paths";
 import { progressReceivedOffsets, progressRequestCount } from "../mocks/progress";
 import {
@@ -19,6 +26,7 @@ import {
   beatQueryKey,
   beatQueryOptions,
   beatsListQueryOptions,
+  deployBeat,
   isBeatDetailTerminal,
   isBeatResearchStateTerminal,
   isLessonViewTerminal,
@@ -29,6 +37,7 @@ import {
   pathQueryKey,
   progressSummaryQueryKey,
   progressSummaryQueryOptions,
+  retryBeat,
   updatePathTitle,
 } from "./api";
 
@@ -277,6 +286,67 @@ describe("beatQueryOptions", () => {
     const options = beatQueryOptions("b1", true);
     expect(options.queryFn).not.toBe(skipToken);
     expect(options.queryKey).toEqual(["beats", "b1"]);
+  });
+});
+
+// Code-review FIX 1 on AL-530: `deployBeat`/`getBeat`/`listBeats`/`retryBeat`
+// all build bare paths in the diff this fixes — every other tz-sensitive call
+// in this file (`getProgressSummary`, `getReviewSummary`, `getReviewQueue`,
+// `gradeCard`) already threads `clientTimezoneOffsetMinutes()`; these four
+// now do too. Not cosmetic: `_drain` -> `drain_claimable` derives
+// `local_today` from it, `domains/cadence.is_claimable` compares against it,
+// and `published_on = local_today` is the date the rail renders — silently
+// UTC without this.
+describe("Beats & Briefs: tz_offset_minutes rides on every call (FIX 1)", () => {
+  it("deployBeat sends the client's offset as a query param", async () => {
+    vi.spyOn(Date.prototype, "getTimezoneOffset").mockReturnValue(-120);
+
+    await deployBeat({ topic: "EU AI regulation", level: "some_experience", anchor_weekday: 0 });
+
+    expect(beatDeployReceivedOffsets()).toEqual([-120]);
+  });
+
+  it("the beatsListQueryOptions fetcher sends the client's offset (getBeat via listBeats)", async () => {
+    vi.spyOn(Date.prototype, "getTimezoneOffset").mockReturnValue(-120);
+    const options = beatsListQueryOptions(true);
+    expect(options.queryFn).not.toBe(skipToken);
+
+    // @ts-expect-error queryOptions types its queryFn generically; this file
+    // knows it is a concrete `() => Promise<BeatList>` when enabled.
+    await options.queryFn();
+
+    expect(beatsListReceivedOffsets()).toEqual([-120]);
+  });
+
+  it("the beatQueryOptions fetcher sends the client's offset (getBeat)", async () => {
+    seedBeat({ id: "beat-offset", topic: "EU AI regulation", level: "some_experience" });
+    vi.spyOn(Date.prototype, "getTimezoneOffset").mockReturnValue(-120);
+    const options = beatQueryOptions("beat-offset", true);
+    expect(options.queryFn).not.toBe(skipToken);
+
+    // @ts-expect-error same as above — concrete `() => Promise<BeatDetail>`.
+    await options.queryFn();
+
+    expect(beatDetailReceivedOffsets()).toEqual([-120]);
+  });
+
+  it("retryBeat sends the client's offset as a query param", async () => {
+    seedBeat({
+      id: "beat-retry-offset",
+      topic: "EU AI regulation",
+      level: "some_experience",
+      resolution: "failed",
+    });
+    vi.spyOn(Date.prototype, "getTimezoneOffset").mockReturnValue(-120);
+
+    await retryBeat("beat-retry-offset");
+
+    expect(beatRetryReceivedOffsets()).toEqual([-120]);
+  });
+
+  it("never rides in the cache key — TDD §7 fixes it as [\"beats\"] / [\"beats\", id]", () => {
+    expect(beatsListQueryOptions(true).queryKey).toEqual(["beats"]);
+    expect(beatQueryOptions("beat-offset", true).queryKey).toEqual(["beats", "beat-offset"]);
   });
 });
 

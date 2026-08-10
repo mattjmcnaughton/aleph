@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import {
   BEATS_LIST_QUERY_KEY,
@@ -9,7 +9,7 @@ import {
   isRateLimited,
 } from "../lib/api";
 import { Breadcrumbs } from "../components/breadcrumbs";
-import { PRIMARY_CTA } from "../components/state-card";
+import { PRIMARY_CTA, StateCard } from "../components/state-card";
 import { ANCHOR_WEEKDAYS, DEFAULT_ANCHOR_WEEKDAY } from "../lib/beats";
 import { useFeatureFlag } from "../lib/feature-flags";
 import { GUIDANCE_MAX_LENGTH, LEVELS, TOPIC_MAX_LENGTH, canSubmitTopic } from "../lib/onboarding";
@@ -60,6 +60,30 @@ function DeployAnalyst() {
   const rateLimited = createMutation.isError && isRateLimited(createMutation.error);
   const createFailed = createMutation.isError && !rateLimited;
 
+  // A direct/deep link with the flag off (D10: the whole surface is a
+  // router-level gate server-side, `404` on every route) — the frontend's
+  // own dead end, matching `routes/cards.tsx`/`routes/review.tsx`'s shape
+  // (code-review FIX 3). Without this the form below renders in full, with a
+  // live, enabled submit button — tapping "Deploy analyst" would silently do
+  // nothing (`onSubmit`'s own `!analystEnabled` early return), which is worse
+  // than never rendering the form at all.
+  if (!analystEnabled) {
+    return (
+      <main className="mx-auto w-full max-w-[480px] px-4 py-8">
+        <Breadcrumbs current="Deploy analyst" root="Your beats" />
+        <StateCard testid="beats-new-unavailable">
+          <h2 className="text-lg font-semibold">Deploying an analyst isn't available.</h2>
+          <p className="mx-auto mt-2 max-w-[24rem] text-sm leading-6 text-mist">
+            Head back home — there's nothing to deploy from here.
+          </p>
+          <Link to="/" className="mt-5 inline-block text-sm text-teal">
+            Back to your beats
+          </Link>
+        </StateCard>
+      </main>
+    );
+  }
+
   function onSubmit(event: React.FormEvent) {
     event.preventDefault();
     if (!analystEnabled || !canSubmitTopic(topic)) return;
@@ -74,9 +98,9 @@ function DeployAnalyst() {
 
   return (
     <main className="mx-auto w-full max-w-[480px] px-4 py-8">
-      <Breadcrumbs current="Deploy analyst" />
+      <Breadcrumbs current="Deploy analyst" root="Your beats" />
 
-      <p className="kicker">New Beat</p>
+      <p className="kicker">New beat</p>
       <h1 className="mt-2 text-3xl font-semibold leading-tight tracking-tight">
         What should Aleph keep watch on?
       </h1>

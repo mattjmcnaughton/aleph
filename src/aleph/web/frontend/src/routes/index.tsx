@@ -269,7 +269,13 @@ function Home() {
             <Link
               to="/beats/new"
               data-testid="deploy-analyst-button"
-              className="text-sm font-semibold text-teal transition-colors hover:text-teal-bright"
+              // >=44px touch target (code-review FIX 2): the primary entry
+              // point into the whole feature was a 20px text link before this
+              // fix — `min-h-[44px]` alone isn't enough on an inline link
+              // whose box is only as tall as its text, so `inline-flex
+              // items-center` is what actually gives the padding somewhere
+              // to expand the hit area into.
+              className="inline-flex min-h-[44px] items-center rounded-md px-3 text-sm font-semibold text-teal transition-colors hover:text-teal-bright focus-visible:outline focus-visible:outline-2 focus-visible:outline-teal"
             >
               Deploy analyst
             </Link>

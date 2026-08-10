@@ -610,18 +610,31 @@ class BriefingService:
 
     # -- the explicit retry claim (POST /beats/{id}/retry, D3, AL-522) ------- #
 
-    def trigger_retry(self, beat_id: uuid.UUID, local_today: date) -> None:
-        """Fire-and-forget the explicit retry claim through the spawn seam.
+    async def trigger_retry(self, beat_id: uuid.UUID, local_today: date) -> None:
+        """Claim synchronously, then fire-and-forget the pipeline alone
+        (code-review FIX 9 on AL-530, correcting this method's original
+        all-in-one-spawned shape).
 
         The router's public entry point for ``POST /beats/{id}/retry`` — the
-        **only** path that re-claims a real ``failed`` run (D3): it mirrors
-        ``GenerationOrchestrator.trigger_outline_retry``/``retry_outline``
-        exactly, claim and run both happening inside the spawned task, so the
-        request returns immediately and the client polls ``GET
-        /beats/{id}`` for the result. Keeping the ``_spawn`` call here (not
-        in the router) keeps the private seam private — the router depends
-        on nothing but this public method, the same discipline
-        ``trigger_outline_retry``'s own docstring states.
+        **only** path that re-claims a real ``failed`` run (D3). The claim
+        itself — ``claim_research_for_retry``, a fast, atomic ``UPDATE`` on
+        its own short transaction (never the caller's session, the drain's
+        own ``FIX C`` shape in :meth:`drain_claimable`) — is **awaited
+        here**, before this coroutine returns, so it is durable and visible
+        by the time it does. Only the actual pipeline (retrieval + the two
+        model calls) is handed to the spawn seam; the claim is not, on
+        purpose. This is what lets the router re-read the Beat *after*
+        awaiting this call and see ``researching`` rather than the stale,
+        pre-claim ``failed`` its own request started with — the identical
+        fix ``_drain`` + ``session.refresh`` already gives the two ``GET``
+        routes (AL-522's own code-review FIX 1). Before this fix the claim
+        rode inside the spawned task alongside the pipeline
+        (``GenerationOrchestrator.trigger_outline_retry``'s shape, copied one
+        step too far): the request routinely returned before the claim had
+        even run, so its ``202`` body still read ``failed`` — worse than the
+        paths precedent it copied, because the Beats arrival drain
+        deliberately never re-claims a ``failed`` Beat, so a client reading
+        a terminal-looking ``failed`` body stops polling for good.
 
         Deliberately carries **no** rate-limit check (TDD §7: "the research
         cap is checked inside the drain, before the claim — never at the
@@ -629,21 +642,18 @@ class BriefingService:
         A same-Beat retry loop is bounded only by claim serialization and
         client patience, the accepted MVP shape ``services/rate_limit.py``
         already documents for ``paths``' own retry cap.
-        """
-        self._spawn(self._run_retry_claim(beat_id, local_today))
 
-    async def _run_retry_claim(self, beat_id: uuid.UUID, local_today: date) -> None:
-        """Claim via the retry predicate (re-claims ``idle`` or ``failed``,
-        D3), then drive the pipeline under the won fence. A lost race (the
-        Beat already resolved by a concurrent caller, or its state changed
-        since the router read it) is a silent no-op, mirroring
-        ``retry_outline``'s own posture."""
+        A lost race (the Beat already resolved by a concurrent caller, or
+        its state changed since the router read it) is a silent no-op,
+        mirroring ``retry_outline``'s own posture — nothing is spawned for a
+        claim that did not win.
+        """
         async with self._session_factory() as session:
             fence = await self._beats(session).claim_research_for_retry(beat_id)
             await session.commit()
         if fence is None:
             return
-        await self.run_research(beat_id, local_today, fence=fence)
+        self._spawn(self.run_research(beat_id, local_today, fence=fence))
 
     # -- the claimed pipeline (TDD §3/§5.3-§5.5/§5.7) ------------------------ #
 

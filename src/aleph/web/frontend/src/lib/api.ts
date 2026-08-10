@@ -1181,35 +1181,85 @@ export interface DeployBeatInput {
  * than a stale pre-claim `idle` (`updatePathTitle`'s return-the-full-detail
  * precedent, not `createPath`'s bare id — this seam's poll starts from a
  * real state, never an assumed one).
+ *
+ * `tz_offset_minutes` rides on every Beats call, this one included
+ * (code-review FIX 1) — `clientTimezoneOffsetMinutes()`, the one wrapped
+ * call site every other tz-sensitive request in this file already goes
+ * through. It is not cosmetic here: the arrival drain this `POST` triggers
+ * (TDD §6's "the first run is claimed in the same request") derives
+ * `local_today` from it, and that is the date this Beat's first Brief
+ * publishes under (D4a) — the router defaults to `0` (UTC) when it is
+ * omitted, so a learner west of UTC opening the app in the evening would get
+ * a Brief dated a day ahead of their own calendar.
  */
 export function deployBeat(input: DeployBeatInput): Promise<BeatDetail> {
-  return apiFetch<BeatDetail>(apiV1Path("/beats"), {
+  const params = new URLSearchParams({
+    tz_offset_minutes: String(clientTimezoneOffsetMinutes()),
+  });
+  return apiFetch<BeatDetail>(apiV1Path(`/beats?${params.toString()}`), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
   });
 }
 
-/** Poll one Beat's detail: research state + the rail — the trigger+poll GET
- *  (TDD D15; the router drains this Beat before it reads, so the response
- *  always reflects whatever this request's own arrival just triggered). */
-export function getBeat(id: string): Promise<BeatDetail> {
-  return apiFetch<BeatDetail>(apiV1Path(`/beats/${id}`));
+/**
+ * Poll one Beat's detail: research state + the rail — the trigger+poll GET
+ * (TDD D15; the router drains this Beat before it reads, so the response
+ * always reflects whatever this request's own arrival just triggered).
+ *
+ * `tz_offset_minutes` rides on this call (code-review FIX 1), the same
+ * `clientTimezoneOffsetMinutes()` every other tz-sensitive request in this
+ * file sends — **never** folded into `beatQueryKey` (TDD §7 fixes that key
+ * as `["beats", id]`; the offset is a request parameter here, not a cache
+ * dimension). Without it the drain this GET triggers derives `local_today`
+ * from the server's UTC default, and `domains/cadence.is_claimable` /
+ * `published_on` both key off that date (D4/D4a) — silently UTC for every
+ * learner who never passes their own offset.
+ */
+export function getBeat(id: string, tzOffsetMinutes: number): Promise<BeatDetail> {
+  return apiFetch<BeatDetail>(
+    apiV1Path(`/beats/${id}?tz_offset_minutes=${tzOffsetMinutes}`),
+  );
 }
 
-/** The learner's Beats, newest first, with unread counts (TDD §6). Also
- *  drains every claimable Beat server-side (TDD D15) — never polled from
- *  here (TDD §7: "nothing polls the beats list"). */
-export function listBeats(): Promise<BeatList> {
-  return apiFetch<BeatList>(apiV1Path("/beats"));
+/**
+ * The learner's Beats, newest first, with unread counts (TDD §6). Also
+ * drains every claimable Beat server-side (TDD D15) — never polled from
+ * here (TDD §7: "nothing polls the beats list").
+ *
+ * `tz_offset_minutes` rides on this call too (code-review FIX 1), for the
+ * identical reason `getBeat` above needs it: this GET drains exactly the
+ * same way, so the arrival's `local_today` must come from this client's own
+ * offset, never the server's UTC default.
+ */
+export function listBeats(tzOffsetMinutes: number): Promise<BeatList> {
+  const params = new URLSearchParams({ tz_offset_minutes: String(tzOffsetMinutes) });
+  return apiFetch<BeatList>(apiV1Path(`/beats?${params.toString()}`));
 }
 
-/** Re-claim a `failed` run (TDD §6/D3). A Beat that is not actually `failed`
- *  is a silent no-op server-side (`idle` above all — it is a Beat's healthy
- *  steady state, not a stray retry target) — the client always polls
- *  `GET /beats/{id}` for the outcome regardless of which branch ran. */
+/**
+ * Re-claim a `failed` run (TDD §6/D3). A Beat that is not actually `failed`
+ * is a silent no-op server-side (`idle` above all — it is a Beat's healthy
+ * steady state, not a stray retry target) — the client always polls
+ * `GET /beats/{id}` for the outcome regardless of which branch ran.
+ *
+ * `tz_offset_minutes` rides on this call as well (code-review FIX 1),
+ * computed internally via `clientTimezoneOffsetMinutes()` — the
+ * `keepFlashcardDrafts` precedent for a mutation whose single variable
+ * (here, the Beat id) is not itself a request-body object a caller builds
+ * field by field. A won retry claim still derives `local_today` (D4a) for
+ * the Brief it publishes, exactly as the arrival drain's own claim does — a
+ * retry firing after midnight UTC but before midnight local must not
+ * publish under tomorrow's date by the learner's own calendar.
+ */
 export function retryBeat(id: string): Promise<BeatDetail> {
-  return apiFetch<BeatDetail>(apiV1Path(`/beats/${id}/retry`), { method: "POST" });
+  const params = new URLSearchParams({
+    tz_offset_minutes: String(clientTimezoneOffsetMinutes()),
+  });
+  return apiFetch<BeatDetail>(apiV1Path(`/beats/${id}/retry?${params.toString()}`), {
+    method: "POST",
+  });
 }
 
 /** Hard-delete a Beat (also how standing orders change — PRD §4.11: delete
@@ -1266,7 +1316,10 @@ export function isBeatDetailTerminal(detail: BeatDetail | undefined): boolean {
 export function beatsListQueryOptions(enabled: boolean) {
   return queryOptions({
     queryKey: BEATS_LIST_QUERY_KEY,
-    queryFn: enabled ? listBeats : skipToken,
+    // `tz_offset_minutes` rides on the request (code-review FIX 1), never on
+    // the key above — TDD §7 fixes `BEATS_LIST_QUERY_KEY` as `["beats"]`,
+    // unlike `progressSummaryQueryKey`'s own offset-bearing key.
+    queryFn: enabled ? () => listBeats(clientTimezoneOffsetMinutes()) : skipToken,
   });
 }
 
@@ -1281,7 +1334,11 @@ export function beatsListQueryOptions(enabled: boolean) {
 export function beatQueryOptions(id: string | null, enabled: boolean) {
   return queryOptions({
     queryKey: beatQueryKey(id ?? "idle"),
-    queryFn: id !== null && enabled ? () => getBeat(id) : skipToken,
+    // `tz_offset_minutes` rides on the request (code-review FIX 1), never on
+    // the key above — TDD §7 fixes `beatQueryKey` as `["beats", id]`, unlike
+    // `progressSummaryQueryKey`'s own offset-bearing key.
+    queryFn:
+      id !== null && enabled ? () => getBeat(id, clientTimezoneOffsetMinutes()) : skipToken,
   });
 }
 

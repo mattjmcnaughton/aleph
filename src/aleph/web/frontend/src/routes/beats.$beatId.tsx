@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { Link, createFileRoute } from "@tanstack/react-router";
 import {
   beatQueryKey,
   beatQueryOptions,
@@ -51,11 +51,34 @@ function BeatView() {
 
   const retry = useRetryGeneration({ mutationFn: retryBeat, queryKey: beatQueryKey });
 
+  // A direct/deep link with the flag off (D10: the whole surface is a
+  // router-level gate server-side, `404` on every route) — the frontend's
+  // own dead end, matching `routes/cards.tsx`/`routes/review.tsx`'s shape
+  // exactly (code-review FIX 3). Without this, `beatQueryOptions`'s
+  // `skipToken` means `beatQuery.data` never resolves and `beatQuery.isError`
+  // never flips true, so `LoadingState` below would render "Loading your
+  // Beat…" forever instead of a real dead end.
+  if (!analystEnabled) {
+    return (
+      <main className="mx-auto w-full max-w-[480px] px-4 py-8">
+        <StateCard testid="beat-unavailable">
+          <h2 className="text-lg font-semibold">This Beat isn't available.</h2>
+          <p className="mx-auto mt-2 max-w-[24rem] text-sm leading-6 text-mist">
+            Head back home — there's nothing to read from here.
+          </p>
+          <Link to="/" className="mt-5 inline-block text-sm text-teal">
+            Back to your beats
+          </Link>
+        </StateCard>
+      </main>
+    );
+  }
+
   const detail = beatQuery.data;
 
   return (
     <main className="mx-auto w-full max-w-[480px] px-4 py-8">
-      {detail ? <Breadcrumbs current={detail.topic} /> : null}
+      {detail ? <Breadcrumbs current={detail.topic} root="Your beats" /> : null}
 
       {detail === undefined ? (
         beatQuery.isError ? (
