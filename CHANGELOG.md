@@ -1,3 +1,10 @@
+## [1.37.1](https://github.com/mattjmcnaughton/aleph/compare/v1.37.0...v1.37.1) (2026-08-10)
+
+
+### Bug Fixes
+
+* **services:** bind the live retriever, and thread the period start through it ([#195](https://github.com/mattjmcnaughton/aleph/issues/195)) ([62788db](https://github.com/mattjmcnaughton/aleph/commit/62788dbb7bb63a66274ee9b56b76f3514fa52c79)), closes [#171](https://github.com/mattjmcnaughton/aleph/issues/171) [#173](https://github.com/mattjmcnaughton/aleph/issues/173) [#177](https://github.com/mattjmcnaughton/aleph/issues/177)
+
 # [1.37.0](https://github.com/mattjmcnaughton/aleph/compare/v1.36.0...v1.37.0) (2026-08-10)
 
 
