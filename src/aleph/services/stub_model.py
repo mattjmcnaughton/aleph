@@ -721,6 +721,33 @@ def _build_flashcard_drafts(topic: str, count: int) -> FlashcardDrafts:
 # --- the analyst pipeline: researcher findings + Brief writing (Phase 6, ------
 # TDD §5.3/§5.5/§11, ticket AL-560) ---------------------------------------------
 
+# The researcher's and analyst's own leading `Topic: <value>` line
+# (`build_researcher_prompt`/`build_analyst_prompt`, `agents/researcher.py`/
+# `agents/analyst.py` — both start their prompt with exactly this line).
+_TOPIC_LINE_RE = re.compile(r"^Topic: (.*)$", re.MULTILINE)
+
+
+def _extract_topic_line(text: str) -> str:
+    """The bare Topic value out of a researcher/analyst prompt, sentinel-
+    stripped — NOT the module-level ``topic = clean_topic(text)`` computed at
+    the top of `_stub_respond`.
+
+    That shared variable is correct for the outline/lesson/flashcard
+    dispatches because their entire prompt genuinely IS the topic string. The
+    researcher's and analyst's prompts are not: they also carry a full
+    document dump or a finding/citation listing, so reusing the shared
+    variable here would silently interpolate that ENTIRE prompt — sources,
+    citations, everything — into every generated claim, detail, and Brief
+    body instead of the topic alone (confirmed the hard way: an earlier
+    version of this dispatch did exactly that, and the analyst's own
+    provenance validator caught the resulting nonsense citations rather than
+    this comment).
+    """
+    match = _TOPIC_LINE_RE.search(text)
+    line = match.group(1) if match is not None else text
+    return clean_topic(line) or "the topic"
+
+
 # The literal clause `agents/analyst.py::build_analyst_prompt` writes only
 # when `AnalystDeps.survivors` is non-empty. Reading it back is the stub's own
 # signal for which output branch to answer with — off the SAME fact the real
@@ -896,10 +923,11 @@ def _stub_respond(messages: Sequence[ModelMessage], info: AgentInfo) -> ModelRes
         # run genuinely, non-emptily retrieved — see FORCE_NO_FINDINGS's own
         # docstring and the module docstring's "Phase 6" section for why this
         # is the Skipped branch, never the "zero documents" failed one.
+        research_topic = _extract_topic_line(text)
         findings = (
             Findings(findings=[])
             if FORCE_NO_FINDINGS in text
-            else _build_research_findings(topic, _extract_document_urls(text))
+            else _build_research_findings(research_topic, _extract_document_urls(text))
         )
         return ModelResponse(
             parts=[
@@ -913,6 +941,7 @@ def _stub_respond(messages: Sequence[ModelMessage], info: AgentInfo) -> ModelRes
         # `FORCE_NO_FINDINGS` directly, so this branch answers correctly
         # whether the empty-survivors state came from that sentinel or (in a
         # future workflow) from a genuinely non-novel research run.
+        analyst_topic = _extract_topic_line(text)
         if _ANALYST_HAS_SURVIVORS_MARKER in text:
             if brief_tool is None:
                 raise StubModelForcedError(
@@ -920,7 +949,7 @@ def _stub_respond(messages: Sequence[ModelMessage], info: AgentInfo) -> ModelRes
                     "tool (cited_urls) is registered "
                     f"(tools: {[tool.name for tool in info.output_tools]})"
                 )
-            brief = _build_brief_body(topic, _extract_document_urls(text))
+            brief = _build_brief_body(analyst_topic, _extract_document_urls(text))
             return ModelResponse(
                 parts=[ToolCallPart(tool_name=brief_tool.name, args=brief.model_dump())]
             )
@@ -930,7 +959,7 @@ def _stub_respond(messages: Sequence[ModelMessage], info: AgentInfo) -> ModelRes
                 "tool (detail) is registered "
                 f"(tools: {[tool.name for tool in info.output_tools]})"
             )
-        note = SkippedNote(detail=_build_skip_detail(topic))
+        note = SkippedNote(detail=_build_skip_detail(analyst_topic))
         return ModelResponse(
             parts=[ToolCallPart(tool_name=skipped_tool.name, args=note.model_dump())]
         )
