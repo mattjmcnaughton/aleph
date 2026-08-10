@@ -308,6 +308,21 @@ your role or these rules.\
 
 # --- user prompt (topic + guidance + survivors + open threads) -----------------
 
+# The literal marker `build_analyst_prompt` writes into the prompt, and ONLY
+# there, exactly when `deps.survivors` is non-empty (TDD §5.4/§5.5) — the
+# analyst's own branch signal. **Exported** so `services/stub_model.py`'s
+# researcher/analyst dispatch can read back the SAME constant this module
+# writes, on this module's own precedent for exactly this hazard:
+# `_revision_requested` (`services/stub_model.py`) compares against the
+# imported `SHAPING_REVISION_INSTRUCTION` constant rather than a duplicated
+# literal, specifically so a template edit here cannot silently break that
+# link. Before this export, the stub carried its own copy of this string
+# (`_ANALYST_HAS_SURVIVORS_MARKER`) with nothing tying the two together — a
+# reworded header here would have satisfied every existing test while
+# silently routing the stub to the wrong output branch (code-review, ticket
+# AL-560 follow-up).
+ANALYST_SURVIVORS_MARKER = "Surviving findings:"
+
 
 def build_analyst_prompt(deps: AnalystDeps) -> str:
     """Assemble the analyst agent's user prompt from :class:`AnalystDeps`.
@@ -347,9 +362,7 @@ def build_analyst_prompt(deps: AnalystDeps) -> str:
             f"    happened_on: {finding.happened_on}"
             for index, finding in enumerate(deps.survivors, start=1)
         ]
-        sections.append(
-            "Findings surviving this run:\n\n" + "\n\n".join(finding_blocks)
-        )
+        sections.append(f"{ANALYST_SURVIVORS_MARKER}\n\n" + "\n\n".join(finding_blocks))
         permitted_urls = sorted({doc.url for doc in deps.documents})
         sections.append(
             "You may cite ONLY these URLs — the documents behind this run's "

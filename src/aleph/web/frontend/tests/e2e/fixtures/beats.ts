@@ -6,17 +6,31 @@
 // `beat-card.tsx`, `beat-rail.tsx`, `brief-sources.tsx`'s own comments already
 // claim these hold "by construction"; this file is what actually checks it).
 //
-// Reuses `fixtures/journey.ts`'s `waitForSurface`/`waitWithReload` rather than
-// a second copy: a Beat's research run is Phase 1's trigger+poll shape one
-// workload over (TDD §2), so the identical reload-backed rescue — real
-// significance restated from that file's own docstring — is what keeps this
-// spec waiting on the SAME live poll a learner's browser runs, and falls back
-// to a hard reload (a fresh `GET`, re-draining server-side) exactly when a
-// stuck client-side poll would otherwise hang the test forever. That fallback
-// is what makes "the polling path is exercised for real" more than a slogan:
-// three prior defects in this phase were "the client cannot see the run its
-// own request started," and a bare `expect(...).toBeVisible()` with no reload
-// rescue would hang on exactly that bug instead of catching it.
+// Reuses `fixtures/journey.ts`'s `waitForSurface` for the one wait that IS
+// safe to reload-rescue (`createBeat`'s wait for `standing-orders`, the
+// initial hand-off render). `waitForBeatEntry` below deliberately does NOT:
+// see its own docstring for why a reload-backed rescue on the
+// researching -> terminal transition would defeat the one thing this suite
+// exists to prove.
+//
+// **Corrected reasoning (code-review, ticket AL-560 follow-up).** An earlier
+// version of this file argued the opposite — that the reload rescue was
+// *what made* the polling path real, and that a bare, non-reloading
+// `expect(...).toBeVisible()` "would hang on exactly that bug instead of
+// catching it." That has it backwards. A bare wait that times out and fails
+// IS what catches a broken poll; a reload rescue is what HIDES one: a
+// `page.reload()` performs a completely fresh `GET`, and a Beat's research
+// run (`BriefingService.run_research`, `services/briefing.py`) is spawned as
+// an independent task at claim time and runs to completion on the server
+// regardless of whether the client is polling for it at all — so a reload
+// always eventually shows the true, server-side state whether or not
+// `refetchInterval` on `routes/beats.$beatId.tsx` is even wired up. Deleting
+// it confirmed this concretely: the seeded `202` body never updated
+// client-side, attempt 0 of the old `waitWithReload`-backed wait failed at
+// 15s exactly as expected, the next attempt's reload found the
+// already-completed run anyway, and both specs stayed green — the fourth
+// instance of "the client cannot see the run its own request started"
+// passing regardless.
 
 import { type Locator, type Page, expect } from "@playwright/test";
 import { GENERATION_TIMEOUT, type Level, waitForSurface } from "./journey";

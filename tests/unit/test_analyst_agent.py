@@ -40,6 +40,7 @@ from pydantic_ai.messages import ModelResponse, RetryPromptPart, ToolCallPart
 from pydantic_ai.models.function import FunctionModel
 
 from aleph.agents.analyst import (
+    ANALYST_SURVIVORS_MARKER,
     AnalystDeps,
     BriefBody,
     SkippedNote,
@@ -426,10 +427,20 @@ def test_prompt_lists_survivors_with_index_and_urls() -> None:
     assert "[2]" in prompt and "Second thing." in prompt
 
 
+def test_prompt_with_survivors_states_the_exported_marker() -> None:
+    # FIX 2 (code review, ticket AL-560 follow-up): `services/stub_model.py`
+    # reads this exact, exported constant back out of the prompt to pick its
+    # output branch — pin that the prompt actually states it, not a
+    # reworded/paraphrased equivalent.
+    survivors = [_finding()]
+    prompt = build_analyst_prompt(_deps(survivors=survivors))
+    assert ANALYST_SURVIVORS_MARKER in prompt
+
+
 def test_prompt_with_no_survivors_says_so_and_omits_findings_block() -> None:
     prompt = build_analyst_prompt(_deps(survivors=[]))
     assert "No findings survived this run" in prompt
-    assert "Findings surviving this run" not in prompt
+    assert ANALYST_SURVIVORS_MARKER not in prompt
 
 
 def test_prompt_permitted_urls_are_named_from_documents_not_survivors() -> None:

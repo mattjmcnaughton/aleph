@@ -160,10 +160,12 @@ provenance discipline the real agents' validators enforce.
   instead, so the run reaches ``domains/novelty.py::filter_new`` with nothing
   to admit and publishes **Skipped** — TDD §5.7's *third* row, not its
   second. The analyst dispatch never inspects this sentinel directly: it reads
-  ``agents/analyst.py::build_analyst_prompt``'s own literal "Findings
-  surviving this run:" marker (:data:`_ANALYST_HAS_SURVIVORS_MARKER`) to
-  decide ``BriefBody`` vs. ``SkippedNote``, exactly mirroring how the real
-  pipeline decides — off ``AnalystDeps.survivors``, never off the topic.
+  ``agents/analyst.py``'s own exported :data:`~aleph.agents.analyst.
+  ANALYST_SURVIVORS_MARKER` (:data:`_ANALYST_HAS_SURVIVORS_MARKER` here is
+  that same constant, imported rather than restated — see its own comment)
+  back out of the prompt to decide ``BriefBody`` vs. ``SkippedNote``, exactly
+  mirroring how the real pipeline decides — off ``AnalystDeps.survivors``,
+  never off the topic.
 """
 
 from __future__ import annotations
@@ -183,6 +185,9 @@ from pydantic_ai.messages import (
 )
 from pydantic_ai.models.function import DeltaToolCall, FunctionModel
 
+from aleph.agents.analyst import (
+    ANALYST_SURVIVORS_MARKER as _AGENT_ANALYST_SURVIVORS_MARKER,
+)
 from aleph.agents.analyst import BriefBody, SkippedNote
 from aleph.agents.flashcard import FlashcardDraft, FlashcardDrafts
 from aleph.agents.lesson import LessonContent, QuickCheck
@@ -742,10 +747,34 @@ def _extract_topic_line(text: str) -> str:
     version of this dispatch did exactly that, and the analyst's own
     provenance validator caught the resulting nonsense citations rather than
     this comment).
+
+    **Raises, does not fall back, when no ``Topic: `` line is found** (FIX 3,
+    ticket AL-560 code review). An earlier version fell back to the whole
+    ``text`` here — exactly the bug this docstring's previous paragraph
+    describes catching once, restored: if either prompt builder ever stops
+    leading with a bare ``Topic: `` line, or reformats it, that fallback would
+    silently interpolate the entire prompt — document dump, URLs and all —
+    into every generated claim, detail, and Brief body again, and it would
+    present identically: an opaque e2e timeout (the provenance validator
+    exhausting its retries), never a loud, attributable error. Every sibling
+    in this module raises instead of defaulting on a missing, mandatory
+    marker (see ``_read_position``/``_read_flashcard_drafts``'s own module
+    docstring sections); this one now does too. Multiple ``Topic: `` lines
+    remain safe: ``_TOPIC_LINE_RE.search`` takes the first, which is always
+    the builder's own line at prompt offset 0 — a document's own text could
+    in principle contain a line that also matches, but only *after* that
+    first, authoritative one.
     """
     match = _TOPIC_LINE_RE.search(text)
-    line = match.group(1) if match is not None else text
-    return clean_topic(line) or "the topic"
+    if match is None:
+        raise StubModelForcedError(
+            "researcher/analyst prompt is missing a parseable 'Topic: <value>' "
+            "line (the build_researcher_prompt/build_analyst_prompt "
+            "contract); falling back to the whole prompt would interpolate "
+            "document text, citations, and URLs into every generated claim, "
+            "detail, and Brief body instead of the topic alone"
+        )
+    return clean_topic(match.group(1)) or "the topic"
 
 
 # The literal clause `agents/analyst.py::build_analyst_prompt` writes only
@@ -755,7 +784,16 @@ def _extract_topic_line(text: str) -> str:
 # second, independent guess (e.g. re-checking `FORCE_NO_FINDINGS` here too,
 # which would drift the moment a *genuinely* non-novel run — no sentinel
 # involved — needed the identical answer).
-_ANALYST_HAS_SURVIVORS_MARKER = "Findings surviving this run:"
+#
+# **Imported, not restated** (code-review, ticket AL-560 follow-up): this used
+# to be a locally-duplicated literal with nothing tying it to
+# `agents/analyst.py::build_analyst_prompt`'s own text, so a reworded header
+# there would have silently routed the stub to the wrong branch while every
+# existing test (which only asserts the string's *absence* in the
+# no-survivors case) stayed green. `_revision_requested`'s own
+# `SHAPING_REVISION_INSTRUCTION` import, a few hundred lines below, is this
+# module's own precedent for closing exactly that hole.
+_ANALYST_HAS_SURVIVORS_MARKER = _AGENT_ANALYST_SURVIVORS_MARKER
 
 # A retrieved document's URL, exactly as `build_researcher_prompt` and
 # `build_analyst_prompt` (`agents/researcher.py`, `agents/analyst.py`) each
@@ -763,21 +801,65 @@ _ANALYST_HAS_SURVIVORS_MARKER = "Findings surviving this run:"
 # `StubRetriever`'s own URLs (`services/retrieval.py`) never contain
 # whitespace, so recovering them is a plain token scan — no need to parse the
 # surrounding document-block formatting either prompt builder uses.
+#
+# **Trailing punctuation is stripped by the caller, not excluded here** (FIX
+# 4, ticket AL-560 code review): `\S+` is deliberately greedy rather than
+# excluding punctuation classes up front, since a URL segment can legitimately
+# contain characters like `,`/`.`/`)` — only a TRAILING one, glued on by the
+# surrounding prose (`agents/analyst.py`'s
+# ``source_urls: {', '.join(...)}`` rendering is exactly this: a second
+# Finding URL on the same line leaves a bare `,` stuck to the first one), is
+# ever spurious. See `_URL_TRAILING_PUNCTUATION` and `_extract_document_urls`.
 _DOC_URL_RE = re.compile(r"https://\S+")
+
+# Characters a rendered URL token can pick up from the surrounding prompt
+# prose rather than the URL itself — a trailing comma from
+# `', '.join(finding.source_urls)` (`agents/analyst.py`), or a period/
+# parenthesis/bracket a document listing's own punctuation glues on. Stripped
+# from the RIGHT end only, once, by `str.rstrip` — never from a URL's
+# interior, where the same characters can be part of the address itself.
+_URL_TRAILING_PUNCTUATION = ",.;:!?)]}\"'"
+
+# The two single-line sections every researcher/analyst prompt leads with
+# (`build_researcher_prompt`/`build_analyst_prompt`, both `f"Topic: {...}"`
+# and, when present, `f"Guidance from the learner: {...}"`) — excluded from
+# the document-URL scan below (FIX 4, ticket AL-560 code review). A Beat's
+# Topic (or its learner-supplied Guidance) can itself be a pasted URL — the
+# frontend's own contract for what a Topic must survive — and without this
+# exclusion that URL would be mistaken for one of the documents this run
+# actually read, which `AnalystDeps.__post_init__`/the researcher's own
+# provenance validator then reject as unbacked.
+_TOPIC_OR_GUIDANCE_LINE_RE = re.compile(
+    r"^(?:Topic|Guidance from the learner): .*$", re.MULTILINE
+)
+
+
+def _document_section(text: str) -> str:
+    """`text` with its leading Topic/Guidance lines blanked out.
+
+    Scopes `_extract_document_urls`'s scan to the part of the prompt that can
+    actually name a retrieved document's URL — never the Topic or Guidance
+    line, which carry learner-supplied text a Beat's own design must let be a
+    pasted URL (FIX 4).
+    """
+    return _TOPIC_OR_GUIDANCE_LINE_RE.sub("", text)
 
 
 def _extract_document_urls(text: str) -> list[str]:
-    """Every distinct URL `text` mentions, in first-occurrence order.
+    """Every distinct document URL `text` mentions, in first-occurrence order.
 
     Run against the researcher's own prompt (one `RetrievedDocument` per
     query) and the analyst's own prompt (a surviving Finding's `source_urls`,
     then the permitted-citation list) alike — both render URLs as bare
     tokens, so one general extractor serves both stub dispatches below.
+    Scoped to `_document_section(text)` (FIX 4) and stripped of any trailing
+    punctuation the surrounding prose glued on (`_URL_TRAILING_PUNCTUATION`).
     """
     seen: set[str] = set()
     urls: list[str] = []
-    for url in _DOC_URL_RE.findall(text):
-        if url not in seen:
+    for raw_url in _DOC_URL_RE.findall(_document_section(text)):
+        url = raw_url.rstrip(_URL_TRAILING_PUNCTUATION)
+        if url and url not in seen:
             seen.add(url)
             urls.append(url)
     return urls
