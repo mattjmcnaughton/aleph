@@ -16,14 +16,16 @@
 // never injects a Brief into the database or mocks the API — it drives the
 // real deploy form, reads the real `202` response (already `research_state:
 // "researching"`, the claim already committed server-side before the response
-// is built, `routers/v1/beats.py`'s own module doc), and then waits — through
-// the Beat view's own live poll, with a reload-backed rescue if that poll ever
-// stalls (`fixtures/beats.ts::waitForBeatEntry`, built on the identical
-// mechanism `fixtures/journey.ts::waitForSurface` already proves for paths and
-// lessons) — for the SAME Beat's rail to show a real, server-persisted,
+// is built, `routers/v1/beats.py`'s own module doc), waits through the real
+// `Researching…` state, and then waits — through the Beat view's own live
+// poll ALONE, with no reload rescue (`fixtures/beats.ts::waitForBeatEntry`;
+// see its own module header for why a reload-backed rescue here would defeat
+// the point) — for the SAME Beat's rail to show a real, server-persisted,
 // published entry. Three separate defects in this phase were "the client
-// cannot see the run its own request started"; a bare, non-reloading wait
-// would hang on exactly that class of bug instead of catching it.
+// cannot see the run its own request started"; a bare, non-reloading wait is
+// what catches a fourth — it times out and fails on exactly that class of
+// bug, rather than a reload quietly finding the server's already-completed
+// state and passing anyway.
 //
 // **Also covers the AL-530 review carry-over**: "390x844 phone viewport: no
 // horizontal scroll, tap targets >= 44px" could not be verified in jsdom (no
@@ -77,7 +79,7 @@ test.describe("W29 deploy an analyst, get a cited Brief", { tag: "@w29" }, () =>
 
     // --- deploy, and wait through a REAL researching -> terminal transition --
     const topic = uniqueTopic("EU AI regulation");
-    await createBeat(page, topic);
+    const beatId = await createBeat(page, topic);
     await waitForBeatEntry(page, "published");
     await expectNoHorizontalOverflow(page);
 
@@ -110,6 +112,17 @@ test.describe("W29 deploy an analyst, get a cited Brief", { tag: "@w29" }, () =>
     // (Also out of e2e's reach on purpose: W30, which alone would produce a
     // second Brief to link to, is an integration case — PRD §7.1's table.)
     await expect(page.getByTestId("builds-on-line")).toHaveCount(0);
+
+    // --- revisit home: a real Beat card now exists (code-review FIX 9) -------
+    // The home visit at the top of this test happens BEFORE anything is
+    // deployed, so on a fresh account the Beats section is empty there and no
+    // card is ever measured — despite this file's own header naming
+    // `beat-card.tsx` among the components it "actually checks". Revisiting
+    // home now, with this Beat published, is what actually measures one.
+    await page.goto("/");
+    await expectMinTouchTarget(
+      page.locator(`[data-testid="beat-list-item"][data-beat-id="${beatId}"]`),
+    );
   });
 
   test("a failed research run's retry button meets the phone touch target", async ({ page }) => {

@@ -141,3 +141,14 @@ def test_e2e_backend_boots_with_the_shaper_slot_stubbed_and_the_flag_on(
         str(FeatureFlag.ANALYST): True,
     }
     assert restored_live_settings.rate_limit_shaping_messages_per_day == 0
+    # Phase 6 (ticket AL-560, code-review follow-up): the analyst's own two
+    # settings mutations, pinned here for the identical reason the shaping cap
+    # and the flag map above are — neither was pinned anywhere before this,
+    # so a silent code-default drift on either would only otherwise surface
+    # as W29/W31 getting slower and eventually flaky weeks into a long-lived
+    # local `aleph_e2e` database, never as a failing test today. Lowered from
+    # its original `1_000` into the low tens (see this factory's own comment
+    # on `max_beats_per_learner` for why raising rather than zeroing is still
+    # correct, and why `1_000` was not).
+    assert restored_live_settings.rate_limit_brief_research_per_day == 0
+    assert restored_live_settings.max_beats_per_learner == 30  # noqa: PLR2004

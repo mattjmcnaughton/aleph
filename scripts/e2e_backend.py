@@ -171,20 +171,39 @@ def create_stub_app() -> FastAPI:
     settings.rate_limit_tutor_messages_per_day = 0
     settings.rate_limit_shaping_messages_per_day = 0
     # Phase 6 (ticket AL-560): the arrival drain's own daily cap (D14) — same
-    # "0 disables it" convention as every rate limit above, and the same
-    # reason: two Playwright projects sharing one backend + `DEV_USER` would
-    # otherwise exhaust ``RATE_LIMIT_BRIEF_RESEARCH_PER_DAY``'s default of 5
-    # partway through a local re-run.
+    # "0 disables it" convention as every rate limit above. **The reason is
+    # not "two Playwright projects sharing one backend + `DEV_USER`"**
+    # (code-review, ticket AL-560 follow-up corrected this sentence: W29/W31
+    # run only in the `mobile-390x844` project, on `DEV_STORAGE_STATE`, and
+    # the flashcards project below shares no user or cap concern with them at
+    # all). The real reason: W29/W31 spend three research runs per suite run
+    # (one per test in `w29.spec.ts`, plus `w31.spec.ts`'s own) against
+    # `RATE_LIMIT_BRIEF_RESEARCH_PER_DAY`'s default of 5 — fine for a single
+    # CI run, but `reuseExistingServer: !CI` keeps `aleph_e2e` warm across
+    # local re-runs on the same calendar day, so a second local run that same
+    # day would silently stop claiming partway through once the cap is spent.
     settings.rate_limit_brief_research_per_day = 0
     # ``max_beats_per_learner`` is NOT set to 0 here (unlike every cap above):
     # it is a **stock** cap (`check_beat_creation`, live Beat rows), not a
     # daily flow one, and `BriefingService.drain_claimable` reuses the same
     # config value as the arrival drain's own query `LIMIT` (`services/
     # briefing.py`) — 0 would make that `LIMIT 0` and silently stop the drain
-    # from ever claiming anything. Raised generously instead, so `DEV_USER`
-    # never hits "You've reached the limit of N analysts" across repeated
-    # local re-runs (`reuseExistingServer: !CI` keeps `aleph_e2e` warm).
-    settings.max_beats_per_learner = 1_000
+    # from ever claiming anything. Raised, not zeroed, for exactly that
+    # reason — but only into the low tens, not the thousands (code-review,
+    # ticket AL-560 follow-up: the original `1_000` compounded with the cap
+    # above into an unbounded local drain). `reuseExistingServer: !CI` keeps
+    # `aleph_e2e` warm across local re-runs, and every Beat this suite ever
+    # deploys stays a live, claim-eligible row forever after — there is no
+    # Beat-deletion control in this ticket's scope — so each one becomes
+    # claim-eligible again on its own next anchor weekday, and the very next
+    # `GET /beats` that day drains and spawns every one of them at once, one
+    # real (if stubbed) research run per row, through
+    # `LIMIT max_beats_per_learner`. 30 is comfortably more than this suite
+    # ever deploys in one calendar day and keeps that `LIMIT` an actual
+    # bound, without leaving a weeks-old local database's accumulated Beats
+    # free to fan out into an unbounded drain the next time someone visits
+    # home.
+    settings.max_beats_per_learner = 30
     # `flashcards` (Phase 3 TDD D13) drafts on *every* completion once the flag
     # is on (`feature_flag_defaults` below) — W1-W23's ~30 lessons per run,
     # plus W24-W27's own, all trigger a drafting run and would otherwise
@@ -232,6 +251,25 @@ def create_stub_app() -> FastAPI:
     # uses (`monkeypatch.setattr(briefing_service, "_retriever", ...)`) — the
     # object every route in `routers/v1/beats.py` calls into, not a second,
     # disconnected instance.
+    #
+    # **A coordination hazard at the lifecycle seam, recorded here on purpose**
+    # (code-review, ticket AL-560 follow-up). This assignment runs BEFORE
+    # `create_app()` below — and therefore before the app's lifespan runs at
+    # all. A separate, in-flight change (not yet on this branch) has
+    # `services/lifecycle.py::GenerationLifecycle.start` bind a live
+    # `ExaRetriever` onto this same `briefing_service._retriever` seam via
+    # `bind_runtime(...)`, which only runs INSIDE the lifespan — i.e. AFTER
+    # `create_stub_app()` has already returned this line's `StubRetriever()`
+    # in place. They compose correctly today only because that binding is a
+    # documented no-op when `EXA_API_KEY` is unset (true here — this factory
+    # never sets it), so the lifespan's own rebind, when it lands, will find
+    # nothing to do and leave this `StubRetriever` standing. **Do not "fix"
+    # this ordering** by moving this assignment after `create_app()`, or by
+    # assuming the lifespan's bind always no-ops: if `bind_runtime` is ever
+    # changed to rebind unconditionally (e.g. to a retriever that does not
+    # gate on the API key), it would silently overwrite this `StubRetriever`
+    # after startup and send the e2e suite at a live provider. Re-verify this
+    # interaction before touching either side of it.
     briefing_service._retriever = StubRetriever()  # noqa: SLF001
 
     # Imported lazily so mutating settings above lands before app assembly.

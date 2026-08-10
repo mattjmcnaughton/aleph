@@ -8,24 +8,42 @@
 // correctly", and this is the assertion that a quiet Beat reads that way to a
 // learner, not as a failure.
 //
-// **The `[force-no-findings]` sentinel forces documents the pipeline's
-// novelty gate rejects, never zero documents.** That distinction is the whole
-// point (TDD §5.7, §11): zero documents after `services/retrieval.py`'s
-// filters is a **failed** run (`services/briefing.py`'s own load-bearing
-// row — "we found nothing to read" is not "nothing happened"), and this test
-// would prove nothing about the Skipped path if its stub took that shortcut.
-// Here, `services/retrieval.py::StubRetriever` returns its ordinary real,
-// dated documents (retrieval genuinely succeeds); `services/stub_model.py`'s
+// **The `[force-no-findings]` sentinel forces the researcher to report ZERO
+// FINDINGS from documents that were genuinely, non-emptily retrieved — never
+// zero documents.** That distinction is the whole point (TDD §5.7, §11):
+// zero documents after `services/retrieval.py`'s filters is a **failed** run
+// (`services/briefing.py`'s own load-bearing row — "we found nothing to
+// read" is not "nothing happened"), and this test would prove nothing about
+// the Skipped path if its stub took that shortcut. Here,
+// `services/retrieval.py::StubRetriever` returns its ordinary real, dated
+// documents (retrieval genuinely succeeds); `services/stub_model.py`'s
 // researcher dispatch is what reports zero Findings from them, so the run
 // reaches `domains/novelty.py::filter_new` with nothing to admit and the
 // analyst publishes Skipped — never the failed branch.
 //
+// **A deliberate, recorded amendment to TDD §11's original text** (code
+// review, ticket AL-560 follow-up — the TDD itself is corrected separately,
+// ticket AL-561; this comment is what a reader of this file sees first).
+// §11 originally described `[force-no-findings]` as forcing documents the
+// novelty gate itself REJECTS — exercising the gate's rejection branch, not
+// just its "nothing survived" one. That was judged arguably forced: a
+// Beat's first-ever research run — the only run this spec (or W29) ever
+// drives — has no prior Brief, so there are no earlier-cited URLs or claims
+// for the gate to reject anything *against*. Genuinely exercising rejection
+// needs a second run, which only W30 produces, and W30 is an integration
+// case per PRD §7.1's own table, never a Playwright journey. So the shipped
+// mechanism above — the researcher itself returning zero Findings — is what
+// this suite actually tests, and it still reaches the same TDD §5.7 row
+// (Skipped) through the same gate (`filter_new` on an empty findings list
+// admits nothing, exactly as it would on a batch the gate rejected).
+//
 // **No live network** (`EXA_API_KEY` unset — see `w29.spec.ts`'s own header)
 // and **the polling path is exercised for real**: this spec deploys through
-// the real form and waits — through the Beat view's live poll, with a
-// reload-backed rescue on stall — for the Beat's own rail to show a real,
+// the real form and waits — through the Beat view's own live poll ALONE, no
+// reload rescue (`fixtures/beats.ts::waitForBeatEntry`; see its own module
+// header for why) — for the Beat's own rail to show a real,
 // server-persisted Skipped row, exactly as `w29.spec.ts` waits for a
-// published one (`fixtures/beats.ts::waitForBeatEntry`).
+// published one.
 
 import { expect, test } from "@playwright/test";
 import { DEV_STORAGE_STATE } from "../fixtures/auth";
@@ -86,11 +104,14 @@ test.describe("W31 a quiet period is Skipped, not padded", { tag: "@w31" }, () =
     // --- no error styling ---------------------------------------------------------
     // `skipped-row.tsx`'s own neutral tone (`border-divider bg-surface`) —
     // never the danger/iris treatment `beat-card.tsx`/`beats.$beatId.tsx` use
-    // for a failed or refused Beat. Asserted on the actual rendered classes,
-    // not merely "the component that would add them never ran".
-    const className = (await skippedRow.getAttribute("class")) ?? "";
-    expect(className).not.toMatch(/danger|iris/);
-    await expect(skippedRow).not.toHaveAttribute("data-variant", "error");
-    await expect(skippedRow).not.toHaveAttribute("data-variant", "refusal");
+    // for a failed or refused Beat. A subtree scan (code-review FIX 8), not
+    // the row's own `class` attribute alone and not a `data-variant` check:
+    // `skipped-row.tsx` sets no `data-variant` at all, so
+    // `not.toHaveAttribute("data-variant", "error")` passed trivially whether
+    // or not the row was actually neutral — it could not tell "confirmed
+    // neutral" from "no attribute here to check" — and a plain `/danger|iris/`
+    // match against the row's own `class` misses the tone landing on a nested
+    // element (e.g. a `<span className="text-danger">`) instead of the row.
+    await expect(skippedRow.locator("[class*=danger], [class*=iris]")).toHaveCount(0);
   });
 });

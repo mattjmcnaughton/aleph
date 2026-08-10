@@ -35,13 +35,17 @@ from aleph.agents.analyst import (
 from aleph.agents.researcher import (
     Finding,
     Findings,
-    ResearchResult,
     ResearcherDeps,
+    ResearchResult,
     RetrievedDocument,
     build_researcher_prompt,
     validate_research_result,
 )
-from aleph.services.stub_model import FORCE_NO_FINDINGS, StubModelForcedError, build_stub_model
+from aleph.services.stub_model import (
+    FORCE_NO_FINDINGS,
+    StubModelForcedError,
+    build_stub_model,
+)
 
 
 def _doc(
@@ -59,7 +63,9 @@ def _doc(
 def _researcher_agent() -> Agent[None, ResearchResult]:
     # Explicit specialization: ty otherwise mis-infers the agent's output type
     # (mirrors test_stub_model.py's _outline_agent/_lesson_agent).
-    return Agent[None, ResearchResult](output_type=ResearchResult, model=build_stub_model())
+    return Agent[None, ResearchResult](
+        output_type=ResearchResult, model=build_stub_model()
+    )
 
 
 def _analyst_agent() -> Agent[None, BriefResult]:
@@ -194,7 +200,9 @@ def test_extract_topic_line_takes_the_first_match_when_several_are_present() -> 
     assert stub_model._extract_topic_line(text) == "real topic"
 
 
-def test_extract_topic_line_raises_rather_than_falling_back_to_the_whole_prompt() -> None:
+def test_extract_topic_line_raises_rather_than_falling_back_to_the_whole_prompt() -> (
+    None
+):
     # FIX 3: the bug found during implementation, pinned. A prompt that does
     # not lead with a bare `Topic: ` line must raise, never silently
     # interpolate the whole prompt (document dump, URLs, everything) into
@@ -278,7 +286,9 @@ def test_a_url_topic_end_to_end_never_becomes_an_unbacked_citation() -> None:
     # ResearcherDeps.documents.
     docs = [_doc(url="https://example.com/stub-source/1")]
     deps = ResearcherDeps(
-        topic="https://a-pasted-url-topic.example/article", guidance=None, documents=docs
+        topic="https://a-pasted-url-topic.example/article",
+        guidance=None,
+        documents=docs,
     )
     result = _researcher_agent().run_sync(build_researcher_prompt(deps)).output
     assert isinstance(result, Findings)

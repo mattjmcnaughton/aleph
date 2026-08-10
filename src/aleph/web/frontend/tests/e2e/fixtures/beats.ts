@@ -33,7 +33,7 @@
 // passing regardless.
 
 import { type Locator, type Page, expect } from "@playwright/test";
-import { GENERATION_TIMEOUT, type Level, waitForSurface } from "./journey";
+import { ACTION_TIMEOUT, GENERATION_TIMEOUT, type Level, waitForSurface } from "./journey";
 
 /** `/beats/{uuid}` — where `routes/beats.new.tsx` navigates on a successful deploy. */
 const BEAT_URL_RE = /\/beats\/([0-9a-f-]{36})(?:$|[?#])/;
@@ -127,17 +127,40 @@ export function briefIdFromUrl(url: string): string {
 
 /**
  * Wait for a Beat's rail to show a real, server-persisted entry of `kind` —
- * the "researching -> terminal" transition itself (see this module's own
- * header for why the reload-backed `waitForSurface` underneath is what makes
- * that transition genuine rather than assumed). Assumes the caller is already
- * on `/beats/{id}` (i.e. `createBeat` already ran).
+ * the "researching -> terminal" transition itself. Assumes the caller is
+ * already on `/beats/{id}` (i.e. `createBeat` already ran).
+ *
+ * Two phases, neither reload-backed (see this module's own header for why a
+ * reload here would defeat the point):
+ *
+ * 1. **`beat-researching` is visible now.** TDD §11 says W29 should "deploy
+ *    an analyst, wait through `Researching…`" — this is that wait, and it is
+ *    a REAL assertion rather than a synthesized one: `createBeat`'s own
+ *    docstring notes TanStack Query's cache is seeded with the `202`
+ *    response's exact body (already `research_state: "researching"`, the
+ *    claim already committed server-side) before the navigate, so this is
+ *    the true first paint of the true first response, not a guess about
+ *    timing.
+ * 2. **The terminal entry (`beat-rail-published`/`-skipped`/`beat-failed`)
+ *    becomes visible through the Beat view's own live poll alone** —a plain,
+ *    bounded `expect(...).toBeVisible()`, generous like every other wait in
+ *    this suite (`GENERATION_TIMEOUT`, tolerant of a slow CI runner or a busy
+ *    developer machine) but with no `page.reload()` anywhere in it. This is
+ *    the fix for the defect this module's header now records: `routes/
+ *    beats.$beatId.tsx`'s `refetchInterval` is the ONLY thing that can carry
+ *    this assertion to a pass, so deleting it makes this step — and W29/W31
+ *    with it — genuinely time out and fail, which is what "the specs can
+ *    catch a broken poll" has to mean.
  */
 export async function waitForBeatEntry(
   page: Page,
   kind: "published" | "skipped" | "failed",
 ): Promise<void> {
   const testId = kind === "failed" ? "beat-failed" : `beat-rail-${kind}`;
-  await waitForSurface(page, testId, GENERATION_TIMEOUT);
+
+  await expect(page.getByTestId("beat-researching")).toBeVisible({ timeout: ACTION_TIMEOUT });
+
+  await expect(page.getByTestId(testId)).toBeVisible({ timeout: GENERATION_TIMEOUT });
 }
 
 /** Every `brief-source` row's title link, in the order the Brief renders them. */
