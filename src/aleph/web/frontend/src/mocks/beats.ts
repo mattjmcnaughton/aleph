@@ -36,6 +36,8 @@ import {
   type BeatSummary,
   type BriefEntry,
   type Level,
+  type ReadPingMarker,
+  type Source,
 } from "../lib/api";
 
 /** Topic contains this (case-insensitive) → the research run refuses. */
@@ -137,6 +139,105 @@ const listReceivedOffsets: number[] = [];
 const detailReceivedOffsets: number[] = [];
 const retryReceivedOffsets: number[] = [];
 
+// --- Briefs (AL-531): the reading surface + read-ping fakes ----------------
+//
+// A separate store from `StoredBeat` above — a Brief's own detail payload
+// (`BriefDetailDTO`, TDD §6) is not derived from a Beat's rail entries here
+// (unlike the real backend, which joins the two tables), so a test seeds
+// whichever of the two it needs directly. `seedBrief` takes a `beatId` only
+// so the read ping's invalidation target is a real value; nothing here
+// requires the id to also exist in `store` above.
+
+interface StoredBrief {
+  id: string;
+  beatId: string;
+  number: number | null;
+  publishedOn: string;
+  title: string | null;
+  bodyMarkdown: string | null;
+  buildsOn: { id: string; number: number; publishedOn: string } | null;
+  sources: Source[];
+  readAt: string | null;
+  sourcesSeenAt: string | null;
+}
+
+const briefStore = new Map<string, StoredBrief>();
+/** Every `POST /briefs/{id}/read` the fake has received, in call order —
+ *  the exactly-once proof (`briefReadPingsFor`) reads this. */
+const briefReadPings: Array<{
+  briefId: string;
+  marker: ReadPingMarker;
+  tzOffsetMinutes: number | null;
+}> = [];
+
+/**
+ * Seed a Brief directly — no research cycle to drive it through (the
+ * `seedBeat` precedent above, one entity over). Every field but `id` and
+ * `beatId` defaults to a plausible published Brief so a test that only
+ * cares about, say, the read ping does not have to spell out a title and a
+ * body it never asserts on.
+ */
+export function seedBrief(brief: {
+  id: string;
+  beatId: string;
+  number?: number;
+  publishedOn?: string;
+  title?: string;
+  bodyMarkdown?: string;
+  buildsOn?: { id: string; number: number; publishedOn: string } | null;
+  sources?: Source[];
+  readAt?: string | null;
+  sourcesSeenAt?: string | null;
+}): void {
+  briefStore.set(brief.id, {
+    id: brief.id,
+    beatId: brief.beatId,
+    number: brief.number ?? 1,
+    publishedOn: brief.publishedOn ?? DEFAULT_TODAY,
+    title: brief.title ?? `Brief #${brief.number ?? 1}`,
+    bodyMarkdown: brief.bodyMarkdown ?? "The body of the Brief.",
+    buildsOn: brief.buildsOn ?? null,
+    sources: brief.sources ?? [],
+    readAt: brief.readAt ?? null,
+    sourcesSeenAt: brief.sourcesSeenAt ?? null,
+  });
+}
+
+/**
+ * Seed a Skipped entry's id — the API resolves it (`BriefDetailDTO` nulls
+ * `number`/`title`/`body_markdown`), even though the rail never links to
+ * one (hand-off item 2). Exercises the route's own graceful deep-link
+ * degradation.
+ */
+export function seedSkippedBriefId(brief: {
+  id: string;
+  beatId: string;
+  publishedOn?: string;
+}): void {
+  briefStore.set(brief.id, {
+    id: brief.id,
+    beatId: brief.beatId,
+    number: null,
+    publishedOn: brief.publishedOn ?? DEFAULT_TODAY,
+    title: null,
+    bodyMarkdown: null,
+    buildsOn: null,
+    sources: [],
+    readAt: null,
+    sourcesSeenAt: null,
+  });
+}
+
+/** Every read ping received for one Brief, in call order — the test-facing
+ *  proof that a ping fired exactly once (or not at all). */
+export function briefReadPingsFor(
+  briefId: string,
+): Array<{ marker: ReadPingMarker; tzOffsetMinutes: number | null }> {
+  return briefReadPings
+    .filter((ping) => ping.briefId === briefId)
+    .map(({ marker, tzOffsetMinutes }) => ({ marker, tzOffsetMinutes }));
+}
+
 /** Reset store + config between tests (wired into tests/setup.ts). */
 export function resetBeats(): void {
   config = { ...defaultConfig };
@@ -149,6 +250,8 @@ export function resetBeats(): void {
   listReceivedOffsets.length = 0;
   detailReceivedOffsets.length = 0;
   retryReceivedOffsets.length = 0;
+  briefStore.clear();
+  briefReadPings.length = 0;
 }
 
 /** Tune the fake's polling/rate-limit/settle behaviour for a single test. */
@@ -481,5 +584,57 @@ export const beatHandlers = [
       beat.researchStartedAt = new Date().toISOString();
     }
     return HttpResponse.json(detailFor(beat), { status: 202 });
+  }),
+
+  http.get(`${API_V1_BASE}/briefs/:id`, ({ params }) => {
+    const brief = briefStore.get(params.id as string);
+    if (!brief) return notFoundEnvelope();
+    return HttpResponse.json({
+      id: brief.id,
+      beat_id: brief.beatId,
+      number: brief.number,
+      published_on: brief.publishedOn,
+      title: brief.title,
+      body_markdown: brief.bodyMarkdown,
+      builds_on: brief.buildsOn
+        ? {
+            id: brief.buildsOn.id,
+            number: brief.buildsOn.number,
+            published_on: brief.buildsOn.publishedOn,
+          }
+        : null,
+      sources: brief.sources,
+    });
+  }),
+
+  http.post(`${API_V1_BASE}/briefs/:id/read`, async ({ params, request }) => {
+    const brief = briefStore.get(params.id as string);
+    if (!brief) return notFoundEnvelope();
+    const body = (await request.json()) as { marker: ReadPingMarker };
+    const raw = new URL(request.url).searchParams.get("tz_offset_minutes");
+    briefReadPings.push({
+      briefId: brief.id,
+      marker: body.marker,
+      tzOffsetMinutes: raw !== null ? Number(raw) : null,
+    });
+    // First-write-wins (D11) — a repeat ping with the same marker never
+    // moves the timestamp, mirroring `mark_read`/`mark_sources_seen`.
+    if (body.marker === "opened") {
+      if (brief.readAt === null) {
+        brief.readAt = new Date().toISOString();
+        // A real backend's Brief and rail-entry `read_at` are the same
+        // column on the same row; this fake keeps two stores (`seedBeat`'s
+        // `entries` and `seedBrief`'s own record) for test-authoring
+        // convenience, so mirror the write into the Beat's rail entry when
+        // one happens to share this id — what makes the invalidation this
+        // ping's caller triggers (`["beats", beatId]`) actually visible.
+        const beat = store.get(brief.beatId);
+        const entry = beat?.entries.find((e) => e.id === brief.id && e.kind === "published");
+        if (entry) entry.readAt = brief.readAt;
+      }
+    } else if (brief.sourcesSeenAt === null) {
+      brief.sourcesSeenAt = new Date().toISOString();
+    }
+    return new HttpResponse(null, { status: 204 });
   }),
 ];

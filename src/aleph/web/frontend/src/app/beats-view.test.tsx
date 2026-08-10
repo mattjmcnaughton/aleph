@@ -187,6 +187,43 @@ describe("Beat view — /beats/$beatId", () => {
     expect(read?.getAttribute("data-unread")).toBeNull();
   });
 
+  it("[AL-531 hand-off 1/2] a published row links to its Brief; a Skipped row links nowhere", async () => {
+    seedBeat({
+      id: "beat-links",
+      topic: "EU AI regulation",
+      level: "some_experience",
+      entries: [
+        {
+          kind: "published",
+          id: "brief-linked",
+          number: 2,
+          publishedOn: "2026-08-03",
+          title: "A published Brief",
+        },
+        {
+          kind: "skipped",
+          id: "skip-linked",
+          publishedOn: "2026-07-27",
+          skipLine: "Nothing material since Brief #1.",
+        },
+      ],
+    });
+
+    await gotoBeat("beat-links");
+
+    const publishedRow = await screen.findByTestId("beat-rail-published");
+    const publishedLink = publishedRow.querySelector("a");
+    expect(publishedLink).not.toBeNull();
+    expect(publishedLink?.getAttribute("href")).toBe("/briefs/brief-linked");
+    // The floor + truncate treatment moved onto the link itself, preserved
+    // from the presentational version this replaces (hand-off item 1).
+    expect(publishedLink?.className).toContain("min-h-[44px]");
+    expect(publishedRow.querySelector("p.truncate")).not.toBeNull();
+
+    const skippedRow = await screen.findByTestId("beat-rail-skipped");
+    expect(skippedRow.querySelector("a")).toBeNull();
+  });
+
   it("[TDD §7] a fresh researching Beat renders the researching state on the very first fetch, the rail renders unconditionally beside it, and polling genuinely continues to a second fetch", async () => {
     vi.useFakeTimers();
     try {
