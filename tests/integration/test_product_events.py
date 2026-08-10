@@ -16,18 +16,31 @@ so structlog events reach it as log records (``span_type == "log"``).
 
 from __future__ import annotations
 
+from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from pydantic_ai.models.function import FunctionModel
 
 from aleph import events
 from aleph.app import create_app
 from aleph.auth import AuthIdentity
 from aleph.logging import configure_logging
+from aleph.routers.v1 import beats as beats_router_module
+from aleph.services import briefing as briefing_module
 from aleph.services import generation as gen_module
 
 from .conftest import CollectingSpawn, assert_event, captured_records, stub_resolver
+from .test_beats_api import _seed_beat, _seed_published
+from .test_beats_api import _sign_in as _sign_in_and_get_user_id
+from .test_briefing import (
+    _doc,
+    _FakeRetriever,
+    _finding_payload,
+    _PipelineResponder,
+    _resolver,
+)
 
 if TYPE_CHECKING:
     from fastapi import FastAPI
@@ -276,3 +289,235 @@ async def test_outline_refused_and_failed_outcomes(
         if record["attributes"]["path_id"] == failed_id
     )
     assert failed_record["success"] is False
+
+
+# --------------------------------------------------------------------------- #
+# Phase 6 — the analyst (AL-540): beat_deployed and brief_read, driven as
+# real HTTP against the real Beats & Briefs API (routers/v1/beats.py).
+# brief_research_completed's four outcomes are exercised at the service layer
+# (tests/integration/test_briefing.py), which already carries the fakes this
+# pipeline needs (a scripted FunctionModel serving both agent calls).
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.anyio
+@pytest.mark.workflow("W29")
+async def test_beat_deployed_and_brief_read_emit_every_declared_field(
+    app: FastAPI,
+    monkeypatch: pytest.MonkeyPatch,
+    analyst_flag_enabled: None,
+    capfire,
+) -> None:
+    configure_logging()
+    beats_spawn = CollectingSpawn()
+    monkeypatch.setattr(briefing_module.briefing_service, "_spawn", beats_spawn)
+    monkeypatch.setattr(
+        briefing_module.briefing_service,
+        "_retriever",
+        _FakeRetriever(documents=[_doc("https://example.com/a")]),
+    )
+    responder = _PipelineResponder(
+        researcher=(
+            "findings",
+            {
+                "findings": [
+                    _finding_payload("The backlash arrived", ["https://example.com/a"])
+                ]
+            },
+        ),
+        analyst=(
+            "cited_urls",
+            {
+                "title": "The backlash arrived",
+                "body_markdown": "Northlake published a review.",
+                "cited_urls": ["https://example.com/a"],
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        briefing_module.briefing_service,
+        "_resolve_model",
+        _resolver(FunctionModel(responder)),
+    )
+
+    async with _client(app) as client:
+        await _sign_in(client, monkeypatch, OWNER)
+
+        deployed = await client.post(
+            "/api/v1/beats",
+            json={
+                "topic": "EU AI regulation",
+                "level": "some_experience",
+                "anchor_weekday": 0,
+                "guidance": "focus on enforcement",
+            },
+        )
+        assert deployed.status_code == 202, deployed.text
+        beat_id = deployed.json()["id"]
+        await beats_spawn.drain()
+
+        detail = await client.get(f"/api/v1/beats/{beat_id}")
+        assert detail.status_code == 200, detail.text
+        entry = detail.json()["entries"][0]
+        brief_id = entry["id"]
+
+        opened = await client.post(
+            f"/api/v1/briefs/{brief_id}/read", json={"marker": "opened"}
+        )
+        assert opened.status_code == 204, opened.text
+        sources = await client.post(
+            f"/api/v1/briefs/{brief_id}/read", json={"marker": "sources"}
+        )
+        assert sources.status_code == 204, sources.text
+
+    deployed_event = assert_event(capfire, events.BEAT_DEPLOYED)
+    assert deployed_event["beat_id"] == beat_id
+    assert deployed_event["beat_level"] == "some_experience"
+    assert deployed_event["anchor_weekday"] == 0
+    assert deployed_event["has_guidance"] is True
+
+    research = assert_event(capfire, events.BRIEF_RESEARCH_COMPLETED)
+    assert research["beat_id"] == beat_id
+    assert research["outcome"] == "published"
+    assert research["total_tokens"] > 0
+
+    read_records = captured_records(capfire, events.BRIEF_READ)
+    assert len(read_records) == 2
+    markers = {r["attributes"]["marker"] for r in read_records}
+    assert markers == {"opened", "sources"}
+    for record in read_records:
+        attributes = record["attributes"]
+        missing = events.EVENT_FIELDS[events.BRIEF_READ] - set(attributes)
+        assert not missing, f"brief_read missing fields {sorted(missing)}"
+        assert attributes["beat_id"] == beat_id
+        assert attributes["brief_id"] == brief_id
+        assert attributes["age_days"] >= 0
+
+
+@pytest.mark.anyio
+async def test_read_ping_age_days_uses_the_learners_local_day_not_utc(
+    app: FastAPI,
+    monkeypatch: pytest.MonkeyPatch,
+    analyst_flag_enabled: None,
+    capfire,
+) -> None:
+    """FIX 9 (code-review, AL-540): `age_days` is computed against the
+    learner's LOCAL day via the route's new `tz_offset_minutes` param, not
+    always UTC's. Regression case: a learner nine hours EAST of UTC (Tokyo,
+    `tz_offset_minutes = -540`, the JS `getTimezoneOffset()` sign convention
+    `dtos/progress.py` documents) reading a Brief in their own morning, at a
+    moment UTC still reads the PREVIOUS day.
+
+    The existing ``age_days >= 0`` assertion just above this test
+    (``test_beat_deployed_and_brief_read_emit_every_declared_field``) is
+    never exercised under a non-UTC offset — every call there omits
+    ``tz_offset_minutes`` and reads it same-day in UTC too, so it would stay
+    green even if this route silently went back to UTC-only. This test pins
+    the one case that distinguishes them: before FIX 9, this exact scenario
+    produced ``age_days == -1``."""
+    configure_logging()
+
+    class _FrozenDatetime(datetime):
+        """Freezes ``datetime.now(UTC)`` inside the beats router to
+        2026-08-10T16:00Z — 2026-08-11T01:00 for a Tokyo-local learner
+        (UTC+9), already the SAME calendar day as the Brief's own
+        ``published_on`` (2026-08-11, the learner's local day at publish
+        time, D4a) even though UTC itself still reads 2026-08-10."""
+
+        @classmethod
+        def now(cls, tz: object = None) -> _FrozenDatetime:
+            del tz
+            return cls(2026, 8, 10, 16, 0, tzinfo=UTC)
+
+    monkeypatch.setattr(beats_router_module, "datetime", _FrozenDatetime)
+
+    async with _client(app) as client:
+        # This module's own `_sign_in` returns `None`; `test_beats_api`'s
+        # version returns the signed-in `user_id`, which the direct
+        # repository seeding below needs (there is no deploy response to
+        # read it off).
+        user_id = await _sign_in_and_get_user_id(client, monkeypatch, OWNER)
+        beat_id = await _seed_beat(user_id=user_id)
+        brief_id = await _seed_published(
+            beat_id, number=1, published_on=date(2026, 8, 11), url="https://x.test/a"
+        )
+
+        resp = await client.post(
+            f"/api/v1/briefs/{brief_id}/read",
+            params={"tz_offset_minutes": -540},
+            json={"marker": "opened"},
+        )
+        assert resp.status_code == 204, resp.text
+
+    record = assert_event(capfire, events.BRIEF_READ)
+    assert record["brief_id"] == str(brief_id)
+    # Local day is 2026-08-11 (16:00 UTC + 9h = 01:00 local, already the
+    # 11th) — the SAME day the Brief published, so age_days is honestly 0.
+    # The old, UTC-only computation would have read UTC's date (still the
+    # 10th) minus published_on (the 11th) = -1, a value with no honest
+    # reading.
+    assert record["age_days"] == 0
+
+
+@pytest.mark.anyio
+async def test_a_repeat_read_ping_does_not_re_emit_brief_read(
+    app: FastAPI,
+    monkeypatch: pytest.MonkeyPatch,
+    analyst_flag_enabled: None,
+    capfire,
+) -> None:
+    """First-write-wins (D11): a repeat ping for a marker already stamped is
+    not a second read — the quick_check_attempted precedent."""
+    configure_logging()
+    beats_spawn = CollectingSpawn()
+    monkeypatch.setattr(briefing_module.briefing_service, "_spawn", beats_spawn)
+    monkeypatch.setattr(
+        briefing_module.briefing_service,
+        "_retriever",
+        _FakeRetriever(documents=[_doc("https://example.com/a")]),
+    )
+    responder = _PipelineResponder(
+        researcher=(
+            "findings",
+            {"findings": [_finding_payload("X happened", ["https://example.com/a"])]},
+        ),
+        analyst=(
+            "cited_urls",
+            {
+                "title": "T",
+                "body_markdown": "Body.",
+                "cited_urls": ["https://example.com/a"],
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        briefing_module.briefing_service,
+        "_resolve_model",
+        _resolver(FunctionModel(responder)),
+    )
+
+    async with _client(app) as client:
+        await _sign_in(client, monkeypatch, OWNER)
+        deployed = await client.post(
+            "/api/v1/beats",
+            json={
+                "topic": "EU AI regulation",
+                "level": "some_experience",
+                "anchor_weekday": 0,
+            },
+        )
+        beat_id = deployed.json()["id"]
+        await beats_spawn.drain()
+        detail = await client.get(f"/api/v1/beats/{beat_id}")
+        brief_id = detail.json()["entries"][0]["id"]
+
+        first = await client.post(
+            f"/api/v1/briefs/{brief_id}/read", json={"marker": "opened"}
+        )
+        assert first.status_code == 204, first.text
+        second = await client.post(
+            f"/api/v1/briefs/{brief_id}/read", json={"marker": "opened"}
+        )
+        assert second.status_code == 204, second.text
+
+    assert len(captured_records(capfire, events.BRIEF_READ)) == 1

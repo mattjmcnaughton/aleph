@@ -4,9 +4,10 @@ This is AL-521 — **the phase's correctness heart** (epic #163). It is
 ``services/generation.py``'s pattern, one workload over (TDD §2's extension
 map: "a new ``services/briefing.py`` in the same shape rather than a sixth
 concern on a 1 250-line class"), never its object: :class:`BriefingService`
-owns claim -> run -> persist -> (no emit yet, AL-540) for one Beat's research
-run, exactly the shape ``GenerationOrchestrator``/``FlashcardDraftingService``
-already establish twice.
+owns claim -> run -> persist -> emit (``brief_research_completed``, AL-540)
+for one Beat's research run, exactly the shape
+``GenerationOrchestrator``/``FlashcardDraftingService`` already establish
+twice.
 
 **The two entry points, and how they compose (TDD §3, §5.6) — CORRECTED by
 code-review FIX 1 on AL-521; the paragraph below describes the current,
@@ -159,12 +160,14 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 import structlog
 
+from aleph import events
 from aleph.agents.analyst import (
     AnalystDeps,
     SkippedNote,
@@ -182,7 +185,7 @@ from aleph.db import new_session
 from aleph.domains.cadence import is_claimable
 from aleph.domains.novelty import filter_new
 from aleph.repositories import BeatRepository, BriefRepository, NewSource
-from aleph.services.generation import AGENT_LEVEL
+from aleph.services.generation import AGENT_LEVEL, usage_tokens
 from aleph.services.openrouter import resolve_model
 from aleph.services.rate_limit import build_daily_rate_limiter
 from aleph.services.retrieval import (
@@ -278,6 +281,40 @@ class _InvariantViolationError(Exception):
     """
 
 
+class _ContextLoadError(Exception):
+    """Wraps any exception :meth:`BriefingService._load_context` raises,
+    carrying the Beat's ``account_id`` when it was already resolved before
+    the failure (FIX 1, code-review on AL-540).
+
+    **Why this exists.** ``_load_context`` — and the entire persist section
+    at the tail of :meth:`BriefingService._run_claimed` — used to sit
+    OUTSIDE every ``try``/``except`` in that method. An exception from either
+    one (a Neon pool blip mid-query, mid-transaction) escaped straight to
+    :meth:`BriefingService.run_research`'s own blanket handler, which marks
+    the run ``failed`` **without emitting** ``brief_research_completed`` —
+    proven by a probe that monkeypatches a context-load or persist-stage call
+    to raise and observes ``state=failed, events=0``. Every Phase 6 query
+    (`brief_skip_rate.sql`'s ``total_runs``, `brief_read_rate.sql`'s
+    denominator, `cost_per_read_brief.sql`'s spend) is blind to a run that
+    resolves this way, and the blindness is correlated with infra trouble —
+    exactly when the dashboard is being read.
+
+    This type is what lets a context-load failure route through the same
+    :meth:`~BriefingService._fail` every other failure branch in the pipeline
+    already uses: by the time ``_load_context`` raises past the point where
+    it has fetched the Beat row, ``beat.user_id`` is already known, so it
+    rides along on this exception rather than being lost. The one case with
+    genuinely no ``account_id`` to carry — the Beat's own fetch failing, or
+    the Beat having vanished — mirrors the existing "Beat vanished" branch's
+    reasoning: there is no account to stamp an event with, so only the DB
+    mark happens, exactly as that branch already accepts.
+    """
+
+    def __init__(self, account_id: uuid.UUID | None) -> None:
+        super().__init__("context load failed")
+        self.account_id = account_id
+
+
 class _UnconfiguredRetriever:
     """The default ``Retriever`` until AL-523's ``ExaRetriever`` ships.
 
@@ -330,6 +367,59 @@ class _ResearchContext:
     prior_claims: tuple[str, ...]
     open_thread_claims: tuple[str, ...]
     latest_published_number: int | None
+
+
+@dataclass
+class _RunStats:
+    """The §15 funnel, accumulated as one claimed run progresses (AL-540).
+
+    Every field is the **best-known value at the point the run stopped** —
+    initialized to zero/``0`` and filled in as each pipeline stage
+    completes, never backfilled after the fact. A run that fails before the
+    researcher is ever called (e.g. zero documents after §5.2's filters)
+    genuinely never produced any findings or survivors, so ``0`` there is
+    the honest count, not a placeholder standing in for "unknown" — exactly
+    :func:`~aleph.events.emit_brief_research_completed`'s own contract.
+
+    ``started`` is a ``time.perf_counter()`` mark taken at the top of
+    :meth:`BriefingService.run_research`, **before the ``MAX_CONCURRENT_
+    BRIEF_RESEARCH`` permit is even acquired** (FIX 2, code-review on
+    AL-540 — corrected from an earlier version that took the mark after the
+    permit, inside :meth:`_run_claimed`). TDD §9 answers "Wait tolerance's
+    duration half" with this field — the learner watches the researching
+    state through the semaphore wait, not just the pipeline that follows it,
+    so a third arrival queued behind a full permit pool has that queueing
+    counted here too. Still "the run", never "the request" (the arrival that
+    spawned this task already returned before this object existed).
+    """
+
+    started: float
+    queries: int = 0
+    documents_retrieved: int = 0
+    documents_after_filters: int = 0
+    findings: int = 0
+    survivors: int = 0
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+
+    def record_raw_documents(self, count: int) -> None:
+        """The ``retrieve()`` callback target (``record_raw_count``) — a
+        bound method so ``retrieve()`` needs no knowledge of ``_RunStats``,
+        only a plain ``Callable[[int], None]``."""
+        self.documents_retrieved = count
+
+    def add_usage(self, run: object) -> None:
+        """Add one model call's token usage to the running total — the two
+        calls a claimed run can make (researcher, analyst) are summed,
+        because D14a's cost ceiling is arithmetic over the whole run."""
+        prompt, completion, total = usage_tokens(run)
+        self.prompt_tokens += prompt
+        self.completion_tokens += completion
+        self.total_tokens += total
+
+    def elapsed_ms(self) -> int:
+        return round((time.perf_counter() - self.started) * 1000)
 
 
 def _local_today(tz_offset_minutes: int, now: datetime | None) -> date:
@@ -681,20 +771,39 @@ class BriefingService:
         FIX 1 requires to already be resolved (or resolved here) before any
         model or retrieval I/O begins.
 
+        **The clock starts here, before the permit is even acquired** (FIX 2,
+        code-review on AL-540 — corrected from an earlier version that
+        started it inside ``_run_claimed``, after the permit was already
+        held). ``duration_ms`` is supposed to answer "how long does the
+        learner watch the researching state" (TDD §9); with
+        ``MAX_CONCURRENT_BRIEF_RESEARCH`` at 2, a third concurrent arrival
+        can queue on the semaphore for most of the 180s timeout before this
+        method's body ever runs, and the old mark reported a healthy ~40s for
+        that run regardless — exactly backwards for a metric whose entire job
+        is catching a saturated pool.
+
         Any escape from the claimed body (an infra blip after the model ran,
-        a persist error) is recorded ``failed`` best-effort by the top-level
-        handler, mirroring ``run_outline_task``'s own invariant: this method
+        a persist error) is recorded ``failed`` — and, since AL-540's FIX 1,
+        emits ``brief_research_completed`` with an ``outcome="failed"`` too,
+        not just marked silently — by :meth:`_run_claimed`'s own outer guard.
+        The blanket ``except Exception`` here stays as the last-resort
+        fallback (mirroring ``run_outline_task``'s own invariant: this method
         never leaks an unretrieved exception, and a row never wedges in
         ``researching`` until the stale window when a fenced mark could have
-        recorded the real cause.
+        recorded the real cause) — it is best-effort and does **not** itself
+        emit, since by the time an exception reaches here ``_run_claimed``
+        has already tried to mark and emit under the same fence.
         """
+        started = time.perf_counter()
         async with self._model_slot():
             if fence is None:
                 fence = await self._claim(beat_id)
                 if fence is None:
                     return
             try:
-                await self._run_claimed(beat_id, local_today, fence=fence)
+                await self._run_claimed(
+                    beat_id, local_today, fence=fence, started=started
+                )
             except Exception:
                 logger.exception("brief_research_task_failed", beat_id=str(beat_id))
                 with contextlib.suppress(Exception):
@@ -707,15 +816,50 @@ class BriefingService:
         return fence
 
     async def _run_claimed(
-        self, beat_id: uuid.UUID, local_today: date, *, fence: datetime
+        self,
+        beat_id: uuid.UUID,
+        local_today: date,
+        *,
+        fence: datetime,
+        started: float,
     ) -> None:
-        context = await self._load_context(beat_id)
+        # AL-540: "the run", never "the request" — `started` is a mark
+        # `run_research` already took before this run's `MAX_CONCURRENT_
+        # BRIEF_RESEARCH` permit was even acquired (FIX 2, code-review), so
+        # duration_ms covers the semaphore wait, context load, and persist —
+        # everything the learner actually watches through.
+        stats = _RunStats(started=started)
+        # FIX 1 (code-review on AL-540): `_load_context` is wrapped here so a
+        # context-load failure routes through `_fail` and emits, exactly like
+        # every other branch below — see `_ContextLoadError`'s own docstring
+        # for the defect this closes (previously: `state=failed, events=0`).
+        try:
+            context = await self._load_context(beat_id)
+        except _ContextLoadError as exc:
+            logger.exception("brief_research_context_load_failed", beat_id=str(beat_id))
+            if exc.account_id is not None:
+                await self._fail(
+                    beat_id,
+                    fence,
+                    _RESEARCH_FAILED_MESSAGE,
+                    account_id=exc.account_id,
+                    stats=stats,
+                )
+            else:
+                # No Beat row was ever resolved (the vanished-beat precedent
+                # just below) — no account_id survives to stamp an event
+                # with, so only the DB mark happens.
+                await self._mark_failed(beat_id, fence, _RESEARCH_FAILED_MESSAGE)
+            return
         if context is None:
             # The Beat vanished (deleted) between the claim and now — a
             # referential-breakage case with no row left to mark, mirroring
-            # ``services/generation.py``'s own vanished-lesson posture.
+            # ``services/generation.py``'s own vanished-lesson posture. No
+            # ``account_id`` survives to stamp an event with either (the
+            # ``flashcards_drafted`` vanished-lesson precedent).
             logger.warning("brief_research_beat_vanished", beat_id=str(beat_id))
             return
+        account_id = context.account_id
 
         try:
             async with asyncio.timeout(self._timeout):
@@ -726,12 +870,15 @@ class BriefingService:
                     since=context.last_entry_on,
                     max_queries=self._config.brief_retrieval_max_queries,
                 )
+                stats.queries = len(plan.queries)
                 documents = await retrieve(
                     self._retriever,
                     plan,
                     max_documents=self._config.brief_retrieval_max_documents,
                     text_budget_chars=self._config.brief_retrieval_text_budget_chars,
+                    record_raw_count=stats.record_raw_documents,
                 )
+                stats.documents_after_filters = len(documents)
 
                 # §5.7's LOAD-BEARING row: zero documents after the §5.2
                 # filters is a FAILED run, never Skipped — checked, and
@@ -741,7 +888,13 @@ class BriefingService:
                 # result as an empty success, and this is deliberately not
                 # one of them.
                 if not documents:
-                    await self._mark_failed(beat_id, fence, _NO_DOCUMENTS_MESSAGE)
+                    await self._fail(
+                        beat_id,
+                        fence,
+                        _NO_DOCUMENTS_MESSAGE,
+                        account_id=account_id,
+                        stats=stats,
+                    )
                     return
 
                 # -- find (model): documents -> Findings | Refusal ---------- #
@@ -759,13 +912,24 @@ class BriefingService:
                         else self._config.model_research
                     ),
                 )
+                stats.add_usage(researcher_run)
                 research_output = researcher_run.output
                 if isinstance(research_output, Refusal):
                     # PRD §2's safety branch: terminal, never retried — an
                     # over-the-boundary Topic is not an infrastructural
                     # failure (TDD D3).
-                    await self._mark_refused(beat_id, fence, research_output.message)
+                    if await self._mark_refused(
+                        beat_id, fence, research_output.message
+                    ):
+                        self._emit_research_completed(
+                            account_id=account_id,
+                            beat_id=beat_id,
+                            outcome="refused",
+                            stats=stats,
+                        )
                     return
+
+                stats.findings = len(research_output.findings)
 
                 # -- gate (pure, D9): Skipped is "no survivors", computed
                 # here and nowhere else --------------------------------------
@@ -774,6 +938,7 @@ class BriefingService:
                     context.prior_urls,
                     context.prior_claims,
                 )
+                stats.survivors = len(survivors)
                 analyst_documents = _documents_for_survivors(documents, survivors)
 
                 # -- write (model): survivors -> BriefBody | SkippedNote ---- #
@@ -812,13 +977,26 @@ class BriefingService:
                         else self._config.model_brief
                     ),
                 )
+                stats.add_usage(analyst_run)
         except RetrievalUnavailableError:
             # §5.7's first row: visible, retryable, never a published Brief
             # and never Skipped.
-            await self._mark_failed(beat_id, fence, _RETRIEVAL_FAILED_MESSAGE)
+            await self._fail(
+                beat_id,
+                fence,
+                _RETRIEVAL_FAILED_MESSAGE,
+                account_id=account_id,
+                stats=stats,
+            )
             return
         except TimeoutError:
-            await self._mark_failed(beat_id, fence, _RESEARCH_TIMEOUT_MESSAGE)
+            await self._fail(
+                beat_id,
+                fence,
+                _RESEARCH_TIMEOUT_MESSAGE,
+                account_id=account_id,
+                stats=stats,
+            )
             return
         except _InvariantViolationError as exc:
             # FIX 9 (AL-521 review), narrowed by second-pass FIX E: a
@@ -853,7 +1031,13 @@ class BriefingService:
                 beat_id=str(beat_id),
                 error_type=type(cause).__name__ if cause is not None else "unknown",
             )
-            await self._mark_failed(beat_id, fence, _INVARIANT_VIOLATION_MESSAGE)
+            await self._fail(
+                beat_id,
+                fence,
+                _INVARIANT_VIOLATION_MESSAGE,
+                account_id=account_id,
+                stats=stats,
+            )
             return
         except Exception:  # noqa: BLE001 - §5.5/§5.7: any agent/infra error -> failed
             # Covers a researcher/analyst retry-budget exhaustion
@@ -862,96 +1046,176 @@ class BriefingService:
             # failed" row, generalized the way ``run_outline_task``'s own
             # blanket ``except Exception`` is.
             logger.exception("brief_research_pipeline_failed", beat_id=str(beat_id))
-            await self._mark_failed(beat_id, fence, _RESEARCH_FAILED_MESSAGE)
+            await self._fail(
+                beat_id,
+                fence,
+                _RESEARCH_FAILED_MESSAGE,
+                account_id=account_id,
+                stats=stats,
+            )
             return
 
         # -- persist (§5.4/§5.5/§5.6): the ONLY output that survived
         # validation determines the branch; no partial Brief is ever written.
+        #
+        # FIX 1 (code-review on AL-540): `_render_skip_line`,
+        # `_persist_skipped`, `_materialize_sources`, and `_persist_published`
+        # — the whole persist section — used to sit OUTSIDE every try/except
+        # in this method, so a persist-stage exception (a Neon pool blip mid-
+        # transaction) escaped straight to `run_research`'s blanket handler,
+        # which marks the run failed WITHOUT emitting (proof: a probe that
+        # monkeypatches a persist method to raise observed `state=failed,
+        # events=0`). `account_id` is already known here (the context load
+        # above succeeded), so a persist-stage failure can now route through
+        # `_fail` and get its event, exactly like the pipeline's own failure
+        # branches above.
+        #
+        # The emit call for a SUCCESSFUL persist stays OUTSIDE this try
+        # (below): a raising telemetry sink there must not re-mark an
+        # already-published Brief as failed — the property the reviewer
+        # already cleared for this branch. It is safe to leave unguarded
+        # regardless: `_mark_failed`'s own atomic fence-and-state `UPDATE`
+        # (`WHERE research_state = RESEARCHING AND research_started_at =
+        # fence`) is a no-op the instant the Beat has moved to `idle`, so even
+        # an accidental second `_fail` call here could never flip a genuinely
+        # published Brief back to failed, and `_fail`'s own
+        # `if await self._mark_failed(...):` guard means that no-op mark
+        # never triggers a second, contradicting event either (no double-
+        # emission on a lost/already-resolved fence).
         result = analyst_run.output
-        if isinstance(result, SkippedNote):
-            skip_line = _render_skip_line(
-                context.latest_published_number, result.detail
-            )
-            persisted = await self._persist_skipped(
-                beat_id, fence, local_today=local_today, skip_line=skip_line
-            )
-        else:
-            sources = _materialize_sources(result.cited_urls, documents)
-            if not sources:
-                # FIX 5 (AL-521 review): "a Brief with no Sources is not
-                # publishable" (TDD §5.5/§5.7), enforced at the PERSIST
-                # boundary rather than merely assumed true because upstream
-                # invariants make it currently-true. Structurally
-                # unreachable today — `AnalystDeps`'s construction-time
-                # invariant plus both agents' output validators already
-                # guarantee a non-empty, resolvable `cited_urls` — which is
-                # exactly why this is a hard guard rather than trusting
-                # `_materialize_sources`'s own defensive `continue`: that
-                # `continue` turns the one observable symptom (a cited URL
-                # with no matching document) into silence, and silence here
-                # would mean a zero-Source Brief gets PUBLISHED.
-                logger.error(
-                    "brief_research_zero_sources_at_persist",
-                    beat_id=str(beat_id),
-                    cited_url_count=len(result.cited_urls),
+        try:
+            if isinstance(result, SkippedNote):
+                skip_line = _render_skip_line(
+                    context.latest_published_number, result.detail
                 )
-                await self._mark_failed(beat_id, fence, _NO_SOURCES_MESSAGE)
-                return
-            number = (context.latest_published_number or 0) + 1
-            persisted = await self._persist_published(
+                persisted = await self._persist_skipped(
+                    beat_id, fence, local_today=local_today, skip_line=skip_line
+                )
+                outcome = "skipped"
+            else:
+                sources = _materialize_sources(result.cited_urls, documents)
+                if not sources:
+                    # FIX 5 (AL-521 review): "a Brief with no Sources is not
+                    # publishable" (TDD §5.5/§5.7), enforced at the PERSIST
+                    # boundary rather than merely assumed true because
+                    # upstream invariants make it currently-true.
+                    # Structurally unreachable today — `AnalystDeps`'s
+                    # construction-time invariant plus both agents' output
+                    # validators already guarantee a non-empty, resolvable
+                    # `cited_urls` — which is exactly why this is a hard
+                    # guard rather than trusting `_materialize_sources`'s own
+                    # defensive `continue`: that `continue` turns the one
+                    # observable symptom (a cited URL with no matching
+                    # document) into silence, and silence here would mean a
+                    # zero-Source Brief gets PUBLISHED.
+                    logger.error(
+                        "brief_research_zero_sources_at_persist",
+                        beat_id=str(beat_id),
+                        cited_url_count=len(result.cited_urls),
+                    )
+                    await self._fail(
+                        beat_id,
+                        fence,
+                        _NO_SOURCES_MESSAGE,
+                        account_id=account_id,
+                        stats=stats,
+                    )
+                    return
+                number = (context.latest_published_number or 0) + 1
+                persisted = await self._persist_published(
+                    beat_id,
+                    fence,
+                    local_today=local_today,
+                    number=number,
+                    title=result.title,
+                    body_markdown=result.body_markdown,
+                    claims=[finding.claim for finding in survivors],
+                    sources=sources,
+                )
+                outcome = "published"
+        except Exception:  # noqa: BLE001 - FIX 1: any persist-stage error -> failed, WITH the event
+            logger.exception("brief_research_persist_failed", beat_id=str(beat_id))
+            await self._fail(
                 beat_id,
                 fence,
-                local_today=local_today,
-                number=number,
-                title=result.title,
-                body_markdown=result.body_markdown,
-                claims=[finding.claim for finding in survivors],
-                sources=sources,
+                _RESEARCH_FAILED_MESSAGE,
+                account_id=account_id,
+                stats=stats,
             )
-        if not persisted:
+            return
+
+        if persisted:
+            self._emit_research_completed(
+                account_id=account_id, beat_id=beat_id, outcome=outcome, stats=stats
+            )
+        else:
             # Lost the fence between the model call and the persist (a stale
             # re-claim raced in) — the loser drops silently, mirroring
             # ``GenerationOrchestrator._persist_outline``'s own rollback-and-
-            # drop for the identical race.
+            # drop for the identical race. No event either: the winner of the
+            # race already emitted (or will emit) its own
+            # ``brief_research_completed`` — the ``outline_generated``
+            # fenced-win precedent.
             logger.warning("brief_research_lost_fence_on_persist", beat_id=str(beat_id))
 
     # -- context load (own session, TDD §5.3/§5.4's inputs) ------------------ #
 
     async def _load_context(self, beat_id: uuid.UUID) -> _ResearchContext | None:
+        """Load ``_ResearchContext``, or ``None`` if the Beat vanished.
+
+        **Any other failure raises** :class:`_ContextLoadError` (FIX 1,
+        code-review on AL-540), never a bare exception — everything after the
+        Beat's own fetch runs inside its own ``try`` so the wrapped error
+        still carries ``beat.user_id`` for the caller to stamp a failed-run
+        event with. See :class:`_ContextLoadError`'s own docstring for why.
+        """
         async with self._session_factory() as session:
             beat = await self._beats(session).get(beat_id)
             if beat is None:
                 return None
-            briefs = BriefRepository(session)
-            last_entries = await briefs.last_published_on_by_beat([beat_id])
-            prior_urls = await briefs.prior_source_urls_for_beat(beat_id)
-            prior_claims = await briefs.prior_claims_for_beat(beat_id)
-            # FIX 6 (AL-521 review), corrected by second-pass FIX B: a
-            # SEPARATE, bounded read from `prior_claims` above (D9's own,
-            # deliberately unbounded gate input) — but bounded to the latest
-            # PUBLISHED Brief's claims, never the latest ENTRY's (a Skipped
-            # row's claims are always `[]`, D2). `latest_published` already
-            # answers `latest_published_number` below, so this costs no
-            # extra query. See `_ResearchContext`'s docstring.
-            latest_published = await briefs.latest_published(beat_id)
-            open_thread_claims = (
-                tuple(latest_published.claims) if latest_published is not None else ()
-            )
-            return _ResearchContext(
-                account_id=beat.user_id,
-                topic=beat.topic,
-                guidance=beat.guidance,
-                level=beat.level,
-                model_research=beat.model_research,
-                model_brief=beat.model_brief,
-                last_entry_on=last_entries.get(beat_id),
-                prior_urls=frozenset(prior_urls),
-                prior_claims=tuple(prior_claims),
-                open_thread_claims=open_thread_claims,
-                latest_published_number=(
-                    latest_published.number if latest_published is not None else None
-                ),
-            )
+            try:
+                briefs = BriefRepository(session)
+                last_entries = await briefs.last_published_on_by_beat([beat_id])
+                prior_urls = await briefs.prior_source_urls_for_beat(beat_id)
+                prior_claims = await briefs.prior_claims_for_beat(beat_id)
+                # FIX 6 (AL-521 review), corrected by second-pass FIX B: a
+                # SEPARATE, bounded read from `prior_claims` above (D9's own,
+                # deliberately unbounded gate input) — but bounded to the
+                # latest PUBLISHED Brief's claims, never the latest ENTRY's
+                # (a Skipped row's claims are always `[]`, D2).
+                # `latest_published` already answers `latest_published_number`
+                # below, so this costs no extra query. See
+                # `_ResearchContext`'s docstring.
+                latest_published = await briefs.latest_published(beat_id)
+                open_thread_claims = (
+                    tuple(latest_published.claims)
+                    if latest_published is not None
+                    else ()
+                )
+                return _ResearchContext(
+                    account_id=beat.user_id,
+                    topic=beat.topic,
+                    guidance=beat.guidance,
+                    level=beat.level,
+                    model_research=beat.model_research,
+                    model_brief=beat.model_brief,
+                    last_entry_on=last_entries.get(beat_id),
+                    prior_urls=frozenset(prior_urls),
+                    prior_claims=tuple(prior_claims),
+                    open_thread_claims=open_thread_claims,
+                    latest_published_number=(
+                        latest_published.number
+                        if latest_published is not None
+                        else None
+                    ),
+                )
+            except Exception as exc:
+                # FIX 1 (code-review on AL-540): `beat` is already resolved
+                # at this point, so its `user_id` survives into
+                # `_ContextLoadError` for `_run_claimed` to stamp a failed-run
+                # event with, instead of the error escaping this method as a
+                # bare exception no caller can attribute to an account.
+                raise _ContextLoadError(account_id=beat.user_id) from exc
 
     # -- fenced marks (own session each, TDD §5.4's short-transaction
     # discipline, mirrored from ``GenerationOrchestrator``) ------------------ #
@@ -965,6 +1229,71 @@ class BriefingService:
             )
             await self._commit_or_rollback(session, ok=ok)
         return ok
+
+    async def _fail(
+        self,
+        beat_id: uuid.UUID,
+        fence: datetime,
+        error: str,
+        *,
+        account_id: uuid.UUID,
+        stats: _RunStats,
+    ) -> None:
+        """:meth:`_mark_failed`, plus the ``failed`` ``brief_research_completed``
+        (AL-540).
+
+        **Every one of TDD §5.7's failure branches that has an ``account_id``
+        to stamp routes through here** — including, since code-review FIX 1
+        on AL-540, the context-load and persist-stage failures that used to
+        mark a run failed silently, with no event at all (the earlier
+        docstring here claimed this was already universally true; a probe
+        monkeypatching a persist method or a context-load query to raise
+        proved it false: `state=failed, events=0`). The one case that still
+        cannot come through here is the same one that predates this fix —
+        the Beat vanishing before any account is ever resolved (see
+        :meth:`_run_claimed`'s vanished-beat branch and
+        :class:`_ContextLoadError`'s own docstring) — because there is
+        genuinely no account to stamp an event with, not because this method
+        was skipped.
+
+        Emitted only on a fenced win, the ``outline_generated``/
+        ``lesson_generated`` precedent: a lost race's mark is a silent no-op
+        (:meth:`_mark_failed` returns ``False``), and so is its event — the
+        winner of that race reports its own outcome. This is also what makes
+        it safe for FIX 1's new persist-stage ``except`` block to call this
+        unconditionally on any persist error: if the persist actually
+        succeeded and only a later step raised, the Beat is already ``idle``,
+        so the atomic fence-and-state ``UPDATE`` inside :meth:`_mark_failed`
+        matches zero rows and no double mark, and no double event, ever
+        happens.
+        """
+        if await self._mark_failed(beat_id, fence, error):
+            self._emit_research_completed(
+                account_id=account_id, beat_id=beat_id, outcome="failed", stats=stats
+            )
+
+    @staticmethod
+    def _emit_research_completed(
+        *, account_id: uuid.UUID, beat_id: uuid.UUID, outcome: str, stats: _RunStats
+    ) -> None:
+        """The one call site every terminal branch of :meth:`_run_claimed`
+        funnels through (AL-540) — ``duration_ms`` is read off ``stats`` here,
+        as late as possible, so it reflects the full run up to (and
+        including) the fenced mark/persist that just resolved it."""
+        events.emit_brief_research_completed(
+            account_id=account_id,
+            beat_id=beat_id,
+            outcome=outcome,
+            duration_ms=stats.elapsed_ms(),
+            queries=stats.queries,
+            documents_retrieved=stats.documents_retrieved,
+            documents_after_filters=stats.documents_after_filters,
+            findings=stats.findings,
+            survivors=stats.survivors,
+            prompt_tokens=stats.prompt_tokens,
+            completion_tokens=stats.completion_tokens,
+            total_tokens=stats.total_tokens,
+        )
 
     async def _mark_refused(
         self, beat_id: uuid.UUID, fence: datetime, message: str

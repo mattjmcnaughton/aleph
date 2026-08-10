@@ -108,6 +108,7 @@ from sqlalchemy.ext.asyncio import (  # noqa: TC002 - FastAPI resolves annotatio
     AsyncSession,
 )
 
+from aleph import events
 from aleph.authz import is_admin
 from aleph.config import settings
 from aleph.db import get_session
@@ -357,6 +358,17 @@ async def deploy_beat(
     await _drain(session, user, tz_offset_minutes)
     await session.refresh(beat)
 
+    # AL-540: the Beat is created, committed, and its first run already
+    # claimed and spawned by the drain above — Beat survival's own
+    # denominator and the deployment-mix datum (TDD §9).
+    events.emit_beat_deployed(
+        account_id=user.id,
+        beat_id=beat.id,
+        beat_level=beat.level.value,
+        anchor_weekday=beat.anchor_weekday,
+        has_guidance=beat.guidance is not None,
+    )
+
     return _beat_detail_dto(beat, entries=[])
 
 
@@ -548,7 +560,11 @@ async def get_brief(brief: OwnedBrief, session: Session) -> BriefDetailDTO:
 
 @router.post("/briefs/{brief_id}/read", status_code=status.HTTP_204_NO_CONTENT)
 async def read_brief(
-    brief: OwnedBrief, body: ReadPingRequest, session: Session
+    brief: OwnedBrief,
+    body: ReadPingRequest,
+    user: CurrentUser,
+    session: Session,
+    tz_offset_minutes: TzOffsetMinutes = 0,
 ) -> Response:
     """Ping a Brief read -> ``204`` (D11, §6/§9).
 
@@ -559,11 +575,43 @@ async def read_brief(
     timestamp (the north-star metric, §9, asks *when a learner first opened*
     a Brief). An unrecognized ``marker`` is a ``422 validation_error`` before
     this body ever runs (``ReadPingMarker``'s ``Literal``).
+
+    **AL-540:** ``brief_read`` fires only on the real, first-write-wins
+    transition — the ``quick_check_attempted`` precedent (a repeat ping is
+    not a second read) — after the ping's own commit, so a raising sink
+    cannot turn an already-recorded read into a ``500``.
+
+    **``age_days`` is computed against the learner's LOCAL day** (FIX 9,
+    code-review — corrected from an earlier version that always used
+    ``datetime.now(UTC).date()``). ``published_on`` is itself the learner's
+    local day at the moment the arrival that produced it ran (D4a) — comparing
+    it against UTC's *today* is not a rounding nicety, it is comparing two
+    different calendars. For a learner east of UTC reading a fresh Brief in
+    their own morning, UTC's *today* can still be *yesterday*, which made
+    ``age_days`` **negative** — a value with no honest reading (an age of
+    ``-1`` is not "no age yet", `age_days` has no ``NULL``/sentinel
+    convention anywhere else this field is used). ``tz_offset_minutes`` is
+    already a query param on every other route in this file
+    (``TzOffsetMinutes``, §7's shared ``local_today`` derivation), so this was
+    a self-imposed gap, not a missing capability. Defaults to ``0`` (UTC) so
+    an old client that has not been updated to send it keeps today's exact
+    behavior. **AL-531 must send this param from the client** for the fix to
+    reach real learners — see the frontend read-ping call site.
     """
     briefs = BriefRepository(session)
     if body.marker == "opened":
-        await briefs.mark_read(brief.id)
+        changed = await briefs.mark_read(brief.id)
     else:
-        await briefs.mark_sources_seen(brief.id)
+        changed = await briefs.mark_sources_seen(brief.id)
     await session.commit()
+
+    if changed:
+        events.emit_brief_read(
+            account_id=user.id,
+            beat_id=brief.beat_id,
+            brief_id=brief.id,
+            marker=body.marker,
+            age_days=(_local_today(tz_offset_minutes) - brief.published_on).days,
+        )
+
     return Response(status_code=status.HTTP_204_NO_CONTENT)

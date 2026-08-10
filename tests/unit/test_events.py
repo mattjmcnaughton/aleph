@@ -50,6 +50,8 @@ def recorder(monkeypatch: pytest.MonkeyPatch) -> _Recorder:
 ACCOUNT = uuid.UUID("11111111-1111-4111-8111-111111111111")
 PATH = uuid.UUID("22222222-2222-4222-8222-222222222222")
 LESSON = uuid.UUID("33333333-3333-4333-8333-333333333333")
+BEAT = uuid.UUID("77777777-7777-4777-8777-777777777777")
+BRIEF = uuid.UUID("88888888-8888-4888-8888-888888888888")
 
 
 def test_account_created(recorder: _Recorder) -> None:
@@ -732,6 +734,153 @@ def test_review_graded_carries_no_path_id_for_an_orphaned_card(
     assert fields["path_id"] is None
 
 
+# --------------------------------------------------------------------------- #
+# The analyst (Phase 6, AL-540 / TDD §9/§15)
+# --------------------------------------------------------------------------- #
+
+
+def test_beat_deployed(recorder: _Recorder) -> None:
+    events.emit_beat_deployed(
+        account_id=ACCOUNT,
+        beat_id=BEAT,
+        beat_level="some_experience",
+        anchor_weekday=0,
+        has_guidance=True,
+    )
+    assert recorder.records == [
+        (
+            "beat_deployed",
+            {
+                "account_id": str(ACCOUNT),
+                "beat_id": str(BEAT),
+                "beat_level": "some_experience",
+                "anchor_weekday": 0,
+                "has_guidance": True,
+                "workflow": "W29",
+            },
+        )
+    ]
+
+
+@pytest.mark.parametrize(
+    ("outcome", "workflow"),
+    [
+        ("published", "W29"),
+        ("skipped", "W31"),
+        ("failed", "W8"),
+        ("refused", "W7"),
+    ],
+)
+def test_brief_research_completed_outcomes(
+    recorder: _Recorder, outcome: str, workflow: str
+) -> None:
+    """All four outcomes (TDD §9/§15) — one event, never a success event plus
+    a separate failure event, the shape ``lesson_generated``/
+    ``tutor_reply_completed`` already use."""
+    events.emit_brief_research_completed(
+        account_id=ACCOUNT,
+        beat_id=BEAT,
+        outcome=outcome,
+        duration_ms=42_000,
+        queries=6,
+        documents_retrieved=10,
+        documents_after_filters=8,
+        findings=3,
+        survivors=1,
+        prompt_tokens=900,
+        completion_tokens=300,
+        total_tokens=1200,
+    )
+    name, fields = recorder.records[0]
+    assert name == "brief_research_completed"
+    assert fields == {
+        "account_id": str(ACCOUNT),
+        "beat_id": str(BEAT),
+        "outcome": outcome,
+        "duration_ms": 42_000,
+        "queries": 6,
+        "documents_retrieved": 10,
+        "documents_after_filters": 8,
+        "findings": 3,
+        "survivors": 1,
+        "prompt_tokens": 900,
+        "completion_tokens": 300,
+        "total_tokens": 1200,
+        "workflow": workflow,
+    }
+
+
+def test_brief_research_completed_funnel_is_honest_when_never_reached(
+    recorder: _Recorder,
+) -> None:
+    """A run failed by the zero-documents-after-filters branch never called
+    the researcher — ``findings``/``survivors`` are honestly ``0``, never a
+    placeholder standing in for "unknown" (TDD §15)."""
+    events.emit_brief_research_completed(
+        account_id=ACCOUNT,
+        beat_id=BEAT,
+        outcome="failed",
+        duration_ms=500,
+        queries=6,
+        documents_retrieved=0,
+        documents_after_filters=0,
+        findings=0,
+        survivors=0,
+    )
+    _name, fields = recorder.records[0]
+    assert fields["findings"] == 0
+    assert fields["survivors"] == 0
+    assert fields["prompt_tokens"] == 0
+    assert fields["completion_tokens"] == 0
+    assert fields["total_tokens"] == 0
+
+
+@pytest.mark.parametrize("marker", ["opened", "sources"])
+def test_brief_read(recorder: _Recorder, marker: str) -> None:
+    events.emit_brief_read(
+        account_id=ACCOUNT, beat_id=BEAT, brief_id=BRIEF, marker=marker, age_days=2
+    )
+    assert recorder.records == [
+        (
+            "brief_read",
+            {
+                "account_id": str(ACCOUNT),
+                "beat_id": str(BEAT),
+                "brief_id": str(BRIEF),
+                "marker": marker,
+                "age_days": 2,
+                "workflow": "W29",
+            },
+        )
+    ]
+
+
+def test_a_failing_analyst_request_path_emitter_never_breaks_the_write(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``beat_deployed`` fires after the Beat already exists and the arrival
+    drain has already spawned its first run; ``brief_read`` fires after its
+    own ping commit. Neither may turn an already-real write into a 500 (the
+    ``change_applied`` argument, one surface over) — both are routed through
+    ``_emit_guarded``."""
+
+    def _explode(_name: str) -> object:
+        raise RuntimeError("logfire sink is down")
+
+    monkeypatch.setattr(events.structlog, "get_logger", _explode)
+
+    events.emit_beat_deployed(
+        account_id=ACCOUNT,
+        beat_id=BEAT,
+        beat_level="some_experience",
+        anchor_weekday=0,
+        has_guidance=False,
+    )
+    events.emit_brief_read(
+        account_id=ACCOUNT, beat_id=BEAT, brief_id=BRIEF, marker="opened", age_days=0
+    )
+
+
 def test_a_failing_shaping_emitter_never_breaks_the_request_path(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -909,6 +1058,30 @@ def _drive_every_emitter() -> None:
         rung_before=1,
         queue_size=10,
         queue_remaining=9,
+    )
+    events.emit_beat_deployed(
+        account_id=ACCOUNT,
+        beat_id=BEAT,
+        beat_level="some_experience",
+        anchor_weekday=0,
+        has_guidance=True,
+    )
+    events.emit_brief_research_completed(
+        account_id=ACCOUNT,
+        beat_id=BEAT,
+        outcome="published",
+        duration_ms=42_000,
+        queries=6,
+        documents_retrieved=10,
+        documents_after_filters=8,
+        findings=3,
+        survivors=1,
+        prompt_tokens=900,
+        completion_tokens=300,
+        total_tokens=1200,
+    )
+    events.emit_brief_read(
+        account_id=ACCOUNT, beat_id=BEAT, brief_id=BRIEF, marker="opened", age_days=2
     )
 
 

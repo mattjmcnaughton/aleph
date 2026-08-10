@@ -75,6 +75,13 @@ _REQUIRED_QUERIES = {
     "review_queue_completion.sql",
     "review_recall_by_rung.sql",
     "flashcard_return.sql",
+    # Phase 6 — the analyst (AL-540, Phase 6 PRD §7 / TDD §9/§15).
+    "brief_return.sql",
+    "brief_read_rate.sql",
+    "brief_depth_of_read.sql",
+    "brief_skip_rate.sql",
+    "brief_wait_tolerance.sql",
+    "cost_per_read_brief.sql",
 }
 
 
@@ -162,3 +169,25 @@ def test_metrics_doc_maps_every_query() -> None:
     doc = _METRICS_DOC.read_text(encoding="utf-8")
     for query in _query_files():
         assert query.name in doc, f"{query.name} is not mapped in docs/metrics.md"
+
+
+# ``activation_rate.sql`` is the query, ``breadth.sql``/``return_rate.sql`` are
+# the other two queries that reuse its exact ``activated`` cohort definition
+# (docs/metrics.md's "Metric semantics & caveats" section) — all three must
+# stay ignorant of ``brief_read`` for the same reason.
+_ACTIVATION_COHORT_QUERIES = ("activation_rate.sql", "breadth.sql", "return_rate.sql")
+
+
+@pytest.mark.parametrize("query_name", _ACTIVATION_COHORT_QUERIES)
+def test_brief_read_is_absent_from_the_activation_query(query_name: str) -> None:
+    """Reading a Brief never touches Activated learner (TDD §15's standing
+    rule, PRD §4.9, Phase 6 §2's point 3) — ``brief_read`` must never join
+    the activated cohort's event list, in any query that reuses it. Nothing
+    about the query engine enforces this; it holds because adding
+    ``brief_read`` here would be a deliberate act, and this test is what
+    keeps it one."""
+    sql = (_QUERIES_DIR / query_name).read_text(encoding="utf-8")
+    assert "brief_read" not in sql, (
+        f"{query_name} references brief_read — reading a Brief must never "
+        "count toward Activated learner (TDD §15)"
+    )
