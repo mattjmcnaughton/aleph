@@ -1,3 +1,10 @@
+# [1.35.0](https://github.com/mattjmcnaughton/aleph/compare/v1.34.0...v1.35.0) (2026-08-10)
+
+
+### Features
+
+* **telemetry:** analyst product events and the six saved queries ([#192](https://github.com/mattjmcnaughton/aleph/issues/192)) ([521bb34](https://github.com/mattjmcnaughton/aleph/commit/521bb34f79225bee67b3b9e380880d83f7a93e46)), closes [#176](https://github.com/mattjmcnaughton/aleph/issues/176)
+
 # [1.34.0](https://github.com/mattjmcnaughton/aleph/compare/v1.33.0...v1.34.0) (2026-08-10)
 
 
