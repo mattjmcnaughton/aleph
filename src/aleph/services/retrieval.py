@@ -33,7 +33,7 @@ import structlog
 from aleph.agents.researcher import RetrievedDocument
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Callable, Mapping, Sequence
     from pathlib import Path
 
 logger = structlog.get_logger(__name__)
@@ -170,6 +170,7 @@ async def retrieve(
     *,
     max_documents: int,
     text_budget_chars: int,
+    record_raw_count: Callable[[int], None] | None = None,
 ) -> list[RetrievedDocument]:
     """search -> dedupe -> drop undated/empty-text -> cap -> character budget.
 
@@ -233,8 +234,24 @@ async def retrieve(
     this function adds no try/except of its own, so the error propagates
     unchanged rather than being caught and degraded to `[]` (§5.2's
     load-bearing rule).
+
+    **`record_raw_count` (AL-540, TDD §9/§15) — an observability hook, never
+    a second call.** `brief_research_completed`'s funnel wants BOTH the raw,
+    pre-filter document count (`documents_retrieved`, the retrieval-RECALL
+    half of §15's table) and the post-filter count this function already
+    returns (`documents_after_filters`). Calling `retriever.search()` a
+    second time from the caller to recover the raw count would double the
+    billed retrieval cost and break the "exactly one `search()` per run"
+    invariant (`tests/unit/test_briefing_service.py`'s guard note); reaching
+    into `retrieve()`'s own single call instead costs nothing extra. Called
+    at most once, with `len(documents)` **before** any of the filters below
+    run, and only when a document list was actually returned — never on a
+    `RetrievalUnavailableError` (nothing came back to count). `None` (the
+    default) is a no-op, so every existing caller is unaffected.
     """
     documents = await retriever.search(plan.queries)
+    if record_raw_count is not None:
+        record_raw_count(len(documents))
     deduped = _dedupe_by_url(documents)
     dated = [document for document in deduped if document.published_on is not None]
     grounded = [document for document in dated if document.text]

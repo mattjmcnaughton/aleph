@@ -107,6 +107,7 @@ from sqlalchemy.ext.asyncio import (  # noqa: TC002 - FastAPI resolves annotatio
     AsyncSession,
 )
 
+from aleph import events
 from aleph.authz import is_admin
 from aleph.config import settings
 from aleph.db import get_session
@@ -356,6 +357,17 @@ async def deploy_beat(
     await _drain(session, user, tz_offset_minutes)
     await session.refresh(beat)
 
+    # AL-540: the Beat is created, committed, and its first run already
+    # claimed and spawned by the drain above — Beat survival's own
+    # denominator and the deployment-mix datum (TDD §9).
+    events.emit_beat_deployed(
+        account_id=user.id,
+        beat_id=beat.id,
+        level=beat.level.value,
+        anchor_weekday=beat.anchor_weekday,
+        has_guidance=beat.guidance is not None,
+    )
+
     return _beat_detail_dto(beat, entries=[])
 
 
@@ -539,7 +551,7 @@ async def get_brief(brief: OwnedBrief, session: Session) -> BriefDetailDTO:
 
 @router.post("/briefs/{brief_id}/read", status_code=status.HTTP_204_NO_CONTENT)
 async def read_brief(
-    brief: OwnedBrief, body: ReadPingRequest, session: Session
+    brief: OwnedBrief, body: ReadPingRequest, user: CurrentUser, session: Session
 ) -> Response:
     """Ping a Brief read -> ``204`` (D11, §6/§9).
 
@@ -550,11 +562,28 @@ async def read_brief(
     timestamp (the north-star metric, §9, asks *when a learner first opened*
     a Brief). An unrecognized ``marker`` is a ``422 validation_error`` before
     this body ever runs (``ReadPingMarker``'s ``Literal``).
+
+    **AL-540:** ``brief_read`` fires only on the real, first-write-wins
+    transition — the ``quick_check_attempted`` precedent (a repeat ping is
+    not a second read) — after the ping's own commit, so a raising sink
+    cannot turn an already-recorded read into a ``500``. ``age_days`` is
+    computed in UTC (no ``tz_offset_minutes`` rides this request; inherits
+    ``return_rate.sql``'s standing UTC-vs-local-day caveat, docs/metrics.md).
     """
     briefs = BriefRepository(session)
     if body.marker == "opened":
-        await briefs.mark_read(brief.id)
+        changed = await briefs.mark_read(brief.id)
     else:
-        await briefs.mark_sources_seen(brief.id)
+        changed = await briefs.mark_sources_seen(brief.id)
     await session.commit()
+
+    if changed:
+        events.emit_brief_read(
+            account_id=user.id,
+            beat_id=brief.beat_id,
+            brief_id=brief.id,
+            marker=body.marker,
+            age_days=(datetime.now(UTC).date() - brief.published_on).days,
+        )
+
     return Response(status_code=status.HTTP_204_NO_CONTENT)

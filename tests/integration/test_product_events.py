@@ -20,14 +20,23 @@ from typing import TYPE_CHECKING
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from pydantic_ai.models.function import FunctionModel
 
 from aleph import events
 from aleph.app import create_app
 from aleph.auth import AuthIdentity
 from aleph.logging import configure_logging
+from aleph.services import briefing as briefing_module
 from aleph.services import generation as gen_module
 
 from .conftest import CollectingSpawn, assert_event, captured_records, stub_resolver
+from .test_briefing import (
+    _doc,
+    _FakeRetriever,
+    _finding_payload,
+    _PipelineResponder,
+    _resolver,
+)
 
 if TYPE_CHECKING:
     from fastapi import FastAPI
@@ -276,3 +285,170 @@ async def test_outline_refused_and_failed_outcomes(
         if record["attributes"]["path_id"] == failed_id
     )
     assert failed_record["success"] is False
+
+
+# --------------------------------------------------------------------------- #
+# Phase 6 — the analyst (AL-540): beat_deployed and brief_read, driven as
+# real HTTP against the real Beats & Briefs API (routers/v1/beats.py).
+# brief_research_completed's four outcomes are exercised at the service layer
+# (tests/integration/test_briefing.py), which already carries the fakes this
+# pipeline needs (a scripted FunctionModel serving both agent calls).
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.anyio
+@pytest.mark.workflow("W29")
+async def test_beat_deployed_and_brief_read_emit_every_declared_field(
+    app: FastAPI,
+    monkeypatch: pytest.MonkeyPatch,
+    analyst_flag_enabled: None,
+    capfire,
+) -> None:
+    configure_logging()
+    beats_spawn = CollectingSpawn()
+    monkeypatch.setattr(briefing_module.briefing_service, "_spawn", beats_spawn)
+    monkeypatch.setattr(
+        briefing_module.briefing_service,
+        "_retriever",
+        _FakeRetriever(documents=[_doc("https://example.com/a")]),
+    )
+    responder = _PipelineResponder(
+        researcher=(
+            "findings",
+            {
+                "findings": [
+                    _finding_payload("The backlash arrived", ["https://example.com/a"])
+                ]
+            },
+        ),
+        analyst=(
+            "cited_urls",
+            {
+                "title": "The backlash arrived",
+                "body_markdown": "Northlake published a review.",
+                "cited_urls": ["https://example.com/a"],
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        briefing_module.briefing_service,
+        "_resolve_model",
+        _resolver(FunctionModel(responder)),
+    )
+
+    async with _client(app) as client:
+        await _sign_in(client, monkeypatch, OWNER)
+
+        deployed = await client.post(
+            "/api/v1/beats",
+            json={
+                "topic": "EU AI regulation",
+                "level": "some_experience",
+                "anchor_weekday": 0,
+                "guidance": "focus on enforcement",
+            },
+        )
+        assert deployed.status_code == 202, deployed.text
+        beat_id = deployed.json()["id"]
+        await beats_spawn.drain()
+
+        detail = await client.get(f"/api/v1/beats/{beat_id}")
+        assert detail.status_code == 200, detail.text
+        entry = detail.json()["entries"][0]
+        brief_id = entry["id"]
+
+        opened = await client.post(
+            f"/api/v1/briefs/{brief_id}/read", json={"marker": "opened"}
+        )
+        assert opened.status_code == 204, opened.text
+        sources = await client.post(
+            f"/api/v1/briefs/{brief_id}/read", json={"marker": "sources"}
+        )
+        assert sources.status_code == 204, sources.text
+
+    deployed_event = assert_event(capfire, events.BEAT_DEPLOYED)
+    assert deployed_event["beat_id"] == beat_id
+    assert deployed_event["level"] == "some_experience"
+    assert deployed_event["anchor_weekday"] == 0
+    assert deployed_event["has_guidance"] is True
+
+    research = assert_event(capfire, events.BRIEF_RESEARCH_COMPLETED)
+    assert research["beat_id"] == beat_id
+    assert research["outcome"] == "published"
+    assert research["total_tokens"] > 0
+
+    read_records = captured_records(capfire, events.BRIEF_READ)
+    assert len(read_records) == 2
+    markers = {r["attributes"]["marker"] for r in read_records}
+    assert markers == {"opened", "sources"}
+    for record in read_records:
+        attributes = record["attributes"]
+        missing = events.EVENT_FIELDS[events.BRIEF_READ] - set(attributes)
+        assert not missing, f"brief_read missing fields {sorted(missing)}"
+        assert attributes["beat_id"] == beat_id
+        assert attributes["brief_id"] == brief_id
+        assert attributes["age_days"] >= 0
+
+
+@pytest.mark.anyio
+async def test_a_repeat_read_ping_does_not_re_emit_brief_read(
+    app: FastAPI,
+    monkeypatch: pytest.MonkeyPatch,
+    analyst_flag_enabled: None,
+    capfire,
+) -> None:
+    """First-write-wins (D11): a repeat ping for a marker already stamped is
+    not a second read — the quick_check_attempted precedent."""
+    configure_logging()
+    beats_spawn = CollectingSpawn()
+    monkeypatch.setattr(briefing_module.briefing_service, "_spawn", beats_spawn)
+    monkeypatch.setattr(
+        briefing_module.briefing_service,
+        "_retriever",
+        _FakeRetriever(documents=[_doc("https://example.com/a")]),
+    )
+    responder = _PipelineResponder(
+        researcher=(
+            "findings",
+            {"findings": [_finding_payload("X happened", ["https://example.com/a"])]},
+        ),
+        analyst=(
+            "cited_urls",
+            {
+                "title": "T",
+                "body_markdown": "Body.",
+                "cited_urls": ["https://example.com/a"],
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        briefing_module.briefing_service,
+        "_resolve_model",
+        _resolver(FunctionModel(responder)),
+    )
+
+    async with _client(app) as client:
+        await _sign_in(client, monkeypatch, OWNER)
+        deployed = await client.post(
+            "/api/v1/beats",
+            json={
+                "topic": "EU AI regulation",
+                "level": "some_experience",
+                "anchor_weekday": 0,
+            },
+        )
+        beat_id = deployed.json()["id"]
+        await beats_spawn.drain()
+        detail = await client.get(f"/api/v1/beats/{beat_id}")
+        brief_id = detail.json()["entries"][0]["id"]
+
+        first = await client.post(
+            f"/api/v1/briefs/{brief_id}/read", json={"marker": "opened"}
+        )
+        assert first.status_code == 204, first.text
+        second = await client.post(
+            f"/api/v1/briefs/{brief_id}/read", json={"marker": "opened"}
+        )
+        assert second.status_code == 204, second.text
+
+    assert len(captured_records(capfire, events.BRIEF_READ)) == 1

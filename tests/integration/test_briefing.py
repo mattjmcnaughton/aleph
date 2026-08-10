@@ -32,9 +32,10 @@ from pydantic_ai.messages import ModelResponse, ToolCallPart
 from pydantic_ai.models.function import FunctionModel
 from sqlalchemy import select, update
 
-from aleph import db
+from aleph import db, events
 from aleph.agents.researcher import ResearcherDeps, RetrievedDocument
 from aleph.config import Settings
+from aleph.logging import configure_logging
 from aleph.models import Beat, BeatResearchState, Brief, BriefKind, BriefSource, Level
 from aleph.repositories import BeatRepository, BriefRepository
 from aleph.services import briefing as briefing_module
@@ -45,7 +46,7 @@ from aleph.services.briefing import (
 )
 from aleph.services.retrieval import RetrievalUnavailableError
 
-from .conftest import CollectingSpawn, create_user
+from .conftest import CollectingSpawn, assert_event, create_user
 
 if TYPE_CHECKING:
     import uuid
@@ -311,6 +312,179 @@ async def test_first_run_produces_a_published_brief_with_sources() -> None:
     assert len(sources) == 1
     assert sources[0].url == "https://example.com/a"
     assert sources[0].publisher == "Northlake Gazette"
+
+
+# --------------------------------------------------------------------------- #
+# AL-540 — brief_research_completed fires on all four outcomes, carrying the
+# §15 funnel. One test per outcome (published/skipped/failed/refused), plus a
+# dedicated retrieval-unavailable case within "failed" (explicitly named by
+# the ticket: "including when retrieval raises").
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.anyio
+async def test_a_published_run_emits_brief_research_completed_with_the_funnel(
+    capfire,
+) -> None:
+    configure_logging()
+    user = await _create_user()
+    beat_id = await _make_beat(user=user)
+    retriever = _FakeRetriever(
+        documents=[_doc("https://example.com/a"), _doc("https://example.com/b")]
+    )
+    responder = _PipelineResponder(
+        researcher=(
+            "findings",
+            {
+                "findings": [
+                    _finding_payload(
+                        "Something material happened", ["https://example.com/a"]
+                    )
+                ]
+            },
+        ),
+        analyst=(
+            "cited_urls",
+            {
+                "title": "The backlash arrived",
+                "body_markdown": "Northlake published a review.",
+                "cited_urls": ["https://example.com/a"],
+            },
+        ),
+    )
+    service, _ = _make_service(
+        retriever=retriever, resolve_model_fn=_resolver(FunctionModel(responder))
+    )
+
+    await service.run_research(beat_id, date(2026, 8, 3))
+
+    record = assert_event(capfire, events.BRIEF_RESEARCH_COMPLETED)
+    assert record["beat_id"] == str(beat_id)
+    assert record["outcome"] == "published"
+    assert record["queries"] > 0
+    # Two documents offered, both survive retrieve()'s own filters here.
+    assert record["documents_retrieved"] == 2
+    assert record["documents_after_filters"] == 2
+    assert record["findings"] == 1
+    assert record["survivors"] == 1
+    assert record["total_tokens"] > 0
+    assert record["duration_ms"] >= 0
+
+
+@pytest.mark.anyio
+async def test_a_skipped_run_emits_brief_research_completed(capfire) -> None:
+    configure_logging()
+    user = await _create_user()
+    beat_id = await _make_beat(user=user, anchor_weekday=0)
+
+    # Non-empty documents, but the researcher legitimately finds nothing.
+    retriever = _FakeRetriever(documents=[_doc("https://example.com/a")])
+    responder = _PipelineResponder(
+        researcher=("findings", {"findings": []}),
+        analyst=("detail", {"detail": ""}),
+    )
+    service, _ = _make_service(
+        retriever=retriever, resolve_model_fn=_resolver(FunctionModel(responder))
+    )
+
+    await service.run_research(beat_id, date(2026, 8, 3))
+
+    record = assert_event(capfire, events.BRIEF_RESEARCH_COMPLETED)
+    assert record["beat_id"] == str(beat_id)
+    assert record["outcome"] == "skipped"
+    assert record["documents_retrieved"] == 1
+    assert record["documents_after_filters"] == 1
+    # The funnel is honest: the researcher WAS called and found nothing.
+    assert record["findings"] == 0
+    assert record["survivors"] == 0
+
+
+@pytest.mark.anyio
+async def test_a_zero_documents_failed_run_emits_brief_research_completed(
+    capfire,
+) -> None:
+    """Failed BEFORE the researcher is ever called: findings/survivors are
+    honestly 0, never a placeholder standing in for "unknown" (TDD §15)."""
+    configure_logging()
+    user = await _create_user()
+    beat_id = await _make_beat(user=user)
+
+    retriever = _FakeRetriever(documents=[])
+    responder = _PipelineResponder(researcher=("findings", {"findings": []}))
+    service, _ = _make_service(
+        retriever=retriever, resolve_model_fn=_resolver(FunctionModel(responder))
+    )
+
+    await service.run_research(beat_id, date(2026, 8, 3))
+
+    record = assert_event(capfire, events.BRIEF_RESEARCH_COMPLETED)
+    assert record["beat_id"] == str(beat_id)
+    assert record["outcome"] == "failed"
+    assert record["documents_retrieved"] == 0
+    assert record["documents_after_filters"] == 0
+    assert record["findings"] == 0
+    assert record["survivors"] == 0
+    assert record["total_tokens"] == 0
+    assert responder.researcher_calls == 0
+
+
+@pytest.mark.anyio
+@pytest.mark.workflow("W33")
+async def test_retrieval_unavailable_emits_brief_research_completed_failed(
+    capfire,
+) -> None:
+    """W33: "including when retrieval raises" (the ticket's own wording) —
+    RetrievalUnavailableError still fenced-wins a mark and still emits."""
+    configure_logging()
+    user = await _create_user()
+    beat_id = await _make_beat(user=user)
+
+    retriever = _FakeRetriever(unavailable=True)
+    responder = _PipelineResponder(researcher=("findings", {"findings": []}))
+    service, _ = _make_service(
+        retriever=retriever, resolve_model_fn=_resolver(FunctionModel(responder))
+    )
+
+    await service.run_research(beat_id, date(2026, 8, 3))
+
+    record = assert_event(capfire, events.BRIEF_RESEARCH_COMPLETED)
+    assert record["beat_id"] == str(beat_id)
+    assert record["outcome"] == "failed"
+    # Nothing ever came back to count.
+    assert record["documents_retrieved"] == 0
+    assert record["documents_after_filters"] == 0
+    assert record["findings"] == 0
+    assert record["survivors"] == 0
+    assert record["total_tokens"] == 0
+
+
+@pytest.mark.anyio
+async def test_a_refused_run_emits_brief_research_completed(capfire) -> None:
+    configure_logging()
+    user = await _create_user()
+    beat_id = await _make_beat(user=user, topic="how to synthesize a bioweapon")
+
+    retriever = _FakeRetriever(documents=[_doc("https://example.com/a")])
+    responder = _PipelineResponder(
+        researcher=(
+            "message",
+            {"message": "This subject is outside what the analyst can research."},
+        ),
+    )
+    service, _ = _make_service(
+        retriever=retriever, resolve_model_fn=_resolver(FunctionModel(responder))
+    )
+
+    await service.run_research(beat_id, date(2026, 8, 3))
+
+    record = assert_event(capfire, events.BRIEF_RESEARCH_COMPLETED)
+    assert record["beat_id"] == str(beat_id)
+    assert record["outcome"] == "refused"
+    # The researcher ran (it cost tokens/latency); the analyst never did.
+    assert record["documents_retrieved"] == 1
+    assert record["documents_after_filters"] == 1
+    assert record["findings"] == 0
+    assert record["survivors"] == 0
 
 
 # --------------------------------------------------------------------------- #

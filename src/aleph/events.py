@@ -21,12 +21,12 @@ anchors it to real emission (the emitters cannot drift from it), and
 ``tests/unit/test_metrics_queries`` checks every attribute referenced by a saved
 SQL query against it — so a query can never reference a field no event provides.
 
-Ported from habagou's ``events.py`` seam, specialised to Aleph's twenty-three
+Ported from habagou's ``events.py`` seam, specialised to Aleph's twenty-six
 product events (Phase 1's nine, Phase 2A's five tutor events, Phase 2B's six
-shaping events, and Phase 3's three flashcard events — each phase's TDD §9).
-If Logfire's retention window ever bounds cohort history (TDD §9 accepted
-risk), the fallback is a Postgres events table behind this same seam — the
-swap is additive, callers are unchanged.
+shaping events, Phase 3's three flashcard events, and Phase 6's three analyst
+events — each phase's TDD §9). If Logfire's retention window ever bounds
+cohort history (TDD §9 accepted risk), the fallback is a Postgres events
+table behind this same seam — the swap is additive, callers are unchanged.
 """
 
 from __future__ import annotations
@@ -77,6 +77,15 @@ FLASHCARDS_DRAFTED = "flashcards_drafted"
 FLASHCARDS_KEPT = "flashcards_kept"
 REVIEW_GRADED = "review_graded"
 
+# Phase 6 — the analyst (TDD §9/§15). Three events: the deployment-mix datum,
+# one research-run-resolution event carrying the §15 funnel (never a success
+# event plus a separate failure event — the ``lesson_generated``/
+# ``tutor_reply_completed`` shape, copied here), and the north star's own
+# read ping.
+BEAT_DEPLOYED = "beat_deployed"
+BRIEF_RESEARCH_COMPLETED = "brief_research_completed"
+BRIEF_READ = "brief_read"
+
 # --- workflow tags (§12 shared vocabulary: PRD workflow → test → trace) ------- #
 
 _W_FIRST_PATH = "W1"  # new learner, first path, first lesson (the magic moment)
@@ -94,6 +103,23 @@ _W_SHAPE_UNDO = "W19"  # undo restores exactly
 _W_DUE_CARD = "W24"  # finishing a lesson produces a due card (draft -> keep)
 _W_QUEUE_HOLDS = "W25"  # the daily queue caps and holds across reload/grading
 _W_LAPSE_RETURNS = "W26"  # a lapse (`again`) resurfaces without costing a slot
+_W_BEAT_DEPLOYED = "W29"  # deploy an analyst, get a cited Brief (also: read it)
+_W_BRIEF_SKIPPED = "W31"  # a quiet period is Skipped, not padded
+#
+# **W30** ("the second Brief builds on the first") and **W32** ("a long
+# absence produces one Brief, not a backlog") tag no event: both are
+# properties of a *sequence* of runs (what a Brief cites, how many Anchor
+# days a drain collapsed into one report) rather than a single run's own
+# outcome, so ``brief_research_completed``'s one-event-per-run shape has no
+# single record to hang either on — they are verified by
+# ``tests/integration/test_briefing.py`` directly, the W27/W20/W21 posture
+# below applied here. **W33** ("retrieval failure is recoverable and never
+# uncited") does not get its own tag either: it is one of several causes
+# folded into ``brief_research_completed``'s generic ``failed`` outcome,
+# which reuses ``_W_FAILURE`` (W8) — the same cross-phase reuse
+# ``flashcards_drafted`` already established for "it broke", rather than
+# minting a phase-specific tag for one failure cause among several that all
+# resolve to the identical outcome value.
 #
 # **W27** ("a card survives its source lesson") tags no event, on the same
 # posture as W20/W21 below: it is a property of the citation degrading
@@ -282,6 +308,43 @@ EVENT_FIELDS: dict[str, frozenset[str]] = {
             "rung_before",
             "queue_size",
             "queue_remaining",
+            "workflow",
+        }
+    ),
+    BEAT_DEPLOYED: frozenset(
+        {
+            "account_id",
+            "beat_id",
+            "level",
+            "anchor_weekday",
+            "has_guidance",
+            "workflow",
+        }
+    ),
+    BRIEF_RESEARCH_COMPLETED: frozenset(
+        {
+            "account_id",
+            "beat_id",
+            "outcome",
+            "duration_ms",
+            "queries",
+            "documents_retrieved",
+            "documents_after_filters",
+            "findings",
+            "survivors",
+            "prompt_tokens",
+            "completion_tokens",
+            "total_tokens",
+            "workflow",
+        }
+    ),
+    BRIEF_READ: frozenset(
+        {
+            "account_id",
+            "beat_id",
+            "brief_id",
+            "marker",
+            "age_days",
             "workflow",
         }
     ),
@@ -1157,4 +1220,203 @@ def emit_review_graded(
         queue_size=queue_size,
         queue_remaining=queue_remaining,
         workflow=_REVIEW_GRADED_WORKFLOW.get(grade, _W_QUEUE_HOLDS),
+    )
+
+
+# --- the analyst (Phase 6, TDD §9/§15) ----------------------------------------- #
+#
+# Three events. ``beat_deployed`` is the deployment-mix datum and Beat
+# survival's denominator; ``brief_research_completed`` is one
+# research-run-resolution event carrying the §15 funnel, fired however the
+# run resolved (never a success event plus a separate failure event — the
+# ``lesson_generated``/``tutor_reply_completed`` shape, copied here so a rate
+# can be computed from one source); ``brief_read`` is the north star's own
+# read ping. AL-070's contract applies unchanged: every field a §9 query
+# reads is one this module actually emits.
+
+
+def emit_beat_deployed(
+    *,
+    account_id: uuid.UUID,
+    beat_id: uuid.UUID,
+    level: str,
+    anchor_weekday: int,
+    has_guidance: bool,
+) -> None:
+    """A learner deployed a Beat (W29) — Beat survival's own denominator and
+    the deployment-mix datum (TDD §9).
+
+    Fires from ``routers/v1/beats.py::deploy_beat`` after the Beat row is
+    created and committed and the arrival drain has claimed and spawned its
+    first research run — the ``path_created`` precedent (``services/
+    generation.py::create_path``), one workload over: the analogous "the row
+    exists, committed" moment for a Beat's own creation. ``level`` is the
+    onboarding Level's wire value (``path_created``'s ``path_level`` reason
+    applies verbatim: ``add_log_level`` owns the bare ``level`` key).
+    ``has_guidance`` is whether the Beat carries an optional Guidance string
+    — the same standing-orders shape a path's does, deployment-mix's finer
+    axis.
+
+    Routed through :func:`_emit_guarded`: it runs in the request path, after
+    the Beat already exists and the drain has already spawned its first run
+    — a raising sink must not turn an already-deployed Beat into a ``500``
+    the learner would read as "nothing happened" (the ``change_applied``
+    argument, one surface over).
+    """
+    _emit_guarded(
+        BEAT_DEPLOYED,
+        account_id=str(account_id),
+        beat_id=str(beat_id),
+        level=level,
+        anchor_weekday=anchor_weekday,
+        has_guidance=has_guidance,
+        workflow=_W_BEAT_DEPLOYED,
+    )
+
+
+_BRIEF_RESEARCH_WORKFLOW = {
+    "published": _W_BEAT_DEPLOYED,
+    "skipped": _W_BRIEF_SKIPPED,
+    "failed": _W_FAILURE,
+    "refused": _W_REFUSAL,
+}
+
+
+def emit_brief_research_completed(
+    *,
+    account_id: uuid.UUID,
+    beat_id: uuid.UUID,
+    outcome: str,
+    duration_ms: int,
+    queries: int,
+    documents_retrieved: int,
+    documents_after_filters: int,
+    findings: int,
+    survivors: int,
+    prompt_tokens: int = 0,
+    completion_tokens: int = 0,
+    total_tokens: int = 0,
+) -> None:
+    """A research run resolved, **however it resolved** (TDD §9/§15) — one
+    event with an ``outcome``, never a success event and a separate failure
+    event, the same shape ``lesson_generated``/``tutor_reply_completed``
+    already use, copied here so a rate needs only one source.
+
+    ``outcome`` is one of ``published`` (a Brief with Sources was
+    persisted), ``skipped`` (the novelty gate found no survivors —
+    "the feature working correctly", CONTEXT.md: Skipped), ``failed`` (any
+    of TDD §5.7's infra/provider/invariant branches — retrieval unavailable,
+    zero documents surviving §5.2's filters, a model timeout, an exhausted
+    writer retry budget, a construction-time invariant violation, or the
+    persist-boundary "no Sources" guard — folded into one wire value because
+    every one of them is equally retryable and equally "not a Brief"), or
+    ``refused`` (the researcher's safety branch, terminal — TDD D3).
+
+    **The funnel is the point (TDD §15), not any single count.**
+    ``documents_retrieved`` is the raw, pre-filter count the ``Retriever``
+    itself returned (``services/retrieval.py::retrieve``'s
+    ``record_raw_count`` hook); ``documents_after_filters`` is what survived
+    ``retrieve()``'s own dedupe/dated/non-empty/cap/budget filters (§5.2) —
+    the same count the "zero documents after filters -> failed" branch
+    checks. ``findings`` is the researcher's own raw count; ``survivors`` is
+    what the novelty gate actually let through to a Brief. Together the four
+    separate a genuinely quiet week (healthy retrieval, healthy findings,
+    zero survivors — the gate working) from thin retrieval RECALL (low
+    documents, low findings, zero survivors — we found little to read) from
+    thin retrieval PRECISION (healthy documents, low findings, zero
+    survivors — we read plenty and it was chum): raw Skip rate alone cannot
+    tell those three apart, and this is the instrument that does (see
+    ``queries/logfire/brief_skip_rate.sql``). Every count is the
+    **best-known value at the point the run stopped** — a run that fails
+    before the researcher is ever called reports ``findings=0``,
+    ``survivors=0`` honestly, never a placeholder standing in for "unknown".
+
+    The token triple is ``usage_tokens``' (``services/generation.py``)
+    reading of **both** model calls one run can make — researcher and
+    analyst — summed, because D14a's $0.50 ceiling is arithmetic over the
+    whole run's cost, not either call alone; these fields are what makes
+    that ceiling **verified rather than asserted** (TDD §9: "the design
+    target is arithmetic, the event is the measurement, and if they
+    disagree the event wins"). Zero on any branch that never reached (or
+    never completed) the corresponding call.
+
+    ``duration_ms`` measures the **run**, never the request: clocked from
+    the moment the claimed pipeline starts (``BriefingService._run_claimed``,
+    before its own context load) through retrieval, both model calls, and
+    persist. This fires from a background task
+    (``BriefingService.run_research``, spawned by the arrival drain or the
+    explicit retry trigger) that the request which spawned it never awaits,
+    so no HTTP round trip — nor any queueing before the spawn — is ever
+    inside this number.
+
+    Emitted only on a **fenced-win** mark (the ``outline_generated``/
+    ``lesson_generated`` precedent): a lost race's mark is a silent no-op
+    (``BriefingService``'s own ``_mark_failed``/``_mark_refused``/
+    ``_persist_published``/``_persist_skipped`` all return whether *this*
+    call still owned the claim), so one run resolves this metric exactly
+    once, from whichever caller actually won the fence.
+    """
+    _emit(
+        BRIEF_RESEARCH_COMPLETED,
+        account_id=str(account_id),
+        beat_id=str(beat_id),
+        outcome=outcome,
+        duration_ms=duration_ms,
+        queries=queries,
+        documents_retrieved=documents_retrieved,
+        documents_after_filters=documents_after_filters,
+        findings=findings,
+        survivors=survivors,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        total_tokens=total_tokens,
+        workflow=_BRIEF_RESEARCH_WORKFLOW.get(outcome, _W_BEAT_DEPLOYED),
+    )
+
+
+def emit_brief_read(
+    *,
+    account_id: uuid.UUID,
+    beat_id: uuid.UUID,
+    brief_id: uuid.UUID,
+    marker: str,
+    age_days: int,
+) -> None:
+    """A learner opened a Brief, or reached its Sources (W29) — the north
+    star's own event, and ``brief_read_rate``/``brief_depth_of_read``'s
+    source (TDD §9).
+
+    **Never in the activation query, on purpose** (TDD §15's standing rule,
+    PRD §4.9): reading a Brief does not touch **Activated learner** —
+    ``queries/logfire/activation_rate.sql`` reads only ``account_created``,
+    ``lesson_completed``, ``quick_check_attempted``, and this event is not
+    one of them. Nothing in this module enforces that by construction (it
+    cannot — the two are unrelated files); it holds because adding
+    ``brief_read`` there would be a deliberate act, and
+    ``tests/unit/test_metrics_queries.py`` pins the query's text to keep it
+    that way.
+
+    ``marker`` is ``opened`` or ``sources`` (:class:`~aleph.dtos.beats.
+    ReadPingMarker`) — Depth of read is ``sources`` ÷ ``opened``.
+    ``age_days`` is how many days old the Brief was when this ping landed
+    (its ``published_on`` to the ping's own day) — the "still fresh, or a
+    backlog" datum a raw open count cannot carry alone.
+
+    Fires from ``routers/v1/beats.py::read_brief`` only on the real,
+    first-write-wins transition (``BriefRepository.mark_read``/
+    ``mark_sources_seen`` returning ``True``) — a repeat ping for a marker
+    already stamped is not a second read, the ``quick_check_attempted``
+    precedent (CONTEXT.md/AL-012: a repeat submit is not a new Attempt).
+    Routed through :func:`_emit_guarded`: it fires after the ping's own
+    commit, so a raising sink must not turn an already-recorded read into a
+    ``500`` (the ``change_applied`` argument, one surface over).
+    """
+    _emit_guarded(
+        BRIEF_READ,
+        account_id=str(account_id),
+        beat_id=str(beat_id),
+        brief_id=str(brief_id),
+        marker=marker,
+        age_days=age_days,
+        workflow=_W_BEAT_DEPLOYED,
     )

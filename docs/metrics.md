@@ -44,6 +44,9 @@ tag (§12), plus the ids that apply. The record's own timestamp is the event tim
 | `flashcards_drafted` | `services/flashcard_drafting.py` — every drafting run resolution *except* a missing-context run and a crashed worker (see below) | `path_id`, `lesson_id`, `position_in_path`, `drafted_count`, `outcome` (generated/failed), `success`, `duration_ms`, `prompt_tokens`, `completion_tokens`, `total_tokens` | W24 / W8 |
 | `flashcards_kept` | `services/flashcard_drafting.py` `keep_flashcard_drafts` — the keep request | `path_id`, `lesson_id`, `drafted_count`, `kept_count` | W24 |
 | `review_graded` | `services/reviews.py` `grade_card` — every grade | `card_id`, `path_id`, `grade`, `rung_before`, `queue_size`, `queue_remaining` | W25 / W26 |
+| `beat_deployed` | `routers/v1/beats.py` `deploy_beat` — after the Beat is created, committed, and the arrival drain has claimed and spawned its first run | `beat_id`, `level`, `anchor_weekday`, `has_guidance` | W29 |
+| `brief_research_completed` | `services/briefing.py` `BriefingService` — every fenced-win resolution of a claimed research run | `beat_id`, `outcome` (published/skipped/failed/refused), `duration_ms`, `queries`, `documents_retrieved`, `documents_after_filters`, `findings`, `survivors`, `prompt_tokens`, `completion_tokens`, `total_tokens` | W29 / W31 / W8 / W7 |
+| `brief_read` | `routers/v1/beats.py` `read_brief` — the real, first-write-wins transition only | `beat_id`, `brief_id`, `marker` (opened/sources), `age_days` | W29 |
 
 `outline_generated` / `lesson_generated` are emitted **only on a fenced-win mark**
 (a lost claim's mark is a silent no-op), so each generation resolves the metric
@@ -104,6 +107,50 @@ reviews, and `None` here is what keeps that case honest rather than
 mis-attributed to a path the card no longer has. `flashcards_kept` carries
 **both** `drafted_count` and `kept_count` on one record — the keep-rate ratio
 lives inside a row rather than a join between two event streams (TDD §9).
+
+Phase 6's three (the analyst, AL-540, TDD §9/§15) carry **no `path_id`/`lesson_id`
+at all** — a Beat and a Brief are siblings of a Path, not lessons inside one
+(CONTEXT.md: Beat, Brief), so `beat_id` (and, on `brief_read`, `brief_id`) are
+this phase's own locators. `brief_research_completed` is **one event with an
+`outcome`, fired however the run resolved** — the `lesson_generated`/
+`tutor_reply_completed` shape, never a success event plus a separate failure
+event, because a rate needs both arms from one source. Its `outcome` is
+`published`, `skipped`, `failed` (every one of TDD §5.7's infra/provider/
+invariant branches, folded into one wire value — retrieval unavailable, zero
+documents after §5.2's filters, a model timeout, an exhausted writer retry
+budget, a construction-time invariant violation, or the persist-boundary "no
+Sources" guard), or `refused` (the researcher's terminal safety branch).
+Emitted only on a **fenced-win** mark (the `outline_generated`/
+`lesson_generated` precedent): a lost race's mark is a silent no-op, and so is
+its event.
+
+**The funnel is the point** (TDD §15): `documents_retrieved` (the raw,
+pre-filter count a `Retriever` returned), `documents_after_filters` (what
+survived `retrieve()`'s own dedupe/dated/non-empty/cap/budget filters, §5.2),
+`findings` (the researcher's raw count) and `survivors` (what the novelty gate
+let through) are the best-known values at the point a run stopped — a run that
+failed before the researcher was ever called reports `findings=0`,
+`survivors=0` honestly, never a placeholder. Together the four separate a
+genuinely quiet week from thin retrieval RECALL from thin retrieval PRECISION
+(`brief_skip_rate.sql`'s own header); raw Skip rate alone cannot. The token
+triple is `usage_tokens`' reading of **both** model calls one run can make
+(researcher + analyst), summed — D14a's $0.50 ceiling is arithmetic over the
+whole run's cost, and these fields are what make that ceiling **verified
+rather than asserted**: if the arithmetic and the event disagree, the event
+wins. `duration_ms` measures the **run** (from the top of the claimed pipeline
+through persist), never the request that spawned it — this fires from a
+background task the arrival drain never awaits.
+
+`beat_deployed` and `brief_read` both fire from the request path, after their
+own commit, and are routed through `_emit_guarded` for the `change_applied`
+reason: a raising sink must not turn an already-deployed Beat or an
+already-recorded read into a `500`. `brief_read` fires only on the real,
+first-write-wins transition (`mark_read`/`mark_sources_seen` returning
+`True`) — the `quick_check_attempted` precedent, so a repeat ping is not a
+second read. **`brief_read` is deliberately absent from `activation_rate.sql`'s
+event list** (TDD §15's standing rule, PRD §4.9): reading a Brief never counts
+toward Activated learner, and adding it there would be a deliberate act, not
+an oversight — see `tests/unit/test_metrics_queries.py`'s dedicated guard.
 
 ## Metric → query
 
@@ -280,6 +327,60 @@ needs, keyed to the card's `source_lesson_id`. No aggregation, no surface, no
 API, and no query file in this phase: the schema alone is the commitment PRD
 §5 makes, and building anything on top of it now would be work with no
 consumer.
+
+### Phase 6 — the analyst (PRD §5/§7, TDD §9/§15)
+
+Phase 6 gets its own north star (PRD §5): *does a Brief bring a learner back
+on a day nothing else would have?* — stated so it can fail. Everything else
+is supporting or a guardrail.
+
+| Metric (PRD §7) | Query | Events consumed |
+| --- | --- | --- |
+| **Return, the north star** — share of Active days (learners with a Beat) whose first action is opening a Brief, and whether Return exceeds their own pre-Beat baseline | [`brief_return.sql`](../queries/logfire/brief_return.sql) | `beat_deployed`, `lesson_viewed`, `lesson_completed`, `quick_check_attempted`, `brief_read` |
+| **Brief read rate** — Briefs opened ÷ Briefs published | [`brief_read_rate.sql`](../queries/logfire/brief_read_rate.sql) | `brief_research_completed`, `brief_read` |
+| **Depth of read** — share of opened Briefs reaching the Sources | [`brief_depth_of_read.sql`](../queries/logfire/brief_depth_of_read.sql) | `brief_read` |
+| **Skip rate + the retrieval funnel** — Skipped ÷ research runs, per Beat, with the §15 funnel columns alongside | [`brief_skip_rate.sql`](../queries/logfire/brief_skip_rate.sql) | `brief_research_completed` |
+| **Wait tolerance** (guardrail) — share of researching Beats the learner is still present for when the Brief lands | [`brief_wait_tolerance.sql`](../queries/logfire/brief_wait_tolerance.sql) | `brief_research_completed`, `brief_read` |
+| **Cost per read Brief** (guardrail) | [`cost_per_read_brief.sql`](../queries/logfire/cost_per_read_brief.sql) | `brief_research_completed`, `brief_read` |
+
+`brief_wait_tolerance.sql` is **the first metric to read** (PRD §5): with
+Brief prefetch deferred (CONTEXT.md: Brief prefetch), every first-slice Brief
+is researched while the learner waits, so this reads the worst case rather
+than an average. It has no direct "still present" signal to read — no event
+records presence — so it is approximated from the two events that do exist:
+a published run's own Beat can resolve only one research run at a time (the
+claim fence), so the next `brief_read` (marker='opened') for that Beat after
+the run's own completion is unambiguously the read that run's Brief produced;
+"still present" is that read landing within a few minutes of the run
+finishing. A published run never opened at all reports NOT present, never a
+false positive.
+
+`brief_skip_rate.sql` answers TDD §15's own table, not just the ratio: it
+returns `avg_documents_retrieved_when_skipped` / `avg_findings_when_skipped` /
+`avg_survivors_when_skipped` alongside `skip_rate`, per Beat, because raw Skip
+rate cannot separate a genuinely quiet week (healthy retrieval, healthy
+findings, zero survivors) from thin retrieval RECALL (low, low, zero) from
+thin retrieval PRECISION (healthy, low, zero) — a human reads the two funnel
+averages against each other, per row, to place a Beat in one of its cases.
+What no query here can do is name the query that *would* have worked, or
+catch retrieval confidently returning documents about the wrong half of a
+subject — that has one detector, a person reading the week's real news and
+comparing, and it is a dogfooding ritual (AL-570), not a dashboard.
+
+**Beat survival** (Beats with a read Brief in 30 days) is computable from
+`beat_deployed` and `brief_read` directly — join each Beat's deployment to
+whether any `brief_read` (marker='opened') for it landed in the last 30 days
+— but is deliberately **not** a saved query yet: there is not enough Beat
+history for the number to mean anything at launch (TDD §9 names the absence
+as a decision, not a gap).
+
+**`brief_read` never appears in `activation_rate.sql`** (TDD §15's standing
+rule, PRD §4.9, §2's point 3): reading a Brief does not touch Activated
+learner. Nothing about the query engine enforces this — it holds because
+adding `brief_read` there would be a deliberate act — so
+`tests/unit/test_metrics_queries.py` pins it directly, alongside every other
+activation-cohort query (`breadth.sql`, `return_rate.sql`) that reuses the
+same `activated` definition.
 
 ## Importing the queries into Logfire
 
@@ -494,3 +595,43 @@ Shaping-specific caveats (Phase 2B):
   content the learner has met cannot be undone at all — so no Attempt and no
   completion is ever in reach of this phase's code. Activation, the north star
   and `quick_check_correctness` move only through Phase 1's own events.
+
+Analyst-specific caveats (Phase 6, AL-540):
+
+- **"Day" is UTC here too** — every analyst query inherits `return_rate.sql`'s
+  standing UTC-vs-local-day caveat above, unchanged: `brief_return.sql`
+  buckets Active days in UTC, and `read_brief`'s `age_days` is computed off
+  `datetime.now(UTC).date()` (no `tz_offset_minutes` rides that request). The
+  learner-local-timezone refinement is the same follow-up as everywhere else
+  in this document, not a Phase 6-specific gap.
+- **`failed` folds six distinct causes into one wire value.** Retrieval
+  unavailable, zero documents after §5.2's filters, a model timeout, an
+  exhausted writer retry budget, a construction-time invariant violation, and
+  the persist-boundary "no Sources" guard all report `outcome='failed'` —
+  every one of them equally retryable and equally "not a Brief", but a single
+  failure-rate number cannot distinguish which cause dominates. The
+  distinguishing detail lives on `beats.research_error` (a generic, non-leaky
+  message) and the structured logs (`brief_research_pipeline_failed`,
+  `brief_research_invariant_violation`, etc.), not on the event.
+- **`brief_wait_tolerance.sql`'s "still present" is a proxy, not a direct
+  signal.** No event records presence; the query infers it from timing (the
+  next Brief open for a Beat, within a few minutes of that Beat's research
+  completing) — sound because a Beat resolves one research run at a time
+  (the claim fence), but a learner who happens to open an old, unrelated
+  Brief for the same Beat inside that window would be misread as present.
+  Practically negligible (the window is minutes, not the days between
+  Anchor days) but not structurally impossible.
+- **`brief_return.sql`'s pre-Beat baseline can be `NULL` for a learner
+  deployed on day one.** The split is by calendar day relative to the first
+  `beat_deployed`, and a learner with no Active day before that timestamp
+  contributes nothing to `return_rate_pre_beat` — correctly, since they have
+  no pre-Beat baseline to report, never a false zero that would bias the
+  comparison toward "the Beat helped."
+- **Beat survival has no saved query yet**, named as a decision in TDD §9,
+  not an oversight: `beat_deployed` + `brief_read` already carry everything
+  the join needs, but there is not enough Beat history at launch for the
+  number to mean anything.
+- **`brief_research_completed`'s token triple sums two model calls**
+  (researcher + analyst), never either alone — D14a's cost ceiling is
+  arithmetic over the whole run, so `cost_per_read_brief.sql` would
+  understate spend by whichever call it dropped.
