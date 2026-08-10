@@ -39,6 +39,11 @@ loop counts every attempt, exactly like ``count_lesson_generations_since``'s
 own new-row-per-attempt shape — see ``models/beat_research_run.py`` and
 ``services.rate_limit`` for the full write-up, including why this is not a
 revival of Phase 6 TDD D2a's rejected ``beat_runs`` table.
+
+AL-522 adds a seventh, differently-shaped counter: :meth:`count_beats_for_user`
+backs the **stock** cap (``MAX_BEATS_PER_LEARNER``, TDD §7/D14) — the count of
+*live* Beats, never a daily flow, so it takes no ``since`` and joins nothing:
+Beats are hard-deleted, so a plain row count already is the live count.
 """
 
 from __future__ import annotations
@@ -48,6 +53,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import func, select
 
 from aleph.models import (
+    Beat,
     BeatResearchRun,
     Conversation,
     ConversationKind,
@@ -243,6 +249,24 @@ class UsageRepository:
                 BeatResearchRun.user_id == user_id,
                 BeatResearchRun.started_at >= since,
             )
+        )
+        return result.scalar_one()
+
+    async def count_beats_for_user(self, *, user_id: uuid.UUID) -> int:
+        """How many Beats ``user_id`` currently has (AL-522, TDD §7/D14).
+
+        The **stock** cap's own counter — deliberately shaped nothing like
+        the six ``count_*_since`` methods above: it takes no ``since``,
+        because ``MAX_BEATS_PER_LEARNER`` bounds the *count of live Beats*,
+        not a daily flow (TDD §7: "a stock cap on live Beats… not a daily
+        flow"). Beats are hard-deleted (``BeatRepository.delete``, no
+        soft-delete column), so a plain row count already **is** the live
+        count — deleting a Beat frees quota immediately, the same "counting
+        real rows" property every other counter in this module has, just
+        without a time window to it.
+        """
+        result = await self.session.execute(
+            select(func.count()).select_from(Beat).where(Beat.user_id == user_id)
         )
         return result.scalar_one()
 

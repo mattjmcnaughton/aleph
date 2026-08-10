@@ -577,6 +577,120 @@ before any work; or an unowned/unknown/draft/already-deleted card id) · `422
 validation_error` (a malformed `cursor`, an out-of-range `limit`, or an edit
 that is empty, over the word cap, or leaves both sides identical).
 
+## Analyst (`/api/v1`, AL-522, issue #172, Phase 6 TDD §6)
+
+Session-cookie protected (`401` via the shared envelope when anonymous). All
+addressing is by UUID; another learner's Beat or Brief reads as `404` (never
+`403` — its existence is not disclosed). **The whole surface is
+feature-flagged, router-level** (TDD D12): every route below sits behind a
+single `analyst` flag gate. Off (the code default — Phase 6 has not launched)
+→ `404` on every route, before any work. See the [Feature flags](#feature-flags-admin-apiv1admin-al-203)
+section's registered-flags table below.
+
+**Beats** (CONTEXT.md: *Beat* — a standing research assignment). `POST
+/beats` both deploys the Beat and claims its first research run in the same
+request (PRD §3: "researched immediately, not at the first Anchor day") — it
+reuses the same arrival drain the two `GET` routes use, since a fresh Beat's
+cadence is unconditionally due (a Beat with no entries is claimable
+immediately). The research itself is spawned, never awaited: the route
+returns as soon as the claim (a fast, atomic `UPDATE`) resolves, and the
+client polls `GET /beats/{id}` for the Brief.
+
+| Method | Path | Query / Body | Success | Notes |
+| ------ | ---- | ------------- | ------- | ----- |
+| `POST` | `/api/v1/beats` | `{topic, level, anchor_weekday, guidance?, model_research?, model_brief?}` | `202` | Deploy an analyst; the first run is claimed in the same response when capacity allows (`research_state` reads `"researching"`, not `"idle"`) — **but** if the daily research cap (`RATE_LIMIT_BRIEF_RESEARCH_PER_DAY`) is already spent, the drain's non-raising capacity check silently declines and the response still reads `"idle"` (PRD §3's "researched immediately" then simply waits for tomorrow's capacity — never a `429` on this route for that reason). Rate-limited by the **stock** Beat cap (`check_beat_creation`, `MAX_BEATS_PER_LEARNER`, default 3; admins exempt) → `429 rate_limited`. `anchor_weekday` is `0..6` (Python's Monday = 0); out of range is `422 validation_error`. `model_research`/`model_brief` are the **admin-only** model-picker overrides (TDD D7/§5.3), enforced by the same `validate_model_override` `POST /paths` uses: `403 forbidden` for a non-admin, `422 validation_error` off `MODEL_ALLOWLIST`. |
+| `GET` | `/api/v1/beats` | `tz_offset_minutes` (optional, default `0`, `-900..900`) | `200 {beats: [...]}` | The learner's Beats, newest first, each with an `unread_count` (**published** Briefs only with no read ping yet — a Skipped row can never be marked read, so it is never counted, code-review FIX 3) and `research_state`. **Drains claimable Beats, then re-reads** (see "The arrival drain" below) — a Beat this request's own drain just claimed reads `"researching"` here, not a stale pre-drain `"idle"`. |
+| `GET` | `/api/v1/beats/{id}` | `tz_offset_minutes` (optional, default `0`) | `200` | One Beat: standing orders, research state, and the rail — `entries`, newest first, both kinds, **never locked** (every entry is always fully rendered). **Drains, then re-reads** (below) — same guarantee as the list route. |
+| `DELETE` | `/api/v1/beats/{id}` | — | `204` | Hard-delete; `ON DELETE CASCADE` tears down its Briefs and Sources. This is also how standing orders change (CONTEXT.md: Beat — delete and redeploy; PRD §4.11). Not undoable (UI confirms). No drain. |
+| `POST` | `/api/v1/beats/{id}/retry` | `tz_offset_minutes` (optional, default `0`) | `202` | Re-claim a `failed` run — the **only** route that does (an ordinary arrival never re-claims a real failure, so a retrieval outage never silently bills a fresh run on every page load). **A genuine no-op on any other state** (`idle`, `researching`, `refused`) — no claim, no spawn, and no billing, since `idle` is a Beat's healthy steady state and letting a stray retry win that claim would drive an off-cadence, billed research run. Only on a real `failed` Beat: rate-limited by the daily research cap (`check_brief_research_retry`, same cap and counter as the arrival drain's own, but **raising** here — an explicit `POST` is the billed-trigger case the drain's own "never at the route" reasoning does not cover) → `429 rate_limited`, checked *before* the claim. Fire-and-forget on the real path: the claim and the pipeline both run inside the spawned task, so the response reflects the row as read *before* the retry is spawned — poll `GET /beats/{id}` for the outcome. No drain of its own either way. |
+
+```jsonc
+// GET /api/v1/beats/{id}
+{
+  "id": "…",
+  "topic": "EU AI regulation",
+  "level": "some_experience",
+  "guidance": "policy and enforcement, not stock moves",
+  "anchor_weekday": 0,                    // Monday, Python's convention
+  "cadence": "weekly",                    // constant this slice (PRD §4.11)
+  "research_state": "researching",        // idle | researching | failed | refused
+  "research_started_at": "2026-08-03T09:14:02Z",
+  "refusal_message": null,
+  "entries": [                            // newest first, both kinds, one list
+    { "id": "…", "kind": "published", "number": 5, "published_on": "2026-08-03",
+      "title": "The ambient-documentation backlash arrived", "read_at": null },
+    { "id": "…", "kind": "skipped", "number": null, "published_on": "2026-07-27",
+      "skip_line": "Nothing material since Brief #4 — the consultation is still open." }
+  ]
+}
+```
+
+**`entries` is one list of both kinds, never two arrays** (D2: a Skipped
+period is a rail entry too) — and the two kinds are genuinely different
+shapes on the wire, not one flat/nullable row: a published entry carries
+`title`/`read_at` and no `skip_line`; a Skipped entry carries `skip_line` (and
+`number: null`, present) and no `title`/`read_at` at all. A client cannot
+accidentally read a Skipped row's `read_at` because the key is not there.
+
+**Briefs** (CONTEXT.md: *Brief*, *Source*).
+
+| Method | Path | Query / Body | Success | Notes |
+| ------ | ---- | ------------- | ------- | ----- |
+| `GET` | `/api/v1/briefs/{id}` | — | `200` | A Brief's body Markdown, Sources, and `builds_on`. Ownership walks Brief → Beat → account (`404` for another learner's, never `403`). Also resolves a Skipped entry's id (its rail row links nowhere in the shipped frontend, but the API draws no such line) — `number`/`title`/`body_markdown` are `null` and `sources` is `[]` for one, mirroring D2's own storage `CHECK`. |
+| `POST` | `/api/v1/briefs/{id}/read` | `{marker: "opened" \| "sources"}` | `204` | The read ping (D11). `opened`/`sources` are independent, first-write-wins columns (`read_at`/`sources_seen_at`) — idempotent per marker: a repeat ping with the same `marker` never moves its timestamp. An unrecognized `marker` is `422 validation_error` before this body runs. |
+
+```jsonc
+// GET /api/v1/briefs/{id}
+{
+  "id": "…", "beat_id": "…", "number": 5, "published_on": "2026-08-03",
+  "title": "…", "body_markdown": "…",
+  "builds_on": { "id": "…", "number": 4, "published_on": "2026-07-27" },
+  "sources": [
+    { "position": 1, "publisher": "Northlake Health System",
+      "title": "Ambient Documentation: 14-Month Post-Deployment Review",
+      "published_on": "2026-07-30", "url": "https://example.com/northlake-review" }
+  ]
+}
+```
+
+**`builds_on`** resolves to the highest-numbered **published** Brief strictly
+below this one's number (CONTEXT.md: Brief continuity) — derived at read time
+(`WHERE number < :n ORDER BY number DESC LIMIT 1`), never a stored edge. It is
+`null` on Brief #1 (nothing exists below it) **and** on every Skipped entry
+(which has no `number` of its own to search below — never queried at all for
+one).
+
+**The arrival drain (D15).** Listing Beats or opening one evaluates the
+Cadence floor for each of the learner's Beats and claims + spawns what is due
+— the same "reaching a lesson kicks its generation" trigger-on-read model
+Phase 1 uses, one workload over. The window of Beats the drain evaluates is
+bounded by `MAX_BEATS_PER_LEARNER` and ordered **least-recently-researched
+first** (`research_started_at ASC NULLS FIRST`, code-review FIX 6) rather
+than oldest-created first — a fixed creation-order window could otherwise let
+a learner's oldest Beats permanently fill it and starve a newer one forever
+(reachable in practice only by an admin today, since the stock Beat cap that
+would otherwise prevent exceeding the window is admin-exempt); this ordering
+rotates instead, so no Beat can be systematically excluded.
+
+**A `GET` that triggers a drain now reflects the claim it made (code-review
+FIX 1).** Both `GET` routes call the drain **first** and build their
+response from a read taken *after* it, so a Beat this very request's own
+arrival claimed reads `research_state: "researching"` in this same response
+— never a stale, pre-drain `"idle"` that a first poll would treat as
+terminal and never resume from. A later, separate request naturally observes
+the same committed state. The daily research cap
+(`RATE_LIMIT_BRIEF_RESEARCH_PER_DAY`, default 5) is checked **inside** the
+drain, before each claim, and is **non-raising** there: hitting it degrades
+to "no research this time," never a `429` on a `GET`.
+
+**Wire codes (Analyst):** `401 unauthenticated` · `404 not_found` (flag off,
+before any work; or an unowned/unknown Beat or Brief) · `422 validation_error`
+(a bad `anchor_weekday`, an out-of-range `tz_offset_minutes`, or an
+unrecognized read-ping `marker`) · `429 rate_limited` (the **stock** Beat cap
+on `POST /beats`, **or** the daily research cap on `POST /beats/{id}/retry`
+when it is about to re-claim a real `failed` run — the drain's own use of
+the same cap, inside a `GET`, never surfaces on the wire).
+
 ## Feature flags (admin) (`/api/v1/admin`, AL-203)
 
 Flags are **defined in code** (`services/feature_flags.py`); the database stores
@@ -620,6 +734,7 @@ costs no extra request. The frontend reads it through `useFeatureFlag(key)`
 | `shaping` | **on** | on (redundantly, as above) | Phase 2B shaping — the shaping rail, its API and its stream, and the apply/undo endpoints. Same history on its own key (epic #114, adopted convention 1): dark through 2B's build-out, **launched at AL-370**. Independent of `tutor`, so either can be killed without disturbing the other. |
 | `streaks` | **on** | on (redundantly, as above) | Phase 5 streaks — `GET /progress/summary` and everything under it (see [Progress](#progress-apiv1-phase-5-tdd-546)). Same history again on its own key (TDD D7): dark at `off` through the slice's build-out while admins dogfooded it, then **launched** by flipping this code default on, exactly as AL-270/AL-370 did. Kill it with `FEATURE_FLAG_DEFAULTS=streaks:off`. |
 | `flashcards` | **on** | on (redundantly, as above) | Phase 3 flashcards — every route under [Flashcards](#flashcards-apiv1-phase-3-tdd-53-56-6) (drafting, the daily queue, grading) and the progress summary's second streak signal (§5.5). This phase's **only** kill switch: one flag gates drafting, the queue, review and the due pill together (TDD D10), because a queue with no drafting is an empty queue and drafting with no queue is a card sink. Shipped dark at `off` through the build-out while admins dogfooded it via the admin baseline; **launched** by flipping this code default on, the fourth flag to run the `tutor`/`shaping`/`streaks` playbook. Kill it without a code deploy with `FEATURE_FLAG_DEFAULTS=flashcards:off`. |
+| `analyst` | **off** | **on** (this is the live one) | Phase 6 — every route under [Analyst](#analyst-apiv1-al-522-issue-172-phase-6-tdd-6) (Beats, Briefs). `FLAG_DEFAULTS` has it `False` (Phase 6 has not launched), so the admin baseline is what lets admins dogfood it while every other learner gets `404` (TDD D12) — the fifth flag to spend its build-out at the `tutor`/`shaping`/`streaks`/`flashcards` dark posture, awaiting its own launch flip. |
 
 **Operating it.** `FEATURE_FLAG_DEFAULTS` is a comma-separated list of
 `key:on` / `key:off` entries (`FEATURE_FLAG_DEFAULTS="tutor:on"`). Malformed and

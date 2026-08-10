@@ -15,6 +15,7 @@ from aleph.config import settings
 from aleph.errors import error_response
 from aleph.logging import configure_logging
 from aleph.routers import auth, health
+from aleph.routers.v1 import beats as v1_beats
 from aleph.routers.v1 import feature_flags as v1_feature_flags
 from aleph.routers.v1 import flashcards as v1_flashcards
 from aleph.routers.v1 import lessons as v1_lessons
@@ -100,6 +101,11 @@ def create_app() -> FastAPI:
     # pill all 404 by default) and be dogfooded by admins without disturbing
     # any already-launched surface above.
     app.include_router(v1_flashcards.router)
+    # Likewise behind the ``analyst`` flag (Phase 6 TDD D12) — its own key,
+    # so this slice can ship dark (deploy, list, the rail, retry, and the
+    # Brief routes all 404 by default) and be dogfooded by admins without
+    # disturbing any already-launched surface above.
+    app.include_router(v1_beats.router)
 
     # Mount frontend static files (only serves if dist/ exists)
     mount_frontend(app)

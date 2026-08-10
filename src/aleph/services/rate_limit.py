@@ -98,11 +98,37 @@ TDD §5.6/§7) runs inside a ``GET`` the learner did not ask to be billed for,
 so hitting the cap must degrade to "no research this time", never a ``429``
 on the beats list. Admins are exempt, matching every other cap here.
 
+**The same cap, RAISING, for the explicit retry (``check_brief_research_retry``,
+code-review FIX 2 on AL-522).** ``POST /beats/{id}/retry`` is the opposite
+case from the drain: an explicit ``POST`` a learner asked for by name, on the
+``check_outline_generation`` precedent (``POST /paths/{id}/retry`` — "a
+billed trigger that inserts no row, so it carries its own daily cap"). Reuses
+the identical counter and cap (``count_brief_research_runs_since``,
+``RATE_LIMIT_BRIEF_RESEARCH_PER_DAY``) as the non-raising check above — one
+daily Beat-research budget, shared by both entry points, just enforced two
+different ways depending on whether the caller asked to spend it. The
+router calls this only once it already knows the retry will do real work
+(the Beat is genuinely ``failed`` — TDD FIX 2b), so a no-op retry on an
+``idle``/``researching``/``refused`` Beat never even reaches this check, let
+alone spends a unit of it.
+
 The check is called *before* the billed work, and admins are exempt via an
 injected ``is_admin`` flag (decoupled from ``authz`` on purpose — AL-050 wires
 the two together). On refusal it raises ``HTTPException(429, ...)`` with a
 friendly message; the app-wide error envelope (``errors.py``) renders it as
 ``{"error": {code: "rate_limited", ...}}``.
+
+**The Beat cap (``check_beat_creation``, AL-522, TDD §7/D14).** A **stock**
+cap, unlike every counter above it: ``MAX_BEATS_PER_LEARNER`` bounds the
+*count of live Beats* a learner may hold, not a daily flow, so it counts
+current rows (``UsageRepository.count_beats_for_user``, no ``since``) rather
+than rows created since a rolling window. **This is the cap that 429s on
+``POST /beats``** — the daily research cap above is deliberately the opposite
+shape (non-raising, checked only inside the drain) precisely so the two never
+compete for the same HTTP verb: creating a Beat can be denied, a background
+research run degrading to "no research this time" cannot. Admins are exempt,
+and a cap of 0 or negative disables it, the same ``_exempt`` convention every
+check in this class uses.
 """
 
 from __future__ import annotations
@@ -159,6 +185,8 @@ class UsageCounter(Protocol):
         self, *, user_id: uuid.UUID, since: datetime
     ) -> int: ...
 
+    async def count_beats_for_user(self, *, user_id: uuid.UUID) -> int: ...
+
 
 def _utc_now() -> datetime:
     return datetime.now(UTC)
@@ -187,6 +215,7 @@ class DailyRateLimiter:
         shaping_messages_per_day: int = 0,
         flashcard_drafts_per_day: int = 0,
         brief_research_per_day: int = 0,
+        beats_per_learner: int = 0,
         now: Callable[[], datetime] = _utc_now,
     ) -> None:
         self._usage = usage
@@ -196,6 +225,7 @@ class DailyRateLimiter:
         self._shaping_messages_per_day = shaping_messages_per_day
         self._flashcard_drafts_per_day = flashcard_drafts_per_day
         self._brief_research_per_day = brief_research_per_day
+        self._beats_per_learner = beats_per_learner
         self._now = now
 
     async def check_path_creation(self, *, user_id: uuid.UUID, is_admin: bool) -> None:
@@ -336,6 +366,24 @@ class DailyRateLimiter:
             ),
         )
 
+    async def check_beat_creation(self, *, user_id: uuid.UUID, is_admin: bool) -> None:
+        """Raise ``HTTPException(429)`` if ``user_id`` is at the live Beat cap.
+
+        Call before creating a Beat (``POST /beats``, AL-522). **Stock, not
+        flow**: counts current ``beats`` rows (``UsageRepository.
+        count_beats_for_user``, no ``since``) against
+        ``MAX_BEATS_PER_LEARNER`` — the only cap this phase raises a ``429``
+        for on the wire (the daily research cap below never does, TDD §7).
+        """
+        if self._exempt(self._beats_per_learner, is_admin=is_admin):
+            return
+        used = await self._usage.count_beats_for_user(user_id=user_id)
+        if used >= self._beats_per_learner:
+            raise _rate_limited(
+                f"You've reached the limit of {self._beats_per_learner} "
+                "analysts. Delete one to deploy another."
+            )
+
     async def brief_research_capacity_available(
         self, *, user_id: uuid.UUID, is_admin: bool
     ) -> bool:
@@ -355,6 +403,32 @@ class DailyRateLimiter:
             user_id=user_id, since=_start_of_utc_day(self._now())
         )
         return used < self._brief_research_per_day
+
+    async def check_brief_research_retry(
+        self, *, user_id: uuid.UUID, is_admin: bool
+    ) -> None:
+        """Raise ``HTTPException(429)`` if ``user_id`` is at the daily research cap.
+
+        Call before triggering an explicit Beat retry (``POST
+        /beats/{id}/retry``, AL-522 code-review FIX 2), and only once the
+        route already knows the retry will do real work (the Beat is
+        ``failed`` — see this module's docstring's "Beat research" section
+        for why a non-``failed`` Beat must never reach this check at all).
+        Reuses the same counter and cap as the arrival drain's own
+        non-raising ``brief_research_capacity_available`` — one daily budget,
+        two enforcement shapes, on the ``check_outline_generation`` /
+        ``brief_research_capacity_available`` precedent one phase over.
+        """
+        await self._check(
+            self._usage.count_brief_research_runs_since,
+            cap=self._brief_research_per_day,
+            user_id=user_id,
+            is_admin=is_admin,
+            message=(
+                f"You've reached today's limit of {self._brief_research_per_day} "
+                "research runs. Please try again tomorrow."
+            ),
+        )
 
     async def _check(
         self,
@@ -411,4 +485,5 @@ def build_daily_rate_limiter(
         shaping_messages_per_day=config.rate_limit_shaping_messages_per_day,
         flashcard_drafts_per_day=config.flashcard_drafts_per_day,
         brief_research_per_day=config.rate_limit_brief_research_per_day,
+        beats_per_learner=config.max_beats_per_learner,
     )

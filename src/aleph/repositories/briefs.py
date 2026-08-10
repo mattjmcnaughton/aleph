@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import func, select, update
 
-from aleph.models import Brief, BriefKind, BriefSource
+from aleph.models import Beat, Brief, BriefKind, BriefSource
 from aleph.repositories._generation import affected_rows
 
 if TYPE_CHECKING:
@@ -145,6 +145,29 @@ class BriefRepository:
     async def get(self, brief_id: uuid.UUID) -> Brief | None:
         return await self.session.get(Brief, brief_id)
 
+    async def get_for_user(
+        self, *, brief_id: uuid.UUID, user_id: uuid.UUID
+    ) -> Brief | None:
+        """Fetch a Brief only if its Beat belongs to ``user_id`` (ownership).
+
+        Restored (AL-522, issue #172) after AL-511's review dropped it for
+        having no caller and no test — this ticket is that caller:
+        ``GET /briefs/{id}`` and ``POST /briefs/{id}/read`` in
+        ``routers/v1/beats.py``. A Brief carries no ``user_id`` of its own
+        (D1: it belongs to a Beat, which belongs to a learner, and neither
+        model declares a ``relationship()``), so ownership is an explicit
+        join — the ``LessonRepository.get_for_user`` shape one level down
+        (``Brief -> Beat.user_id``, in place of ``Lesson -> Path.user_id``).
+        Another learner's Brief resolves to ``None`` here, 404-never-403
+        (TDD §6).
+        """
+        result = await self.session.execute(
+            select(Brief)
+            .join(Beat, Brief.beat_id == Beat.id)
+            .where(Brief.id == brief_id, Beat.user_id == user_id)
+        )
+        return result.scalar_one_or_none()
+
     async def last_published_on_by_beat(
         self, beat_ids: Sequence[uuid.UUID]
     ) -> dict[uuid.UUID, date]:
@@ -187,6 +210,85 @@ class BriefRepository:
             .limit(1)
         )
         return result.scalar_one_or_none()
+
+    async def previous_published(
+        self, *, beat_id: uuid.UUID, number: int
+    ) -> Brief | None:
+        """The highest-numbered **published** Brief strictly below ``number``
+        — "Builds on Brief #N" (TDD §4/§6), new work this ticket adds (not
+        one of the four restored methods): ``WHERE number < :n ORDER BY
+        number DESC LIMIT 1``, never a stored edge (D1's "no
+        ``builds_on_brief_id``"). The caller (``routers/v1/beats.py``) only
+        calls this for a ``kind == PUBLISHED`` Brief with a real ``number``
+        — a Skipped entry's ``builds_on`` is ``None`` by construction at the
+        call site, never by this query returning nothing for a ``None``
+        input.
+        """
+        result = await self.session.execute(
+            select(Brief)
+            .where(
+                Brief.beat_id == beat_id,
+                Brief.kind == BriefKind.PUBLISHED,
+                Brief.number < number,
+            )
+            .order_by(Brief.number.desc())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
+    async def sources_for_brief(self, brief_id: uuid.UUID) -> list[BriefSource]:
+        """A Brief's Sources, in rendering order (§6's Sources block).
+
+        Restored (AL-522, issue #172) after AL-511's review dropped it for
+        having no caller and no test — this ticket is that caller:
+        ``GET /briefs/{id}``. Ordered by ``position`` (1-based,
+        ``create_published``'s own insertion order), never re-derived from
+        ``published_on`` or insertion time. Empty for a Skipped entry (no
+        ``brief_sources`` rows exist for one, D2) and for an id that does not
+        resolve at all.
+        """
+        result = await self.session.execute(
+            select(BriefSource)
+            .where(BriefSource.brief_id == brief_id)
+            .order_by(BriefSource.position)
+        )
+        return list(result.scalars())
+
+    async def unread_counts_by_beat(
+        self, beat_ids: Sequence[uuid.UUID]
+    ) -> dict[uuid.UUID, int]:
+        """Count of **published** Briefs with ``read_at IS NULL``, per Beat.
+
+        New work this ticket adds (not one of the four restored methods) —
+        ``GET /beats``'s "unread counts" (TDD §6's endpoint description).
+        Batched over every id in one query, the ``last_published_on_by_beat``
+        shape, so the learner's Beats list never becomes one query per row.
+
+        **Published only (code-review FIX 3, AL-522).** A Skipped row's
+        ``read_at`` can never be stamped: ``SkippedEntryDTO`` carries no
+        ``read_at`` field at all and a Skipped rail row links nowhere in the
+        shipped frontend (``docs/api.md``), so no read ping is ever sent for
+        one — meaning a Skipped entry counted here would be permanently
+        unread, on a Beat that may have zero unread *Briefs*. A quiet Beat
+        that produces three Skipped weeks and one read Brief would otherwise
+        show "3 new briefs" forever (PRD §4.10's home-card copy), monotone in
+        skips and never returning to zero — destroying the exact signal that
+        copy exists to carry. Filtering to ``BriefKind.PUBLISHED`` is what
+        keeps this count meaning "Briefs this learner has not yet opened",
+        never "rows nothing can ever clear".
+        """
+        if not beat_ids:
+            return {}
+        result = await self.session.execute(
+            select(Brief.beat_id, func.count())
+            .where(
+                Brief.beat_id.in_(beat_ids),
+                Brief.kind == BriefKind.PUBLISHED,
+                Brief.read_at.is_(None),
+            )
+            .group_by(Brief.beat_id)
+        )
+        return {beat_id: count for beat_id, count in result.all()}
 
     async def list_for_beat(self, beat_id: uuid.UUID) -> list[Brief]:
         """The Beat rail: newest first, **both kinds interleaved** (D2) —
