@@ -11,13 +11,15 @@ synonym (say **path**, not "course"; **Quick check**, not "quiz question").
 > phase-boundary note below), **the Phase 3 PRD** (which widened **Active day** to count a
 > review, and owns the Retention section below), **and the Phase 6 PRD** (which owns The
 > analyst section, and widens **Active day** a second time — to count reading a Brief —
-> against a phase that is **not yet built**). References:
+> against a phase that is now **built, behind its own kill switch, not yet launched, see the
+> phase-boundary note below**). References:
 > [`README.md`](../README.md) · [`roadmap.md`](roadmap.md) ·
 > [Phase 1 PRD](prds/phase-1-path-generation.md) · [Phase 1 TDD](tdds/phase-1-path-generation.md) ·
 > [Phase 2 PRD](prds/phase-2-tutor.md) · [Phase 2 TDD](tdds/phase-2-tutor.md) ·
 > [Phase 2B PRD](prds/phase-2b-shape-your-path.md) · [Phase 2B TDD](tdds/phase-2b-shape-your-path.md) ·
 > [Phase 5 streaks PRD](prds/phase-5-streaks.md) · [Phase 5 streaks TDD](tdds/phase-5-streaks.md) ·
-> [Phase 3 PRD](prds/phase-3-flashcards.md) · [Phase 6 PRD](prds/phase-6-analyst.md).
+> [Phase 3 PRD](prds/phase-3-flashcards.md) · [Phase 6 PRD](prds/phase-6-analyst.md) ·
+> [Phase 6 TDD](tdds/phase-6-analyst.md).
 
 ## Core domain
 
@@ -66,8 +68,8 @@ synonym (say **path**, not "course"; **Quick check**, not "quiz question").
 | **Progress** | The persisted record of which lessons/units are complete, per path, per account. |
 | **Switcher** | The "Your paths" UI for moving between a learner's multiple paths, each keeping its own progress. |
 | **Delete path** | Removing a path and its progress (confirmed, not undoable in MVP). Doubles as **reset**: with no regenerate, deleting and creating anew is how a learner discards an unsatisfying path. |
-| **Active day** | A calendar day, in the learner's local timezone, on which the learner did **at least one** of: completed a lesson, reviewed a flashcard, or **read a Brief**. Those are the three signals a streak counts — not a view, not an Attempt on its own, not drafting or keeping a card, and never a Brief merely *arriving* (Phase 6 PRD §4.9: a streak that advanced because a background task ran would measure our uptime, not the learner). Membership in the set of Active days *is* the daily target, so there is no separate goal concept. **Widened twice**: by the Phase 3 PRD (§4.9) to count a review — lesson completion alone through Phase 5, live with Phase 3's launch — and by the Phase 6 PRD (§4.9) to count a Brief read. **The third signal is decided but unbuilt**, on the same reasoning the second was decided early: no Brief exists yet, so adding it moves no live streak, and this is the only moment the amendment is free. |
-| **Daily streak** | The learner's **global** streak: the count of consecutive Active days, across every path, ending today — or ending yesterday if today is still empty, so it does not break at midnight (Phase 5 PRD §4.4). *The* streak: the one with the flame and the celebration. Derived, never stored (Phase 5 TDD D1) — from `lessons.completed_at`, **union**ed with reviews now that Phase 3 has shipped, and to be unioned with Brief reads when Phase 6 is built. |
+| **Active day** | A calendar day, in the learner's local timezone, on which the learner did **at least one** of: completed a lesson, reviewed a flashcard, or **read a Brief**. Those are the three signals a streak counts — not a view, not an Attempt on its own, not drafting or keeping a card, and never a Brief merely *arriving* (Phase 6 PRD §4.9: a streak that advanced because a background task ran would measure our uptime, not the learner). Membership in the set of Active days *is* the daily target, so there is no separate goal concept. **Widened twice**: by the Phase 3 PRD (§4.9) to count a review — lesson completion alone through Phase 5, live with Phase 3's launch — and by the Phase 6 PRD (§4.9) to count a Brief read. **The third signal is decided and the Brief-reading machinery is now built, but the streak union itself stays deferred** (Phase 6 TDD D11: `services/progress_read.py` is untouched by design). Reading a Brief stamps `briefs.read_at` and fires a `brief_read` product event, but nothing feeds either into a streak computation yet, so a Brief read still moves no live streak — re-entry cost is one `UNION` arm in Phase 5 §5.2's query. |
+| **Daily streak** | The learner's **global** streak: the count of consecutive Active days, across every path, ending today — or ending yesterday if today is still empty, so it does not break at midnight (Phase 5 PRD §4.4). *The* streak: the one with the flame and the celebration. Derived, never stored (Phase 5 TDD D1) — from `lessons.completed_at`, **union**ed with reviews now that Phase 3 has shipped, and to be unioned with Brief reads once the streak union is wired (deferred, Phase 6 TDD D11 — the analyst itself is built). |
 | **Path streak** | The same run-of-consecutive-Active-days count, scoped to one path's **lesson completions** instead of every path's. Deliberately narrower than the Daily streak: neither reviews nor Brief reads count toward it — a flashcard belongs to the learner rather than to a path (Phase 3 PRD §4.1) and an orphaned card has no path to credit, and a **Beat** is not a path at all (Phase 6 PRD §4.9), so neither has a path to credit. A quieter stat, shown on the home list and deliberately not celebrated — with multiple paths a learner naturally alternates, which is the **Breadth** metric working, and a per-path streak breaks every time they do (Phase 5 PRD §4.3). |
 | **Best streak** | The longest run of consecutive Active days ever recorded — global or per path, matching whichever streak it sits beside — including a run that is not the current one. Renders only when it exceeds the current streak (Phase 5 TDD §14 R5). |
 
@@ -134,8 +136,9 @@ the foot of this document. Spec: [Phase 3 PRD](prds/phase-3-flashcards.md) ·
 ## The analyst (Phase 6)
 
 Phase 6 vocabulary — the second pillar, beside paths: a subject that is still moving, reported
-on as it moves. **Specified but entirely unbuilt**; see the phase-boundary note at the foot of
-this document. Spec: [Phase 6 PRD](prds/phase-6-analyst.md).
+on as it moves. **Built, behind the `analyst` flag (dark by default; admin dogfooding, not yet
+launched)**; see the phase-boundary note at the foot of this document. Spec:
+[Phase 6 PRD](prds/phase-6-analyst.md), [Phase 6 TDD](tdds/phase-6-analyst.md).
 
 | Term | Meaning |
 | --- | --- |
@@ -213,16 +216,24 @@ phase:
   destructive edit shapes (remove, reorder, touching engaged work): **Phase 4**, building on 2B's
   Proposal/Apply machinery.
 - **Beat** / **Brief** / **Source** / **Cadence** / **Anchor day** / **Brief continuity** /
-  **Brief prefetch** / **Skipped** — the analyst (**Phase 6**), defined in The analyst section above: **specified,
-  entirely unbuilt** ([PRD](prds/phase-6-analyst.md), [TDD](tdds/phase-6-analyst.md); no code, no flag, no mock). The
-  terms are here rather than waiting for the code because the vocabulary is authoritative and
-  a name is cheapest to fix before prompts and schemas use it. Two things in that section are
-  decisions the PRD makes rather than descriptions of anything running: a Brief's period is
-  *since the last Brief* rather than a calendar slot, and **Skipped** is a first-class outcome.
+  **Skipped** — the analyst (**Phase 6**), defined in The analyst section above: **built**
+  ([PRD](prds/phase-6-analyst.md), [TDD](tdds/phase-6-analyst.md)), behind the `analyst` flag —
+  `False` in `FLAG_DEFAULTS`, present in `ADMIN_DEFAULT_FLAGS` for dogfooding, not yet flipped
+  on for every learner (the `tutor`/`shaping`/`streaks`/`flashcards` dark-then-flip playbook,
+  [deploy.md](deploy.md#launching-a-flagged-phase-al-270--al-370)). No dedicated Nocturne mock,
+  on the Phase 5 precedent (TDD §8) — the surfaces are specified against the existing tokens
+  directly. A Brief's period genuinely is *since the last Brief* rather than a calendar slot,
+  and **Skipped** genuinely is a first-class outcome (a `briefs` row with `kind = 'skipped'`,
+  never a laundry slot for infrastructural failure) — both running, not merely decided.
   **Active day above is already widened to count reading a Brief** (PRD §4.9), on exactly the
-  Phase 3 precedent — no Brief exists, so the third signal adds no past Active day and moves no
-  live streak, and this is the only moment the amendment is free. Nothing reads that third
-  signal yet.
+  Phase 3 precedent, and the read-tracking machinery behind it is now built (`briefs.read_at`,
+  the `brief_read` event, TDD D11) — but the **streak union stays deferred**
+  (`services/progress_read.py` is untouched by design), so a Brief read still moves no live
+  streak. Nothing reads that third signal into a streak yet.
+- **Brief prefetch** — making a Beat claimable a little before its Anchor day opens: **deferred**
+  (PRD §7.1, Phase 6 TDD, "Not built"), unlike the rest of the analyst vocabulary above. Every
+  first-slice Beat is researched while the learner waits; see **Cadence** and **Brief prefetch**
+  in The analyst section for the reasoning.
 - **Goal ring / daily minutes** — light gamification (**Phase 5**); **streaks
   shipped early, see the streaks PRD** ([PRD](prds/phase-5-streaks.md) ·
   [TDD](tdds/phase-5-streaks.md)), the same pull-forward move Phase 2B was.

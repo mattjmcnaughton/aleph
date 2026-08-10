@@ -17,7 +17,8 @@ src/aleph/
   services/            # Business logic
   agents/              # pydantic-ai agent definitions (bind no model, no app imports)
   domains/             # Pure domain logic, no I/O (grading, progression, engagement,
-                       # Change payloads and their position shifts)
+                       # Change payloads and their position shifts, Beat cadence,
+                       # the Brief novelty gate)
   dtos/                # Pydantic request/response models
   web/                 # Frontend integration
     serve.py           # Static file serving for production
@@ -134,6 +135,57 @@ Ghost rows have no server component at all: the path rail merges the pending
 proposal payload client-side, so a preview can be optimistically stale while the
 mutation cannot (apply re-validates). Applied rows are ordinary data from the
 refreshed path the apply response returns.
+
+## The analyst: retrieval seam and no-tool agents (Phase 6)
+
+Phase 6 adds a second research/write pipeline beside path generation — a
+**Beat** produces dated, cited **Briefs** — built almost entirely from reused
+machinery ([`docs/tdds/phase-6-analyst.md`](tdds/phase-6-analyst.md) §2's
+extension map). Three pieces are genuinely new.
+
+- **`agents/researcher.py`** (documents → structured findings) and
+  **`agents/analyst.py`** (surviving findings → the Brief) — two agents, two
+  model slots (`model_research`, `model_brief`), one call each, obeying the
+  same no-model/no-config purity as every other agent. `RetrievedDocument` — a
+  frozen dataclass, not a provider type — is *declared* in
+  `agents/researcher.py` and populated by the service, the `agents/
+  flashcard.py`-style `FlashcardCaps` precedent for keeping a shape's
+  ownership in `agents/` while its population stays in `services/`.
+- **`services/retrieval.py`** — the `Retriever` `Protocol` every provider
+  implements (`search(queries, *, since=None) -> list[RetrievedDocument]`),
+  a pure query planner (`build_query_plan`), and `retrieve()`, the single
+  entry point that owns every invariant a Brief's retrieved text must satisfy
+  (dedupe by URL, drop undated/empty-text documents, cap at
+  `BRIEF_RETRIEVAL_MAX_DOCUMENTS`, apply the character budget) so a second
+  provider can never ship without them. Three implementations: `ExaRetriever`
+  (live), `FixtureRetriever` (evals + integration, keyed on the Beat and
+  replaying a recorded query plan), and `StubRetriever` (e2e). It lives in
+  `services/`, not `agents/`, on the same reasoning as every seam in this
+  codebase an agent must not see directly: an agent receives documents as
+  plain frozen data in its `Deps` and never learns a provider exists.
+- **`domains/cadence.py`** (`next_claimable_on`/`is_claimable` — when a Beat's
+  Anchor day makes it claimable again) and **`domains/novelty.py`**
+  (`filter_new` — the gate that drops findings a prior Brief already covered)
+  — pure, stdlib-only, no I/O, the same contract every other `domains/`
+  module keeps. `filter_new` returning no survivors is exactly how a
+  **Skipped** period is produced; there is no separate "should we skip" flag
+  anywhere.
+
+**No agent in this pipeline calls a tool.** The retrieval step is a
+deterministic pipeline stage (`services/briefing.py`: plan → retrieve → find →
+gate → write), never something an agent reaches for mid-run — two model
+calls, zero tools, zero agentic loops. This is enforced structurally, not by
+convention: `tests/unit/test_agents_layering.py::
+test_researcher_and_analyst_define_no_tool` asserts both
+`build_researcher_agent()` and `build_analyst_agent()` register no
+`@agent.tool`/`@agent.tool_plain` **and** were built with no caller-supplied
+`toolsets=` — the second check matters more than the first, since a `Agent(...,
+toolsets=[...])` never touches the same bookkeeping a registered
+`@agent.tool` does, so a future search tool wired onto either agent would
+pass the first assertion and fail only the second. `agents/shaper.py`'s
+(Phase 2B) `propose_path_edit` tool is deliberately outside this rule's
+scope — it is an already-accepted design elsewhere in `agents/`, not a
+regression the Phase 6 pipeline may repeat.
 
 ## Frontend
 

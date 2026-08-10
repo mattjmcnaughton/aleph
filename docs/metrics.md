@@ -650,9 +650,11 @@ Analyst-specific caveats (Phase 6, AL-540):
   `age_days` **negative** for a learner east of UTC reading a fresh Brief in
   their own morning, which has no honest reading (not a rounding question).
   Defaults to `0` (UTC) when the param is omitted, so an unmigrated client
-  keeps today's exact behavior — **AL-531 owns sending it from the frontend**;
-  until that ships, `age_days` is still effectively UTC-derived in practice
-  even though the route itself is fixed.
+  keeps today's exact behavior — **AL-531 shipped this:** `lib/api.ts`'s
+  `pingBriefRead` sends `tz_offset_minutes` on every call, pinned by a
+  frontend test (`api.test.ts`'s "Beats & Briefs: tz_offset_minutes rides on
+  every call" block), so `age_days` is local-day-derived in practice, not
+  just at the route.
 - **`failed` folds six distinct causes into one wire value.** Retrieval
   unavailable, zero documents after §5.2's filters, a model timeout, an
   exhausted writer retry budget, a construction-time invariant violation, and

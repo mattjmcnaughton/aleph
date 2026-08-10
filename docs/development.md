@@ -152,6 +152,49 @@ the message: `[force-proposal-add]`, `[force-proposal-revise]`,
 `[force-shaping-decline]` or `[force-shaping-failure]`
 (`services/stub_model.py`).
 
+**Seeing the analyst (`beats`/`briefs`) locally, and the honest limit on `just
+dev-be` alone.** Unlike `tutor`/`shaping`, `analyst` is still **dark**
+(`FLAG_DEFAULTS` has it `False`) — sign in as `admin-dev`
+(`ADMIN_DEFAULT_FLAGS` forces it on for admins) to see the deploy form and the
+Beats section on home, or set `FEATURE_FLAG_DEFAULTS=analyst:on` in `.env` to
+open it for the `dev` user too, the same lever as above.
+
+That gets the surface rendering, but **`just dev-be` on its own cannot
+actually research a Beat without `EXA_API_KEY`.** `services/lifecycle.py`
+only binds a live `ExaRetriever` when the key is configured; with no key, the
+loud `_UnconfiguredRetriever` default stays bound, so a deployed Beat's first
+research run fails immediately and visibly (`research_state: "failed"`,
+retryable) — correct behavior (TDD §12: startup must still succeed without
+the key, and research must fail visibly rather than publish uncited), but it
+means a plain `just dev-be` never produces a real Brief. There is no dev-mode
+wiring that points the ordinary app factory at `FixtureRetriever` or
+`StubRetriever` instead — both exist only in other harnesses:
+
+- **The eval harness, offline** — `just evals --smoke --briefs` runs the
+  actual researcher/analyst agents against `FixtureRetriever` replaying
+  `evals/fixtures/retrieval/*.yaml` (today, hand-authored placeholders — see
+  [`evals.md`](evals.md)), with no key and no network call. This exercises the
+  pipeline's logic end to end, but it is the eval CLI, not the web app — there
+  is no Beat row, no rail, nothing to click through.
+- **The Playwright e2e suite** — `just test-e2e` boots
+  `scripts/e2e_backend.py`, which wires `StubRetriever` (not
+  `FixtureRetriever`) into `briefing_service` in place of the lifespan's own
+  binding, alongside the stub model on every slot. This is the one path that
+  produces an actual, clickable Beat/Brief through the real HTTP API with no
+  key: sign in, deploy a Beat, and its research resolves deterministically
+  against the stub's synthetic documents. Two sentinels in the Beat's topic
+  string force the two non-happy branches, on the Phase 1 precedent:
+  `[force-retrieval-failure]` (→ a `failed` run) and `[force-no-findings]` (→
+  a `skipped` row — the researcher reports zero findings from documents it
+  genuinely retrieved, not zero documents; see `services/retrieval.py::
+  StubRetriever`'s docstring and the Phase 6 TDD §11's amendment for why).
+  `tests/e2e/journeys/w29.spec.ts` and `w31.spec.ts` are the scripted version
+  of exactly this walkthrough.
+
+With a real `EXA_API_KEY` set in `.env`, `just dev-be` researches for real —
+useful for a one-off manual check, but it spends money and reads the live
+web, so prefer the two no-key paths above for routine local development.
+
 ## Common Tasks
 
 ```sh

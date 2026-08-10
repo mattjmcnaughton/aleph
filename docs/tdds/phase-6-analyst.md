@@ -28,14 +28,14 @@ qualified ("Phase 1 D5", "Phase 3 D7", "Phase 5 §5.2").
 
 | # | Decision | Choice | Why |
 | --- | --- | --- | --- |
-| D1 | Aggregate | **Three new tables — `beats`, `briefs`, `brief_sources`. Nothing is added to `paths`, `lessons`, or `units`, and no existing column changes.** A Beat belongs to a `user`, exactly as a path does; a Brief belongs to a Beat; a Source belongs to a Brief. *(Amended from "two tables": §4 needs Sources queryable as rows, because D9's novelty gate reads **prior cited Source URLs** across a Beat's whole history — PRD §4.5's central continuity material. A JSONB column would make that hot, structured read an unnest.)* | PRD §2's product argument, made structural — and the concrete form is stronger than the product one. `lessons` carries **four `NOT NULL` columns a Brief can never have a value for** — `unit_id` (FK), `path_id` (FK), `position_in_path`, `position_in_unit` — plus `uq_lessons_path_position_in_path` over the last of them. Reusing the table therefore means either fabricating a synthetic path and unit per Beat, or dropping `NOT NULL` on four columns of the busiest table in the product, on a live database, to store rows that will never use them. Neither is a migration worth writing. The shared thing is the **claim protocol** (D3), not the storage |
+| D1 | Aggregate | **Three new tables — `beats`, `briefs`, `brief_sources`. Nothing is added to `paths`, `lessons`, or `units`, and no existing column changes.** A Beat belongs to a `user`, exactly as a path does; a Brief belongs to a Beat; a Source belongs to a Brief. *(Amended from "two tables": §4 needs Sources queryable as rows, because D9's novelty gate reads **prior cited Source URLs** across a Beat's whole history — PRD §4.5's central continuity material. A JSONB column would make that hot, structured read an unnest.)* This row is about the aggregate's own shape and stays three tables; a fourth, unrelated table (`beat_research_runs`, a rate-limit counter log with no place in this aggregate) shipped later in migration `0013` — see D13's amendment | PRD §2's product argument, made structural — and the concrete form is stronger than the product one. `lessons` carries **four `NOT NULL` columns a Brief can never have a value for** — `unit_id` (FK), `path_id` (FK), `position_in_path`, `position_in_unit` — plus `uq_lessons_path_position_in_path` over the last of them. Reusing the table therefore means either fabricating a synthetic path and unit per Beat, or dropping `NOT NULL` on four columns of the busiest table in the product, on a live database, to store rows that will never use them. Neither is a migration worth writing. The shared thing is the **claim protocol** (D3), not the storage |
 | D2 | **Skipped** | **A `briefs` row with `kind = 'skipped'`** — dated, **unnumbered**, one line of prose, no body, no Sources. Not a state on the Beat, not a second table, and **not** anywhere failure can reach. `number` is therefore **sparse over published Briefs only**: `NULL` on a Skipped row, under a partial `UNIQUE (beat_id, number) WHERE number IS NOT NULL` | PRD §4.6 makes Skipped a published outcome, and PRD §4.2 forbids it from ever becoming "a laundry slot for *we failed to run*". Both fall out of this: a Skipped entry is a row the learner sees in the rail, and failure is *structurally elsewhere* (D3 — it lives on the Beat's run state, which has no `briefs` row at all). The second payoff is D4's: the cadence floor and **Brief continuity** both key off "the last entry", which is one query over one table with one `ORDER BY` because a Skipped period *is* an entry. **The numbering is PRD §3's own**: its example Skipped line reads *"Nothing material since Brief #4"* — it references the last Brief and carries no number itself, so the rail reads `Brief #5 · 3 Aug` / `Skipped · 27 Jul` / `Brief #4 · 20 Jul`. It also makes `Builds on Brief #4` correct by construction, since continuity is about prior *claims* and a Skipped period has none |
 | D2a | Rejected alternative to D2 | **A `beat_runs` table** — one row per research run carrying `published` / `skipped` / `failed`, with `briefs` holding published artifacts only | Genuinely competitive and recorded rather than dismissed. It would make PRD §5's **Skip rate** ("Skipped ÷ research runs") a database query rather than a Logfire one, keep `briefs` a table of nothing but immutable artifacts, and give per-run diagnostics (documents retrieved, findings surviving D9) a home. It loses on the read that matters most: the Beat rail — the feature's primary read — becomes a union or a join instead of one indexed `ORDER BY`, and D4's "last entry of either kind" has to look in two places. Skip rate comes from `brief_research_completed` (§9) instead, which is where **every** metric in this codebase already comes from (`docs/metrics.md`), so the DB-query advantage buys a capability nothing would use |
 | D3 | Run state & claim | **The Beat carries the claim**, exactly as `paths` carries the outline claim: `research_state` (*idle → researching → idle*, with *failed* as the retryable branch **and *refused* as the terminal safety one**), `research_started_at`, `research_error`, `refusal_message`. Claimed with `repositories/_generation.py`'s existing `claimable_predicate` / `stale_cutoff` / `affected_rows`, **imported unchanged**. **Two claim methods, not one:** `claim_research` (automatic, claimable states `(idle,)`) and `claim_research_for_retry` (explicit, adding `failed`) | Phase 1 §5.4 verbatim, which is the single largest piece of leverage in this phase (PRD §2). The two-method split is `claim_outline` / `claim_outline_for_retry` and it matters **more** here than it does for paths: under D15 the trigger is *arrival*, so an auto-claimable `failed` state would mean a retrieval outage bills a fresh research run on every page load of the beats list. `repositories/paths.py`'s own words — "a systematically failing generation is not retry-burned … only the learner's explicit retry loops" — are the rule, and keeping `failed` out of the auto predicate is how it holds. Note the asymmetry with `paths`: a path's status is *terminal* on success (`ready`), a Beat's returns to `idle` because it reports again next week, which is why `research_state` is a new enum rather than a reuse of `PathStatus`. **`refused` is PRD §2's "same safety branch", made reachable:** the researcher's output is a union `Findings | Refusal` on Phase 1 D12's precedent, and an over-the-boundary Topic terminates the Beat with a graceful message rather than failing it — the distinction `paths` already draws |
 | D4 | Cadence | **Derived, never stored.** No `next_claimable_at` column. `domains/cadence.py` (pure, stdlib only) answers `next_claimable_on(last_entry_on, anchor_weekday) -> date` and `is_claimable(last_entry_on, anchor_weekday, today) -> bool`; "the last entry" is `max(briefs.published_on)` for the Beat, of **either** kind (D2) | Phase 5 D1's grain — a stored copy of a derivable fact is how two answers to one question start disagreeing — and here the derivation is a pure function of a row that already exists. Three PRD rules fall out rather than being coded: a Beat with no entries is claimable immediately (PRD §3's "the first Brief is researched immediately"), a Skipped entry resets the floor (PRD §4.6) because it *is* an entry, and **W32** — a long absence produces one Brief, not a backlog — is what `today >= next_claimable_on(…)` means, with no catch-up loop to write or bound |
 | D4a | A Brief's date | **Stamped at publication, not derived per request.** `published_at` (`timestamptz`, the event) **and** `published_on` (`date`, the label), the latter computed from the claiming arrival's `tz_offset_minutes`. D4's arithmetic reads `published_on` | PRD §4.1 calls a Brief "a dated, immutable record", and its date is part of the artifact rather than a view of it — `Brief #5 — Monday 3 August 2026` is content. Deriving it per request would make an immutable record's date mutable in practice: crossing a timezone would move both the rendered date and the cadence floor. This is a deliberate divergence from Phase 5 D3, and the reason it does not transfer is that a streak is a live computation over history while a Brief is a published document. **Accepted consequence, recorded so nobody "fixes" it:** a learner who deploys in London and reads in Tokyo sees each Brief dated where they were when it published |
-| D5 | Where "today" lives, and the reconciler | **The Anchor day is evaluated on arrival only**, in the service, from the request's `tz_offset_minutes` — one owner of "today", exactly `services/progress_read.py`. **The reconciler is untouched: no Beats scan, no `ids_needing_reconciliation`, no dedup entry.** `services/lifecycle.py` changes only to construct and bind D14's second semaphore | PRD §4.2 states this as a product consequence; making it structural is this TDD's job, and the structure turns out to be *less* code than the draft assumed. A Beats scan would have exactly two jobs and neither survives: failed runs must **not** be auto-retried (D3), and a stale `researching` row is already recovered by the next arrival — `claimable_predicate`'s second arm makes it re-claimable, and `effective_state_case` makes it read as failed-with-retry meanwhile, both inherited rather than written. So there is no off-request code path that could evaluate a cadence *at all*, which is a stronger guarantee than a rule saying it must not. **Accepted cost:** a run that crashes mid-flight leaves the Beat reading `Researching…` until the learner returns, then self-heals. Re-adding the scan is one repository method and one line in `tick` |
-| D6 | Retrieval seam | **A `Retriever` `Protocol` in `services/retrieval.py`** — `search(queries) -> list[RetrievedDocument]`, frozen (url, publisher, title, published_on, text) — with **three** implementations: `ExaRetriever` (live), `FixtureRetriever` (evals + integration), `StubRetriever` (e2e, beside `services/stub_model.py`). **All three ship in the first slice** — the live adapter is not deferred, so the slice adds one production secret (`EXA_API_KEY`, §12 and [`deploy.md`](../deploy.md)) | PRD §4.4's three requirements — resolving URLs, a publication date, enough text to ground a quote — are met natively by Exa's document text plus `publishedDate`, which is why it is the named adapter rather than a general web-search API whose snippets and date coverage would make the third a best-effort. The Protocol is what makes that a swap rather than a rewrite. It lives in `services/` because `agents/` imports no application layer: an agent receives documents as plain frozen dataclasses in its `Deps` and never learns a provider exists |
+| D5 | Where "today" lives, and the reconciler | **The Anchor day is evaluated on arrival only**, in the service, from the request's `tz_offset_minutes` — one owner of "today", exactly `services/progress_read.py`. **The reconciler is untouched: no Beats scan, no `ids_needing_reconciliation`, no dedup entry.** ~~`services/lifecycle.py` changes only to construct and bind D14's second semaphore~~ — **amended (docs sweep, AL-561): that undersold it.** `lifecycle.py` also constructs a live `ExaRetriever` (when `EXA_API_KEY` is configured) and binds it into `briefing_service` via `bind_runtime`'s new `retriever` parameter — the retriever-wiring fix that closed the AL-521/AL-523 handoff gap (see D6's amendment and §2's extension map). The reconciler claim this row makes stands: nothing here adds a Beats scan | PRD §4.2 states this as a product consequence; making it structural is this TDD's job, and the structure turns out to be *less* code than the draft assumed. A Beats scan would have exactly two jobs and neither survives: failed runs must **not** be auto-retried (D3), and a stale `researching` row is already recovered by the next arrival — `claimable_predicate`'s second arm makes it re-claimable, and `effective_state_case` makes it read as failed-with-retry meanwhile, both inherited rather than written. So there is no off-request code path that could evaluate a cadence *at all*, which is a stronger guarantee than a rule saying it must not. **Accepted cost:** a run that crashes mid-flight leaves the Beat reading `Researching…` until the learner returns, then self-heals. Re-adding the scan is one repository method and one line in `tick` |
+| D6 | Retrieval seam | **A `Retriever` `Protocol` in `services/retrieval.py`** — `search(queries, *, since=None) -> list[RetrievedDocument]`, frozen (url, publisher, title, published_on, text) — with **three** implementations: `ExaRetriever` (live), `FixtureRetriever` (evals + integration), `StubRetriever` (e2e, beside `services/stub_model.py`). **All three ship in the first slice** — the live adapter is not deferred, so the slice adds one production secret (`EXA_API_KEY`, §12 and [`deploy.md`](../deploy.md)). **Amended (docs sweep, AL-561): `since` is a per-call keyword on `search`, not a constructor argument.** The design this row originally described bound a Beat's period start (`since`) once, at `ExaRetriever.__init__`, on the assumption that a fresh instance would be built per Beat. Nothing ever did that — `services/lifecycle.py` binds **one** `ExaRetriever` for the whole process's lifetime (the correct shape for a stateless adapter otherwise) — so a construction-time `since` would have pinned whichever Beat's period start happened to be passed first, forever, silently making D6's own "pass the plan's `since` through as Exa's date filter" unreachable. Moving `since` onto every `search()` call (sourced from `QueryPlan.since`, §5.2) is what makes one shared instance correct: the value that varies per Beat now rides the per-call argument instead of instance state, so no per-Beat construction is needed anywhere. `FixtureRetriever` and `StubRetriever` accept and ignore the parameter (D10: replay is keyed on the *recorded* queries, never a live `since`) | PRD §4.4's three requirements — resolving URLs, a publication date, enough text to ground a quote — are met natively by Exa's document text plus `publishedDate`, which is why it is the named adapter rather than a general web-search API whose snippets and date coverage would make the third a best-effort. The Protocol is what makes that a swap rather than a rewrite. It lives in `services/` because `agents/` imports no application layer: an agent receives documents as plain frozen dataclasses in its `Deps` and never learns a provider exists |
 | D6a | Retrieval is **deterministic**, and no agent calls a tool | A **pure** `build_query_plan(topic, guidance, since, *, max_queries)` in `services/retrieval.py` derives the queries from the Beat's frozen standing orders plus the period start; the service executes the plan through the `Retriever`; the documents are then **read by a model**. Two model calls in the whole pipeline (D7), zero tools, zero agentic loops. The pipeline is: **plan (pure) → retrieve (I/O) → find (model) → gate (pure, D9) → write (model) → validate (pure, D8)** | The PRD says "tool-using" (§4.4); this keeps its substance — the research/write split it actually cares about — while dropping a mechanism §4.4 delegates. **Fixture stability is *an* argument, not the decisive one — see the correction under D10.** The reasons that survive scrutiny are narrower: one fewer model call on a path where the learner is already waiting (PRD §4.2's accepted cost, which a third call makes worse), less machinery in the first slice, and spend that is countable before it is spent. Those argue for shipping deterministic **first**, not for deterministic being right. Three things follow for free: spend is countable *before* it is spent rather than after (PRD §4.7's most expensive generation), `agents/` stays import-free because retrieval is never reachable from inside an agent, and the retrieval step needs no eval because it has no model in it. **What this gives up is query diversity** — a model is better than a template at asking the same subject three different ways, and Exa's neural search is what makes the template viable at all, since it takes a natural-language description plus a `since` date rather than needing keyword engineering. If Briefs come back thin, the named upgrade is a query-proposal call ahead of the plan — and D10's fixture format is shaped so that upgrade costs no fixture migration |
 | D7 | Agents & model slots | **Two agents, two slots, one model call each** — `agents/researcher.py` (documents → structured findings) and `agents/analyst.py` (surviving findings → the Brief). Backed by `model_research` and `model_brief`, both added to `MODEL_SLOTS`. Neither binds a tool. The admin per-request picker **does** reach them, stored as `beats.model_research` / `beats.model_brief` | PRD §8 Q6, answered on the `outline`/`lesson` precedent (Phase 1 D14): the choice is stored on the row rather than held on the request precisely because the claim is DB-driven — a retried run must research with the model the admin chose, and a request-scoped override cannot survive to that run. Membership in `MODEL_SLOTS` is what puts both slots behind `config.py`'s production stub guard, which is the whole reason that tuple exists. Two slots rather than one because the calls have opposite profiles: reading documents is mechanical, huge-input, and cheap to get right; writing is quality-sensitive and short — the same argument that split `outline` from `lesson`. **The split is load-bearing for D9, not only D8:** the novelty gate needs structured findings with claims and URLs to compare against prior Briefs, and a single agent that read and wrote in one pass would leave it nothing to gate on but prose |
 | D8 | Provenance | **"The analyst never cites what it did not read" is an output validator, not a prompt line.** The writing agent's `Deps` carry *only* documents whose text was actually fetched; a validator asserts every cited URL is in that set and retries on violation. The predicate is importable and shared with the eval layer-1 pre-filters | PRD §4.4 is the phase's central quality rule and PRD §7.1 keeps the research/write split specifically to make it enforceable. A prompt instruction is a hope; a set-membership check against the agent's own inputs is a fact — and D6a is what guarantees the input set is exactly what was read, since the only way a document reaches the writer is by having come back from the `Retriever` and survived D9's gate. `agents/flashcard.py`'s shared-validator pattern (Phase 3 §5.2) is the shape, verbatim. Its sibling — **a Brief with no Sources is not publishable** — is the same check's degenerate case, and resolves to a `failed` run (D3), never to a published body |
@@ -43,9 +43,9 @@ qualified ("Phase 1 D5", "Phase 3 D7", "Phase 5 §5.2").
 | D10 | Evals | **`brief` is the fourth `ArtifactKind`; `brief_findings` is deferred** (PRD §7.1). **Recorded retrieval fixtures are not deferred** — one YAML format under `evals/fixtures/retrieval/`, **keyed on the Beat and recording the query plan alongside the results** (`beat` → `queries` → `results`), read by `FixtureRetriever` and written by a `just` recipe that hits Exa once and dumps the file | PRD §6's new constraint: live retrieval makes an eval measure the news rather than the agent. The fixtures are the phase's largest single new piece of harness work and the thing it cannot ship *or boot* without, so they are their own ticket rather than a line on the agent's. **Correcting D6a's stated reasoning.** D6a first claimed deterministic queries were *required* for stable fixtures, because a model-proposed query would make the fixture key a model output that drifts on any prompt edit. Keying on the **Beat** and recording the **plan** dissolves that: on replay the proposal call is skipped entirely and the recorded queries are executed, so the key is frozen at deployment whether or not a model proposed them. The honest position is that a query proposer is **untestable offline no matter what we do** — freezing its output costs nothing a fixture could have measured. So the plan is recorded now, while it is still a pure function and its queries are trivially reproducible, purely to buy the option: upgrading to a proposer becomes additive rather than a format migration plus a full re-record. On a phase whose fixtures are its largest single piece of harness work, that difference is what decides whether a planned upgrade ever happens. A fixture whose key drifts is still worse than no fixture — it fails by quietly missing rather than by erroring — which is why the key is the Beat and never the query text. `APPLICABLE_ITEMS["brief"]` plus an `ARTIFACT_NOTES` reading of the existing **Grounded** item — pointed at a Source instead of a Read passage — is the whole rubric change; no sixth `RubricItem`, on Phase 3 §10's reasoning |
 | D11 | Read tracking | **Two columns and an event, and nothing more: `briefs.read_at` + `briefs.sources_seen_at` + a `brief_read` product event.** `services/progress_read.py` is **untouched** — the streak union stays deferred (PRD §7.1) | PRD §7.1 splits these deliberately and the split is worth keeping sharp: §5's north-star question ("does a Brief bring a learner back on a day nothing else would have?") needs the read timestamps and the event, and needs them from day one because they cannot be backfilled. Feeding Brief reads into **Active day** needs neither, and `CONTEXT.md` already says nothing reads the third signal yet. Re-entry cost is one `UNION` arm in Phase 5 §5.2's query |
 | D12 | Rollout | **`FeatureFlag.ANALYST`**, the fifth flag — `False` in `FLAG_DEFAULTS`, present in `ADMIN_DEFAULT_FLAGS`, gated **router-level** so a future route cannot forget it. Off → `404` | The `tutor` / `shaping` / `streaks` / `flashcards` playbook verbatim ([`deploy.md`](../deploy.md)). A kill switch on a feature whose per-run cost is the highest in the product is worth more here than in any prior phase, and it stays registered after launch |
-| D13 | Migration | **`0012_analyst`** — three tables (D1), **two** new enums (`beat_research_state`, `brief_kind`; `level` is reused), no change to any existing table or column | The additive shape D1 buys. Rollback is dropping three tables nothing else references; no backfill, no reconciliation, no column to unwind on a live table. *(Amended from "two tables, four enums" — the count was wrong in both directions: `brief_sources` is a table D9 needs, and `Level` is reused rather than redeclared.)* |
+| D13 | Migration | **`0012_analyst`** — three tables (D1), **two** new enums (`beat_research_state`, `brief_kind`; `level` is reused), no change to any existing table or column | The additive shape D1 buys. Rollback is dropping three tables nothing else references; no backfill, no reconciliation, no column to unwind on a live table. *(Amended from "two tables, four enums" — the count was wrong in both directions: `brief_sources` is a table D9 needs, and `Level` is reused rather than redeclared.)* **Second amendment (docs sweep, AL-561): a fourth table, `beat_research_runs`, shipped in a follow-on migration, `0013_beat_research_runs`.** Code-review on AL-521 found that the daily research cap (`RATE_LIMIT_BRIEF_RESEARCH_PER_DAY`, D14) as originally specified — counting `beats` rows whose `research_started_at` fell today — could never fire at production settings: a claim *overwrites* that single stamp on every (re-)claim, so the count could never exceed a learner's live Beat count, which `MAX_BEATS_PER_LEARNER` (3) already holds below the cap (5). `beat_research_runs` is one append-only row per **won** claim (auto or retry alike), inserted in the same transaction as the claim's own `UPDATE`; the cap now counts real runs. It is deliberately **not** a revival of D2a's rejected `beat_runs` table — it carries no `outcome`/`kind`, only that a claim happened, for whom, and when, and nothing routes it into the Beat rail read. See `models/beat_research_run.py` and `alembic/versions/0013_beat_research_runs.py` for the full write-up, including the one accepted gap it does not close (a process death between the claim's commit and the spawn actually starting still consumes a cap unit for work that never ran) |
 | D14 | Bounds | **Its own semaphore** (`MAX_CONCURRENT_BRIEF_RESEARCH = 2`), never `max_concurrent_generations`; plus `MAX_BEATS_PER_LEARNER = 3` (PRD §4.7's cap, config not constant) and `RATE_LIMIT_BRIEF_RESEARCH_PER_DAY = 5` on the existing `DailyRateLimiter` | Phase 2 D9's argument, one workload over: research is the most expensive generation in the product per unit of output (PRD §4.7), and it must not be able to starve lesson generation — a learner waiting on lesson 3 of their path should never queue behind three analysts. Two pools is the only arrangement where neither can, and 2 against `max_concurrent_generations`'s 8 says which one yields. The daily cap is the sixth counter on a limiter built for exactly this shape (admins exempt, as everywhere), and it is what bounds *per-learner* spend where D14a bounds *per-Brief* |
-| D14a | The cost ceiling | **A Brief costs at most $0.50, and the binding constraint is a character budget on retrieved text — not a document count.** `BRIEF_RETRIEVAL_MAX_QUERIES = 6`, `BRIEF_RETRIEVAL_MAX_DOCUMENTS = 12`, and **`BRIEF_RETRIEVAL_TEXT_BUDGET_CHARS = 160_000`**, allocated evenly across returned documents and truncated at the `Retriever` seam before anything reaches a model | The owner's ceiling, made structural. A document count does **not** bound cost: twelve 2 000-token articles is ~24k input tokens on D6a's second call (a few cents), and twelve 20 000-token ones is ~240k (several times the whole budget, on one call). Since the length of what a retrieval API returns is not ours to choose, the only bound that holds is on the text itself. 160 000 chars is ≈40k tokens, which puts a typical Brief around **$0.20** across D6a's whole pipeline — retrieval ~$0.04, the research read ~$0.12, the write ~$0.05, and *nothing* for query planning, which D6a made a pure function — with a worst case near **$0.35**, leaving margin for a pricier slot without renegotiating the ceiling. Two honest caveats: the dollar figures assume current Sonnet-class pricing on both slots and current Exa pricing, so they are a **design target, not an invariant**; what is enforced is the character budget, and what *verifies* the ceiling is §9's `brief_research_completed` carrying `usage_tokens` (the helper `services/generation.py` already has) plus the retrieval counts, which is what makes PRD §5's **Cost per read Brief** guardrail computable rather than estimated. Worst-case exposure for one learner is the daily cap times the worst case — 5 × $0.35 ≈ $1.75/day — and that product is the number to watch, not either factor alone |
+| D14a | The cost ceiling | **A Brief costs at most $0.50, and the binding constraint is a character budget on retrieved text — not a document count.** `BRIEF_RETRIEVAL_MAX_QUERIES = 6`, `BRIEF_RETRIEVAL_MAX_DOCUMENTS = 12`, and **`BRIEF_RETRIEVAL_TEXT_BUDGET_CHARS = 160_000`**, allocated evenly across returned documents and truncated at the `Retriever` seam before anything reaches a model. **Amended (docs sweep, AL-561): `BRIEF_RETRIEVAL_MAX_DOCUMENTS` needed its own enforcer, and now has one.** §5.2's `retrieve()` originally showed only `text_budget_chars` in its signature; nothing enforced the document cap, because the character budget alone does not bound *count* — `url`/`publisher`/`title`/`published_on` are unbounded per document and outside the budget's reach (measured at 136,890 uncounted characters for 1,200 documents), and a per-query cap at the `Retriever` cannot reconstruct a total cap after cross-query dedupe. `retrieve()`'s signature now takes `max_documents` alongside `text_budget_chars` and enforces it directly (§5.2) | The owner's ceiling, made structural. A document count does **not** bound cost: twelve 2 000-token articles is ~24k input tokens on D6a's second call (a few cents), and twelve 20 000-token ones is ~240k (several times the whole budget, on one call). Since the length of what a retrieval API returns is not ours to choose, the only bound that holds is on the text itself. 160 000 chars is ≈40k tokens, which puts a typical Brief around **$0.20** across D6a's whole pipeline — retrieval ~$0.04, the research read ~$0.12, the write ~$0.05, and *nothing* for query planning, which D6a made a pure function — with a worst case near **$0.35**, leaving margin for a pricier slot without renegotiating the ceiling. Two honest caveats: the dollar figures assume current Sonnet-class pricing on both slots and current Exa pricing, so they are a **design target, not an invariant**; what is enforced is the character budget, and what *verifies* the ceiling is §9's `brief_research_completed` carrying `usage_tokens` (the helper `services/generation.py` already has) plus the retrieval counts, which is what makes PRD §5's **Cost per read Brief** guardrail computable rather than estimated. Worst-case exposure for one learner is the daily cap times the worst case — 5 × $0.35 ≈ $1.75/day — and that product is the number to watch, not either factor alone |
 | D15 | Delivery | **Trigger + poll, verbatim** (Phase 1 D5). `POST /api/v1/beats` returns immediately; the client polls `GET /api/v1/beats/{id}`. **The arrival drain is a side effect of the reads** — listing or opening a Beat evaluates D4's cadence and claims what is due, exactly as reaching a lesson kicks its generation today. The frontend reuses `lib/polling.ts` unchanged | PRD §4.2's trigger 1, which at current scale is the only trigger that fires. Reusing the polling module rather than adding an interval means the researching state gets Phase 1's backoff, its jitter, and its stop conditions for nothing |
 | D16 | Workflow numbers | **W29–W33, not W28–W32.** The PRD's "W28 is the next free number" is stale — AL-410 shipped `w28.spec.ts` (kept-card management) after it was written. **W29** (a cited Brief) and **W31** (Skipped, not padded) are the two browser journeys; W30/W32/W33 are integration cases (PRD §7.1) | Recorded as a decision rather than fixed silently, because the PRD's §5 and §7.1 both name numbers and a reader holding the PRD needs the mapping. §14 carries it as a correction |
 
@@ -54,14 +54,14 @@ qualified ("Phase 1 D5", "Phase 3 D7", "Phase 5 §5.2").
 | Concern | Existing asset | Analyst change |
 | --- | --- | --- |
 | The claim protocol | `repositories/_generation.py` — `claimable_predicate`, `stale_cutoff`, `effective_state_case`, `affected_rows`; the DB clock as the one clock | **Reuse unchanged.** `BeatRepository.claim_research` is `PathRepository.claim_outline` with a different state column. The single biggest reuse in the phase, and the reason PRD §4.2 needs no deployment change |
-| Background execution | `services/lifecycle.py` — `TaskRegistry`, the process-wide semaphore, `GenerationLifecycle` | **Extend:** a second semaphore (D14) constructed and bound alongside the first. The registry and the lifespan wiring are reused as-is |
+| Background execution | `services/lifecycle.py` — `TaskRegistry`, the process-wide semaphore, `GenerationLifecycle` | **Extend — amended (docs sweep, AL-561): more than a semaphore.** A second semaphore (D14) constructed and bound alongside the first, **and** (the AL-521/AL-523 handoff gap's fix) a single process-lifetime `ExaRetriever` constructed here and passed to `briefing_service.bind_runtime`'s new `retriever` parameter — `None` when `EXA_API_KEY` is unset, so startup still succeeds and a Beat's runs fail visibly instead (§12). Neither AL-521 nor AL-523 wired a live retriever into production; this is that wiring, landed as a cross-ticket fix. The registry and the lifespan wiring are reused as-is |
 | The reconciler | `Reconciler.tick` → `PathRepository.ids_needing_reconciliation` | **Untouched** (D5). A Beats scan would have exactly two jobs and neither survives: failed runs must not be auto-retried, and a stale `researching` row is already recovered by the next arrival — both inherited from the claim protocol rather than written |
 | Generation orchestration | `services/generation.py::GenerationOrchestrator` — `bind_runtime`, claim → run → persist → emit, failure mapping | **Pattern, not the object.** A new `services/briefing.py` in the same shape rather than a sixth concern on a 1 250-line class. It binds its own `spawn`/`model_slot` seams from the same lifecycle |
 | Agent purity | `agents/*.py` — no bound model, no config, no application imports, frozen `*Deps`, importable validators | **New** `agents/researcher.py`, `agents/analyst.py` under the same rules; auto-covered by the layering test. Retrieved documents arrive as frozen dataclasses, so `agents/` still imports nothing (D6) |
 | Pure derivation | `domains/` — `progression`, `engagement`, `streaks`, `scheduling`, `grading`, `changes` | **New** `domains/cadence.py` (D4) and `domains/novelty.py` (D9), same contract: stdlib only, frozen inputs, no I/O |
 | Model resolution | `services/openrouter.py` resolving a slot id; `MODEL_SLOTS` + the production stub guard; the admin picker stored on the row | **Extend:** two slots, two allowlist-bound columns on `beats` (D7). The guard's slot arm iterates `MODEL_SLOTS`, so both are covered by construction |
 | Local-day arithmetic | `services/progress_read.py` — the injected `now`, `tz_offset_minutes`, Phase 5 D3's `AT TIME ZONE 'UTC'` pin | **Reuse the pattern** for the Anchor day (D5). Same seam, same sign convention, same both-hemispheres test discipline |
-| Rate limiting | `services/rate_limit.py::DailyRateLimiter` + the `UsageCounter` `Protocol` (five counters) | **Extend:** a sixth counter and `check_brief_research`, in the shape of the other five |
+| Rate limiting | `services/rate_limit.py::DailyRateLimiter` + the `UsageCounter` `Protocol` (five counters) | **Extend:** a sixth counter and `check_beat_creation`/`brief_research_capacity_available`/`check_brief_research_retry`, in the shape of the other five. **Amended (docs sweep, AL-561):** the sixth counter is backed by a **new table**, `beat_research_runs` (§4's amendment, migration `0013`), not by reading `beats.research_started_at` directly — a claim overwrites that single stamp on every re-claim, so counting the Beat row itself could never exceed `MAX_BEATS_PER_LEARNER` and would never bind the daily cap |
 | Feature flags | `FeatureFlag` enum, `FLAG_DEFAULTS`, `ADMIN_DEFAULT_FLAGS`, `require_*_enabled`, `user.feature_flags` on the session payload | **Extend:** one enum member, two registry entries, one dependency — copied from `require_flashcards_enabled` |
 | Router conventions | `routers/v1/`, `CurrentUser` / `Session` aliases, 404-never-403, the `errors.py` envelope | **New** `routers/v1/beats.py`; conventions verbatim. `docs/api.md` gains an `## Analyst` section |
 | Markdown rendering | `components/markdown.tsx` — the security boundary for model-written text, with `mermaid.tsx` | **Reuse verbatim, and touch nothing.** PRD §2 and §7.1 both turn on this: a Brief is model-written text and must not get its own renderer, which is also why inline citations are deferred |
@@ -72,14 +72,17 @@ qualified ("Phase 1 D5", "Phase 3 D7", "Phase 5 §5.2").
 | MSW | `mocks/handlers.ts` composing per-domain modules with `configure*` / `reset*` | **New** `mocks/beats.ts` in the same shape |
 | Deterministic backends | `services/stub_model.py` (sentinel topics force branches); `scripts/e2e_backend.py::create_stub_app` | **Extend:** stub dispatch for the two new agents' output shapes plus sentinels for the Skipped and retrieval-failure branches, and a `StubRetriever` bound in the stub factory only (D6, D10) |
 | Eval harness | `evals/rubric.py` (`ArtifactKind`, `APPLICABLE_ITEMS`, `ARTIFACT_NOTES`), `evals/generation.py` (layer-1 evaluators + a judge per kind), `flashcard_seed_set.yaml` | **Extend:** a fourth kind, `brief_seed_set.yaml`, layer-1 predicates importing D8's and D9's shipped functions — **and the new fixture format** (D10), which is the part with no precedent |
-| Events | `events.py::EVENT_FIELDS` + the typed emitters | **Extend:** `beat_created`, `brief_research_completed` (however it resolved — the `outcome` shape the tutor and drafting events already use), `brief_read` |
+| Events | `events.py::EVENT_FIELDS` + the typed emitters | **Extend:** `beat_deployed`, `brief_research_completed` (however it resolved — the `outcome` shape the tutor and drafting events already use), `brief_read` |
 
-**Built new:** migration `0012` (two tables), `models/beat.py` + `models/brief.py`,
-`domains/cadence.py`, `domains/novelty.py`, `services/retrieval.py` (+ three adapters),
-`agents/researcher.py`, `agents/analyst.py`, `services/briefing.py`,
-`repositories/beats.py` + `repositories/briefs.py`, `dtos/beats.py`, `routers/v1/beats.py`,
-the Beat deployment / list / rail / Brief routes and components, `mocks/beats.ts`,
-`evals/fixtures/retrieval/`, `brief_seed_set.yaml`, a saved Logfire query per §5 metric.
+**Built new:** migration `0012` (three tables — **amended (docs sweep, AL-561):** was
+misstated as two) plus migration `0013` (`beat_research_runs`, added by the AL-521
+code-review fix — D1/D13/§4/§12's amendment), `models/beat.py` + `models/brief.py`
+(`Brief`, `BriefSource`) + `models/beat_research_run.py`, `domains/cadence.py`,
+`domains/novelty.py`, `services/retrieval.py` (+ three adapters), `agents/researcher.py`,
+`agents/analyst.py`, `services/briefing.py`, `repositories/beats.py` +
+`repositories/briefs.py`, `dtos/beats.py`, `routers/v1/beats.py`, the Beat deployment /
+list / rail / Brief routes and components, `mocks/beats.ts`, `evals/fixtures/retrieval/`,
+`brief_seed_set.yaml`, a saved Logfire query per §5 metric.
 
 **Not built, and named so the absence is a decision:** no scheduler, no cron, no external trigger,
 no `fly.toml` change and no `min_machines_running` flip (PRD §4.2); no stored timezone and no
@@ -127,18 +130,20 @@ The research path, end to end:
 ```
 GET /beats?tz_offset_minutes=-120        (or GET /beats/{id})
   → require_analyst_enabled              (404 if off, before any work)
-  → load_beats(...)                      the read the learner actually wanted
   → drain_claimable(session, user_id=…, tz_offset_minutes=…)     ← the arrival trigger (D15)
       today = (now(UTC) - offset).date()                          ← one owner of "today" (D5)
       for each beat: is_claimable(last_entry_on, anchor_weekday, today)   ← pure (D4)
         → claim_research(beat_id)        atomic; idle-or-stale only (D3)
         → spawn(run_research(beat_id, local_today))               ← TaskRegistry, unchanged
+  → load_beats(...) / session.refresh(beat)   the read the learner actually wanted, taken
+                                               AFTER the drain so it reflects what this
+                                               request's own arrival just changed
   → the response returns immediately; the client polls (D15)
 
 run_research(beat_id, local_today):
   permit = MAX_CONCURRENT_BRIEF_RESEARCH                          ← its own bound (D14)
   plan      = build_query_plan(topic, guidance, since=last_entry_on, max_queries=…)   pure
-  documents = retrieve(retriever, plan, text_budget_chars=…)      ← the only cost ceiling (D14a)
+  documents = retrieve(retriever, plan, max_documents=…, text_budget_chars=…)   ← the only cost ceiling (D14a)
   result    = researcher.run(…, model=beat.model_research or settings.model_research)
       Refusal → research_state = refused (terminal), refusal_message set        [PRD §2]
   survivors = novelty.filter_new(result.findings, prior_urls, prior_claims)     pure (D9)
@@ -148,6 +153,20 @@ run_research(beat_id, local_today):
   research_state = idle                                           ← ready to report again
 ```
 
+**Amended (docs sweep, AL-561): the diagram above now drains before it reads.** The original
+diagram showed `load_beats(...)` preceding `drain_claimable(...)` on the `GET` path. The shipped
+router does the opposite (`src/aleph/routers/v1/beats.py`, code-review FIX 1 on AL-522) and its
+module docstring names this section as the thing that was wrong. The order is not stylistic:
+reading before draining returns a response built from the **pre-drain** row, and a Beat's
+pre-run state (`idle`) is also its post-success state, so `lib/polling.ts` — which stops the
+instant it sees any terminal state, `idle` included — never starts polling. A learner opening
+`/beats/{id}` for the first time would see `research_state: "idle"` for a run the same request
+just started, and the Brief lands with nothing on screen: the AL-522 review's own finding,
+verbatim the defect AL-521's FIX 1 had already eliminated one layer down. `docs/api.md` already
+documented the shipped (correct) order; only this diagram was stale. Also added: the
+`max_documents` argument to `retrieve(...)`, D14a and §5.2's amendment, which this diagram had
+not carried.
+
 **One purity note, recorded rather than left to be noticed.** `build_query_plan` is a pure
 function but lives in `services/retrieval.py`, not `domains/`. It encodes retrieval-provider
 concepts — a `since` filter, a result cap — and provider concepts in `domains/` would be the
@@ -155,10 +174,39 @@ actual layering violation. The cost is that the layering test does not cover it,
 convention; the compensating control is that it takes no `session`, performs no I/O, and its unit
 tests pass no fakes.
 
-## 4. Data model & storage schema (migration `0012_analyst`)
+## 4. Data model & storage schema (migration `0012_analyst`, plus `0013_beat_research_runs`)
 
 `down_revision = "0011_flashcard_management"`. Three tables, two enums, additive throughout —
 nothing on an existing table, so nothing here is online-risky on Neon.
+
+**Amended (docs sweep, AL-561): a fourth table shipped in a follow-on migration.** Code-review on
+AL-521 found the daily research cap (`RATE_LIMIT_BRIEF_RESEARCH_PER_DAY`, D14) as this section
+originally specified it — counting `beats` rows whose `research_started_at` fell today — could
+never actually fire: a claim overwrites that one stamp on every (re-)claim, so the count could
+never exceed a learner's live Beat count (bounded at `MAX_BEATS_PER_LEARNER = 3`), which sits
+strictly below the cap (`5`). `0013_beat_research_runs` (down-revision `0012_analyst`) adds one
+new table, purely additive, nothing touched on any existing table:
+
+```
+beat_research_runs
+  id, created_at, updated_at                      (UUIDAuditMixin)
+  beat_id     UUID → beats ON DELETE CASCADE
+  user_id     UUID → users ON DELETE CASCADE
+  started_at  TIMESTAMPTZ NOT NULL   -- the claim's own fencing stamp, never re-derived
+  INDEX ix_beat_research_runs_user_id_started_at (user_id, started_at)
+  INDEX ix_beat_research_runs_beat_id
+```
+
+One row is inserted every time `BeatRepository._claim` **wins** a claim — auto or explicit retry
+alike (D3) — in the same transaction as the claim's own `UPDATE`, so the two writes commit or
+roll back together; the daily cap now counts real runs (`UsageRepository.
+count_brief_research_runs_since`) instead of Beats. This is deliberately **not** a revival of
+D2a's rejected `beat_runs` table: it carries no `outcome`/`kind` and is read by exactly one query
+(the cap's own `COUNT`), so it cannot become a second Beat-rail source and D2a's reasoning for
+rejecting a run-outcomes table is untouched. **Accepted cost, stated in the migration rather than
+left implicit:** a process death between the claim's commit and the spawn actually starting still
+consumes a cap unit for work that never ran — narrower than, but the same shape as, D5's own
+accepted stale-recovery window. See `models/beat_research_run.py` for the full write-up.
 
 ```
 beats
@@ -267,19 +315,38 @@ The `Retriever` `Protocol`, the pure plan builder, and **one entry point that ow
 invariant** — so a second provider cannot ship without them:
 
 ```python
-async def retrieve(retriever, plan, *, text_budget_chars) -> list[RetrievedDocument]:
-    """search → dedupe by URL → drop undated → apply the character budget."""
+async def retrieve(
+    retriever, plan, *, max_documents, text_budget_chars
+) -> list[RetrievedDocument]:
+    """search → dedupe by URL → drop undated/empty-text → cap at max_documents →
+    apply the character budget."""
 ```
 
 - **Dedupe by URL** — one document legitimately answers several of the plan's queries.
 - **Drop undated** — PRD §4.4 requires a publication date we can show and reason about; a
   document without one cannot be a Source, so it never reaches a model.
-- **The character budget is D14a's only enforcement point.** Even shares, then redistribute what
-  short documents did not use; truncation is a deterministic prefix so a fixture replays
-  identically. Every model-bound character in this phase passes through this function.
+- **Cap at `max_documents`.** Kept in the order established by dedupe/drop-undated (effectively
+  the plan's query order, most-valuable-angle-first).
+- **The character budget is D14a's cost-ceiling enforcement point.** Even shares, then
+  redistribute what short documents did not use; truncation is a deterministic prefix so a
+  fixture replays identically. Every model-bound character in this phase passes through this
+  function.
 
 `RetrievalUnavailableError` maps to a `failed` run (D3) — visible, retryable, never a published
 Brief and **never Skipped**.
+
+**Amended (docs sweep, AL-561): the signature above now shows `max_documents`, which the
+original pseudocode omitted.** `BRIEF_RETRIEVAL_MAX_DOCUMENTS` (D14a, §13) is a real configured
+value, and nothing enforced it before this parameter existed: the character budget alone does
+not bound document *count*, because it counts only `document.text` — `url`, `publisher`,
+`title`, and `published_on` are unbounded per document and all enter the researcher's prompt,
+measured at 136,890 uncounted characters for 1,200 documents at shipped field widths. A per-query
+cap at the `Retriever` cannot reconstruct a *total* cap after cross-query dedupe either, since
+the same document can answer several of the plan's queries. `max_documents` is therefore enforced
+inside `retrieve()` itself, alongside the character budget it was always meant to sit beside — a
+deliberate amendment to this section's signature, landed during AL-512's build rather than left
+as a silent gap. See `services/retrieval.py::retrieve`'s own docstring for the exhaustive
+reasoning this section summarizes.
 
 **The `FixtureRetriever` raises on a miss rather than returning `[]`.** Downstream, an empty result
 and "nothing material happened" are the same value: the gate finds no survivors and the analyst
@@ -372,13 +439,13 @@ New router `routers/v1/beats.py`, prefix `/api/v1`, every convention verbatim: c
 
 | Endpoint | Purpose |
 | --- | --- |
-| `POST /api/v1/beats` | Deploy an analyst. Body: `topic`, `level`, `anchor_weekday`, optional `guidance`, optional admin `model_research` / `model_brief`. Returns the Beat immediately; the first research run is claimed in the same request (PRD §3 — researched immediately, not at the first anchor day) |
+| `POST /api/v1/beats?tz_offset_minutes=<int>` | Deploy an analyst. Body: `topic`, `level`, `anchor_weekday`, optional `guidance`, optional admin `model_research` / `model_brief`. Returns the Beat immediately; the first research run is claimed in the same request via the same arrival drain the two `GET` routes use (PRD §3 — researched immediately, not at the first anchor day), so this route needs `tz_offset_minutes` for the drain's own `today` derivation (D5) — it stamps the first Brief's `published_on` in the learner's local day (D4a), which sets D4's cadence floor |
 | `GET /api/v1/beats?tz_offset_minutes=<int>` | The learner's Beats with unread counts and research state. **Drains claimable Beats** (D15) |
 | `GET /api/v1/beats/{id}?tz_offset_minutes=<int>` | One Beat: standing orders, research state, and the rail — entries newest first, both kinds. **Drains this Beat** |
 | `DELETE /api/v1/beats/{id}` | Delete. This is also how standing orders change (PRD §4.11 — delete and redeploy) |
-| `POST /api/v1/beats/{id}/retry` | The explicit retry claim (D3). The **only** path that re-claims a `failed` run |
+| `POST /api/v1/beats/{id}/retry?tz_offset_minutes=<int>` | The explicit retry claim (D3). The **only** path that re-claims a `failed` run — and, added during the build, a **genuine no-op** on any other state (`idle`, `researching`, `refused`; §7's amendment), rate-limited by its own **raising** daily-cap check |
 | `GET /api/v1/briefs/{id}` | A Brief: body Markdown, Sources, `builds_on` |
-| `POST /api/v1/briefs/{id}/read` | The read ping. Body: `marker: "opened" \| "sources"` (D11, §9) |
+| `POST /api/v1/briefs/{id}/read?tz_offset_minutes=<int>` | The read ping. Body: `marker: "opened" \| "sources"` (D11, §9). **Amended (docs sweep, AL-561):** this route also takes `tz_offset_minutes` — added during the build so `brief_read`'s `age_days` field (§9) compares `published_on` against the learner's *local* day rather than UTC's, which could otherwise go negative for a learner east of UTC reading a fresh Brief in their own morning |
 
 ```jsonc
 // GET /api/v1/beats/{id}
@@ -433,13 +500,26 @@ asks *when a learner first opened a Brief*, so a re-read must not move the times
 
 ## 7. Load, caching & rate limiting
 
-**Rate limiting.** Two caps, both on the existing `DailyRateLimiter` (D14): `check_beat_creation`
-against `MAX_BEATS_PER_LEARNER` (a *stock* cap — the count of live Beats, not a daily flow) and
-`check_brief_research` against `RATE_LIMIT_BRIEF_RESEARCH_PER_DAY`, the sixth counter on the
-`UsageCounter` `Protocol`. Admins exempt, as everywhere. The research cap is checked **inside the
-drain, before the claim** — never at the route — because the drain is a side effect of a read the
-learner did not explicitly ask to be billed for, so hitting the cap must degrade to "no research
-this time", not to a `429` on a `GET` that would break the beats list.
+**Rate limiting.** Three checks, all on the existing `DailyRateLimiter` (D14), against
+`RATE_LIMIT_BRIEF_RESEARCH_PER_DAY`'s sixth counter (backed by `beat_research_runs`, §4's
+amendment) or `MAX_BEATS_PER_LEARNER`. Admins exempt, as everywhere. **Amended (docs sweep,
+AL-561): this was shipped as three checks with three different shapes, not the two this section
+originally described, and "never at the route" turned out not to hold for the explicit retry.**
+
+- `check_beat_creation` — the **stock** cap (`MAX_BEATS_PER_LEARNER`, the count of live Beats, not
+  a daily flow) — raises `429`, checked at `POST /beats` before the row is created.
+- `brief_research_capacity_available` — **non-raising**, checked **inside the arrival drain,
+  before each claim**, exactly as originally specified: the drain is a side effect of a read the
+  learner did not explicitly ask to be billed for, so hitting the cap must degrade to "no research
+  this time," not to a `429` on a `GET` that would break the beats list.
+- `check_brief_research_retry` — **raising** `429`, checked at `POST /beats/{id}/retry`, and only
+  when the Beat is actually `failed` (§6's no-op branch for any other state means a stray retry
+  costs no quota unit at all). §7's original text stated the "never at the route" rule as a
+  blanket rule for the whole research cap; the correct scope is narrower — it is the *drain's*
+  rule, because the drain's own reasoning ("a side effect of a read the learner did not
+  explicitly ask to be billed for") does not extend to an explicit `POST` the learner asked for by
+  name, the `POST /paths/{id}/retry` precedent (`check_outline_generation`, checked before
+  triggering, for the identical reason).
 
 **A `GET` with a side effect** (D15) is unusual enough to defend. It is Phase 1's poll-as-trigger
 verbatim — reaching a lesson kicks its generation — and it is safe here for the same three reasons:
@@ -664,9 +744,26 @@ terminal state; flag off → no request.
   **Skipped** row: dated, one line, no body, and no retry affordance.
 
 **Stub sentinels** in the topic string, on the Phase 1 precedent: `[force-retrieval-failure]`
-(→ W33's branch), `[force-no-findings]` (→ Skipped). The latter returns **documents the gate
-rejects**, not zero documents — a stub returning nothing would prove the easier, wrong thing
-(§5.7's second row).
+(→ W33's branch), `[force-no-findings]` (→ Skipped).
+
+**Amended (docs sweep, AL-561): what `[force-no-findings]` actually forces.** This section
+originally said the sentinel "returns documents the gate rejects" — i.e. that it would drive
+`domains/novelty.py::filter_new` to reject findings against prior cited URLs/claims. The shipped
+mechanism is narrower, for a reason that was structural rather than an oversight: `w31.spec.ts`
+is a Beat's **first-ever** research run (a fresh deploy, exactly like `w29.spec.ts`), and a first
+run has no prior Brief — no earlier-cited Source URLs, no earlier claims — so there is nothing for
+the novelty gate to reject *against*. Genuinely exercising the gate's rejection branch needs a
+*second* run on the same Beat, and that is **W30**, an integration case per PRD §7.1's own table
+(§11 above), never a Playwright journey. So instead, `[force-no-findings]` makes
+`services/stub_model.py`'s researcher dispatch report **zero `Findings`** from documents the run
+genuinely, non-emptily retrieved (`StubRetriever` still returns real-looking, dated stub
+documents for every query — "not zero documents, a stub returning nothing would prove the
+easier, wrong thing" still holds exactly as stated below: zero *documents* is `services/
+briefing.py`'s own load-bearing *failed* row, §5.7's second row, and would prove nothing about
+Skipped). The mechanism still lands on §5.7's third row (idle + a `skipped` row) — which is
+precisely what `w31.spec.ts` asserts — it just gets there via the researcher finding nothing
+worth reporting rather than via the gate rejecting something it found. See
+`services/retrieval.py::StubRetriever`'s own docstring for the full reasoning.
 
 **External — `tests/external/test_exa.py`, `@pytest.mark.external`:** one live contract test
 asserting Exa returns document text and a `publishedDate`, and that `since` filters. This is what
@@ -681,7 +778,9 @@ feature — cannot run, and a Beat's runs fail visibly rather than publishing un
 
 **Migration `0012` is additive** — three new tables, two new enums, nothing touched on an existing
 table. Online-safe on Neon at any size, because no existing row is read or rewritten. Rollback is
-dropping three tables nothing else references.
+dropping three tables nothing else references. **`0013_beat_research_runs` followed it** (§4's
+amendment) — one more additive table, same online-safety and rollback shape, adding the daily
+research cap's real counter.
 
 **No `fly.toml` change.** `min_machines_running = 0` and `auto_stop_machines = 'stop'` stay exactly
 as they are — PRD §4.2's central design outcome, and the reason this phase needs no second
@@ -731,7 +830,7 @@ record rather than a quiet rewrite. A reader holding the PRD needs the mapping.
 | **R1** | **The workflows are W29–W33, not W28–W32.** PRD §5's "W28 is the next free number; W1–W27 are taken" was true when written; AL-410 then shipped `w28.spec.ts` (kept-card management). W29 = a cited Brief, W30 = the second builds on the first, W31 = Skipped not padded, W32 = one Brief not a backlog, W33 = retrieval failure never uncited | D16, §11 |
 | **R2** | **Retrieval is deterministic, not tool-using.** PRD §4.4 describes research as "tool-using"; the queries are derived by a pure function of the Beat's frozen orders and executed by the service. The split the PRD actually argues for is kept in full. The reason is fixture stability: a query proposed by a model makes the fixture key a model output, and PRD §6 makes recorded fixtures the thing this phase cannot ship or boot without | D6a, §5.2 |
 | **R3** | **A Brief's date is stamped at publication, not derived per request.** PRD §4.2's "the arrival carries it" implies deriving a local date the way the streak does. A Brief is an immutable dated record (§4.1) whose date is part of its content, so deriving it would let a learner's travel move a published document's date and the cadence floor with it | D4a, §4 |
-| **R4** | **The reconciler gets no Beats scan at all.** PRD §4.2 lists it as trigger 2 ("one more scan drains claimable Beats for free") and then removes it four paragraphs later ("the reconciler does not deliver anchored Beats at all"). This TDD takes the later position to its conclusion: with failed runs deliberately un-retried and stale claims recovered by the next arrival, a scan has no work left, so `services/lifecycle.py` changes only to bind the second semaphore | D5, §3 |
+| **R4** | **The reconciler gets no Beats scan at all.** PRD §4.2 lists it as trigger 2 ("one more scan drains claimable Beats for free") and then removes it four paragraphs later ("the reconciler does not deliver anchored Beats at all"). This TDD takes the later position to its conclusion: with failed runs deliberately un-retried and stale claims recovered by the next arrival, a scan has no work left, so ~~`services/lifecycle.py` changes only to bind the second semaphore~~ — **amended (docs sweep, AL-561): see D5's amendment.** `lifecycle.py` also constructs a process-lifetime `ExaRetriever` and binds it into `briefing_service` via `bind_runtime`'s new `retriever` parameter — the AL-521/AL-523 handoff-gap fix. The reconciler claim this row makes (no Beats scan) stands unchanged | D5, §3 |
 | **R5** | **Skipped entries are unnumbered.** PRD §3's own example line reads "Nothing material since Brief #4" — referencing the last Brief, carrying no number — but the PRD never states the rule. `number` is sparse over published Briefs only, under a partial unique index | D2, §4 |
 | **R6** | **PRD §5's Depth of read needs a signal the PRD does not name.** "Share of opened Briefs where the learner reaches the Sources" is not derivable from a read timestamp, so `briefs.sources_seen_at` and the `marker` field on the read ping exist to carry it | §4, §6, §9 |
 

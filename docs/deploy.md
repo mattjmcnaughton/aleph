@@ -84,15 +84,18 @@ in `fly.toml` `[env]` and is committed.
 | `DATABASE_URL` | Neon pooled URL, rewritten as above. The default (`postgresql+asyncpg://localhost:5432/aleph`) points at nothing in production, so `release_command` and `/readyz` both fail without it. | [AL-101](https://github.com/mattjmcnaughton/aleph/issues/38) |
 | `SESSION_SECRET_KEY` | Signs the first-party session cookie. The dev default is published in this repo, so signing production cookies with it yields forgeable sessions — `_enforce_production_auth` in `config.py` rejects both an empty value and the dev default whenever `ENV=production`. | [AL-101](https://github.com/mattjmcnaughton/aleph/issues/38) |
 | `OPENROUTER_API_KEY` | Every outline and lesson model call (TDD §5.3/D4). Startup succeeds without it, but generation — the product — cannot run. | [AL-101](https://github.com/mattjmcnaughton/aleph/issues/38) |
+| `EXA_API_KEY` | Every Beat research run's retrieval step (Phase 6 TDD D6/§12). Startup succeeds without it, but research — the feature — cannot run: `services/lifecycle.py` leaves the loud `_UnconfiguredRetriever` bound in place of a live `ExaRetriever`, so a Beat's runs fail visibly (`research_state: failed`, retryable) rather than publishing an uncited Brief. | [AL-502](https://github.com/mattjmcnaughton/aleph/issues/166) |
 | `OIDC_ISSUER` | Auth0 tenant issuer used for OIDC discovery. Non-empty is enforced at startup under `ENV=production`. | [AL-102](https://github.com/mattjmcnaughton/aleph/issues/39) |
 | `OIDC_CLIENT_ID` | Auth0 Regular Web Application client id. Non-empty is enforced at startup. | [AL-102](https://github.com/mattjmcnaughton/aleph/issues/39) |
 | `OIDC_CLIENT_SECRET` | Auth0 Regular Web Application client secret. Non-empty is enforced at startup. | [AL-102](https://github.com/mattjmcnaughton/aleph/issues/39) |
 
-Four of those six (`SESSION_SECRET_KEY`, `OIDC_ISSUER`, `OIDC_CLIENT_ID`,
+Four of those seven (`SESSION_SECRET_KEY`, `OIDC_ISSUER`, `OIDC_CLIENT_ID`,
 `OIDC_CLIENT_SECRET`) are **fail-fast**: a production boot missing any of them raises
-at startup rather than serving in a degraded state.
-`tests/unit/test_deploy_config.py` pins this table against the guard, so the doc
-cannot drift away from the code.
+at startup rather than serving in a degraded state. `OPENROUTER_API_KEY` and
+`EXA_API_KEY` are the other shape — startup succeeds without either, and the
+gap surfaces later as a visible, retryable failure on the generation each one
+backs (`tests/unit/test_config_analyst.py` pins `EXA_API_KEY`'s no-crash-at-startup
+behavior).
 
 ### Optional
 
@@ -332,12 +335,21 @@ code — it is one committed configuration change.
 > same way with no configuration. That is the intended end state for a launched
 > phase: the env var is the *override*, not the statement of what is live.
 > **Phase 5's `streaks` launched the same way, and Phase 3's `flashcards` then
-> did too**, so all four registered flags now default on and the registry
-> currently holds nothing dark.
+> did too**, so four registered flags now default on.
 >
-> This section stays the reference for the lever itself, now read mainly for
-> **turning a flag off** (the kill switch below) and for launching the next phase
-> that ships dark.
+> **Phase 6's `analyst` is the fifth flag and is still dark** (`FLAG_DEFAULTS`
+> has it `False`) — the highest-per-run-cost feature in the product ships
+> behind the same posture `tutor`/`shaping` did pre-launch: `ADMIN_DEFAULT_FLAGS`
+> forces it on for admins only, so dogfooding (the guardrail-query read and the
+> manual retrieval-quality ritual, Phase 6 TDD §12/§15, AL-570) happens before
+> the flip. This section is exactly the playbook AL-570 follows to launch it —
+> flip `FeatureFlag.ANALYST`'s entry in `FLAG_DEFAULTS`, per "Launching a dark
+> phase" below — so, unlike the four above, the registry currently holds one
+> flag still dark.
+>
+> This section stays the reference for the lever itself, now read for
+> **launching `analyst`**, for **turning a launched flag off** (the kill switch
+> below), and for the next phase after this one that ships dark.
 
 This section is the whole of it; the ship
 tickets ([AL-270](https://github.com/mattjmcnaughton/aleph/issues/97) for the

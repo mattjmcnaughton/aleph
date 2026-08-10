@@ -43,7 +43,7 @@ src/aleph/
   logging.py                # structlog setup
   telemetry.py              # OpenTelemetry setup
   db.py                     # Async engine/session setup
-  domains/                  # Pure domain logic, no I/O (grading, progression)
+  domains/                  # Pure domain logic, no I/O (grading, progression, cadence, novelty)
   agents/                   # pydantic-ai agents (no bound model, no config/db)
   routers/                  # HTTP endpoint definitions (health.py: /healthz, /readyz)
   services/                 # Business logic / orchestration

@@ -33,7 +33,7 @@ afterthought.
 | **3 — Flashcards and spaced repetition** | ✅ Shipped & launched (`flashcards` flag on) — all ten TDD tickets plus AL-410's card-management surface | [PRD](prds/phase-3-flashcards.md) · [TDD](tdds/phase-3-flashcards.md) · [mock](mocks/aleph-phase-3-flashcards.html) |
 | **4 — Adaptive paths** | ⬜ Not started — **no PRD yet** (2B pre-built the proposal/apply machinery) | — |
 | **5 — Momentum** | 🟡 In progress — streaks shipped **and launched**; goal ring and daily minutes unbuilt | streaks: [PRD](prds/phase-5-streaks.md) · [TDD](tdds/phase-5-streaks.md) |
-| **6 — The analyst** | ⬜ Not started — **PRD + TDD, no code, no flag, no mock**. A second pillar beside paths, not a deepening of one | [PRD](prds/phase-6-analyst.md) · [TDD](tdds/phase-6-analyst.md) |
+| **6 — The analyst** | ✅ Shipped, **not yet launched** — behind the `analyst` flag (dark by default; admin dogfooding via `ADMIN_DEFAULT_FLAGS`), awaiting AL-570's guardrail reads and the flag flip. A second pillar beside paths, not a deepening of one | [PRD](prds/phase-6-analyst.md) · [TDD](tdds/phase-6-analyst.md) |
 | **Beyond** | ⬜ Unscoped, sequenced against real usage | — |
 
 Three tails hang off the shipped phases and are tracked as open issues rather than
@@ -45,10 +45,14 @@ The Phase 2 and 2B epics (#82, #114) stay open until those close.
 So, concretely, what is left to build: **the rest of Phase 5** — the goal ring and
 the daily-minutes target, now that streaks are launched — then **all of Phase 4**,
 plus the Phase 2 slices listed as deferred below. Phase 3 has shipped and launched
-too, so no phase is waiting on a flag flip anymore — only on code not yet built.
-**Phase 6 sits outside that sequence**: it is a second pillar rather than the next
-rung of the first one, so it is sequenced by appetite rather than by dependency —
-nothing above it blocks it, and it blocks nothing above it.
+too, so within that numbered sequence no phase is waiting on a flag flip anymore —
+only on code not yet built. **Phase 6 sits outside that sequence**: it is a second
+pillar rather than the next rung of the first one, so it was sequenced by appetite
+rather than by dependency — nothing above it blocked it, and it blocked nothing
+above it. It has since shipped in full (epic #163) and is now the one phase in
+either sequence waiting on a flag flip rather than on more code — gated on
+AL-570's two cost/wait-tolerance guardrail queries and a manual retrieval-quality
+read (Phase 6 TDD §12/§15), not on anything left to build.
 
 ## Phase 1 — The generated path (MVP)
 
@@ -231,10 +235,17 @@ for the rest of this phase.
 
 ## Phase 6 — The analyst
 
-> ⬜ **Status:** not started. **PRD + TDD** — no code, no flag, no mock. The
-> vocabulary is already in [`CONTEXT.md`](CONTEXT.md) (the *The analyst* section,
-> marked unbuilt) because a name is cheapest to fix before prompts and schemas use
-> it.
+> ✅ **Status:** shipped (epic #163's full first-slice build), **not yet
+> launched** — behind the `analyst` flag: `False` in `FLAG_DEFAULTS`, present in
+> `ADMIN_DEFAULT_FLAGS` for admin dogfooding, the same dark-then-flip playbook
+> `tutor`/`shaping`/`streaks`/`flashcards` all ran
+> ([deploy.md](deploy.md#launching-a-flagged-phase-al-270--al-370)). Launch
+> (AL-570) is gated on reading the cost-per-Brief and wait-tolerance guardrail
+> queries and a manual retrieval-quality comparison against a real week — not on
+> any more code. No dedicated Nocturne mock, on the Phase 5 precedent (specified
+> against the existing tokens directly). The vocabulary is in
+> [`CONTEXT.md`](CONTEXT.md) (the *The analyst* section), now marked built rather
+> than unbuilt.
 > 📄 **Full spec:** [Phase 6 PRD — The analyst](prds/phase-6-analyst.md) ·
 > [Phase 6 TDD](tdds/phase-6-analyst.md)
 
@@ -246,14 +257,20 @@ cited **Brief** that builds on every Brief before it. Same reading surface, same
 Markdown pipeline, deliberately the same shape of rail — and the opposite
 relationship to time.
 
-The design turns on three decisions the PRD argues at length. **It is a sibling,
-not a "realtime path"**: linear unlock is the wrong reading model for a feed, an
-infinite path has no denominator, and folding Briefs into lesson-shaped counters
-would corrupt the **Activation rate** north star irreversibly. **Nothing is
-scheduled**: cadence is a floor on frequency rather than a calendar appointment,
-and work is driven by learner arrival plus a
-time-axis **Brief prefetch** — which needs no cron, no always-on machine, and no
-deployment change, and which makes an unread Beat cost exactly nothing. And
+The design turns on three decisions the PRD argues at length, all shipped in the
+first slice. **It is a sibling, not a "realtime path"**: linear unlock is the
+wrong reading model for a feed, an infinite path has no denominator, and folding
+Briefs into lesson-shaped counters would corrupt the **Activation rate** north
+star irreversibly. **Nothing is scheduled**: cadence is a floor on frequency
+rather than a calendar appointment, and work is driven entirely by learner
+arrival — reaching the beats list or a Beat evaluates the cadence floor and
+claims what is due, needing no cron, no always-on machine, and no deployment
+change, and making an unread Beat cost exactly nothing. Time-axis **Brief
+prefetch** (claimable a little before the Anchor day opens, so a warm moment
+produces the next Brief early) is the named upgrade once the app has a warm
+moment to exploit, but it is **deferred from this first slice** (PRD §7.1) — the
+app sleeps between visits today, so arrival is the only trigger that actually
+fires, and every first-slice Brief is researched while the learner waits. And
 **nothing to report is a first-class outcome**: the failure mode that kills this
 feature is not a broken trigger but Brief #7 confidently restating Brief #6, so a
 period with no novel findings publishes a dated **Skipped** entry rather than
