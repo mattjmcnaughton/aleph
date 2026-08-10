@@ -266,16 +266,20 @@ class BriefRepository:
 
         **Published only (code-review FIX 3, AL-522).** A Skipped row's
         ``read_at`` can never be stamped: ``SkippedEntryDTO`` carries no
-        ``read_at`` field at all and a Skipped rail row links nowhere in the
-        shipped frontend (``docs/api.md``), so no read ping is ever sent for
-        one — meaning a Skipped entry counted here would be permanently
-        unread, on a Beat that may have zero unread *Briefs*. A quiet Beat
-        that produces three Skipped weeks and one read Brief would otherwise
-        show "3 new briefs" forever (PRD §4.10's home-card copy), monotone in
-        skips and never returning to zero — destroying the exact signal that
-        copy exists to carry. Filtering to ``BriefKind.PUBLISHED`` is what
-        keeps this count meaning "Briefs this learner has not yet opened",
-        never "rows nothing can ever clear".
+        ``read_at`` field at all, a Skipped rail row links nowhere in the
+        shipped frontend (``docs/api.md``), and — since code-review FIX 2
+        (AL-531) — :meth:`mark_read` itself now refuses to stamp one even if
+        a ping somehow targeted it, so "no read ping is ever sent for one" is
+        an enforced invariant here, not merely an observation about what the
+        shipped client happens to do. Without the filter here, a Skipped
+        entry counted in this query would be permanently unread, on a Beat
+        that may have zero unread *Briefs*. A quiet Beat that produces three
+        Skipped weeks and one read Brief would otherwise show "3 new briefs"
+        forever (PRD §4.10's home-card copy), monotone in skips and never
+        returning to zero — destroying the exact signal that copy exists to
+        carry. Filtering to ``BriefKind.PUBLISHED`` is what keeps this count
+        meaning "Briefs this learner has not yet opened", never "rows
+        nothing can ever clear".
         """
         if not beat_ids:
             return {}
@@ -342,19 +346,39 @@ class BriefRepository:
     # -- the read ping (D11, first-write-wins) -------------------------------- #
 
     async def mark_read(self, brief_id: uuid.UUID) -> bool:
-        """Stamp ``read_at`` on first open only.
+        """Stamp ``read_at`` on first open only — **published Briefs only**
+        (code-review FIX 2, AL-531).
 
-        ``UPDATE briefs SET read_at = now() WHERE id = :id AND read_at IS
-        NULL`` — the same guard ``LessonRepository.mark_completed`` /
-        ``mark_completed_and_finalize`` use, and for the same reason: the
-        north-star metric (§9) asks when a learner *first* opened a Brief, so
-        a re-read must never move the timestamp. Two concurrent pings
-        serialize on the row lock; exactly one sees ``read_at IS NULL`` and
-        wins. Returns whether *this* call performed the transition.
+        ``UPDATE briefs SET read_at = now() WHERE id = :id AND kind =
+        'published' AND read_at IS NULL`` — the same first-write-wins guard
+        ``LessonRepository.mark_completed`` / ``mark_completed_and_finalize``
+        use (``read_at IS NULL``), and for the same reason: the north-star
+        metric (§9) asks when a learner *first* opened a Brief, so a re-read
+        must never move the timestamp. Two concurrent pings serialize on the
+        row lock; exactly one sees ``read_at IS NULL`` and wins.
+
+        The ``kind == PUBLISHED`` clause is what makes
+        :meth:`unread_counts_by_beat`'s own docstring true rather than
+        aspirational: that method has always *assumed* "a Skipped row's
+        ``read_at`` can never be stamped" and filtered to published Briefs on
+        that basis, but nothing enforced it here — a client bug (or a
+        deliberately crafted request) hitting ``POST /briefs/{skipped_id}/read``
+        got a ``204`` and a stamped row with no guard at all before this fix.
+        A Skipped id now no-ops here exactly like a genuine repeat ping
+        does — ``affected_rows(result) == 0``, still a well-formed
+        idempotent call, never an error — so PRD §4.6's "a Skipped period is
+        not a read" holds all the way down to the row, and
+        ``brief_read_rate.sql`` (opened ÷ published) can no longer see a
+        Skipped id enter the numerator with no denominator row to match it.
+        Returns whether *this* call performed the transition.
         """
         result = await self.session.execute(
             update(Brief)
-            .where(Brief.id == brief_id, Brief.read_at.is_(None))
+            .where(
+                Brief.id == brief_id,
+                Brief.kind == BriefKind.PUBLISHED,
+                Brief.read_at.is_(None),
+            )
             .values(read_at=func.now(), updated_at=func.now())
         )
         return affected_rows(result) > 0
@@ -363,10 +387,21 @@ class BriefRepository:
         """Stamp ``sources_seen_at`` on first visibility only — the same
         first-write-wins shape as :meth:`mark_read`, for PRD §5's **Depth of
         read** (§9).
+
+        Also published-Briefs-only (code-review FIX 2, AL-531), for the
+        identical reason :meth:`mark_read` now carries the guard: a Skipped
+        entry has no Sources block to ever become visible (``sources_for_brief``
+        returns ``[]`` for one, D2), so a ping claiming otherwise no-ops here
+        rather than stamping a timestamp for an event that cannot have
+        happened.
         """
         result = await self.session.execute(
             update(Brief)
-            .where(Brief.id == brief_id, Brief.sources_seen_at.is_(None))
+            .where(
+                Brief.id == brief_id,
+                Brief.kind == BriefKind.PUBLISHED,
+                Brief.sources_seen_at.is_(None),
+            )
             .values(sources_seen_at=func.now(), updated_at=func.now())
         )
         return affected_rows(result) > 0

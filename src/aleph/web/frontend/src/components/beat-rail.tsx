@@ -1,3 +1,4 @@
+import { Link } from "@tanstack/react-router";
 import type { BriefEntry } from "../lib/api";
 import { formatBriefDate } from "../lib/beats";
 import { SkippedRow } from "./skipped-row";
@@ -40,8 +41,9 @@ export function BeatRail({ entries }: { entries: BriefEntry[] }) {
  * A published Brief's row: its number, its date, its title, and an unread
  * marker replacing the path rail's locked/available/complete (PRD §3:
  * "Read/unread replaces locked/available/complete; nothing is ever
- * locked"). Deliberately not a link — the Brief reading surface is AL-531;
- * this ticket renders the rail only.
+ * locked"). Links to the Brief reading surface (AL-531) — the whole row is
+ * the tap target, `min-h-[44px]` and the title's `truncate` preserved
+ * unchanged from the presentational version this replaces.
  */
 function PublishedRow({ entry }: { entry: Extract<BriefEntry, { kind: "published" }> }) {
   const unread = entry.read_at === null;
@@ -50,21 +52,27 @@ function PublishedRow({ entry }: { entry: Extract<BriefEntry, { kind: "published
       data-testid="beat-rail-published"
       data-entry-id={entry.id}
       data-unread={unread || undefined}
-      className="flex min-h-[44px] items-center gap-3 rounded-lg border border-divider bg-surface px-4 py-3"
     >
-      {/* Decorative unread marker; the sr-only text below is the accessible
-          readout — the dot itself carries no independent meaning to AT. */}
-      <span
-        aria-hidden="true"
-        className={`h-2 w-2 shrink-0 rounded-full ${unread ? "bg-teal" : "bg-transparent"}`}
-      />
-      <div className="min-w-0 flex-1">
-        <p className="text-sm font-semibold leading-snug text-porcelain">
-          Brief #{entry.number} · {formatBriefDate(entry.published_on)}
-        </p>
-        <p className="mt-0.5 truncate text-sm text-mist">{entry.title}</p>
-      </div>
-      <span className="sr-only">{unread ? "Unread" : "Read"}</span>
+      <Link
+        to="/briefs/$briefId"
+        params={{ briefId: entry.id }}
+        className="flex min-h-[44px] items-center gap-3 rounded-lg border border-divider bg-surface px-4 py-3 transition-colors hover:border-teal/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-teal"
+      >
+        {/* Decorative unread marker; the sr-only text below is the
+            accessible readout — the dot itself carries no independent
+            meaning to AT. */}
+        <span
+          aria-hidden="true"
+          className={`h-2 w-2 shrink-0 rounded-full ${unread ? "bg-teal" : "bg-transparent"}`}
+        />
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold leading-snug text-porcelain">
+            Brief #{entry.number} · {formatBriefDate(entry.published_on)}
+          </p>
+          <p className="mt-0.5 truncate text-sm text-mist">{entry.title}</p>
+        </div>
+        <span className="sr-only">{unread ? "Unread" : "Read"}</span>
+      </Link>
     </li>
   );
 }

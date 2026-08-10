@@ -597,6 +597,25 @@ async def read_brief(
     an old client that has not been updated to send it keeps today's exact
     behavior. **AL-531 must send this param from the client** for the fix to
     reach real learners — see the frontend read-ping call site.
+
+    **A ping targeting a Skipped Brief is also a ``204`` no-op (code-review
+    FIX 2, AL-531).** Deliberately the same shape as a repeat ping, not a
+    ``404``: ``GET /briefs/{id}`` already resolves a Skipped id successfully
+    (nulling ``number``/``title``/``body_markdown`` rather than 404ing —
+    ``get_brief``'s own docstring), so this route stays consistent with that
+    precedent rather than introducing a second, kind-dependent meaning for
+    ``404`` on the same id. The no-op itself lives one layer down —
+    ``BriefRepository.mark_read``/``mark_sources_seen`` now filter to
+    ``BriefKind.PUBLISHED`` — so this handler does not need to branch on
+    ``brief.kind`` at all; it already cannot stamp a Skipped row's
+    ``read_at``/``sources_seen_at`` no matter what a caller (a client bug, or
+    a request crafted by hand) sends. The shipped client also guards this on
+    its own side (``routes/briefs.$briefId.tsx``'s effect never fires
+    `opened` for a Brief with no body) — this is defense in depth for the
+    data-integrity invariant ``repositories/briefs.py`` states outright: a
+    Skipped period is never a read (PRD §4.6), and ``brief_read_rate.sql``
+    depends on that holding at the row level, not just at the one client this
+    ticket shipped.
     """
     briefs = BriefRepository(session)
     if body.marker == "opened":

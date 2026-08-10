@@ -663,6 +663,83 @@ async def test_read_ping_bad_marker_is_422(
 
 
 # --------------------------------------------------------------------------- #
+# code-review FIX 2 (AL-531): a read ping against a Skipped Brief must not
+# stamp `read_at`/`sources_seen_at` — `repositories/briefs.py`'s own
+# docstring states this as a load-bearing invariant ("a Skipped row's
+# `read_at` can never be stamped … no read ping is ever sent for one") that
+# `unread_counts_by_beat`'s published-only filter depends on, and
+# `brief_read_rate.sql` (opened ÷ published) would otherwise let a Skipped id
+# enter the numerator with no denominator row to match it. Reproduces the
+# reviewer's own probe: before this fix, `POST /briefs/{skipped_id}/read
+# {"marker":"opened"}` returned `204` and the row came back with `read_at`
+# stamped — there was no server-side guard at all.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.anyio
+async def test_read_ping_against_a_skipped_brief_is_a_noop(
+    app: FastAPI,
+    spawn: CollectingSpawn,
+    monkeypatch: pytest.MonkeyPatch,
+    analyst_flag_enabled: None,
+) -> None:
+    async with _client(app) as client:
+        user_id = await _sign_in(client, monkeypatch, OWNER)
+        beat_id = await _seed_beat(user_id=user_id)
+        skipped_id = await _seed_skipped(beat_id, published_on=date(2026, 7, 20))
+
+        opened_resp = await client.post(
+            f"/api/v1/briefs/{skipped_id}/read", json={"marker": "opened"}
+        )
+        sources_resp = await client.post(
+            f"/api/v1/briefs/{skipped_id}/read", json={"marker": "sources"}
+        )
+
+    # A `204` no-op — deliberately the SAME shape as a repeat ping on an
+    # already-read published Brief (`read_brief`'s own docstring), never a
+    # `404`: `GET /briefs/{id}` already resolves a Skipped id successfully,
+    # so this route stays consistent with that precedent.
+    assert opened_resp.status_code == 204, opened_resp.text
+    assert sources_resp.status_code == 204, sources_resp.text
+
+    skipped = await _reload_brief(skipped_id)
+    assert skipped.kind is BriefKind.SKIPPED
+    # The invariant `repositories/briefs.py` states outright: neither column
+    # was ever touched, no matter how many pings targeted this id.
+    assert skipped.read_at is None
+    assert skipped.sources_seen_at is None
+
+
+@pytest.mark.anyio
+async def test_read_ping_still_stamps_a_published_brief_next_to_a_skipped_one(
+    app: FastAPI,
+    spawn: CollectingSpawn,
+    monkeypatch: pytest.MonkeyPatch,
+    analyst_flag_enabled: None,
+) -> None:
+    """The `kind == PUBLISHED` guard added to `mark_read`/`mark_sources_seen`
+    (FIX 2) must not weaken the existing first-write-wins guard for a
+    genuinely published Brief on the same Beat — the two predicates are
+    ANDed, not substituted for one another."""
+    async with _client(app) as client:
+        user_id = await _sign_in(client, monkeypatch, OWNER)
+        beat_id = await _seed_beat(user_id=user_id)
+        await _seed_skipped(beat_id, published_on=date(2026, 7, 13))
+        published_id = await _seed_published(
+            beat_id, number=1, published_on=date(2026, 7, 20), url="https://x.test/a"
+        )
+
+        resp = await client.post(
+            f"/api/v1/briefs/{published_id}/read", json={"marker": "opened"}
+        )
+    assert resp.status_code == 204, resp.text
+
+    published = await _reload_brief(published_id)
+    assert published.kind is BriefKind.PUBLISHED
+    assert published.read_at is not None
+
+
+# --------------------------------------------------------------------------- #
 # `builds_on` resolves to the previous published Brief; null on Brief #1 and
 # on every Skipped entry.
 # --------------------------------------------------------------------------- #

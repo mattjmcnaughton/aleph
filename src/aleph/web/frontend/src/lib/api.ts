@@ -1339,6 +1339,118 @@ export function beatQueryOptions(id: string | null, enabled: boolean) {
   });
 }
 
+// --- Briefs API (Phase 6 TDD §6-9, AL-531, docs/api.md ## Analyst) ---------
+//
+// The Brief reading surface's own wire seam: one `GET` (not a poll target — a
+// Brief is immutable once published, CONTEXT.md: Brief, so there is nothing
+// here for a client to wait on the way `research_state` is) plus the read
+// ping (D11). Gated behind the same `analyst` flag as every Beats call above
+// (router-level, TDD D12) — `briefQueryOptions`' `enabled` is
+// `useFeatureFlag("analyst")`, the identical `skipToken`-on-off shape.
+
+/**
+ * One Source in a Brief's Sources block (`SourceDTO`, TDD §6's `GET
+ * /briefs/{id}` example, CONTEXT.md: Source). Every field is metadata a
+ * service joined from the retriever's own document at persist time (TDD
+ * §5.5: "a Source's metadata is never model-written") — this type only
+ * carries it to the wire, unchanged.
+ */
+export interface Source {
+  position: number;
+  publisher: string;
+  title: string;
+  published_on: string;
+  url: string;
+}
+
+/**
+ * The `Builds on Brief #N` line's data (`BuildsOnDTO`, CONTEXT.md: Brief
+ * continuity). `null` on the parent `BriefDetail` for Brief #1 and for every
+ * Skipped entry (D1: "no `builds_on_brief_id`" — a derived `number < :n`
+ * read, never a stored edge).
+ */
+export interface BuildsOn {
+  id: string;
+  number: number;
+  published_on: string;
+}
+
+/**
+ * `GET /api/v1/briefs/{id}` body (`BriefDetailDTO`, TDD §6): the Brief
+ * reading surface's payload — body Markdown, Sources, `builds_on`.
+ *
+ * `number`/`title`/`body_markdown` are nullable: this same route also
+ * resolves a Skipped entry's id (its rail row links nowhere in the shipped
+ * frontend, `beat-rail.tsx`, but the API itself draws no such line) — a
+ * Skipped row's own storage-layer `CHECK` constraint guarantees exactly
+ * these three columns are `NULL`, and this type mirrors that truthfully
+ * rather than fabricating placeholder text.
+ */
+export interface BriefDetail {
+  id: string;
+  beat_id: string;
+  number: number | null;
+  published_on: string;
+  title: string | null;
+  body_markdown: string | null;
+  builds_on: BuildsOn | null;
+  sources: Source[];
+}
+
+/** `POST /api/v1/briefs/{id}/read` body marker (D11, TDD §6/§9): which read
+ *  ping fired — `opened` on mount, `sources` once on first visibility of the
+ *  Sources block (`components/brief-sources.tsx`'s `IntersectionObserver`). */
+export type ReadPingMarker = "opened" | "sources";
+
+/** Fetch one Brief: body Markdown, Sources, `builds_on` (TDD §6). Not a poll
+ *  target — a Brief is immutable once published, so there is no
+ *  `refetchInterval` anywhere in this seam. */
+export function getBrief(id: string): Promise<BriefDetail> {
+  return apiFetch<BriefDetail>(apiV1Path(`/briefs/${id}`));
+}
+
+/**
+ * Ping a Brief read (D11): `opened` on mount, `sources` once on first
+ * visibility of the Sources block. First-write-wins server-side
+ * (`read_at`/`sources_seen_at`) — a repeat ping with the same marker is a
+ * no-op `204` and never moves the timestamp (TDD §9's north-star metric asks
+ * *when* a learner first opened a Brief).
+ *
+ * `tz_offset_minutes` rides on this call, the `clientTimezoneOffsetMinutes()`
+ * wrapped call site every other tz-sensitive request in this file goes
+ * through — the route's `age_days` (TDD §9) must not go negative for a
+ * learner east of UTC.
+ */
+export function pingBriefRead(id: string, marker: ReadPingMarker): Promise<void> {
+  const params = new URLSearchParams({
+    tz_offset_minutes: String(clientTimezoneOffsetMinutes()),
+  });
+  return apiFetch<void>(apiV1Path(`/briefs/${id}/read?${params.toString()}`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ marker }),
+  });
+}
+
+/** TanStack query key for one Brief's detail — `["briefs", id]`, the
+ *  `beatQueryKey` precedent one entity over. */
+export function briefQueryKey(id: string): readonly ["briefs", string] {
+  return ["briefs", id] as const;
+}
+
+/**
+ * THE Brief-detail query — key + fetcher paired (the `sessionQueryOptions`
+ * house rule). `enabled` is `useFeatureFlag("analyst")` — off means
+ * `skipToken`: no request, no rendered surface, matching every gated query
+ * in this file.
+ */
+export function briefQueryOptions(id: string, enabled: boolean) {
+  return queryOptions({
+    queryKey: briefQueryKey(id),
+    queryFn: enabled ? () => getBrief(id) : skipToken,
+  });
+}
+
 /**
  * THE card-list query, for `/cards` (AL-410 plan §6) — an **infinite** query,
  * unlike every other factory in this file, because "Load more" is the one
