@@ -44,7 +44,7 @@ tag (§12), plus the ids that apply. The record's own timestamp is the event tim
 | `flashcards_drafted` | `services/flashcard_drafting.py` — every drafting run resolution *except* a missing-context run and a crashed worker (see below) | `path_id`, `lesson_id`, `position_in_path`, `drafted_count`, `outcome` (generated/failed), `success`, `duration_ms`, `prompt_tokens`, `completion_tokens`, `total_tokens` | W24 / W8 |
 | `flashcards_kept` | `services/flashcard_drafting.py` `keep_flashcard_drafts` — the keep request | `path_id`, `lesson_id`, `drafted_count`, `kept_count` | W24 |
 | `review_graded` | `services/reviews.py` `grade_card` — every grade | `card_id`, `path_id`, `grade`, `rung_before`, `queue_size`, `queue_remaining` | W25 / W26 |
-| `beat_deployed` | `routers/v1/beats.py` `deploy_beat` — after the Beat is created, committed, and the arrival drain has claimed and spawned its first run | `beat_id`, `level`, `anchor_weekday`, `has_guidance` | W29 |
+| `beat_deployed` | `routers/v1/beats.py` `deploy_beat` — after the Beat is created, committed, and the arrival drain has claimed and spawned its first run | `beat_id`, `beat_level`, `anchor_weekday`, `has_guidance` | W29 |
 | `brief_research_completed` | `services/briefing.py` `BriefingService` — every fenced-win resolution of a claimed research run | `beat_id`, `outcome` (published/skipped/failed/refused), `duration_ms`, `queries`, `documents_retrieved`, `documents_after_filters`, `findings`, `survivors`, `prompt_tokens`, `completion_tokens`, `total_tokens` | W29 / W31 / W8 / W7 |
 | `brief_read` | `routers/v1/beats.py` `read_brief` — the real, first-write-wins transition only | `beat_id`, `brief_id`, `marker` (opened/sources), `age_days` | W29 |
 

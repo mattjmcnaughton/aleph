@@ -363,7 +363,7 @@ async def deploy_beat(
     events.emit_beat_deployed(
         account_id=user.id,
         beat_id=beat.id,
-        level=beat.level.value,
+        beat_level=beat.level.value,
         anchor_weekday=beat.anchor_weekday,
         has_guidance=beat.guidance is not None,
     )

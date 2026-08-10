@@ -368,7 +368,7 @@ async def test_beat_deployed_and_brief_read_emit_every_declared_field(
 
     deployed_event = assert_event(capfire, events.BEAT_DEPLOYED)
     assert deployed_event["beat_id"] == beat_id
-    assert deployed_event["level"] == "some_experience"
+    assert deployed_event["beat_level"] == "some_experience"
     assert deployed_event["anchor_weekday"] == 0
     assert deployed_event["has_guidance"] is True
 

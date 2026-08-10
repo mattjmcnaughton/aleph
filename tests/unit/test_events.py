@@ -743,7 +743,7 @@ def test_beat_deployed(recorder: _Recorder) -> None:
     events.emit_beat_deployed(
         account_id=ACCOUNT,
         beat_id=BEAT,
-        level="some_experience",
+        beat_level="some_experience",
         anchor_weekday=0,
         has_guidance=True,
     )
@@ -753,7 +753,7 @@ def test_beat_deployed(recorder: _Recorder) -> None:
             {
                 "account_id": str(ACCOUNT),
                 "beat_id": str(BEAT),
-                "level": "some_experience",
+                "beat_level": "some_experience",
                 "anchor_weekday": 0,
                 "has_guidance": True,
                 "workflow": "W29",
@@ -872,7 +872,7 @@ def test_a_failing_analyst_request_path_emitter_never_breaks_the_write(
     events.emit_beat_deployed(
         account_id=ACCOUNT,
         beat_id=BEAT,
-        level="some_experience",
+        beat_level="some_experience",
         anchor_weekday=0,
         has_guidance=False,
     )
@@ -1062,7 +1062,7 @@ def _drive_every_emitter() -> None:
     events.emit_beat_deployed(
         account_id=ACCOUNT,
         beat_id=BEAT,
-        level="some_experience",
+        beat_level="some_experience",
         anchor_weekday=0,
         has_guidance=True,
     )

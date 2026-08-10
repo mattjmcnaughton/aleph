@@ -315,7 +315,7 @@ EVENT_FIELDS: dict[str, frozenset[str]] = {
         {
             "account_id",
             "beat_id",
-            "level",
+            "beat_level",
             "anchor_weekday",
             "has_guidance",
             "workflow",
@@ -1239,7 +1239,7 @@ def emit_beat_deployed(
     *,
     account_id: uuid.UUID,
     beat_id: uuid.UUID,
-    level: str,
+    beat_level: str,
     anchor_weekday: int,
     has_guidance: bool,
 ) -> None:
@@ -1250,9 +1250,10 @@ def emit_beat_deployed(
     created and committed and the arrival drain has claimed and spawned its
     first research run — the ``path_created`` precedent (``services/
     generation.py::create_path``), one workload over: the analogous "the row
-    exists, committed" moment for a Beat's own creation. ``level`` is the
-    onboarding Level's wire value (``path_created``'s ``path_level`` reason
-    applies verbatim: ``add_log_level`` owns the bare ``level`` key).
+    exists, committed" moment for a Beat's own creation. The Level rides as
+    ``beat_level``, **not** ``level`` — ``path_created``'s ``path_level``
+    reason applies verbatim: structlog's ``add_log_level`` processor owns the
+    bare ``level`` key (the log severity) and silently clobbers it.
     ``has_guidance`` is whether the Beat carries an optional Guidance string
     — the same standing-orders shape a path's does, deployment-mix's finer
     axis.
@@ -1267,7 +1268,7 @@ def emit_beat_deployed(
         BEAT_DEPLOYED,
         account_id=str(account_id),
         beat_id=str(beat_id),
-        level=level,
+        beat_level=beat_level,
         anchor_weekday=anchor_weekday,
         has_guidance=has_guidance,
         workflow=_W_BEAT_DEPLOYED,
