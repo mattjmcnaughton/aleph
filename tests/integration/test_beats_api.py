@@ -35,7 +35,14 @@ from aleph import db
 from aleph.app import create_app
 from aleph.auth import AuthIdentity
 from aleph.config import settings
-from aleph.models import Beat, BeatResearchState, Brief, BriefKind, Level
+from aleph.models import (
+    Beat,
+    BeatResearchRun,
+    BeatResearchState,
+    Brief,
+    BriefKind,
+    Level,
+)
 from aleph.repositories import BeatRepository, BriefRepository
 from aleph.repositories.briefs import NewSource
 from aleph.services import briefing as briefing_module
@@ -517,21 +524,26 @@ async def test_daily_research_cap_never_429s_a_get(
 
 
 # --------------------------------------------------------------------------- #
-# A GET that triggers a drain returns the SAME body it would have returned
-# without triggering one (§7's defence of a GET-with-a-side-effect).
+# FIX 1 (code review, AL-522): a GET that triggers a drain must REFLECT the
+# claim that drain made — never the stale, pre-drain "idle" a naive
+# read-then-drain ordering would return, which `lib/polling.ts` treats as
+# terminal (idle is a Beat's pre-run AND post-success state) and would never
+# resume polling from. FIX 5: `hold=True` — a *local* CollectingSpawn, not
+# the module `spawn` fixture (which defaults to `hold=False`) — so the
+# spawned pipeline task is parked and can never race these assertions, which
+# read DB state written by the request itself, exactly the discipline
+# `tests/integration/conftest.py` and AL-521's own drain tests already use.
 # --------------------------------------------------------------------------- #
 
 
 @pytest.mark.anyio
-async def test_get_beat_body_is_unaffected_by_its_own_drain(
+async def test_get_beat_reflects_the_claim_its_own_drain_made(
     app: FastAPI,
-    spawn: CollectingSpawn,
     monkeypatch: pytest.MonkeyPatch,
     analyst_flag_enabled: None,
 ) -> None:
-    retriever = _FakeRetriever(documents=[])
-    responder = _PipelineResponder(researcher=("findings", {"findings": []}))
-    _wire_pipeline(monkeypatch, retriever=retriever, responder=responder)
+    held_spawn = CollectingSpawn(hold=True)
+    monkeypatch.setattr(briefing_module.briefing_service, "_spawn", held_spawn)
 
     async with _client(app) as client:
         user_id = await _sign_in(client, monkeypatch, OWNER)
@@ -546,28 +558,26 @@ async def test_get_beat_body_is_unaffected_by_its_own_drain(
 
     assert resp.status_code == 200, resp.text
     body = resp.json()
-    # The response reflects the PRE-drain state — "idle" — even though the
-    # claim already committed inside this same request (proven below).
-    assert body["research_state"] == "idle"
-    assert body["research_started_at"] is None
+    # The response reflects the claim THIS request's own drain just
+    # committed — never a stale pre-drain "idle".
+    assert body["research_state"] == "researching"
+    assert body["research_started_at"] is not None
 
     after = await _reload_beat(beat_id)
     assert after.research_state is BeatResearchState.RESEARCHING
     assert after.research_started_at is not None
-    assert len(spawn.tasks) == 1
-    await spawn.cancel_pending()
+    assert len(held_spawn.tasks) == 1
+    await held_spawn.cancel_pending()
 
 
 @pytest.mark.anyio
-async def test_list_beats_body_is_unaffected_by_its_own_drain(
+async def test_list_beats_reflects_the_claim_its_own_drain_made(
     app: FastAPI,
-    spawn: CollectingSpawn,
     monkeypatch: pytest.MonkeyPatch,
     analyst_flag_enabled: None,
 ) -> None:
-    retriever = _FakeRetriever(documents=[])
-    responder = _PipelineResponder(researcher=("findings", {"findings": []}))
-    _wire_pipeline(monkeypatch, retriever=retriever, responder=responder)
+    held_spawn = CollectingSpawn(hold=True)
+    monkeypatch.setattr(briefing_module.briefing_service, "_spawn", held_spawn)
 
     async with _client(app) as client:
         user_id = await _sign_in(client, monkeypatch, OWNER)
@@ -577,11 +587,13 @@ async def test_list_beats_body_is_unaffected_by_its_own_drain(
 
     assert resp.status_code == 200, resp.text
     row = next(r for r in resp.json()["beats"] if r["id"] == str(beat_id))
-    assert row["research_state"] == "idle"
+    assert row["research_state"] == "researching"
+    assert row["research_started_at"] is not None
 
     after = await _reload_beat(beat_id)
     assert after.research_state is BeatResearchState.RESEARCHING
-    await spawn.cancel_pending()
+    assert len(held_spawn.tasks) == 1
+    await held_spawn.cancel_pending()
 
 
 # --------------------------------------------------------------------------- #
@@ -992,6 +1004,16 @@ async def test_retry_reclaims_a_failed_beat(
     assert briefs[0].kind is BriefKind.PUBLISHED
 
 
+async def _count_research_runs(beat_id: uuid.UUID) -> int:
+    async with db.async_session() as session:
+        rows = (
+            await session.execute(
+                select(BeatResearchRun).where(BeatResearchRun.beat_id == beat_id)
+            )
+        ).scalars()
+        return len(list(rows))
+
+
 @pytest.mark.anyio
 async def test_retry_on_an_idle_beat_is_a_noop(
     app: FastAPI,
@@ -999,10 +1021,31 @@ async def test_retry_on_an_idle_beat_is_a_noop(
     monkeypatch: pytest.MonkeyPatch,
     analyst_flag_enabled: None,
 ) -> None:
-    """The retry predicate re-claims ``idle`` too (D3's `_RETRY_CLAIMABLE_STATES`),
-    so this actually re-researches — still ``202``, not an error."""
-    retriever = _FakeRetriever(documents=[])
-    responder = _PipelineResponder(researcher=("findings", {"findings": []}))
+    """FIX 2(b): ``idle`` is a Beat's HEALTHY STEADY STATE (unlike a path's
+    ``pending``, a pre-run state), so retry must NOT re-claim it — a stray
+    retry on an untouched Beat would win the claim, drive a full billed
+    pipeline, and publish an off-cadence Brief that resets D4's cadence floor
+    early. A genuine no-op, made real (FIX 4): no task spawned, no
+    ``BeatResearchRun`` row (no claim was won), and no Brief written — not
+    merely "still idle", which would pass identically whether nothing
+    happened or a full run completed (``idle`` is also the post-success
+    state).
+    """
+    retriever = _FakeRetriever(documents=[_doc("https://example.com/a")])
+    responder = _PipelineResponder(
+        researcher=(
+            "findings",
+            {"findings": [_finding_payload("X happened", ["https://example.com/a"])]},
+        ),
+        analyst=(
+            "cited_urls",
+            {
+                "title": "Should never be written",
+                "body_markdown": "Body.",
+                "cited_urls": ["https://example.com/a"],
+            },
+        ),
+    )
     _wire_pipeline(monkeypatch, retriever=retriever, responder=responder)
 
     async with _client(app) as client:
@@ -1011,7 +1054,109 @@ async def test_retry_on_an_idle_beat_is_a_noop(
 
         resp = await client.post(f"/api/v1/beats/{beat_id}/retry")
         assert resp.status_code == 202, resp.text
-        await spawn.drain()
+        assert resp.json()["research_state"] == "idle"
 
+    # No claim, no spawn, no billing: the Beat is untouched down to its
+    # research_started_at, no research-run row was inserted (the retry cap
+    # is checked ONLY once a real failed Beat is confirmed — FIX 2a — so a
+    # no-op retry spends no quota either), and no Brief exists.
+    assert spawn.tasks == []
     beat = await _reload_beat(beat_id)
     assert beat.research_state is BeatResearchState.IDLE
+    assert beat.research_started_at is None
+    assert await _count_research_runs(beat_id) == 0
+    async with db.async_session() as session:
+        briefs = await BriefRepository(session).list_for_beat(beat_id)
+    assert briefs == []
+
+
+@pytest.mark.anyio
+async def test_retry_on_a_refused_beat_is_a_noop(
+    app: FastAPI,
+    spawn: CollectingSpawn,
+    monkeypatch: pytest.MonkeyPatch,
+    analyst_flag_enabled: None,
+) -> None:
+    """``refused`` is terminal (PRD §2's safety branch, D3) — retry must not
+    re-claim it either. Only a genuine ``failed`` run is retry-claimable."""
+    async with _client(app) as client:
+        user_id = await _sign_in(client, monkeypatch, OWNER)
+        beat_id = await _seed_beat(user_id=user_id)
+        async with db.async_session() as session:
+            await session.execute(
+                update(Beat)
+                .where(Beat.id == beat_id)
+                .values(
+                    research_state=BeatResearchState.REFUSED,
+                    refusal_message="Out of scope for this analyst.",
+                )
+            )
+            await session.commit()
+
+        resp = await client.post(f"/api/v1/beats/{beat_id}/retry")
+        assert resp.status_code == 202, resp.text
+        body = resp.json()
+        assert body["research_state"] == "refused"
+        assert body["refusal_message"] == "Out of scope for this analyst."
+
+    assert spawn.tasks == []
+    beat = await _reload_beat(beat_id)
+    assert beat.research_state is BeatResearchState.REFUSED
+    assert await _count_research_runs(beat_id) == 0
+
+
+@pytest.mark.anyio
+async def test_retry_on_a_failed_beat_is_429_at_the_daily_research_cap(
+    app: FastAPI,
+    spawn: CollectingSpawn,
+    monkeypatch: pytest.MonkeyPatch,
+    analyst_flag_enabled: None,
+) -> None:
+    """FIX 2(a): unlike the arrival drain's own non-raising check, the
+    explicit retry route's cap check RAISES — the `POST /paths/{id}/retry`
+    precedent (`check_outline_generation`), because an explicit `POST` is
+    the billed trigger the drain's own "never at the route" reasoning does
+    not cover. Checked only after confirming the Beat is genuinely `failed`
+    (FIX 2b), so the no-op path never spends or blocks on this cap."""
+    monkeypatch.setattr(settings, "rate_limit_brief_research_per_day", 1)
+    retriever = _FakeRetriever(documents=[])
+    responder = _PipelineResponder(researcher=("findings", {"findings": []}))
+    _wire_pipeline(monkeypatch, retriever=retriever, responder=responder)
+
+    async with _client(app) as client:
+        user_id = await _sign_in(client, monkeypatch, OWNER)
+
+        # Spend the one unit of daily research capacity via a real deploy.
+        first = await client.post(
+            "/api/v1/beats",
+            json={"topic": "spends the cap", "level": "new_to_it", "anchor_weekday": 0},
+        )
+        assert first.status_code == 202
+        await spawn.drain()
+
+        # A second, genuinely FAILED Beat: the retry route confirms it is
+        # eligible for real work, THEN hits the (now-exhausted) cap.
+        second_beat_id = await _seed_beat(user_id=user_id, topic="failed one")
+        async with db.async_session() as session:
+            await session.execute(
+                update(Beat)
+                .where(Beat.id == second_beat_id)
+                .values(
+                    research_state=BeatResearchState.FAILED,
+                    research_started_at=datetime(2026, 7, 1, tzinfo=UTC),
+                    research_error="Couldn't reach sources. Please retry.",
+                )
+            )
+            await session.commit()
+
+        resp = await client.post(f"/api/v1/beats/{second_beat_id}/retry")
+
+    assert resp.status_code == 429, resp.text
+    body = resp.json()
+    assert body["error"]["code"] == "rate_limited"
+    assert body["error"]["request_id"] == resp.headers["X-Request-ID"]
+
+    # The 429 happened before any claim: the Beat is still failed, untouched.
+    beat = await _reload_beat(second_beat_id)
+    assert beat.research_state is BeatResearchState.FAILED
+    assert await _count_research_runs(second_beat_id) == 1  # only the first deploy's

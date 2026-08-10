@@ -257,18 +257,35 @@ class BriefRepository:
     async def unread_counts_by_beat(
         self, beat_ids: Sequence[uuid.UUID]
     ) -> dict[uuid.UUID, int]:
-        """Count of entries (either kind) with ``read_at IS NULL``, per Beat.
+        """Count of **published** Briefs with ``read_at IS NULL``, per Beat.
 
         New work this ticket adds (not one of the four restored methods) —
         ``GET /beats``'s "unread counts" (TDD §6's endpoint description).
         Batched over every id in one query, the ``last_published_on_by_beat``
         shape, so the learner's Beats list never becomes one query per row.
+
+        **Published only (code-review FIX 3, AL-522).** A Skipped row's
+        ``read_at`` can never be stamped: ``SkippedEntryDTO`` carries no
+        ``read_at`` field at all and a Skipped rail row links nowhere in the
+        shipped frontend (``docs/api.md``), so no read ping is ever sent for
+        one — meaning a Skipped entry counted here would be permanently
+        unread, on a Beat that may have zero unread *Briefs*. A quiet Beat
+        that produces three Skipped weeks and one read Brief would otherwise
+        show "3 new briefs" forever (PRD §4.10's home-card copy), monotone in
+        skips and never returning to zero — destroying the exact signal that
+        copy exists to carry. Filtering to ``BriefKind.PUBLISHED`` is what
+        keeps this count meaning "Briefs this learner has not yet opened",
+        never "rows nothing can ever clear".
         """
         if not beat_ids:
             return {}
         result = await self.session.execute(
             select(Brief.beat_id, func.count())
-            .where(Brief.beat_id.in_(beat_ids), Brief.read_at.is_(None))
+            .where(
+                Brief.beat_id.in_(beat_ids),
+                Brief.kind == BriefKind.PUBLISHED,
+                Brief.read_at.is_(None),
+            )
             .group_by(Brief.beat_id)
         )
         return {beat_id: count for beat_id, count in result.all()}

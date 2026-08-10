@@ -98,6 +98,20 @@ TDD §5.6/§7) runs inside a ``GET`` the learner did not ask to be billed for,
 so hitting the cap must degrade to "no research this time", never a ``429``
 on the beats list. Admins are exempt, matching every other cap here.
 
+**The same cap, RAISING, for the explicit retry (``check_brief_research_retry``,
+code-review FIX 2 on AL-522).** ``POST /beats/{id}/retry`` is the opposite
+case from the drain: an explicit ``POST`` a learner asked for by name, on the
+``check_outline_generation`` precedent (``POST /paths/{id}/retry`` — "a
+billed trigger that inserts no row, so it carries its own daily cap"). Reuses
+the identical counter and cap (``count_brief_research_runs_since``,
+``RATE_LIMIT_BRIEF_RESEARCH_PER_DAY``) as the non-raising check above — one
+daily Beat-research budget, shared by both entry points, just enforced two
+different ways depending on whether the caller asked to spend it. The
+router calls this only once it already knows the retry will do real work
+(the Beat is genuinely ``failed`` — TDD FIX 2b), so a no-op retry on an
+``idle``/``researching``/``refused`` Beat never even reaches this check, let
+alone spends a unit of it.
+
 The check is called *before* the billed work, and admins are exempt via an
 injected ``is_admin`` flag (decoupled from ``authz`` on purpose — AL-050 wires
 the two together). On refusal it raises ``HTTPException(429, ...)`` with a
@@ -389,6 +403,32 @@ class DailyRateLimiter:
             user_id=user_id, since=_start_of_utc_day(self._now())
         )
         return used < self._brief_research_per_day
+
+    async def check_brief_research_retry(
+        self, *, user_id: uuid.UUID, is_admin: bool
+    ) -> None:
+        """Raise ``HTTPException(429)`` if ``user_id`` is at the daily research cap.
+
+        Call before triggering an explicit Beat retry (``POST
+        /beats/{id}/retry``, AL-522 code-review FIX 2), and only once the
+        route already knows the retry will do real work (the Beat is
+        ``failed`` — see this module's docstring's "Beat research" section
+        for why a non-``failed`` Beat must never reach this check at all).
+        Reuses the same counter and cap as the arrival drain's own
+        non-raising ``brief_research_capacity_available`` — one daily budget,
+        two enforcement shapes, on the ``check_outline_generation`` /
+        ``brief_research_capacity_available`` precedent one phase over.
+        """
+        await self._check(
+            self._usage.count_brief_research_runs_since,
+            cap=self._brief_research_per_day,
+            user_id=user_id,
+            is_admin=is_admin,
+            message=(
+                f"You've reached today's limit of {self._brief_research_per_day} "
+                "research runs. Please try again tomorrow."
+            ),
+        )
 
     async def _check(
         self,

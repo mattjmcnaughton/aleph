@@ -490,6 +490,77 @@ async def test_brief_research_cap_is_per_account() -> None:
 
 
 # --------------------------------------------------------------------------- #
+# The SAME Beat research cap, RAISING (code-review FIX 2 on AL-522) —
+# ``check_brief_research_retry``, for ``POST /beats/{id}/retry``. Reuses the
+# identical counter/cap as ``brief_research_capacity_available`` right above
+# (one daily budget, two entry points), but unlike that non-raising check,
+# THIS one raises — the explicit-POST case §7's "never at the route"
+# reasoning does not cover, on the ``check_outline_generation`` precedent.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.anyio
+async def test_check_brief_research_retry_allows_up_to_cap_then_denies() -> None:
+    usage = _FakeUsage()
+    limiter = _limiter(usage, brief_research=3)
+
+    for _ in range(3):
+        await limiter.check_brief_research_retry(user_id=USER, is_admin=False)
+        usage.add_brief_research_run(USER, DAY_ONE)
+
+    with pytest.raises(HTTPException) as excinfo:
+        await limiter.check_brief_research_retry(user_id=USER, is_admin=False)
+    assert excinfo.value.status_code == status.HTTP_429_TOO_MANY_REQUESTS
+
+
+@pytest.mark.anyio
+async def test_check_brief_research_retry_shares_the_drains_own_counter() -> None:
+    """The two entry points spend from the SAME daily budget: capacity the
+    drain's own (non-raising) check already spent is reflected here too."""
+    usage = _FakeUsage()
+    usage.add_brief_research_run(USER, DAY_ONE)
+    limiter = _limiter(usage, brief_research=1)
+
+    assert (
+        await limiter.brief_research_capacity_available(user_id=USER, is_admin=False)
+        is False
+    )
+    with pytest.raises(HTTPException) as excinfo:
+        await limiter.check_brief_research_retry(user_id=USER, is_admin=False)
+    assert excinfo.value.status_code == status.HTTP_429_TOO_MANY_REQUESTS
+
+
+@pytest.mark.anyio
+async def test_check_brief_research_retry_exempts_admins_and_rolls_over() -> None:
+    usage = _FakeUsage()
+    for _ in range(20):
+        usage.add_brief_research_run(USER, DAY_ONE)
+
+    await _limiter(usage, brief_research=3).check_brief_research_retry(
+        user_id=USER, is_admin=True
+    )
+    await _limiter(usage, brief_research=3, now=DAY_TWO).check_brief_research_retry(
+        user_id=USER, is_admin=False
+    )
+
+
+@pytest.mark.anyio
+async def test_check_brief_research_retry_friendly_429_message_names_the_cap() -> None:
+    usage = _FakeUsage()
+    for _ in range(3):
+        usage.add_brief_research_run(USER, DAY_ONE)
+
+    with pytest.raises(HTTPException) as excinfo:
+        await _limiter(usage, brief_research=3).check_brief_research_retry(
+            user_id=USER, is_admin=False
+        )
+    detail = excinfo.value.detail
+    assert isinstance(detail, str)
+    assert "3" in detail
+    assert "tomorrow" in detail.lower()
+
+
+# --------------------------------------------------------------------------- #
 # The Beat cap (AL-522, Phase 6 TDD §7/D14) — ``check_beat_creation``. Unlike
 # every counter above, it is a **stock** cap (the count of live Beats a
 # learner currently holds), not a daily flow: no ``since`` window, and it

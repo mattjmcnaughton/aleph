@@ -748,6 +748,68 @@ async def test_list_claim_eligible_for_user_covers_every_claim_state_arm() -> No
     assert ids["refused"] not in eligible_ids
 
 
+@pytest.mark.anyio
+async def test_list_claim_eligible_for_user_orders_least_recently_researched() -> None:
+    """Code-review FIX 6 (AL-522): ordering by ``created_at`` alone could let
+    a learner's OLDEST Beats permanently fill a ``limit``-bounded drain
+    window and starve a newer one forever — concretely, an admin (the Beat
+    cap is admin-exempt) holding 3 Beats that all published today deploys a
+    4th, and the limit-3 window keeps re-selecting the same 3 on every
+    arrival since they are still the 3 oldest, so the 4th is never even
+    evaluated for cadence until one of the others is deleted.
+    ``research_started_at ASC NULLS FIRST`` fixes that: a Beat that has never
+    been researched (``NULL``) always sorts first, however recently it was
+    CREATED, and among researched Beats the least-recently-researched sorts
+    first — so the window rotates across a learner's whole Beat set instead
+    of freezing on whichever Beats existed first.
+    """
+    now = datetime.now(UTC)
+    async with db.async_session() as session:
+        user = await create_user(session)
+        # Three Beats already researched, oldest research first — and all
+        # created BEFORE the never-researched Beat below.
+        researched_longest_ago = await _make_beat(
+            session,
+            user=user,
+            topic="researched longest ago",
+            research_started_at=now - timedelta(days=3),
+        )
+        researched_middle = await _make_beat(
+            session,
+            user=user,
+            topic="researched middle",
+            research_started_at=now - timedelta(days=2),
+        )
+        researched_most_recently = await _make_beat(
+            session,
+            user=user,
+            topic="researched most recently",
+            research_started_at=now - timedelta(days=1),
+        )
+        # A brand-new Beat, created LAST (so a plain `created_at ASC`
+        # ordering would sort it last — and drop it from a limit-3 window)
+        # but never yet researched.
+        never_researched = await _make_beat(
+            session, user=user, topic="never researched"
+        )
+        await session.commit()
+        user_id = user.id
+
+    async with db.async_session() as session:
+        repo = BeatRepository(session, stale_after_seconds=TEST_STALE_AFTER_SECONDS)
+        eligible = await repo.list_claim_eligible_for_user(user_id=user_id, limit=3)
+
+    eligible_ids = [beat.id for beat in eligible]
+    # The never-researched Beat is ALWAYS first (NULLS FIRST) despite being
+    # the most recently CREATED — the property that prevents starvation.
+    assert eligible_ids[0] == never_researched.id
+    # Then least-recently-researched first among the rest.
+    assert eligible_ids[1:] == [researched_longest_ago.id, researched_middle.id]
+    # The window is exactly `limit`: the most RECENTLY researched Beat is the
+    # one left out — never a Beat that has never been touched at all.
+    assert researched_most_recently.id not in eligible_ids
+
+
 # --------------------------------------------------------------------------- #
 # effective_research_state (§5.7's "process dies mid-run" row) — the READ
 # side of stale recovery; the tests above cover only the CLAIM side. Inverting
@@ -1473,7 +1535,14 @@ async def test_previous_published_ignores_a_skipped_entry_between() -> None:
 
 
 @pytest.mark.anyio
-async def test_unread_counts_by_beat_counts_either_kind_per_beat() -> None:
+async def test_unread_counts_by_beat_counts_published_only_never_skipped() -> None:
+    """Code-review FIX 3 (AL-522): a Skipped row's ``read_at`` can never be
+    stamped (``SkippedEntryDTO`` carries no such field, and its rail row
+    links nowhere in the shipped frontend, ``docs/api.md``) — so a Skipped
+    entry must NEVER contribute to this count, or a quiet Beat with several
+    Skipped weeks and zero unread Briefs would show a permanently non-zero
+    "N new briefs" home-card figure (PRD §4.10) that no read ping could ever
+    clear."""
     async with db.async_session() as session:
         user = await create_user(session)
         beat_a = await _make_beat(session, user=user, topic="beat a")
@@ -1500,11 +1569,19 @@ async def test_unread_counts_by_beat_counts_either_kind_per_beat() -> None:
             claims=["claim"],
             sources=[_new_source(url="https://example.com/second")],
         )
+        # Two Skipped rows, both permanently unread-able — must contribute
+        # NOTHING to the count, however many of them exist.
         await repo.create_skipped(
             beat_id=beat_a.id,
             published_at=datetime(2026, 7, 20, 9, tzinfo=UTC),
             published_on=date(2026, 7, 20),
             skip_line="Nothing material.",
+        )
+        await repo.create_skipped(
+            beat_id=beat_a.id,
+            published_at=datetime(2026, 7, 27, 9, tzinfo=UTC),
+            published_on=date(2026, 7, 27),
+            skip_line="Still nothing material.",
         )
         await repo.mark_read(read.id)
         await session.commit()
@@ -1515,9 +1592,10 @@ async def test_unread_counts_by_beat_counts_either_kind_per_beat() -> None:
             [beat_a_id, beat_b_id]
         )
 
-    # beat_a: 3 entries, one marked read -> 2 unread. beat_b has no entries at
-    # all, so it is absent from the mapping (the batched shape
-    # ``last_published_on_by_beat`` already uses), and the empty-input case
-    # short-circuits to {} without a query.
-    assert counts == {beat_a_id: 2}
+    # beat_a: 2 published Briefs, one read -> 1 unread; the 2 Skipped rows
+    # (unread-able by construction) contribute 0 regardless of how many
+    # exist. beat_b has no entries at all, so it is absent from the mapping
+    # (the batched shape ``last_published_on_by_beat`` already uses), and the
+    # empty-input case short-circuits to {} without a query.
+    assert counts == {beat_a_id: 1}
     assert await BriefRepository(session).unread_counts_by_beat([]) == {}

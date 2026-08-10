@@ -175,6 +175,40 @@ class BeatRepository:
         drain_claimable``) is this method's only caller; :meth:`list_for_user`
         (unfiltered, every state) remains what a Beat *list/detail* read uses
         to render the learner's actual Beats regardless of research state.
+
+        **Ordering: least-recently-researched first, never oldest-created
+        first (code-review FIX 6, AL-522).** ``ORDER BY
+        Beat.research_started_at ASC NULLS FIRST`` (a Beat that has never
+        been claimed sorts before any Beat that has), falling back to
+        ``created_at``/``id`` only to keep ties deterministic. ``limit`` (the
+        drain's own bound, ``MAX_BEATS_PER_LEARNER``, D14) is applied to this
+        ordering, so the window itself is what rotates rather than what
+        freezes.
+
+        **Why ``created_at ASC`` alone could starve a Beat permanently.**
+        That ordering never changes for a Beat's whole life, so a learner
+        holding more Beats than the window (in practice today, only an
+        admin — the *stock* Beat cap is admin-exempt, TDD D14/§7, and the
+        flag is still dark) could have the ``limit`` window filled forever by
+        the same oldest Beats. Concretely: an admin holding 3 Beats deploys a
+        4th; if the 3 oldest published *today* (so they read ``idle`` and are
+        eligible again, but their own cadence is not yet due — TDD §5.1), the
+        limit-3 window is filled by them on every subsequent arrival, and the
+        4th Beat — created after them, `POST /beats` having just answered
+        ``idle`` rather than PRD §3's "researched immediately" — is never
+        even evaluated for cadence, on every arrival, until an older Beat is
+        deleted. ``research_started_at`` closes that hole with no extra join:
+        it is stamped by every WON claim (:meth:`_claim`) and never cleared
+        on success (:meth:`mark_idle` resets only ``research_state``), so it
+        is a durable "last actually researched" clock already sitting on this
+        table. Ordering by it ascending means a Beat that just finished
+        researching moves to the **back** of the window (its own timestamp is
+        now the newest), and a Beat that has never been claimed (``NULL``)
+        is always the **most overdue** and therefore always sorts first — so
+        the window rotates fairly across a learner's whole Beat set on every
+        arrival instead of favouring however many Beats happened to exist
+        first, and no Beat already `research_started_at`-stamped can keep a
+        never-yet-claimed sibling out of the window forever.
         """
         query = (
             select(Beat)
@@ -188,7 +222,11 @@ class BeatRepository:
                     stale_after_seconds=self._stale_after_seconds,
                 ),
             )
-            .order_by(Beat.created_at, Beat.id)
+            .order_by(
+                Beat.research_started_at.asc().nulls_first(),
+                Beat.created_at.asc(),
+                Beat.id.asc(),
+            )
         )
         if limit is not None:
             query = query.limit(limit)

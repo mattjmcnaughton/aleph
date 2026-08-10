@@ -158,10 +158,14 @@ class BeatSummaryDTO(BaseModel):
     """One row of ``GET /api/v1/beats`` (§6: "the learner's Beats with unread
     counts and research state").
 
-    ``unread_count`` counts entries of **either** kind with ``read_at IS
-    NULL`` for this Beat (``BriefRepository.unread_counts_by_beat``) — the
-    figure behind the home card's "3 new briefs" copy (§8); it does not
-    itself distinguish which entries are unread, only how many.
+    ``unread_count`` counts **published Briefs only** with ``read_at IS
+    NULL`` for this Beat (``BriefRepository.unread_counts_by_beat``,
+    code-review FIX 3 on AL-522) — the figure behind the home card's "3 new
+    briefs" copy (§8); it does not itself distinguish which Briefs are
+    unread, only how many. Deliberately excludes Skipped entries: nothing
+    can ever stamp a Skipped row's read state (it carries no ``read_at`` at
+    all, and its rail row links nowhere in the shipped frontend), so counting
+    it here would make the figure monotone in skips and unable to reach zero.
     """
 
     id: UUID
