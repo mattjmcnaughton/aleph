@@ -35,6 +35,8 @@ from sqlalchemy.ext.asyncio import (  # noqa: TC002 - FastAPI resolves annotatio
 from aleph.config import MODEL_SLOTS, STUB_MODEL_ID, settings
 from aleph.db import get_session
 from aleph.models import Flashcard, Lesson
+from aleph.services.briefing import briefing_service
+from aleph.services.retrieval import StubRetriever
 
 if TYPE_CHECKING:
     from fastapi import FastAPI
@@ -168,6 +170,21 @@ def create_stub_app() -> FastAPI:
     settings.rate_limit_lesson_generations_per_day = 0
     settings.rate_limit_tutor_messages_per_day = 0
     settings.rate_limit_shaping_messages_per_day = 0
+    # Phase 6 (ticket AL-560): the arrival drain's own daily cap (D14) — same
+    # "0 disables it" convention as every rate limit above, and the same
+    # reason: two Playwright projects sharing one backend + `DEV_USER` would
+    # otherwise exhaust ``RATE_LIMIT_BRIEF_RESEARCH_PER_DAY``'s default of 5
+    # partway through a local re-run.
+    settings.rate_limit_brief_research_per_day = 0
+    # ``max_beats_per_learner`` is NOT set to 0 here (unlike every cap above):
+    # it is a **stock** cap (`check_beat_creation`, live Beat rows), not a
+    # daily flow one, and `BriefingService.drain_claimable` reuses the same
+    # config value as the arrival drain's own query `LIMIT` (`services/
+    # briefing.py`) — 0 would make that `LIMIT 0` and silently stop the drain
+    # from ever claiming anything. Raised generously instead, so `DEV_USER`
+    # never hits "You've reached the limit of N analysts" across repeated
+    # local re-runs (`reuseExistingServer: !CI` keeps `aleph_e2e` warm).
+    settings.max_beats_per_learner = 1_000
     # `flashcards` (Phase 3 TDD D13) drafts on *every* completion once the flag
     # is on (`feature_flag_defaults` below) — W1-W23's ~30 lessons per run,
     # plus W24-W27's own, all trigger a drafting run and would otherwise
@@ -190,7 +207,32 @@ def create_stub_app() -> FastAPI:
     # ``shaping``/``streaks`` now covers ``flashcards`` too, since its own
     # launch flip removed the one thing that used to make it different (the
     # admin-only default this comment used to describe).
-    settings.feature_flag_defaults = "tutor:on,shaping:on,streaks:on,flashcards:on"
+    # ``analyst`` (Phase 6, TDD D12, ticket AL-560) joins the same launched
+    # posture the other four flags already have here: dark-by-default in
+    # ``services/feature_flags.py`` (the "specified, entirely unbuilt" phase
+    # boundary CONTEXT.md still records at the vocabulary level), but the e2e
+    # suite's plain ``DEV_USER`` learner needs to see the Beats surfaces
+    # without an admin baseline, exactly as the other four already argue.
+    settings.feature_flag_defaults = (
+        "tutor:on,shaping:on,streaks:on,flashcards:on,analyst:on"
+    )
+
+    # Phase 6's retrieval seam (ticket AL-560; `services/retrieval.py`,
+    # `services/briefing.py`). ``briefing_service`` is a module-level
+    # singleton constructed with no live ``Retriever`` at all
+    # (``_UnconfiguredRetriever``, which always raises) — nothing in
+    # production wires one in yet (``services/lifecycle.py::
+    # GenerationLifecycle.start`` binds only ``spawn``/``model_slot``), so an
+    # e2e Beat's research run would fail before ever reaching the stub model.
+    # Setting the private seam directly, before ``create_app()`` assembles the
+    # routers that import this exact singleton, mirrors both this factory's
+    # own ``settings`` mutations above and the sanctioned test pattern
+    # `tests/integration/test_briefing.py::
+    # test_lifecycle_binds_briefing_service_to_the_shared_registry` already
+    # uses (`monkeypatch.setattr(briefing_service, "_retriever", ...)`) — the
+    # object every route in `routers/v1/beats.py` calls into, not a second,
+    # disconnected instance.
+    briefing_service._retriever = StubRetriever()  # noqa: SLF001
 
     # Imported lazily so mutating settings above lands before app assembly.
     from aleph.app import create_app
