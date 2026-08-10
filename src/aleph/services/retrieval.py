@@ -1029,17 +1029,32 @@ class StubRetriever:
     [force-no-findings] news since …`), which is not stripped anywhere else
     in this pipeline.
 
-    **`[force-no-findings]` is deliberately NOT otherwise handled here.** Per
-    TDD §11: that sentinel must make the *researcher/analyst* pipeline reject
-    every finding via the novelty gate, using documents the gate rejects —
-    "not zero documents, a stub returning nothing would prove the easier,
-    wrong thing." `StubRetriever`'s ordinary behavior already satisfies "not
-    zero documents": it always returns real-looking, dated stub documents for
+    **`[force-no-findings]` is deliberately NOT otherwise handled here.**
+    TDD §11's original text described that sentinel as making the
+    researcher/analyst pipeline reject every finding via the novelty gate,
+    using documents the gate rejects. The shipped mechanism is a deliberate,
+    narrower amendment (recorded here, where a reader of this file sees it
+    first; the TDD itself is corrected separately, ticket AL-561 — see
+    `w31.spec.ts`'s own header for the full reasoning): a Beat's first-ever
+    research run — the only run these e2e journeys ever drive — has no prior
+    Brief, so there are no earlier-cited URLs or claims for the novelty gate
+    to reject anything *against*; genuinely exercising the gate's rejection
+    branch needs a second run (W30, an integration case per PRD §7.1's own
+    table, never a Playwright journey). So `services/stub_model.py`'s
+    researcher dispatch instead reports **zero Findings** from documents this
+    run genuinely, non-emptily retrieved — "not zero documents, a stub
+    returning nothing would prove the easier, wrong thing" still holds:
+    zero documents is `services/briefing.py`'s own load-bearing *failed* row
+    (§5.7's second row), and would prove nothing about Skipped.
+    `StubRetriever`'s ordinary behavior already supplies that "not zero
+    documents" half: it always returns real-looking, dated stub documents for
     every query it is given (with the sentinel scrubbed from their title and
-    text, per above). Making those documents' *findings* look
-    already-covered is `agents/researcher.py`'s stub dispatch to build
-    (AL-520+), once the researcher/analyst agents exist — there is nothing
-    more for this retriever to special-case.
+    text, per above). Reporting zero Findings from them is
+    `services/stub_model.py`'s own researcher dispatch to build — not, as an
+    earlier version of this docstring said, `agents/researcher.py`'s: that
+    module binds no model and builds nothing (TDD D6a — `agents/` reaches no
+    provider and registers no tool). There is nothing more for this
+    retriever to special-case.
     """
 
     async def search(

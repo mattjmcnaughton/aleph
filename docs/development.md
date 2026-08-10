@@ -194,9 +194,13 @@ Tests are organized by type (see [`ci.md`](ci.md) for the CI job that runs each)
   Keycloak** (`just compose-keycloak-up`): `tests/e2e/journeys/` are the PRD §8
   workflows — Phase 1's `@w1`..`@w8`, the tutor's `@w9` and `@w11`..`@w16`
   (W10 is reserved for the deferred selection-to-quote), shaping's
-  `@w17`..`@w21`, and streaks' `@w22`/`@w23` — and they sign in for real. The
-  journeys run in the `mobile-390x844` project only; the `desktop` project runs
-  the non-journey specs. See [`ci.md`](ci.md).
+  `@w17`..`@w21`, streaks' `@w22`/`@w23`, flashcards' `@w24`..`@w28` (their own
+  `mobile-390x844-flashcards` project, isolated accounts — see that project's
+  own comment in `playwright.config.ts`), and the analyst's `@w29`/`@w31`
+  (W30/W32/W33 are integration cases instead, PRD §7.1) — and they sign in for
+  real. The journeys run in the `mobile-390x844` project only (flashcards'
+  five in their own sibling project); the `desktop` project runs the
+  non-journey specs. See [`ci.md`](ci.md).
 - `tests/external/` — live-provider contract tests, opt-in via `just test-external`.
 
 Use `@pytest.mark.external` for tests that hit external services (they must skip cleanly

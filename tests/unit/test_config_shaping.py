@@ -124,14 +124,31 @@ def test_e2e_backend_boots_with_the_shaper_slot_stubbed_and_the_flag_on(
     assert restored_live_settings.model_shaper == STUB_MODEL_ID
     # ``tutor``, ``streaks``, and ``flashcards`` have all since launched and
     # default on in code, which would make an explicit entry here redundant on
-    # its own — but this pin is kept for all four rather than thinned to just
+    # its own — but this pin is kept for all five rather than thinned to just
     # ``shaping``: the suite asserts against surfaces that must exist, and a
     # silent code-default flip should surface as a failure here before it turns
     # into a confusing "every spec 404s on an absent surface" somewhere else.
+    # ``analyst`` (Phase 6, ticket AL-560) joins the other four: unlike them it
+    # has NOT launched (dark-by-default in ``services/feature_flags.py``), but
+    # the e2e suite's plain ``DEV_USER`` still needs to see the Beats surfaces
+    # for W29/W31, exactly the reasoning that already applies to the other
+    # four.
     assert restored_live_settings.feature_flag_default_map == {
         str(FeatureFlag.TUTOR): True,
         str(FeatureFlag.SHAPING): True,
         str(FeatureFlag.STREAKS): True,
         str(FeatureFlag.FLASHCARDS): True,
+        str(FeatureFlag.ANALYST): True,
     }
     assert restored_live_settings.rate_limit_shaping_messages_per_day == 0
+    # Phase 6 (ticket AL-560, code-review follow-up): the analyst's own two
+    # settings mutations, pinned here for the identical reason the shaping cap
+    # and the flag map above are — neither was pinned anywhere before this,
+    # so a silent code-default drift on either would only otherwise surface
+    # as W29/W31 getting slower and eventually flaky weeks into a long-lived
+    # local `aleph_e2e` database, never as a failing test today. Lowered from
+    # its original `1_000` into the low tens (see this factory's own comment
+    # on `max_beats_per_learner` for why raising rather than zeroing is still
+    # correct, and why `1_000` was not).
+    assert restored_live_settings.rate_limit_brief_research_per_day == 0
+    assert restored_live_settings.max_beats_per_learner == 30  # noqa: PLR2004

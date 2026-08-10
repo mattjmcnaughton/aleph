@@ -135,6 +135,37 @@ read the position it is generating. Two properties AL-032 must preserve:
   stub will misparse. Decision for the handoff: keep the regex unanchored and
   make **uniqueness the prompt's contract** (documented here) rather than
   hard-anchoring to a line format the prompt author hasn't fixed yet.
+
+**Phase 6 — the analyst (TDD §11, ticket AL-560).** Two more agents, one more
+sentinel. ``agents/researcher.py`` registers a single output tool carrying
+``findings`` (plus a ``message`` tool shared with ``agents/outline.py``'s
+``Refusal`` — never dispatched to here, since e2e has no workflow that needs
+the researcher to refuse); ``agents/analyst.py`` registers ``cited_urls``
+(``BriefBody``) and ``detail`` (``SkippedNote``). Both dispatches build real
+citations rather than inventing URLs: :func:`_extract_document_urls` reads the
+bare ``https://…`` tokens straight off the prompt text — the researcher's own
+document listing, or the analyst's finding/permitted-citation listing — so
+every stub Finding and every stub Brief cites a URL this run's
+``StubRetriever`` (``services/retrieval.py``) actually returned, the same
+provenance discipline the real agents' validators enforce.
+
+- ``[force-no-findings]`` — a *topic* sentinel (TDD §11): the researcher
+  reports :class:`~aleph.agents.researcher.Findings` with an **empty** list —
+  a legitimate result (that module's own docstring: "not itself the Skipped
+  signal") — from documents this run genuinely, non-emptily retrieved. Never
+  ``[force-retrieval-failure]`` (``services/retrieval.py::StubRetriever``,
+  handled entirely at the retrieval seam, never reaching this module): that
+  sentinel makes retrieval itself come back empty (TDD §5.7's FAILED "zero
+  documents" row); this one lets retrieval succeed and empties the *findings*
+  instead, so the run reaches ``domains/novelty.py::filter_new`` with nothing
+  to admit and publishes **Skipped** — TDD §5.7's *third* row, not its
+  second. The analyst dispatch never inspects this sentinel directly: it reads
+  ``agents/analyst.py``'s own exported :data:`~aleph.agents.analyst.
+  ANALYST_SURVIVORS_MARKER` (:data:`_ANALYST_HAS_SURVIVORS_MARKER` here is
+  that same constant, imported rather than restated — see its own comment)
+  back out of the prompt to decide ``BriefBody`` vs. ``SkippedNote``, exactly
+  mirroring how the real pipeline decides — off ``AnalystDeps.survivors``,
+  never off the topic.
 """
 
 from __future__ import annotations
@@ -154,9 +185,14 @@ from pydantic_ai.messages import (
 )
 from pydantic_ai.models.function import DeltaToolCall, FunctionModel
 
+from aleph.agents.analyst import (
+    ANALYST_SURVIVORS_MARKER as _AGENT_ANALYST_SURVIVORS_MARKER,
+)
+from aleph.agents.analyst import BriefBody, SkippedNote
 from aleph.agents.flashcard import FlashcardDraft, FlashcardDrafts
 from aleph.agents.lesson import LessonContent, QuickCheck
 from aleph.agents.outline import LessonOutline, PathOutline, Refusal, UnitOutline
+from aleph.agents.researcher import Finding, Findings
 from aleph.agents.shaper import (
     PROPOSE_PATH_EDIT_TOOL_NAME as AGENT_PROPOSE_PATH_EDIT_TOOL_NAME,
 )
@@ -190,6 +226,9 @@ FORCE_PROPOSAL_ADD = "[force-proposal-add]"
 FORCE_PROPOSAL_REVISE = "[force-proposal-revise]"
 FORCE_SHAPING_DECLINE = "[force-shaping-decline]"
 FORCE_SHAPING_FAILURE = "[force-shaping-failure]"
+# Phase 6 (TDD §11, ticket AL-560) — a topic sentinel on the researcher branch.
+# See the module docstring's "Phase 6" section for the full mechanism.
+FORCE_NO_FINDINGS = "[force-no-findings]"
 
 
 def _marker_re(name: str, value: str) -> re.Pattern[str]:
@@ -231,6 +270,8 @@ _SENTINEL_RE = re.compile(
     r"|\[force-shaping-decline\]"
     r"|\[force-shaping-failure\]"
     r"|\[force-draft-failure\]"
+    r"|\[force-no-findings\]"
+    r"|\[force-retrieval-failure\]"
 )
 
 
@@ -682,6 +723,226 @@ def _build_flashcard_drafts(topic: str, count: int) -> FlashcardDrafts:
     )
 
 
+# --- the analyst pipeline: researcher findings + Brief writing (Phase 6, ------
+# TDD §5.3/§5.5/§11, ticket AL-560) ---------------------------------------------
+
+# The researcher's and analyst's own leading `Topic: <value>` line
+# (`build_researcher_prompt`/`build_analyst_prompt`, `agents/researcher.py`/
+# `agents/analyst.py` — both start their prompt with exactly this line).
+_TOPIC_LINE_RE = re.compile(r"^Topic: (.*)$", re.MULTILINE)
+
+
+def _extract_topic_line(text: str) -> str:
+    """The bare Topic value out of a researcher/analyst prompt, sentinel-
+    stripped — NOT the module-level ``topic = clean_topic(text)`` computed at
+    the top of `_stub_respond`.
+
+    That shared variable is correct for the outline/lesson/flashcard
+    dispatches because their entire prompt genuinely IS the topic string. The
+    researcher's and analyst's prompts are not: they also carry a full
+    document dump or a finding/citation listing, so reusing the shared
+    variable here would silently interpolate that ENTIRE prompt — sources,
+    citations, everything — into every generated claim, detail, and Brief
+    body instead of the topic alone (confirmed the hard way: an earlier
+    version of this dispatch did exactly that, and the analyst's own
+    provenance validator caught the resulting nonsense citations rather than
+    this comment).
+
+    **Raises, does not fall back, when no ``Topic: `` line is found** (FIX 3,
+    ticket AL-560 code review). An earlier version fell back to the whole
+    ``text`` here — exactly the bug this docstring's previous paragraph
+    describes catching once, restored: if either prompt builder ever stops
+    leading with a bare ``Topic: `` line, or reformats it, that fallback would
+    silently interpolate the entire prompt — document dump, URLs and all —
+    into every generated claim, detail, and Brief body again, and it would
+    present identically: an opaque e2e timeout (the provenance validator
+    exhausting its retries), never a loud, attributable error. Every sibling
+    in this module raises instead of defaulting on a missing, mandatory
+    marker (see ``_read_position``/``_read_flashcard_drafts``'s own module
+    docstring sections); this one now does too. Multiple ``Topic: `` lines
+    remain safe: ``_TOPIC_LINE_RE.search`` takes the first, which is always
+    the builder's own line at prompt offset 0 — a document's own text could
+    in principle contain a line that also matches, but only *after* that
+    first, authoritative one.
+    """
+    match = _TOPIC_LINE_RE.search(text)
+    if match is None:
+        raise StubModelForcedError(
+            "researcher/analyst prompt is missing a parseable 'Topic: <value>' "
+            "line (the build_researcher_prompt/build_analyst_prompt "
+            "contract); falling back to the whole prompt would interpolate "
+            "document text, citations, and URLs into every generated claim, "
+            "detail, and Brief body instead of the topic alone"
+        )
+    return clean_topic(match.group(1)) or "the topic"
+
+
+# The literal clause `agents/analyst.py::build_analyst_prompt` writes only
+# when `AnalystDeps.survivors` is non-empty. Reading it back is the stub's own
+# signal for which output branch to answer with — off the SAME fact the real
+# pipeline decided one layer up (`domains/novelty.py::filter_new`), never a
+# second, independent guess (e.g. re-checking `FORCE_NO_FINDINGS` here too,
+# which would drift the moment a *genuinely* non-novel run — no sentinel
+# involved — needed the identical answer).
+#
+# **Imported, not restated** (code-review, ticket AL-560 follow-up): this used
+# to be a locally-duplicated literal with nothing tying it to
+# `agents/analyst.py::build_analyst_prompt`'s own text, so a reworded header
+# there would have silently routed the stub to the wrong branch while every
+# existing test (which only asserts the string's *absence* in the
+# no-survivors case) stayed green. `_revision_requested`'s own
+# `SHAPING_REVISION_INSTRUCTION` import, a few hundred lines below, is this
+# module's own precedent for closing exactly that hole.
+_ANALYST_HAS_SURVIVORS_MARKER = _AGENT_ANALYST_SURVIVORS_MARKER
+
+# A retrieved document's URL, exactly as `build_researcher_prompt` and
+# `build_analyst_prompt` (`agents/researcher.py`, `agents/analyst.py`) each
+# render one: a bare `https://…` token on its own document/citation line.
+# `StubRetriever`'s own URLs (`services/retrieval.py`) never contain
+# whitespace, so recovering them is a plain token scan — no need to parse the
+# surrounding document-block formatting either prompt builder uses.
+#
+# **Trailing punctuation is stripped by the caller, not excluded here** (FIX
+# 4, ticket AL-560 code review): `\S+` is deliberately greedy rather than
+# excluding punctuation classes up front, since a URL segment can legitimately
+# contain characters like `,`/`.`/`)` — only a TRAILING one, glued on by the
+# surrounding prose (`agents/analyst.py`'s
+# ``source_urls: {', '.join(...)}`` rendering is exactly this: a second
+# Finding URL on the same line leaves a bare `,` stuck to the first one), is
+# ever spurious. See `_URL_TRAILING_PUNCTUATION` and `_extract_document_urls`.
+_DOC_URL_RE = re.compile(r"https://\S+")
+
+# Characters a rendered URL token can pick up from the surrounding prompt
+# prose rather than the URL itself — a trailing comma from
+# `', '.join(finding.source_urls)` (`agents/analyst.py`), or a period/
+# parenthesis/bracket a document listing's own punctuation glues on. Stripped
+# from the RIGHT end only, once, by `str.rstrip` — never from a URL's
+# interior, where the same characters can be part of the address itself.
+_URL_TRAILING_PUNCTUATION = ",.;:!?)]}\"'"
+
+# The two single-line sections every researcher/analyst prompt leads with
+# (`build_researcher_prompt`/`build_analyst_prompt`, both `f"Topic: {...}"`
+# and, when present, `f"Guidance from the learner: {...}"`) — excluded from
+# the document-URL scan below (FIX 4, ticket AL-560 code review). A Beat's
+# Topic (or its learner-supplied Guidance) can itself be a pasted URL — the
+# frontend's own contract for what a Topic must survive — and without this
+# exclusion that URL would be mistaken for one of the documents this run
+# actually read, which `AnalystDeps.__post_init__`/the researcher's own
+# provenance validator then reject as unbacked.
+_TOPIC_OR_GUIDANCE_LINE_RE = re.compile(
+    r"^(?:Topic|Guidance from the learner): .*$", re.MULTILINE
+)
+
+
+def _document_section(text: str) -> str:
+    """`text` with its leading Topic/Guidance lines blanked out.
+
+    Scopes `_extract_document_urls`'s scan to the part of the prompt that can
+    actually name a retrieved document's URL — never the Topic or Guidance
+    line, which carry learner-supplied text a Beat's own design must let be a
+    pasted URL (FIX 4).
+    """
+    return _TOPIC_OR_GUIDANCE_LINE_RE.sub("", text)
+
+
+def _extract_document_urls(text: str) -> list[str]:
+    """Every distinct document URL `text` mentions, in first-occurrence order.
+
+    Run against the researcher's own prompt (one `RetrievedDocument` per
+    query) and the analyst's own prompt (a surviving Finding's `source_urls`,
+    then the permitted-citation list) alike — both render URLs as bare
+    tokens, so one general extractor serves both stub dispatches below.
+    Scoped to `_document_section(text)` (FIX 4) and stripped of any trailing
+    punctuation the surrounding prose glued on (`_URL_TRAILING_PUNCTUATION`).
+    """
+    seen: set[str] = set()
+    urls: list[str] = []
+    for raw_url in _DOC_URL_RE.findall(_document_section(text)):
+        url = raw_url.rstrip(_URL_TRAILING_PUNCTUATION)
+        if url and url not in seen:
+            seen.add(url)
+            urls.append(url)
+    return urls
+
+
+# Keep the stub's Findings small and readable: the point is a real,
+# structurally-valid citation chain end to end, not an exhaustive list.
+_RESEARCH_FINDING_CAP = 3
+
+
+def _build_research_findings(topic: str, urls: Sequence[str]) -> Findings:
+    """Deterministic Findings citing `urls` — one Finding per URL, capped.
+
+    Each Finding cites EXACTLY one of the documents this run actually read
+    (TDD D8: never a URL from outside `ResearcherDeps.documents`), so the
+    researcher's own provenance validator (`validate_research_result`) always
+    passes. `urls` is empty only if `retrieve()` genuinely found nothing —
+    unreachable via this stub in practice, since `BriefingService._run_claimed`
+    never calls the researcher on an empty document list (§5.7's "zero
+    documents -> failed" branch runs first) — and `Findings(findings=[])` is
+    still the correct, schema-valid answer if it ever happened.
+    """
+    findings: list[Finding] = []
+    for index, url in enumerate(urls[:_RESEARCH_FINDING_CAP]):
+        seed = _seed(f"{topic}|finding|{index}")
+        adjective = _pick(_ADJECTIVES, seed + 1)
+        aspect = _pick(_ASPECTS, seed)
+        findings.append(
+            Finding(
+                claim=f"A {adjective} development in {topic}'s {aspect} ({index + 1}).",
+                detail=(
+                    "Deterministic stub detail: the retrieved document describes "
+                    f"a {adjective} shift in {topic}'s {aspect}, drawn only from "
+                    "what this run actually read."
+                ),
+                source_urls=[url],
+                happened_on=None,
+            )
+        )
+    return Findings(findings=findings)
+
+
+def _build_brief_body(topic: str, urls: Sequence[str]) -> BriefBody:
+    """A deterministic, schema-valid Brief citing every url in `urls`.
+
+    `urls` is the analyst's own permitted set (extracted from its prompt, see
+    `_stub_respond`'s call site) — the writer's provenance validator
+    (`validate_brief_result`) requires `cited_urls` be non-empty and a subset
+    of exactly that set, so citing all of it is always safe and never a
+    ModelRetry.
+    """
+    seed = _seed(f"{topic}|brief")
+    aspect = _pick(_ASPECTS, seed)
+    lead = (
+        f"## What changed in {topic}\n\n"
+        f"This Brief covers deterministic stub developments in the {aspect} "
+        f"of {topic}, each traceable to a Source below."
+    )
+    paragraph_count = max(1, min(len(urls), 3))
+    paragraphs = [
+        f"A stub source reports a {_pick(_ADJECTIVES, seed + index)} "
+        f"development in {topic}'s {_pick(_ASPECTS, seed + index)}."
+        for index in range(paragraph_count)
+    ]
+    return BriefBody(
+        title=f"{topic}: what changed",
+        body_markdown="\n\n".join([lead, *paragraphs]),
+        cited_urls=list(urls),
+    )
+
+
+def _build_skip_detail(topic: str) -> str:
+    """A Skipped run's `detail` fragment.
+
+    Lower-case, no terminal period (`SkippedNote`'s own register rule,
+    `agents/analyst.py`): it either continues a templated clause after an em
+    dash, or — on a Beat's first-ever run, which is the only case this e2e
+    sentinel exercises — stands alone as the whole rendered line
+    (`services/briefing.py::_render_skip_line`).
+    """
+    return f"the sources read this run turned up nothing new to report on {topic}"
+
+
 # --- FunctionModel callback ----------------------------------------------------
 
 
@@ -705,6 +966,16 @@ def _stub_respond(messages: Sequence[ModelMessage], info: AgentInfo) -> ModelRes
     outline_tool = _tool_with(info.output_tools, "units")
     refusal_tool = _tool_with(info.output_tools, "message")
     flashcard_tool = _tool_with(info.output_tools, "cards")
+    # Phase 6 (ticket AL-560): the researcher's `Findings` and the analyst's
+    # `BriefBody`/`SkippedNote` union. `refusal_tool` (the "message" prop) is
+    # ALSO present whenever `research_tool` is — `agents/researcher.py`'s own
+    # output type is `Findings | Refusal`, reusing `agents/outline.py`'s
+    # `Refusal` verbatim — but the dispatch below never routes to it: no e2e
+    # workflow needs the researcher to refuse, so a `research_tool` hit always
+    # answers with Findings.
+    research_tool = _tool_with(info.output_tools, "findings")
+    brief_tool = _tool_with(info.output_tools, "cited_urls")
+    skipped_tool = _tool_with(info.output_tools, "detail")
 
     # A real agent registers *either* the lesson schema, the outline union, or
     # the flashcard-drafts schema, never more than one. If more than one appears
@@ -727,6 +998,52 @@ def _stub_respond(messages: Sequence[ModelMessage], info: AgentInfo) -> ModelRes
             "ambiguous output schema: both a flashcard-drafts tool (cards) and "
             "an outline/refusal tool are present; the stub cannot choose a "
             f"branch (tools: {[tool.name for tool in info.output_tools]})"
+        )
+
+    if research_tool is not None:
+        # `[force-no-findings]` (TDD §11): report nothing from documents this
+        # run genuinely, non-emptily retrieved — see FORCE_NO_FINDINGS's own
+        # docstring and the module docstring's "Phase 6" section for why this
+        # is the Skipped branch, never the "zero documents" failed one.
+        research_topic = _extract_topic_line(text)
+        findings = (
+            Findings(findings=[])
+            if FORCE_NO_FINDINGS in text
+            else _build_research_findings(research_topic, _extract_document_urls(text))
+        )
+        return ModelResponse(
+            parts=[
+                ToolCallPart(tool_name=research_tool.name, args=findings.model_dump())
+            ]
+        )
+
+    if brief_tool is not None or skipped_tool is not None:
+        # Dispatched off the analyst's OWN prompt marker (see
+        # `_ANALYST_HAS_SURVIVORS_MARKER`'s docstring) — never off
+        # `FORCE_NO_FINDINGS` directly, so this branch answers correctly
+        # whether the empty-survivors state came from that sentinel or (in a
+        # future workflow) from a genuinely non-novel research run.
+        analyst_topic = _extract_topic_line(text)
+        if _ANALYST_HAS_SURVIVORS_MARKER in text:
+            if brief_tool is None:
+                raise StubModelForcedError(
+                    "analyst prompt states survivors but no BriefBody output "
+                    "tool (cited_urls) is registered "
+                    f"(tools: {[tool.name for tool in info.output_tools]})"
+                )
+            brief = _build_brief_body(analyst_topic, _extract_document_urls(text))
+            return ModelResponse(
+                parts=[ToolCallPart(tool_name=brief_tool.name, args=brief.model_dump())]
+            )
+        if skipped_tool is None:
+            raise StubModelForcedError(
+                "analyst prompt states no survivors but no SkippedNote output "
+                "tool (detail) is registered "
+                f"(tools: {[tool.name for tool in info.output_tools]})"
+            )
+        note = SkippedNote(detail=_build_skip_detail(analyst_topic))
+        return ModelResponse(
+            parts=[ToolCallPart(tool_name=skipped_tool.name, args=note.model_dump())]
         )
 
     if flashcard_tool is not None:
