@@ -56,7 +56,7 @@ function PublishedRow({ entry }: { entry: Extract<BriefEntry, { kind: "published
       <Link
         to="/briefs/$briefId"
         params={{ briefId: entry.id }}
-        className="flex min-h-[44px] items-center gap-3 rounded-lg border border-divider bg-surface px-4 py-3 transition-colors hover:border-teal/40"
+        className="flex min-h-[44px] items-center gap-3 rounded-lg border border-divider bg-surface px-4 py-3 transition-colors hover:border-teal/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-teal"
       >
         {/* Decorative unread marker; the sr-only text below is the
             accessible readout — the dot itself carries no independent

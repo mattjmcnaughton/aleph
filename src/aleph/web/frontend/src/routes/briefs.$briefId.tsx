@@ -1,7 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
-import { type ReadPingMarker, beatQueryKey, briefQueryOptions, pingBriefRead } from "../lib/api";
+import {
+  BEATS_LIST_QUERY_KEY,
+  type ReadPingMarker,
+  briefQueryOptions,
+  pingBriefRead,
+} from "../lib/api";
 import { Breadcrumbs } from "../components/breadcrumbs";
 import { BriefSources } from "../components/brief-sources";
 import { BuildsOnLine } from "../components/builds-on-line";
@@ -35,35 +40,60 @@ function BriefView() {
   const detail = briefQuery.data;
 
   // The read ping (D11, TDD §6/§9): `opened` on mount, `sources` once on
-  // first visibility of the Sources block. One mutation serves both markers
-  // — `beatId` rides along in the mutate call's own variables rather than
-  // being read from `detail` inside `onSuccess`, so the invalidation target
-  // is never stale even if `detail` were somehow to change between the call
-  // and its response. Invalidates exactly `["beats", beatId]` (TDD §7) — the
-  // unread count and the rail's read state move in the same interaction,
-  // nothing more.
+  // first visibility of the Sources block. One mutation serves both markers.
+  //
+  // Invalidates the `["beats"]` PREFIX (code-review FIX 1, correcting an
+  // AL-531 defect), not `beatQueryKey(beatId)` = `["beats", beatId]` alone.
+  // TanStack Query's `invalidateQueries` matches by prefix: a query key must
+  // START WITH the filter key to match. `["beats"]` is a prefix of BOTH
+  // itself and `["beats", beatId]`, so this one call reaches the list query
+  // (`BEATS_LIST_QUERY_KEY`, the *only* carrier of `unread_count` —
+  // `BeatSummaryDTO`) AND the rail's own detail query — but the reverse is
+  // false: `["beats", beatId]` is never a prefix of the shorter `["beats"]`,
+  // so invalidating only the detail key (the original, defective code) can
+  // never reach the list no matter what `beatId` is. TDD §7 states the
+  // purpose verbatim — "the unread count and the rail's read state move in
+  // the same interaction" — and the list is the unread count's only source,
+  // so reaching it is not over-invalidation, it is the point. `beatId` is no
+  // longer threaded through the mutation's variables at all (unlike the
+  // original code): the invalidation target is the fixed `["beats"]` prefix
+  // regardless of which Beat this Brief belongs to, so there is nothing
+  // per-call left to carry.
   const readPing = useMutation({
-    mutationFn: ({ marker }: { marker: ReadPingMarker; beatId: string }) =>
-      pingBriefRead(briefId, marker),
-    onSuccess: (_result, variables) => {
-      void queryClient.invalidateQueries({ queryKey: beatQueryKey(variables.beatId) });
+    mutationFn: ({ marker }: { marker: ReadPingMarker }) => pingBriefRead(briefId, marker),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: BEATS_LIST_QUERY_KEY });
     },
   });
   const pingRead = readPing.mutate;
 
-  // `opened`, once the Brief actually loads — not a bare mount effect, since
-  // there is nothing to ping until `detail.beat_id` exists to invalidate.
+  // `opened`, once the Brief actually loads and turns out to have a body —
+  // not a bare mount effect (code-review FIX 2, see below), and not fired
+  // for a Skipped id's `detail` either.
+  //
   // Keyed by `detail.id` (the `draftsTriggeredForRef` precedent,
   // `routes/lessons.$lessonId.tsx`): TanStack Router re-renders this route
   // with new params rather than remounting it on Brief-to-Brief navigation
   // (the `Builds on Brief #N` link), so a per-instance flag would latch on
   // the first Brief and never re-arm for the next one. Firing exactly once
   // per Brief id also covers React's StrictMode double-invoke.
+  //
+  // **Guarded on `body_markdown !== null` (code-review FIX 2).** Without
+  // this, the effect fires as soon as `detail` resolves — before the render
+  // body below ever inspects `body_markdown` to decide the page is showing
+  // `UnavailableState` — so a deep link to a Skipped Brief's id sent an
+  // `opened` ping for a row that PRD §4.6 says is never read and
+  // `repositories/briefs.py` says can never have `read_at` stamped. The
+  // server now also refuses to stamp one (defense in depth, see that
+  // module), but the client should not send a ping for a page it is telling
+  // the learner it "couldn't load" in the first place.
   const openedFiredForRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!detail || openedFiredForRef.current === detail.id) return;
+    if (!detail || detail.body_markdown === null || openedFiredForRef.current === detail.id) {
+      return;
+    }
     openedFiredForRef.current = detail.id;
-    pingRead({ marker: "opened", beatId: detail.beat_id });
+    pingRead({ marker: "opened" });
   }, [detail, pingRead]);
 
   // A direct/deep link with the flag off (D12: the whole surface is a
@@ -118,9 +148,26 @@ function BriefView() {
             {detail.body_markdown}
           </Markdown>
 
+          {/* `key={detail.id}` (code-review FIX 3/5) — this route re-renders
+              in place across a Brief-to-Brief navigation rather than
+              remounting (see `openedFiredForRef`'s own note above), and
+              `<BriefSources>` carried no key at all before this fix. Its own
+              `firedRef`/disconnected-observer guard only resets on a real
+              unmount+remount, so without a key that is tied to the Brief
+              actually being shown, navigating to a Brief already sitting in
+              the TanStack Query cache (no `undefined` gap for `detail` to
+              pass through) reuses the same component instance with
+              `firedRef` still `true` and an observer that already
+              disconnected — permanently suppressing the `sources` ping for
+              every cached Brief reached this way. Keying on `detail.id`
+              forces React to tear down and rebuild a fresh instance (fresh
+              `firedRef`, fresh observer) exactly when the Brief being shown
+              changes, the same fix `openedFiredForRef` above needed and got
+              via keying its own ref by id instead. */}
           <BriefSources
+            key={detail.id}
             sources={detail.sources}
-            onFirstVisible={() => pingRead({ marker: "sources", beatId: detail.beat_id })}
+            onFirstVisible={() => pingRead({ marker: "sources" })}
           />
         </>
       )}

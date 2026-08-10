@@ -20,7 +20,7 @@ export function BuildsOnLine({ buildsOn }: { buildsOn: BuildsOn | null }) {
         to="/briefs/$briefId"
         params={{ briefId: buildsOn.id }}
         data-testid="builds-on-line"
-        className="inline-flex min-h-[44px] items-center text-sm text-teal underline underline-offset-2 transition-colors hover:text-teal-bright"
+        className="inline-flex min-h-[44px] items-center text-sm text-teal underline underline-offset-2 transition-colors hover:text-teal-bright focus-visible:outline focus-visible:outline-2 focus-visible:outline-teal"
       >
         Builds on Brief #{buildsOn.number} ({formatBriefDate(buildsOn.published_on)})
       </Link>

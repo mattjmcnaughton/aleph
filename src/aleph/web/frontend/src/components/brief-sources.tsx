@@ -22,6 +22,16 @@ import { formatBriefDate } from "../lib/beats";
  * (`onFirstVisibleRef`) rather than the effect's own dependency array, so a
  * caller passing a fresh closure every render — the ordinary React shape —
  * never tears down and rebuilds the observer mid-flight.
+ *
+ * **The caller MUST key this component on the Brief's own id** (code-review
+ * FIX 3/5, `routes/briefs.$briefId.tsx`). `firedRef`/the disconnected
+ * observer only reset on a real unmount+remount — this component has no way
+ * to notice "the Brief changed" on its own, since `sources` and
+ * `onFirstVisible` are exactly the kind of props that legitimately change on
+ * every render. A parent route that re-renders in place across navigation
+ * (rather than remounting) MUST force the remount itself via `key`, or this
+ * "exactly once" guard becomes "at most once, ever" the moment a second
+ * Brief reuses the same instance.
  */
 export function BriefSources({
   sources,
@@ -73,14 +83,21 @@ export function BriefSources({
       className="mt-10 rounded-lg border border-divider bg-elevated p-5"
     >
       <p className="kicker">Sources</p>
-      <ol className="mt-4 space-y-4">
+      {/* `list-none` (code-review FIX 7): makes "deliberately unnumbered"
+          (PRD Appendix A) an explicit, testable CSS decision on this
+          element, rather than something that happened to be true only
+          because nothing here ever prints a `source.position` prefix as
+          text — a test asserting the *intent* should assert on this class,
+          not on `textContent` never containing a marker it was never going
+          to contain regardless of list-style. */}
+      <ol className="mt-4 list-none space-y-4">
         {sources.map((source) => (
           <li key={source.position} data-testid="brief-source" className="min-w-0">
             <a
               href={source.url}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex min-h-[44px] flex-col justify-center text-base font-semibold leading-6 text-porcelain underline-offset-2 hover:text-teal hover:underline"
+              className="flex min-h-[44px] flex-col justify-center text-base font-semibold leading-6 text-porcelain underline-offset-2 hover:text-teal hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-teal"
             >
               {source.title}
             </a>
