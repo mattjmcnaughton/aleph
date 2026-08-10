@@ -877,13 +877,14 @@ short version:
   and no separate input that does either. CLAUDE.md names workflow dispatch as
   the sanctioned way to run evals, so this is a real gap, stated here rather
   than assumed away: **`--flashcards` (Phase 3) and `--briefs` (Phase 6) are
-  local-only** — `just evals --flashcards`, `just evals --briefs`, and their
-  `--smoke` forms all require a developer's own `OPENROUTER_API_KEY` (and, for
-  a live `--briefs` run, `EXA_API_KEY`) on their own machine; neither mode has
-  ever run in CI, dispatched or otherwise. Adding either is a workflow-file
-  change (new `mode` options or new inputs), not a docs fix, and is out of
-  scope for this sweep (AL-561) — it is recorded here so the absence is a
-  known gap rather than a silent one.
+  local-only** — `just evals --flashcards` and `just evals --briefs` need a
+  developer's own `OPENROUTER_API_KEY` on their own machine to run live;
+  their `--smoke` forms need no key at all, and `--briefs` never reads
+  `EXA_API_KEY`, live or `--smoke` — retrieval is always a fixture replay.
+  Neither mode has ever run in CI, dispatched or otherwise. Adding either is
+  a workflow-file change (new `mode` options or new inputs), not a docs fix,
+  and is out of scope for this sweep (AL-561) — it is recorded here so the
+  absence is a known gap rather than a silent one.
 - **Secret:** `OPENROUTER_API_KEY` (repository secret, **AL-080 — not uploaded
   yet**). Until it lands, a dispatched run fails immediately with the harness's
   exit-2 message; nothing else about the workflow is waiting on it.

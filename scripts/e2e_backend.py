@@ -239,10 +239,10 @@ def create_stub_app() -> FastAPI:
     # Phase 6's retrieval seam (ticket AL-560; `services/retrieval.py`,
     # `services/briefing.py`). ``briefing_service`` is a module-level
     # singleton constructed with no live ``Retriever`` at all
-    # (``_UnconfiguredRetriever``, which always raises) — nothing in
-    # production wires one in yet (``services/lifecycle.py::
-    # GenerationLifecycle.start`` binds only ``spawn``/``model_slot``), so an
-    # e2e Beat's research run would fail before ever reaching the stub model.
+    # (``_UnconfiguredRetriever``, which always raises) until
+    # ``services/lifecycle.py::GenerationLifecycle.start`` runs and rebinds
+    # it (see below) — so an e2e Beat's research run would fail before ever
+    # reaching the stub model unless this factory sets a live seam first.
     # Setting the private seam directly, before ``create_app()`` assembles the
     # routers that import this exact singleton, mirrors both this factory's
     # own ``settings`` mutations above and the sanctioned test pattern
@@ -253,17 +253,17 @@ def create_stub_app() -> FastAPI:
     # disconnected instance.
     #
     # **A coordination hazard at the lifecycle seam, recorded here on purpose**
-    # (code-review, ticket AL-560 follow-up). This assignment runs BEFORE
-    # `create_app()` below — and therefore before the app's lifespan runs at
-    # all. A separate, in-flight change (not yet on this branch) has
-    # `services/lifecycle.py::GenerationLifecycle.start` bind a live
+    # (code-review, ticket AL-560 follow-up; the retriever-wiring fix below
+    # landed in 62788db). This assignment runs BEFORE `create_app()` below —
+    # and therefore before the app's lifespan runs at all.
+    # `services/lifecycle.py::GenerationLifecycle.start` binds a live
     # `ExaRetriever` onto this same `briefing_service._retriever` seam via
     # `bind_runtime(...)`, which only runs INSIDE the lifespan — i.e. AFTER
     # `create_stub_app()` has already returned this line's `StubRetriever()`
-    # in place. They compose correctly today only because that binding is a
+    # in place. They compose correctly only because that binding is a
     # documented no-op when `EXA_API_KEY` is unset (true here — this factory
-    # never sets it), so the lifespan's own rebind, when it lands, will find
-    # nothing to do and leave this `StubRetriever` standing. **Do not "fix"
+    # never sets it), so the lifespan's own rebind finds nothing to do and
+    # leaves this `StubRetriever` standing. **Do not "fix"
     # this ordering** by moving this assignment after `create_app()`, or by
     # assuming the lifespan's bind always no-ops: if `bind_runtime` is ever
     # changed to rebind unconditionally (e.g. to a retriever that does not

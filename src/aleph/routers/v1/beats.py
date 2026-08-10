@@ -595,8 +595,9 @@ async def read_brief(
     (``TzOffsetMinutes``, §7's shared ``local_today`` derivation), so this was
     a self-imposed gap, not a missing capability. Defaults to ``0`` (UTC) so
     an old client that has not been updated to send it keeps today's exact
-    behavior. **AL-531 must send this param from the client** for the fix to
-    reach real learners — see the frontend read-ping call site.
+    behavior. **AL-531 shipped this:** ``lib/api.ts``'s ``pingBriefRead``
+    sends ``tz_offset_minutes`` on every call, pinned by a frontend test —
+    see the frontend read-ping call site.
 
     **A ping targeting a Skipped Brief is also a ``204`` no-op (code-review
     FIX 2, AL-531).** Deliberately the same shape as a repeat ping, not a

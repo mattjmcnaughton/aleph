@@ -72,14 +72,17 @@ qualified ("Phase 1 D5", "Phase 3 D7", "Phase 5 §5.2").
 | MSW | `mocks/handlers.ts` composing per-domain modules with `configure*` / `reset*` | **New** `mocks/beats.ts` in the same shape |
 | Deterministic backends | `services/stub_model.py` (sentinel topics force branches); `scripts/e2e_backend.py::create_stub_app` | **Extend:** stub dispatch for the two new agents' output shapes plus sentinels for the Skipped and retrieval-failure branches, and a `StubRetriever` bound in the stub factory only (D6, D10) |
 | Eval harness | `evals/rubric.py` (`ArtifactKind`, `APPLICABLE_ITEMS`, `ARTIFACT_NOTES`), `evals/generation.py` (layer-1 evaluators + a judge per kind), `flashcard_seed_set.yaml` | **Extend:** a fourth kind, `brief_seed_set.yaml`, layer-1 predicates importing D8's and D9's shipped functions — **and the new fixture format** (D10), which is the part with no precedent |
-| Events | `events.py::EVENT_FIELDS` + the typed emitters | **Extend:** `beat_created`, `brief_research_completed` (however it resolved — the `outcome` shape the tutor and drafting events already use), `brief_read` |
+| Events | `events.py::EVENT_FIELDS` + the typed emitters | **Extend:** `beat_deployed`, `brief_research_completed` (however it resolved — the `outcome` shape the tutor and drafting events already use), `brief_read` |
 
-**Built new:** migration `0012` (two tables), `models/beat.py` + `models/brief.py`,
-`domains/cadence.py`, `domains/novelty.py`, `services/retrieval.py` (+ three adapters),
-`agents/researcher.py`, `agents/analyst.py`, `services/briefing.py`,
-`repositories/beats.py` + `repositories/briefs.py`, `dtos/beats.py`, `routers/v1/beats.py`,
-the Beat deployment / list / rail / Brief routes and components, `mocks/beats.ts`,
-`evals/fixtures/retrieval/`, `brief_seed_set.yaml`, a saved Logfire query per §5 metric.
+**Built new:** migration `0012` (three tables — **amended (docs sweep, AL-561):** was
+misstated as two) plus migration `0013` (`beat_research_runs`, added by the AL-521
+code-review fix — D1/D13/§4/§12's amendment), `models/beat.py` + `models/brief.py`
+(`Brief`, `BriefSource`) + `models/beat_research_run.py`, `domains/cadence.py`,
+`domains/novelty.py`, `services/retrieval.py` (+ three adapters), `agents/researcher.py`,
+`agents/analyst.py`, `services/briefing.py`, `repositories/beats.py` +
+`repositories/briefs.py`, `dtos/beats.py`, `routers/v1/beats.py`, the Beat deployment /
+list / rail / Brief routes and components, `mocks/beats.ts`, `evals/fixtures/retrieval/`,
+`brief_seed_set.yaml`, a saved Logfire query per §5 metric.
 
 **Not built, and named so the absence is a decision:** no scheduler, no cron, no external trigger,
 no `fly.toml` change and no `min_machines_running` flip (PRD §4.2); no stored timezone and no
@@ -127,18 +130,20 @@ The research path, end to end:
 ```
 GET /beats?tz_offset_minutes=-120        (or GET /beats/{id})
   → require_analyst_enabled              (404 if off, before any work)
-  → load_beats(...)                      the read the learner actually wanted
   → drain_claimable(session, user_id=…, tz_offset_minutes=…)     ← the arrival trigger (D15)
       today = (now(UTC) - offset).date()                          ← one owner of "today" (D5)
       for each beat: is_claimable(last_entry_on, anchor_weekday, today)   ← pure (D4)
         → claim_research(beat_id)        atomic; idle-or-stale only (D3)
         → spawn(run_research(beat_id, local_today))               ← TaskRegistry, unchanged
+  → load_beats(...) / session.refresh(beat)   the read the learner actually wanted, taken
+                                               AFTER the drain so it reflects what this
+                                               request's own arrival just changed
   → the response returns immediately; the client polls (D15)
 
 run_research(beat_id, local_today):
   permit = MAX_CONCURRENT_BRIEF_RESEARCH                          ← its own bound (D14)
   plan      = build_query_plan(topic, guidance, since=last_entry_on, max_queries=…)   pure
-  documents = retrieve(retriever, plan, text_budget_chars=…)      ← the only cost ceiling (D14a)
+  documents = retrieve(retriever, plan, max_documents=…, text_budget_chars=…)   ← the only cost ceiling (D14a)
   result    = researcher.run(…, model=beat.model_research or settings.model_research)
       Refusal → research_state = refused (terminal), refusal_message set        [PRD §2]
   survivors = novelty.filter_new(result.findings, prior_urls, prior_claims)     pure (D9)
@@ -147,6 +152,20 @@ run_research(beat_id, local_today):
       BriefBody   → briefs(kind='published', number=next) + brief_sources rows
   research_state = idle                                           ← ready to report again
 ```
+
+**Amended (docs sweep, AL-561): the diagram above now drains before it reads.** The original
+diagram showed `load_beats(...)` preceding `drain_claimable(...)` on the `GET` path. The shipped
+router does the opposite (`src/aleph/routers/v1/beats.py`, code-review FIX 1 on AL-522) and its
+module docstring names this section as the thing that was wrong. The order is not stylistic:
+reading before draining returns a response built from the **pre-drain** row, and a Beat's
+pre-run state (`idle`) is also its post-success state, so `lib/polling.ts` — which stops the
+instant it sees any terminal state, `idle` included — never starts polling. A learner opening
+`/beats/{id}` for the first time would see `research_state: "idle"` for a run the same request
+just started, and the Brief lands with nothing on screen: the AL-522 review's own finding,
+verbatim the defect AL-521's FIX 1 had already eliminated one layer down. `docs/api.md` already
+documented the shipped (correct) order; only this diagram was stale. Also added: the
+`max_documents` argument to `retrieve(...)`, D14a and §5.2's amendment, which this diagram had
+not carried.
 
 **One purity note, recorded rather than left to be noticed.** `build_query_plan` is a pure
 function but lives in `services/retrieval.py`, not `domains/`. It encodes retrieval-provider
@@ -420,7 +439,7 @@ New router `routers/v1/beats.py`, prefix `/api/v1`, every convention verbatim: c
 
 | Endpoint | Purpose |
 | --- | --- |
-| `POST /api/v1/beats` | Deploy an analyst. Body: `topic`, `level`, `anchor_weekday`, optional `guidance`, optional admin `model_research` / `model_brief`. Returns the Beat immediately; the first research run is claimed in the same request (PRD §3 — researched immediately, not at the first anchor day) |
+| `POST /api/v1/beats?tz_offset_minutes=<int>` | Deploy an analyst. Body: `topic`, `level`, `anchor_weekday`, optional `guidance`, optional admin `model_research` / `model_brief`. Returns the Beat immediately; the first research run is claimed in the same request via the same arrival drain the two `GET` routes use (PRD §3 — researched immediately, not at the first anchor day), so this route needs `tz_offset_minutes` for the drain's own `today` derivation (D5) — it stamps the first Brief's `published_on` in the learner's local day (D4a), which sets D4's cadence floor |
 | `GET /api/v1/beats?tz_offset_minutes=<int>` | The learner's Beats with unread counts and research state. **Drains claimable Beats** (D15) |
 | `GET /api/v1/beats/{id}?tz_offset_minutes=<int>` | One Beat: standing orders, research state, and the rail — entries newest first, both kinds. **Drains this Beat** |
 | `DELETE /api/v1/beats/{id}` | Delete. This is also how standing orders change (PRD §4.11 — delete and redeploy) |
@@ -811,7 +830,7 @@ record rather than a quiet rewrite. A reader holding the PRD needs the mapping.
 | **R1** | **The workflows are W29–W33, not W28–W32.** PRD §5's "W28 is the next free number; W1–W27 are taken" was true when written; AL-410 then shipped `w28.spec.ts` (kept-card management). W29 = a cited Brief, W30 = the second builds on the first, W31 = Skipped not padded, W32 = one Brief not a backlog, W33 = retrieval failure never uncited | D16, §11 |
 | **R2** | **Retrieval is deterministic, not tool-using.** PRD §4.4 describes research as "tool-using"; the queries are derived by a pure function of the Beat's frozen orders and executed by the service. The split the PRD actually argues for is kept in full. The reason is fixture stability: a query proposed by a model makes the fixture key a model output, and PRD §6 makes recorded fixtures the thing this phase cannot ship or boot without | D6a, §5.2 |
 | **R3** | **A Brief's date is stamped at publication, not derived per request.** PRD §4.2's "the arrival carries it" implies deriving a local date the way the streak does. A Brief is an immutable dated record (§4.1) whose date is part of its content, so deriving it would let a learner's travel move a published document's date and the cadence floor with it | D4a, §4 |
-| **R4** | **The reconciler gets no Beats scan at all.** PRD §4.2 lists it as trigger 2 ("one more scan drains claimable Beats for free") and then removes it four paragraphs later ("the reconciler does not deliver anchored Beats at all"). This TDD takes the later position to its conclusion: with failed runs deliberately un-retried and stale claims recovered by the next arrival, a scan has no work left, so `services/lifecycle.py` changes only to bind the second semaphore | D5, §3 |
+| **R4** | **The reconciler gets no Beats scan at all.** PRD §4.2 lists it as trigger 2 ("one more scan drains claimable Beats for free") and then removes it four paragraphs later ("the reconciler does not deliver anchored Beats at all"). This TDD takes the later position to its conclusion: with failed runs deliberately un-retried and stale claims recovered by the next arrival, a scan has no work left, so ~~`services/lifecycle.py` changes only to bind the second semaphore~~ — **amended (docs sweep, AL-561): see D5's amendment.** `lifecycle.py` also constructs a process-lifetime `ExaRetriever` and binds it into `briefing_service` via `bind_runtime`'s new `retriever` parameter — the AL-521/AL-523 handoff-gap fix. The reconciler claim this row makes (no Beats scan) stands unchanged | D5, §3 |
 | **R5** | **Skipped entries are unnumbered.** PRD §3's own example line reads "Nothing material since Brief #4" — referencing the last Brief, carrying no number — but the PRD never states the rule. `number` is sparse over published Briefs only, under a partial unique index | D2, §4 |
 | **R6** | **PRD §5's Depth of read needs a signal the PRD does not name.** "Share of opened Briefs where the learner reaches the Sources" is not derivable from a read timestamp, so `briefs.sources_seen_at` and the `marker` field on the read ping exist to carry it | §4, §6, §9 |
 
