@@ -1159,4 +1159,6 @@ async def test_retry_on_a_failed_beat_is_429_at_the_daily_research_cap(
     # The 429 happened before any claim: the Beat is still failed, untouched.
     beat = await _reload_beat(second_beat_id)
     assert beat.research_state is BeatResearchState.FAILED
-    assert await _count_research_runs(second_beat_id) == 1  # only the first deploy's
+    # Zero runs on THIS Beat: the cap rejected the retry before it could claim.
+    # (The one run the deploy above spent belongs to the first Beat, not this one.)
+    assert await _count_research_runs(second_beat_id) == 0
