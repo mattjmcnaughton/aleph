@@ -73,7 +73,10 @@ class _FakeRetriever:
     unavailable: bool = False
     calls: list[tuple[str, ...]] = field(default_factory=list)
 
-    async def search(self, queries: Sequence[str]) -> list[RetrievedDocument]:
+    async def search(
+        self, queries: Sequence[str], *, since: date | None = None
+    ) -> list[RetrievedDocument]:
+        del since  # not asserted here — see test_retrieval.py's own guard
         self.calls.append(tuple(queries))
         if self.unavailable:
             raise RetrievalUnavailableError("forced failure")

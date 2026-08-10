@@ -330,8 +330,10 @@ class _UnconfiguredRetriever:
     ``retriever=`` explicitly.
     """
 
-    async def search(self, queries: Sequence[str]) -> list[RetrievedDocument]:
-        del queries
+    async def search(
+        self, queries: Sequence[str], *, since: date | None = None
+    ) -> list[RetrievedDocument]:
+        del queries, since
         msg = (
             "BriefingService has no live Retriever configured — AL-523's "
             "ExaRetriever has not shipped yet. Construct "
@@ -572,6 +574,11 @@ class BriefingService:
         self._retriever: Retriever = (
             retriever if retriever is not None else _UnconfiguredRetriever()
         )
+        # The runtime seam AL-52x's production wiring rebinds (see
+        # ``bind_runtime``/``reset_runtime`` below): the construction-time
+        # retriever — a real one if a caller passed one (tests), the loud
+        # ``_UnconfiguredRetriever`` otherwise — is what shutdown restores.
+        self._base_retriever = self._retriever
         self._timeout = (
             research_timeout_seconds
             if research_timeout_seconds is not None
@@ -585,21 +592,38 @@ class BriefingService:
 
     # -- runtime wiring (services/lifecycle.py) ----------------------------- #
 
-    def bind_runtime(self, *, spawn: Spawn, model_slot: ModelSlot) -> None:
-        """Rebind the spawn and model-slot seams for the app's lifetime.
+    def bind_runtime(
+        self,
+        *,
+        spawn: Spawn,
+        model_slot: ModelSlot,
+        retriever: Retriever | None = None,
+    ) -> None:
+        """Rebind the spawn, model-slot, and (optionally) retriever seams.
 
         Mirrors ``GenerationOrchestrator.bind_runtime`` exactly, including
         the "mutate in place" reasoning: ``services/lifecycle.py`` calls this
         on the module-level :data:`briefing_service` singleton, so a rebind
         of the module attribute would not reach references already imported.
+
+        ``retriever`` closes the AL-521/AL-523 handoff gap: production
+        wiring (``services/lifecycle.py``) passes a live ``ExaRetriever``
+        when ``EXA_API_KEY`` is configured, leaving ``_UnconfiguredRetriever``
+        bound (its loud raise, TDD §5.7) when it is not — startup must
+        succeed either way (TDD §12). ``None`` (the default) leaves whatever
+        is already bound untouched, so a caller that only wants to rebind
+        ``spawn``/``model_slot`` (existing tests) is unaffected.
         """
         self._spawn = spawn
         self._model_slot = model_slot
+        if retriever is not None:
+            self._retriever = retriever
 
     def reset_runtime(self) -> None:
         """Restore the unbound construction-time seams (lifespan shutdown)."""
         self._spawn = self._base_spawn
         self._model_slot = self._base_model_slot
+        self._retriever = self._base_retriever
 
     # -- repository construction ---------------------------------------------#
 
@@ -1378,7 +1402,11 @@ class BriefingService:
 # A module-level default instance, mirroring ``generation_orchestrator`` /
 # ``flashcard_drafting_service``: production wiring constructed once, cheaply
 # (no I/O — ``build_researcher_agent``/``build_analyst_agent`` bind no model,
-# TDD D7), that ``services/lifecycle.py`` binds and a future router (AL-522)
-# imports directly. Its ``retriever`` stays the safe, import-time-inert
-# placeholder until AL-522/523 wire a real one in.
+# TDD D7), that ``services/lifecycle.py`` binds and the beats router imports
+# directly. Its ``retriever`` starts as the safe, import-time-inert
+# ``_UnconfiguredRetriever`` placeholder — ``services/lifecycle.py::start``
+# rebinds it to a live ``ExaRetriever`` when ``EXA_API_KEY`` is configured
+# (the AL-521/AL-523 handoff gap this closes), and ``stop`` restores this
+# placeholder so a Beat's research fails loudly rather than silently if the
+# app is ever used with the lifecycle un-started.
 briefing_service = BriefingService()

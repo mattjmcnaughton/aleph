@@ -53,7 +53,18 @@ that split the tutor's semaphore from generation's, one workload over. It
 registry ... reused as-is") — background research is exactly the same kind
 of work (strong ref, shutdown-cancelled, self-healing via stale recovery) as
 outline/lesson generation, so it needs no second registry, only a second
-semaphore. **This is the only change this ticket makes to this module.**
+semaphore. **This was the only change AL-521 made to this module.**
+
+**A later ticket adds the retriever itself** (the AL-521/AL-523 handoff gap:
+AL-521 shipped ``briefing_service`` bound to ``_UnconfiguredRetriever`` on
+purpose and recorded production wiring as belonging elsewhere; AL-523 shipped
+``ExaRetriever`` under a brief that said "nothing above the seam changes" and
+recorded the wiring as belonging elsewhere too — so nothing ever bound one).
+:meth:`GenerationLifecycle.start` now passes a live ``ExaRetriever`` to
+``briefing_service.bind_runtime`` when ``EXA_API_KEY`` is configured, and
+``None`` (no rebind — the loud ``_UnconfiguredRetriever`` default stays
+bound, TDD §5.7) when it is not, so startup still succeeds without the key
+(TDD §12) and a Beat's research fails visibly rather than silently either way.
 """
 
 from __future__ import annotations
@@ -74,6 +85,7 @@ from aleph.config import settings as global_settings
 from aleph.db import new_session
 from aleph.repositories import PathRepository
 from aleph.services.briefing import briefing_service
+from aleph.services.retrieval import ExaRetriever
 
 if TYPE_CHECKING:
     import uuid
@@ -85,6 +97,7 @@ if TYPE_CHECKING:
 
     from aleph.config import Settings
     from aleph.services.generation import GenerationOrchestrator
+    from aleph.services.retrieval import Retriever
 
     SessionFactory = Callable[[], AbstractAsyncContextManager[AsyncSession]]
 
@@ -423,6 +436,35 @@ class GenerationLifecycle:
         self._research_semaphore = asyncio.Semaphore(
             config.max_concurrent_brief_research
         )
+        # The AL-521/AL-523 handoff gap this ticket closes: neither ticket's
+        # brief owned wiring a live ``Retriever`` into production, so nothing
+        # ever did — ``briefing_service`` shipped permanently bound to
+        # ``_UnconfiguredRetriever`` (its loud raise), and every Beat research
+        # run failed at the first retrieval step. Constructing ``ExaRetriever``
+        # needs no I/O (it only stores its args, TDD D6), so — like the two
+        # semaphores above — it is safe to build here, at app-assembly time.
+        # ``None`` when ``EXA_API_KEY`` is unset (TDD §12: startup must still
+        # succeed) — :meth:`start` then passes ``retriever=None`` through to
+        # ``bind_runtime``, which leaves ``_UnconfiguredRetriever`` bound so
+        # research fails visibly (§5.7) instead of silently.
+        #
+        # A SINGLE ``ExaRetriever`` for the whole process's lifetime is
+        # correct: ``since`` (the Beat's period start) no longer lives on the
+        # instance — an earlier version of this constructor took it as a
+        # constructor argument, which only produced the right per-Beat date
+        # filter if a fresh instance were built per Beat, and nothing did.
+        # It now rides ``Retriever.search(queries, *, since)`` on every call,
+        # sourced from ``QueryPlan.since`` (``retrieve()`` in
+        # ``services/retrieval.py``), so one shared instance genuinely is the
+        # right shape — no per-Beat construction needed here or anywhere else.
+        self._research_retriever: Retriever | None = (
+            ExaRetriever(
+                api_key=config.exa_api_key,
+                max_documents=config.brief_retrieval_max_documents,
+            )
+            if config.exa_api_key
+            else None
+        )
         self._reconciler = Reconciler(
             orchestrator,
             registry=self._registry,
@@ -458,10 +500,14 @@ class GenerationLifecycle:
         # D14: the SAME registry (background research is cancelled/self-heals
         # exactly like generation, TDD §2), but its OWN semaphore — never
         # ``self._semaphore`` — so a spike of Beat research can never queue
-        # behind, or starve, lesson generation.
+        # behind, or starve, lesson generation. ``retriever`` is the AL-521/
+        # AL-523 handoff gap this ticket closes: a live ``ExaRetriever`` when
+        # ``EXA_API_KEY`` is configured, or ``None`` (no rebind — the loud
+        # ``_UnconfiguredRetriever`` stays bound) when it is not.
         briefing_service.bind_runtime(
             spawn=self._registry.spawn,
             model_slot=lambda: self._research_semaphore,
+            retriever=self._research_retriever,
         )
         self._reconciler_task = asyncio.create_task(self._reconciler.run_forever())
         logger.info("generation_lifecycle_started")
