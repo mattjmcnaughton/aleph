@@ -1,3 +1,10 @@
+# [1.33.0](https://github.com/mattjmcnaughton/aleph/compare/v1.32.0...v1.33.0) (2026-08-10)
+
+
+### Features
+
+* **api:** the beats router, its DTOs, and the Beat cap ([#190](https://github.com/mattjmcnaughton/aleph/issues/190)) ([c6c68fb](https://github.com/mattjmcnaughton/aleph/commit/c6c68fba38fe32391625293f5ace9777946a77bd)), closes [#172](https://github.com/mattjmcnaughton/aleph/issues/172)
+
 # [1.32.0](https://github.com/mattjmcnaughton/aleph/compare/v1.31.0...v1.32.0) (2026-08-09)
 
 
