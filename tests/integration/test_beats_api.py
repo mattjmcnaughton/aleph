@@ -336,9 +336,6 @@ async def test_flag_off_hides_every_route_and_spawns_nothing(
     monkeypatch: pytest.MonkeyPatch,
     analyst_flag_disabled: None,
 ) -> None:
-    # ``analyst`` launched and defaults on now, so proving the 404 gate needs
-    # this fixture to explicitly close it — omitting a fixture is no longer
-    # enough to prove "off", since off is no longer the default.
     async with _client(app) as client:
         user_id = await _sign_in(client, monkeypatch, OWNER)
         beat_id = await _seed_beat(user_id=user_id)

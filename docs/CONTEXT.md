@@ -137,8 +137,9 @@ the foot of this document. Spec: [Phase 3 PRD](prds/phase-3-flashcards.md) ·
 
 Phase 6 vocabulary — the second pillar, beside paths: a subject that is still moving, reported
 on as it moves. **Built and launched, behind the `analyst` flag**, which now defaults **on**
-having run the same dark-then-flip playbook as `tutor`/`shaping`/`streaks`/`flashcards`, and
-stays registered as a kill switch; see the phase-boundary note at the foot of this document.
+having run the same dark-then-flip playbook as `tutor`/`shaping`/`streaks`/`flashcards`;
+`FEATURE_FLAG_DEFAULTS=analyst:off` remains the kill switch, outranking the code default with
+no deploy and reaching admins too; see the phase-boundary note at the foot of this document.
 Spec: [Phase 6 PRD](prds/phase-6-analyst.md), [Phase 6 TDD](tdds/phase-6-analyst.md).
 
 | Term | Meaning |
@@ -221,10 +222,11 @@ phase:
   launched** ([PRD](prds/phase-6-analyst.md), [TDD](tdds/phase-6-analyst.md)), gated by
   `FeatureFlag.ANALYST`, which now defaults **on** — the fifth flag to run the
   `tutor`/`shaping`/`streaks`/`flashcards` dark-then-flip playbook
-  ([deploy.md](deploy.md#launching-a-flagged-phase-al-270--al-370)), and it stays registered as
-  a kill switch. No dedicated Nocturne mock, on the Phase 5 precedent (TDD §8) — the surfaces
-  are specified against the existing tokens directly. A Brief's period genuinely is *since the
-  last Brief* rather than a calendar slot,
+  ([deploy.md](deploy.md#launching-a-flagged-phase-al-270--al-370)).
+  `FEATURE_FLAG_DEFAULTS=analyst:off` is the kill switch — it outranks the code default with no
+  deploy and reaches admins too. No dedicated Nocturne mock, on the Phase 5 precedent (TDD §8) —
+  the surfaces are specified against the existing tokens directly. A Brief's period genuinely is
+  *since the last Brief* rather than a calendar slot,
   and **Skipped** genuinely is a first-class outcome (a `briefs` row with `kind = 'skipped'`,
   never a laundry slot for infrastructural failure) — both running, not merely decided.
   **Active day above is already widened to count reading a Brief** (PRD §4.9), on exactly the

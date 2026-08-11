@@ -415,6 +415,7 @@ panel is never reading a window the feature was dark for.
 | 1 (AL-103) | 9 | `activation_rate` (north star), `first_lesson_activation`, `path_start_rate`, `continuation`, `return_rate`, `breadth`, `cost_per_path`, `generation_failure_latency`, `quick_check_correctness` |
 | 2 — tutor (AL-240) | 8 | `tutor_assisted_continuation` (primary), `tutor_adoption`, `tutor_repeat_use`, `tutor_depth`, `tutor_entry_mix`, `tutor_check_uptake`, `tutor_completion_guardrail`, `tutor_reply_failure_latency` |
 | 2B — shaping (AL-340) | 8 | `shaping_yield` (primary), `shaping_adoption`, `proposal_acceptance`, `edit_shape_mix`, `undo_rate`, `depth_to_proposal`, `shaped_path_completion_guardrail`, `shaping_reply_failure_latency` |
+| 6 — analyst (AL-540) | 6 | `brief_return` (north star), `brief_read_rate`, `brief_depth_of_read`, `brief_skip_rate`, `brief_wait_tolerance` (guardrail), `cost_per_read_brief` (guardrail) |
 
 Two things to expect on the shaping set:
 

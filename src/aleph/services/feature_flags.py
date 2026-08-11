@@ -42,9 +42,8 @@ without disturbing the other.
 ``streaks`` (Phase 5, D7) was registered the same way again, and rode the same
 playbook from dark to launched. ``flashcards`` (Phase 3, TDD D10) then did too —
 the fourth flag to make the same trip. ``analyst`` (Phase 6, TDD D12) has now
-made it a fifth: registered ``False`` in :data:`FLAG_DEFAULTS`, present in
-:data:`ADMIN_DEFAULT_FLAGS`, dogfooded dark through the whole of Phase 6's
-build-out, then flipped at launch exactly as the other four were.
+made it a fifth: registered the same way, dogfooded dark through the whole of
+Phase 6's build-out, then flipped at launch exactly as the other four were.
 
 **All five are now launched and default on** (AL-270, AL-370, the streaks flip,
 the flashcards flip, and the analyst flip). Their entry in :data:`FLAG_DEFAULTS`
