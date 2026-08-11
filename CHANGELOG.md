@@ -1,3 +1,10 @@
+## [1.37.2](https://github.com/mattjmcnaughton/aleph/compare/v1.37.1...v1.37.2) (2026-08-11)
+
+
+### Bug Fixes
+
+* **config:** launch the analyst — default the flag on ([#198](https://github.com/mattjmcnaughton/aleph/issues/198)) ([f757b1a](https://github.com/mattjmcnaughton/aleph/commit/f757b1acb498278396ed53880258966a232bea94)), closes [#163](https://github.com/mattjmcnaughton/aleph/issues/163) [#180](https://github.com/mattjmcnaughton/aleph/issues/180) [#180](https://github.com/mattjmcnaughton/aleph/issues/180)
+
 ## [1.37.1](https://github.com/mattjmcnaughton/aleph/compare/v1.37.0...v1.37.1) (2026-08-10)
 
 
