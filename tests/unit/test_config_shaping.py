@@ -122,17 +122,13 @@ def test_e2e_backend_boots_with_the_shaper_slot_stubbed_and_the_flag_on(
     create_stub_app()
 
     assert restored_live_settings.model_shaper == STUB_MODEL_ID
-    # ``tutor``, ``streaks``, and ``flashcards`` have all since launched and
-    # default on in code, which would make an explicit entry here redundant on
-    # its own — but this pin is kept for all five rather than thinned to just
-    # ``shaping``: the suite asserts against surfaces that must exist, and a
-    # silent code-default flip should surface as a failure here before it turns
-    # into a confusing "every spec 404s on an absent surface" somewhere else.
-    # ``analyst`` (Phase 6, ticket AL-560) joins the other four: unlike them it
-    # has NOT launched (dark-by-default in ``services/feature_flags.py``), but
-    # the e2e suite's plain ``DEV_USER`` still needs to see the Beats surfaces
-    # for W29/W31, exactly the reasoning that already applies to the other
-    # four.
+    # ``tutor``, ``streaks``, ``flashcards``, and ``analyst`` (Phase 6, ticket
+    # AL-560/AL-570) have all since launched and default on in code, which
+    # would make an explicit entry here redundant on its own — but this pin is
+    # kept for all five rather than thinned to just ``shaping``: the suite
+    # asserts against surfaces that must exist, and a silent code-default flip
+    # should surface as a failure here before it turns into a confusing "every
+    # spec 404s on an absent surface" somewhere else.
     assert restored_live_settings.feature_flag_default_map == {
         str(FeatureFlag.TUTOR): True,
         str(FeatureFlag.SHAPING): True,

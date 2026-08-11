@@ -158,10 +158,12 @@ async def require_analyst_enabled(user: CurrentUser, session: Session) -> None:
 
     Mounted as a **router-level** dependency (see the module docstring), so
     every route in this file — present and future — inherits the gate by
-    construction (TDD D12's whole point). Off (dark-by-default, the
-    ``tutor``/``shaping``/``streaks``/``flashcards`` posture) -> ``404`` for
-    every route, before any work — ``get_current_user`` runs first, so an
-    anonymous request is already ``401`` before the flag is ever consulted.
+    construction (TDD D12's whole point). ``analyst`` followed the identical
+    ``tutor``/``shaping``/``streaks``/``flashcards`` playbook and is now
+    launched too, which makes this gate a kill switch rather than a curtain:
+    off -> ``404`` for every route, before any work — ``get_current_user`` runs
+    first, so an anonymous request is already ``401`` before the flag is ever
+    consulted.
     """
     flags = await FeatureFlagService(session).resolve_for_user(user)
     if not flags.get(FeatureFlag.ANALYST, False):

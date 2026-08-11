@@ -165,16 +165,20 @@ def test_flashcards_is_registered_and_launched_on_by_default() -> None:
     assert feature_flags.FeatureFlag.FLASHCARDS in feature_flags.ADMIN_DEFAULT_FLAGS
 
 
-def test_analyst_is_registered_off_by_default_and_on_for_admins() -> None:
-    """Phase 6's one flag (TDD D12), registered dark like ``tutor`` first was.
+def test_analyst_is_registered_and_launched_on_by_default() -> None:
+    """Phase 6's one flag, registered and launched the same way (TDD D12).
 
-    Unlike the four launched flags, ``analyst`` spends its whole build-out at
-    ``False`` — that is what shipping dark means, and what lets every
-    analyst ticket merge and deploy with zero learner exposure while admins
-    dogfood it via the admin baseline.
+    It spent Phase 6's whole build-out at ``False`` — that dark posture is what
+    let every analyst ticket, Beats through Briefs, merge and deploy with zero
+    learner exposure while admins dogfooded it via the admin baseline. This
+    flip is the launch itself: the fifth flag to run the
+    ``tutor``/``shaping``/``streaks``/``flashcards`` playbook. Membership in
+    :data:`ADMIN_DEFAULT_FLAGS` is asserted still: it is redundant while the
+    default is ``True``, but it is what the flag falls back to if this is ever
+    flipped dark again.
     """
     assert feature_flags.FeatureFlag.ANALYST == "analyst"
-    assert feature_flags.FLAG_DEFAULTS[feature_flags.FeatureFlag.ANALYST] is False
+    assert feature_flags.FLAG_DEFAULTS[feature_flags.FeatureFlag.ANALYST] is True
     assert feature_flags.FeatureFlag.ANALYST in feature_flags.ADMIN_DEFAULT_FLAGS
 
 

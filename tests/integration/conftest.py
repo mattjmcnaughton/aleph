@@ -475,12 +475,12 @@ def streaks_flag_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
 def analyst_flag_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
     """Turn the ``analyst`` flag on globally for one test (Phase 6 TDD D12).
 
-    The ``tutor_flag_enabled`` pattern, one phase later: the analyst ships
-    dark (``FLAG_DEFAULTS[ANALYST] = False``), so an integration test that
-    drives Beats/Briefs as a plain learner would otherwise be testing the
-    flag gate rather than the analyst. No ``analyst_flag_disabled`` twin
-    exists (yet) — unlike ``streaks``/``tutor``, this flag has not launched,
-    so "off" is already every test's starting point with no fixture needed.
+    The Phase 6 twin of ``tutor_flag_enabled``/``streaks_flag_enabled``, and
+    redundant for the same reason they are: since the launch flip the code
+    default is ``True``, so Beats/Briefs are open without it. Kept, and still
+    requested by the tests that drive that surface, because it states which
+    flag a test's subject hangs off — and because it is what those tests would
+    need again if this flag ever went dark.
     """
     _enable_flag_globally(monkeypatch, "analyst")
 
@@ -496,6 +496,19 @@ def streaks_flag_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
     the same documented kill switch.
     """
     _disable_flag_globally(monkeypatch, "streaks")
+
+
+@pytest.fixture
+def analyst_flag_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Turn the ``analyst`` flag off globally for one test.
+
+    The mirror of ``analyst_flag_enabled``, and now the one that does the work:
+    since the launch flip the code default is ``True``, so a test that wants to
+    prove the ``404`` gate has to *close* the flag rather than assume it — the
+    same move ``tutor_flag_disabled``/``shaping_flag_disabled``/
+    ``streaks_flag_disabled`` make, through the same documented kill switch.
+    """
+    _disable_flag_globally(monkeypatch, "analyst")
 
 
 def _enable_flag_globally(monkeypatch: pytest.MonkeyPatch, key: str) -> None:

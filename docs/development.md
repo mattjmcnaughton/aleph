@@ -153,11 +153,10 @@ the message: `[force-proposal-add]`, `[force-proposal-revise]`,
 (`services/stub_model.py`).
 
 **Seeing the analyst (`beats`/`briefs`) locally, and the honest limit on `just
-dev-be` alone.** Unlike `tutor`/`shaping`, `analyst` is still **dark**
-(`FLAG_DEFAULTS` has it `False`) — sign in as `admin-dev`
-(`ADMIN_DEFAULT_FLAGS` forces it on for admins) to see the deploy form and the
-Beats section on home, or set `FEATURE_FLAG_DEFAULTS=analyst:on` in `.env` to
-open it for the `dev` user too, the same lever as above.
+dev-be` alone.** Nothing to configure: `analyst` is now launched and defaults
+**on** in code, the same as `tutor`/`shaping` above, so a fresh clone with no
+`.env` shows the deploy form and the Beats section on home to the `dev` user
+too — no admin sign-in required.
 
 That gets the surface rendering, but **`just dev-be` on its own cannot
 actually research a Beat without `EXA_API_KEY`.** `services/lifecycle.py`

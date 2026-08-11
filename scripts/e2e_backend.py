@@ -214,24 +214,19 @@ def create_stub_app() -> FastAPI:
     # mode the four caps above exist to prevent, just one cap late.
     settings.flashcard_drafts_per_day = 0
     # ``tutor`` (AL-203/AL-270), ``shaping`` (AL-301/AL-370), ``streaks``
-    # (Phase 5 D7), and ``flashcards`` (Phase 3 TDD D10) are all launched and
-    # default on in ``services/feature_flags.py``, so the browser suite's plain
-    # learner — ``DEV_USER``, who is not an admin and gets none of
-    # ``ADMIN_DEFAULT_FLAGS``' baseline — meets both rails, the streak line and
-    # the flashcards surfaces with nothing set here. This line is kept as an
-    # explicit *pin* rather than deleted as redundant: the suite asserts
-    # against surfaces that must exist, and "every tutor spec failed on an
-    # absent rail" is a confusing way to discover someone flipped a code
-    # default — the same reasoning that already applied to ``tutor``/
-    # ``shaping``/``streaks`` now covers ``flashcards`` too, since its own
-    # launch flip removed the one thing that used to make it different (the
-    # admin-only default this comment used to describe).
-    # ``analyst`` (Phase 6, TDD D12, ticket AL-560) joins the same launched
-    # posture the other four flags already have here: dark-by-default in
-    # ``services/feature_flags.py`` (the "specified, entirely unbuilt" phase
-    # boundary CONTEXT.md still records at the vocabulary level), but the e2e
-    # suite's plain ``DEV_USER`` learner needs to see the Beats surfaces
-    # without an admin baseline, exactly as the other four already argue.
+    # (Phase 5 D7), ``flashcards`` (Phase 3 TDD D10), and ``analyst`` (Phase 6
+    # TDD D12, ticket AL-560) are all launched and default on in
+    # ``services/feature_flags.py``, so the browser suite's plain learner —
+    # ``DEV_USER``, who is not an admin and gets none of
+    # ``ADMIN_DEFAULT_FLAGS``' baseline — meets every rail, the streak line,
+    # the flashcards surfaces and the Beats surfaces with nothing set here.
+    # This line is kept as an explicit *pin* rather than deleted as redundant:
+    # the suite asserts against surfaces that must exist, and "every tutor
+    # spec failed on an absent rail" is a confusing way to discover someone
+    # flipped a code default — the same reasoning that already applied to
+    # ``tutor``/``shaping``/``streaks``/``flashcards`` now covers ``analyst``
+    # too, since its own launch flip removed the one thing that used to make
+    # it different (the admin-only default this comment used to describe).
     settings.feature_flag_defaults = (
         "tutor:on,shaping:on,streaks:on,flashcards:on,analyst:on"
     )

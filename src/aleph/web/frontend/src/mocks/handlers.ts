@@ -26,14 +26,15 @@ export const learnerUser: AuthUser = {
   email: "learner@example.com",
   is_admin: false,
   model_allowlist: [],
-  // `tutor`, `streaks`, and `flashcards` all now default **on** in the real
-  // `FLAG_DEFAULTS` registry (AL-203/AL-270, Streaks TDD D7, Phase 3 TDD D10 —
-  // all four launched flags run the same dark-then-flip playbook). The fake
-  // learner ships them off anyway: this fixture's job is to make every gated
-  // surface opt in explicitly via `server.use(...)`, so a test proves the gate
-  // itself rather than inheriting an accident of whatever the backend default
-  // happens to be this week. `analyst` (AL-522/AL-530) joins the same
-  // dark-by-default posture (`routers/v1/beats.py`'s own `require_analyst_enabled`).
+  // `tutor`, `streaks`, `flashcards`, and `analyst` all now default **on** in
+  // the real `FLAG_DEFAULTS` registry (AL-203/AL-270, Streaks TDD D7, Phase 3
+  // TDD D10, Phase 6 TDD D12 — all five launched flags run the same
+  // dark-then-flip playbook). The fake learner ships them off anyway: this
+  // fixture's job is to make every gated surface opt in explicitly via
+  // `server.use(...)`, so a test proves the gate itself
+  // (`routers/v1/beats.py`'s own `require_analyst_enabled`, and its Phase
+  // 2/5/3 twins) rather than inheriting an accident of whatever the backend
+  // default happens to be this week.
   feature_flags: { tutor: false, streaks: false, flashcards: false, analyst: false },
 };
 
