@@ -18,29 +18,24 @@ Auth is the real cookie flow with a stubbed OIDC code exchange (mirroring
 ``test_auth_api`` / ``test_paths_api``), so the admin gate is genuine — admin
 status is derived from the email domain (``authz.is_admin``), never stored.
 
-**All four registered flags are launched and default on** — ``tutor``
-(AL-270), ``shaping`` (AL-370), Phase 5's ``streaks`` (D7), and Phase 3's
-``flashcards`` (D10) — which would make most of the resolution machinery
-below untestable — a flag that is on for everyone cannot demonstrate an admin
-baseline, an override that flips a learner *on*, or a `404` gate. So
-``dark_flag_defaults`` (autouse) puts every code default back to ``False`` for
-this module: every test here is about the machinery, and the machinery's
-interesting case is a dark flag. The launched defaults get their own test,
-``test_launched_flags_reach_a_plain_learner``, which opts back out. With no
-flag left genuinely dark in the registry, ``dark_flag_defaults`` is what
-actually exercises the admin-baseline path here, standing in for the dark
-phase the machinery is built for rather than reading it off a real one.
+**All five registered flags are launched and default on** — ``tutor``
+(AL-270), ``shaping`` (AL-370), Phase 5's ``streaks`` (D7), Phase 3's
+``flashcards`` (D10), and Phase 6's ``analyst`` (D12) — which would make most
+of the resolution machinery below untestable — a flag that is on for everyone
+cannot demonstrate an admin baseline, an override that flips a learner *on*,
+or a `404` gate. So ``dark_flag_defaults`` (autouse) puts every code default
+back to ``False`` for this module: every test here is about the machinery,
+and the machinery's interesting case is a dark flag. The launched defaults
+get their own test, ``test_launched_flags_reach_a_plain_learner``, which opts
+back out via ``monkeypatch.undo()``. With no flag left genuinely dark in the
+registry, ``dark_flag_defaults`` is what actually exercises the admin-baseline
+path here, standing in for the dark phase the machinery is built for rather
+than reading it off a real one.
 
-Every resolved map and every admin listing below carries all four keys (the
+Every resolved map and every admin listing below carries all five keys (the
 session/list surfaces the whole registry, not just the flags a given test is
 about), which is what proves a further flag joining the registry never widens
 what a plain learner sees.
-
-**Phase 6's ``analyst`` (TDD D12) has since joined the registry, dark** — the
-posture ``tutor``/``shaping`` shipped with first. It rides along in every
-resolved map and listing below the same way ``streaks``/``flashcards`` did
-before their own launch: off for a plain learner, on for the admin baseline
-in scenarios that exercise it.
 """
 
 from __future__ import annotations
@@ -75,9 +70,8 @@ STREAKS = "streaks"
 # Phase 3's flag (D10), registered the same way and also launched. Also in
 # every resolved map below, for the same reason.
 FLASHCARDS = "flashcards"
-# Phase 6's flag (TDD D12), registered the same way as ``tutor``/``shaping``
-# first were — dark by default, present in the admin baseline. Also in every
-# resolved map below, for the same reason.
+# Phase 6's flag (TDD D12), registered the same way and also launched. Also
+# in every resolved map below, for the same reason.
 ANALYST = "analyst"
 
 LEARNER = AuthIdentity(
@@ -129,7 +123,7 @@ async def _sign_in(
 def dark_flag_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     """Force every code default back to ``False`` for this module.
 
-    See the module docstring: all four flags are launched and default on, but
+    See the module docstring: all five flags are launched and default on, but
     every test here is about the *resolution machinery*, whose whole subject
     matter is a flag that is not simply on for everyone. Patching
     ``FLAG_DEFAULTS`` (rather than the settings map) is deliberate — the settings
@@ -162,17 +156,17 @@ def _resolved(
     Spelled as a helper so a new flag joining the registry is one edit here
     rather than one per assertion, while the assertions stay exact: an extra key
     leaking into a learner's map (a stale override row, say) still fails.
-    ``streaks``, ``flashcards`` and ``analyst`` default to ``False`` because
-    ``dark_flag_defaults`` closes their code defaults like the other two, so a
-    plain learner sees them off — the real code default for all four launched
-    flags is ``True`` (``analyst`` is genuinely dark, TDD D12), but this
+    ``streaks``, ``flashcards`` and ``analyst`` default to ``False`` here for
+    the same reason ``tutor`` and ``shaping`` do: ``dark_flag_defaults``
+    (autouse) closes every code default in the registry, all five alike, so a
+    plain learner sees all five off — the real code default for all five
+    flags is ``True`` (``analyst`` included, now launched, TDD D12), but this
     module's whole point is exercising the dark-flag machinery, which needs a
-    flag that is not simply on for everyone. All three still have to be passed
+    flag that is not simply on for everyone. All five still have to be passed
     explicitly in the **admin** scenarios: they are members of
     ``ADMIN_DEFAULT_FLAGS``, so the admin baseline resolves them *on* even
     while every learner sees a `404` — which is the dark-launch story this
-    module exists to test, now told by three closed-here flags rather than by
-    ``tutor``/``shaping``, which no fixture in this file darkens.
+    module exists to test.
     """
     return {
         TUTOR: tutor,
@@ -275,14 +269,18 @@ async def test_launched_flags_reach_a_plain_learner(
 ) -> None:
     """The launched posture: on for everyone, with nothing configured.
 
-    Opts back out of ``dark_flag_defaults`` by restoring the real registry
-    values, so this is the one test in the module reading the defaults the
-    codebase actually ships. A plain learner — no admin domain, no override row,
-    no ``FEATURE_FLAG_DEFAULTS`` — gets every surface, which is what makes a
-    fresh clone and a local ``just dev`` show the real product.
+    Opts back out of ``dark_flag_defaults`` with ``monkeypatch.undo()`` — the
+    fixture and this test share one ``monkeypatch`` instance (both are
+    function-scoped), so undoing it reverts exactly the five ``setitem`` calls
+    the fixture made and leaves ``FLAG_DEFAULTS`` exactly as the module shipped
+    it. This is the one test in the module reading the defaults the codebase
+    actually ships, rather than a value the test wrote itself: a code default
+    that regresses to ``False`` fails the assertion below instead of passing
+    it. A plain learner — no admin domain, no override row, no
+    ``FEATURE_FLAG_DEFAULTS`` — gets every surface, which is what makes a fresh
+    clone and a local ``just dev`` show the real product.
     """
-    for flag in feature_flags.FLAG_DEFAULTS:
-        monkeypatch.setitem(feature_flags.FLAG_DEFAULTS, flag, True)
+    monkeypatch.undo()
     assert not settings.feature_flag_defaults, "nothing may be configured here"
 
     async with _client(app) as learner:

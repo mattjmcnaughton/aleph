@@ -33,7 +33,7 @@ afterthought.
 | **3 — Flashcards and spaced repetition** | ✅ Shipped & launched (`flashcards` flag on) — all ten TDD tickets plus AL-410's card-management surface | [PRD](prds/phase-3-flashcards.md) · [TDD](tdds/phase-3-flashcards.md) · [mock](mocks/aleph-phase-3-flashcards.html) |
 | **4 — Adaptive paths** | ⬜ Not started — **no PRD yet** (2B pre-built the proposal/apply machinery) | — |
 | **5 — Momentum** | 🟡 In progress — streaks shipped **and launched**; goal ring and daily minutes unbuilt | streaks: [PRD](prds/phase-5-streaks.md) · [TDD](tdds/phase-5-streaks.md) |
-| **6 — The analyst** | ✅ Shipped, **not yet launched** — behind the `analyst` flag (dark by default; admin dogfooding via `ADMIN_DEFAULT_FLAGS`), awaiting AL-570's guardrail reads and the flag flip. A second pillar beside paths, not a deepening of one | [PRD](prds/phase-6-analyst.md) · [TDD](tdds/phase-6-analyst.md) |
+| **6 — The analyst** | ✅ Shipped & launched (`analyst` flag on) — a second pillar beside paths, not a deepening of one | [PRD](prds/phase-6-analyst.md) · [TDD](tdds/phase-6-analyst.md) |
 | **Beyond** | ⬜ Unscoped, sequenced against real usage | — |
 
 Three tails hang off the shipped phases and are tracked as open issues rather than
@@ -49,10 +49,12 @@ too, so within that numbered sequence no phase is waiting on a flag flip anymore
 only on code not yet built. **Phase 6 sits outside that sequence**: it is a second
 pillar rather than the next rung of the first one, so it was sequenced by appetite
 rather than by dependency — nothing above it blocked it, and it blocked nothing
-above it. It has since shipped in full (epic #163) and is now the one phase in
-either sequence waiting on a flag flip rather than on more code — gated on
-AL-570's two cost/wait-tolerance guardrail queries and a manual retrieval-quality
-read (Phase 6 TDD §12/§15), not on anything left to build.
+above it. It has since shipped in full (epic #163) and launched — the `analyst`
+flag flip landed ahead of the rest of AL-570's ship-verification, which stays
+open on [#180](https://github.com/mattjmcnaughton/aleph/issues/180): the
+guardrail reads, the retrieval-quality ritual, production smoke, and the
+Logfire import. No phase in either sequence is waiting on a flag flip
+anymore, though AL-570 itself is not done.
 
 ## Phase 1 — The generated path (MVP)
 
@@ -235,17 +237,22 @@ for the rest of this phase.
 
 ## Phase 6 — The analyst
 
-> ✅ **Status:** shipped (epic #163's full first-slice build), **not yet
-> launched** — behind the `analyst` flag: `False` in `FLAG_DEFAULTS`, present in
-> `ADMIN_DEFAULT_FLAGS` for admin dogfooding, the same dark-then-flip playbook
-> `tutor`/`shaping`/`streaks`/`flashcards` all ran
-> ([deploy.md](deploy.md#launching-a-flagged-phase-al-270--al-370)). Launch
-> (AL-570) is gated on reading the cost-per-Brief and wait-tolerance guardrail
-> queries and a manual retrieval-quality comparison against a real week — not on
-> any more code. No dedicated Nocturne mock, on the Phase 5 precedent (specified
-> against the existing tokens directly). The vocabulary is in
-> [`CONTEXT.md`](CONTEXT.md) (the *The analyst* section), now marked built rather
-> than unbuilt.
+> ✅ **Status:** shipped and **launched** (epic #163's full first-slice build)
+> — the `analyst` flag now defaults **on** in `FLAG_DEFAULTS`, the fifth flag
+> to run the dark-then-flip playbook `tutor`/`shaping`/`streaks`/`flashcards`
+> all ran
+> ([deploy.md](deploy.md#launching-a-flagged-phase-al-270--al-370)), and
+> `FEATURE_FLAG_DEFAULTS=analyst:off` stays the kill switch, reaching admins
+> too with no deploy. **The flip landed ahead of**
+> [AL-570](https://github.com/mattjmcnaughton/aleph/issues/180)'s
+> ship-verification gates, which remain outstanding: both guardrail reads
+> (`cost_per_read_brief.sql`, `brief_wait_tolerance.sql`, numbers recorded on
+> the ticket), the retrieval-quality comparison written up for every
+> dogfooded Beat, production smoke covering all four run outcomes, and the
+> Logfire query import are all still open on #180. No dedicated Nocturne
+> mock, on the Phase 5 precedent (specified against the existing tokens
+> directly). The vocabulary is in [`CONTEXT.md`](CONTEXT.md) (the *The analyst*
+> section), now marked shipped and launched rather than unbuilt.
 > 📄 **Full spec:** [Phase 6 PRD — The analyst](prds/phase-6-analyst.md) ·
 > [Phase 6 TDD](tdds/phase-6-analyst.md)
 

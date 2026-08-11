@@ -335,21 +335,16 @@ code — it is one committed configuration change.
 > same way with no configuration. That is the intended end state for a launched
 > phase: the env var is the *override*, not the statement of what is live.
 > **Phase 5's `streaks` launched the same way, and Phase 3's `flashcards` then
-> did too**, so four registered flags now default on.
+> did too**, so four registered flags defaulted on. **Phase 6's `analyst`
+> (AL-570) has now launched the same way too** — the highest-per-run-cost
+> feature in the product spent its whole build-out behind the same posture
+> `tutor`/`shaping` did pre-launch, `ADMIN_DEFAULT_FLAGS` forcing it on for
+> admins only while every other learner saw `404` — so all five registered
+> flags now default on and the registry currently holds nothing dark.
 >
-> **Phase 6's `analyst` is the fifth flag and is still dark** (`FLAG_DEFAULTS`
-> has it `False`) — the highest-per-run-cost feature in the product ships
-> behind the same posture `tutor`/`shaping` did pre-launch: `ADMIN_DEFAULT_FLAGS`
-> forces it on for admins only, so dogfooding (the guardrail-query read and the
-> manual retrieval-quality ritual, Phase 6 TDD §12/§15, AL-570) happens before
-> the flip. This section is exactly the playbook AL-570 follows to launch it —
-> flip `FeatureFlag.ANALYST`'s entry in `FLAG_DEFAULTS`, per "Launching a dark
-> phase" below — so, unlike the four above, the registry currently holds one
-> flag still dark.
->
-> This section stays the reference for the lever itself, now read for
-> **launching `analyst`**, for **turning a launched flag off** (the kill switch
-> below), and for the next phase after this one that ships dark.
+> This section stays the reference for the lever itself, now read mainly for
+> **turning a launched flag off** (the kill switch below) and for the next
+> phase after this one that ships dark.
 
 This section is the whole of it; the ship
 tickets ([AL-270](https://github.com/mattjmcnaughton/aleph/issues/97) for the
@@ -367,7 +362,8 @@ that block. Resolution order and the full semantics are in
 (`services/feature_flags.py`) from `False` to `True`. That is the launch: it
 reaches production *and* every developer's laptop and every CI run at once, which
 is why it beats setting the env var — one statement of what is live, not two.
-`tutor`, `shaping`, `streaks`, and `flashcards` were all launched this way.
+`tutor`, `shaping`, `streaks`, `flashcards`, and `analyst` were all launched this
+way.
 
 Use the `fly.toml` env var instead only when the flip must be **reversible
 without a code deploy** — a staged rollout you expect to roll back, or an early
@@ -419,6 +415,7 @@ panel is never reading a window the feature was dark for.
 | 1 (AL-103) | 9 | `activation_rate` (north star), `first_lesson_activation`, `path_start_rate`, `continuation`, `return_rate`, `breadth`, `cost_per_path`, `generation_failure_latency`, `quick_check_correctness` |
 | 2 — tutor (AL-240) | 8 | `tutor_assisted_continuation` (primary), `tutor_adoption`, `tutor_repeat_use`, `tutor_depth`, `tutor_entry_mix`, `tutor_check_uptake`, `tutor_completion_guardrail`, `tutor_reply_failure_latency` |
 | 2B — shaping (AL-340) | 8 | `shaping_yield` (primary), `shaping_adoption`, `proposal_acceptance`, `edit_shape_mix`, `undo_rate`, `depth_to_proposal`, `shaped_path_completion_guardrail`, `shaping_reply_failure_latency` |
+| 6 — analyst (AL-540) | 6 | `brief_return` (north star), `brief_read_rate`, `brief_depth_of_read`, `brief_skip_rate`, `brief_wait_tolerance` (guardrail), `cost_per_read_brief` (guardrail) |
 
 Two things to expect on the shaping set:
 

@@ -1,6 +1,6 @@
 # PRD — Phase 6: The analyst
 
-**Status:** Accepted · **Owner:** solo builder · **Roadmap item:** [Phase 6 — The analyst](../roadmap.md#phase-6--the-analyst)
+**Status:** Accepted — **shipped and launched** (the `analyst` flag defaults on) · **Owner:** solo builder · **Roadmap item:** [Phase 6 — The analyst](../roadmap.md#phase-6--the-analyst)
 **Companion to:** [Phase 6 TDD](../tdds/phase-6-analyst.md) — this document owns the product boundary only; the TDD's §14 records where the shipped design corrected this one
 **References:** [`README.md`](../../README.md) · [`roadmap.md`](../roadmap.md) · [`CONTEXT.md`](../CONTEXT.md) (ubiquitous language) · [Phase 1 PRD](phase-1-path-generation.md) · [Phase 2B PRD](phase-2b-shape-your-path.md) · [Phase 3 PRD](phase-3-flashcards.md) · [Phase 5 streaks PRD](phase-5-streaks.md) · [Phase 6 TDD](../tdds/phase-6-analyst.md) · [`architecture.md`](../architecture.md) · [`metrics.md`](../metrics.md) · [`evals.md`](../evals.md) · [`deploy.md`](../deploy.md)
 

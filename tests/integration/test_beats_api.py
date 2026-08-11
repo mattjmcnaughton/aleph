@@ -15,9 +15,13 @@ imports directly (`generation_orchestrator`'s own shape); its `_spawn` and
 `_retriever`/`_resolve_model` seams are patched in place per test, exactly as
 `test_paths_api.py`'s `spawn` fixture patches `generation_orchestrator`.
 
-The `analyst` flag ships dark (TDD D12): every test that exercises the live
-surface requests `analyst_flag_enabled` (`conftest.py`); the one flag-off test
-deliberately does not.
+The `analyst` flag is launched (TDD D12) and defaults on, so every test that
+exercises the live surface requests `analyst_flag_enabled` (`conftest.py`) for
+the same reason `streaks`/`flashcards` coverage still requests theirs —
+stating which flag a test's subject hangs off, redundantly with the code
+default. The one flag-off test requests `analyst_flag_disabled` instead: since
+launch, off is no longer any test's starting point for free, so proving the
+`404` gate means *closing* the flag rather than omitting a fixture.
 """
 
 from __future__ import annotations
@@ -327,9 +331,11 @@ async def test_deploy_claims_the_first_run_and_returns_immediately(
 
 @pytest.mark.anyio
 async def test_flag_off_hides_every_route_and_spawns_nothing(
-    app: FastAPI, spawn: CollectingSpawn, monkeypatch: pytest.MonkeyPatch
+    app: FastAPI,
+    spawn: CollectingSpawn,
+    monkeypatch: pytest.MonkeyPatch,
+    analyst_flag_disabled: None,
 ) -> None:
-    # No ``analyst_flag_enabled`` fixture requested: off is the default.
     async with _client(app) as client:
         user_id = await _sign_in(client, monkeypatch, OWNER)
         beat_id = await _seed_beat(user_id=user_id)

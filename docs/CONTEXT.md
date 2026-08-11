@@ -11,8 +11,8 @@ synonym (say **path**, not "course"; **Quick check**, not "quiz question").
 > phase-boundary note below), **the Phase 3 PRD** (which widened **Active day** to count a
 > review, and owns the Retention section below), **and the Phase 6 PRD** (which owns The
 > analyst section, and widens **Active day** a second time — to count reading a Brief —
-> against a phase that is now **built, behind its own kill switch, not yet launched, see the
-> phase-boundary note below**). References:
+> against a phase that is now **shipped and launched, see the phase-boundary note
+> below**). References:
 > [`README.md`](../README.md) · [`roadmap.md`](roadmap.md) ·
 > [Phase 1 PRD](prds/phase-1-path-generation.md) · [Phase 1 TDD](tdds/phase-1-path-generation.md) ·
 > [Phase 2 PRD](prds/phase-2-tutor.md) · [Phase 2 TDD](tdds/phase-2-tutor.md) ·
@@ -136,9 +136,11 @@ the foot of this document. Spec: [Phase 3 PRD](prds/phase-3-flashcards.md) ·
 ## The analyst (Phase 6)
 
 Phase 6 vocabulary — the second pillar, beside paths: a subject that is still moving, reported
-on as it moves. **Built, behind the `analyst` flag (dark by default; admin dogfooding, not yet
-launched)**; see the phase-boundary note at the foot of this document. Spec:
-[Phase 6 PRD](prds/phase-6-analyst.md), [Phase 6 TDD](tdds/phase-6-analyst.md).
+on as it moves. **Built and launched, behind the `analyst` flag**, which now defaults **on**
+having run the same dark-then-flip playbook as `tutor`/`shaping`/`streaks`/`flashcards`;
+`FEATURE_FLAG_DEFAULTS=analyst:off` remains the kill switch, outranking the code default with
+no deploy and reaching admins too; see the phase-boundary note at the foot of this document.
+Spec: [Phase 6 PRD](prds/phase-6-analyst.md), [Phase 6 TDD](tdds/phase-6-analyst.md).
 
 | Term | Meaning |
 | --- | --- |
@@ -216,13 +218,15 @@ phase:
   destructive edit shapes (remove, reorder, touching engaged work): **Phase 4**, building on 2B's
   Proposal/Apply machinery.
 - **Beat** / **Brief** / **Source** / **Cadence** / **Anchor day** / **Brief continuity** /
-  **Skipped** — the analyst (**Phase 6**), defined in The analyst section above: **built**
-  ([PRD](prds/phase-6-analyst.md), [TDD](tdds/phase-6-analyst.md)), behind the `analyst` flag —
-  `False` in `FLAG_DEFAULTS`, present in `ADMIN_DEFAULT_FLAGS` for dogfooding, not yet flipped
-  on for every learner (the `tutor`/`shaping`/`streaks`/`flashcards` dark-then-flip playbook,
-  [deploy.md](deploy.md#launching-a-flagged-phase-al-270--al-370)). No dedicated Nocturne mock,
-  on the Phase 5 precedent (TDD §8) — the surfaces are specified against the existing tokens
-  directly. A Brief's period genuinely is *since the last Brief* rather than a calendar slot,
+  **Skipped** — the analyst (**Phase 6**), defined in The analyst section above: **shipped and
+  launched** ([PRD](prds/phase-6-analyst.md), [TDD](tdds/phase-6-analyst.md)), gated by
+  `FeatureFlag.ANALYST`, which now defaults **on** — the fifth flag to run the
+  `tutor`/`shaping`/`streaks`/`flashcards` dark-then-flip playbook
+  ([deploy.md](deploy.md#launching-a-flagged-phase-al-270--al-370)).
+  `FEATURE_FLAG_DEFAULTS=analyst:off` is the kill switch — it outranks the code default with no
+  deploy and reaches admins too. No dedicated Nocturne mock, on the Phase 5 precedent (TDD §8) —
+  the surfaces are specified against the existing tokens directly. A Brief's period genuinely is
+  *since the last Brief* rather than a calendar slot,
   and **Skipped** genuinely is a first-class outcome (a `briefs` row with `kind = 'skipped'`,
   never a laundry slot for infrastructural failure) — both running, not merely decided.
   **Active day above is already widened to count reading a Brief** (PRD §4.9), on exactly the

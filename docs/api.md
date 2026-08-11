@@ -583,9 +583,11 @@ Session-cookie protected (`401` via the shared envelope when anonymous). All
 addressing is by UUID; another learner's Beat or Brief reads as `404` (never
 `403` — its existence is not disclosed). **The whole surface is
 feature-flagged, router-level** (TDD D12): every route below sits behind a
-single `analyst` flag gate. Off (the code default — Phase 6 has not launched)
-→ `404` on every route, before any work. See the [Feature flags](#feature-flags-admin-apiv1admin-al-203)
-section's registered-flags table below.
+single `analyst` flag gate. On (the code default — Phase 6 is launched), so a
+fresh clone and every learner see the surface with no configuration; off →
+`404` on every route, before any work. See the
+[Feature flags](#feature-flags-admin-apiv1admin-al-203) section's
+registered-flags table below.
 
 **Beats** (CONTEXT.md: *Beat* — a standing research assignment). `POST
 /beats` both deploys the Beat and claims its first research run in the same
@@ -734,7 +736,7 @@ costs no extra request. The frontend reads it through `useFeatureFlag(key)`
 | `shaping` | **on** | on (redundantly, as above) | Phase 2B shaping — the shaping rail, its API and its stream, and the apply/undo endpoints. Same history on its own key (epic #114, adopted convention 1): dark through 2B's build-out, **launched at AL-370**. Independent of `tutor`, so either can be killed without disturbing the other. |
 | `streaks` | **on** | on (redundantly, as above) | Phase 5 streaks — `GET /progress/summary` and everything under it (see [Progress](#progress-apiv1-phase-5-tdd-546)). Same history again on its own key (TDD D7): dark at `off` through the slice's build-out while admins dogfooded it, then **launched** by flipping this code default on, exactly as AL-270/AL-370 did. Kill it with `FEATURE_FLAG_DEFAULTS=streaks:off`. |
 | `flashcards` | **on** | on (redundantly, as above) | Phase 3 flashcards — every route under [Flashcards](#flashcards-apiv1-phase-3-tdd-53-56-6) (drafting, the daily queue, grading) and the progress summary's second streak signal (§5.5). This phase's **only** kill switch: one flag gates drafting, the queue, review and the due pill together (TDD D10), because a queue with no drafting is an empty queue and drafting with no queue is a card sink. Shipped dark at `off` through the build-out while admins dogfooded it via the admin baseline; **launched** by flipping this code default on, the fourth flag to run the `tutor`/`shaping`/`streaks` playbook. Kill it without a code deploy with `FEATURE_FLAG_DEFAULTS=flashcards:off`. |
-| `analyst` | **off** | **on** (this is the live one) | Phase 6 — every route under [Analyst](#analyst-apiv1-al-522-issue-172-phase-6-tdd-6) (Beats, Briefs). `FLAG_DEFAULTS` has it `False` (Phase 6 has not launched), so the admin baseline is what lets admins dogfood it while every other learner gets `404` (TDD D12) — the fifth flag to spend its build-out at the `tutor`/`shaping`/`streaks`/`flashcards` dark posture, awaiting its own launch flip. |
+| `analyst` | **on** | on (redundantly, as above) | Phase 6 — every route under [Analyst](#analyst-apiv1-al-522-issue-172-phase-6-tdd-6) (Beats, Briefs). Same history again on its own key (TDD D12): shipped dark at `off` through the build-out while admins dogfooded it via the admin baseline, then **launched** by flipping this code default on, the fifth flag to run the `tutor`/`shaping`/`streaks`/`flashcards` playbook. Kill it without a code deploy with `FEATURE_FLAG_DEFAULTS=analyst:off`. |
 
 **Operating it.** `FEATURE_FLAG_DEFAULTS` is a comma-separated list of
 `key:on` / `key:off` entries (`FEATURE_FLAG_DEFAULTS="tutor:on"`). Malformed and
