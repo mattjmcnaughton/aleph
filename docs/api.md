@@ -66,7 +66,7 @@ disclosed). Same **trigger + poll** model: `POST /lessons/{id}/generate` returns
 | `GET` | `/api/v1/lessons/{id}` | — | `200` | Poll target. Body below. The poll is itself a trigger: it spawns the idempotent resume **and** refills the prefetch window, so *viewing* a lesson advances prefetch (§5.4). `generation_state` is effective (a stale `generating` reads as `failed`); `unlock_state` is derived (`locked`/`available`/`complete`). |
 | `POST` | `/api/v1/lessons/{id}/generate` | — | `202 {id}` | Ensure/retry this lesson's generation (also refills the prefetch window). Rate-limited by the daily lesson cap (`check_lesson_generation`, `RATE_LIMIT_LESSON_GENERATIONS_PER_DAY`, default 100; admins exempt) → `429 rate_limited` at the cap. Note this cap (100) is now **below** `MAX_LESSONS_PER_PATH` (200): a learner working through a maximal path spans more than one day of lesson-generation quota — accepted, not a bug (the cap bounds daily spend, not path completion speed). Chain-head gated (§5.2/§5.5): it *ensures* a reached `ungenerated` lesson and *retries* a `failed` one only when all predecessors are `generated`; a trigger on a `generated` or non-chain-head lesson still returns `202` but only advances the window. |
 | `POST` | `/api/v1/lessons/{id}/attempt` | `{selected_index}` | `200` | Record the Attempt (first-wins) and grade it server-side. Gates on *not locked*, **not** available-only: **locked → `403`**, but a **complete** lesson stays attemptable (a learner may complete a lesson and still answer its Quick check — completion is orthogonal to the Attempt). An ungenerated lesson (no Quick check yet) → `409 conflict`. Returns `AttemptResult` (below) — the reveal boundary. A second submit never overwrites the first: the response is the first Attempt's Outcome, re-derived from its stored index (the `attempts.is_correct` column is a metrics cache, never trusted — AL-012). |
-| `POST` | `/api/v1/lessons/{id}/complete` | — | `200 {id, unlock_state}` | Mark complete (non-gating; orthogonal to the Quick-check Outcome). Only the **available** lesson may be completed (AL-012): **locked → `403`** (a later/not-yet-reached lesson cannot be skipped ahead to); already-**complete → idempotent `200`** no-op (no re-stamp). On success the prefetch window advances (`on_lesson_completed`, after commit) so the newly-unlocked next lesson begins prefetching. |
+| `POST` | `/api/v1/lessons/{id}/complete` | — | `200 {id, unlock_state, path_completion}` | Mark complete (non-gating; orthogonal to the Quick-check Outcome). Only the **available** lesson may be completed (AL-012): **locked → `403`** (a later/not-yet-reached lesson cannot be skipped ahead to); already-**complete → idempotent `200`** no-op (no re-stamp). On success the prefetch window advances (`on_lesson_completed`, after commit) so the newly-unlocked next lesson begins prefetching. `path_completion` is non-null when the path has no incomplete lesson left — see below. |
 
 **`GET /api/v1/lessons/{id}` body.**
 
@@ -118,6 +118,36 @@ disclosed). Same **trigger + poll** model: `POST /lessons/{id}/generate` returns
 `selected_index` is the recorded (first-wins) Attempt's index; `outcome` is
 re-derived deterministically from it (`domains/grading`). An incorrect Attempt
 still reveals `correct_index` + `explanation` (formative, non-gating).
+
+**`POST /api/v1/lessons/{id}/complete` response (`path_completion`).**
+
+```json
+{ "id": "…", "unlock_state": "complete",
+  "path_completion": { "lesson_count": 24,
+                       "first_completed_at": "2026-08-02T09:14:11Z",
+                       "completed_at": "2026-08-13T21:31:02Z" } }
+```
+
+`path_completion` is `null` on every completion that leaves a lesson
+outstanding, and an object when **every** lesson on the path is complete — its
+presence *is* the "was that the last one?" answer, so there is no boolean beside
+it. It is a fact about the path **after** this call, not about what this call
+changed, which makes it idempotent alongside `unlock_state`: re-completing the
+final lesson answers the same way rather than only for the request that
+performed the transition. (Contrast the `path_completed` product event, which
+fires exactly once, from the narrower `path_now_complete` the repository derives
+under the path lock.)
+
+It rides on this response rather than being derived from a refetched
+`GET /paths/{id}` because the client's path-complete surface has to render on the
+same frame as the tap; inferring it would put a round trip in between, and the
+completion card would show the mid-path copy first and then change its mind.
+
+`first_completed_at`/`completed_at` are the two ends of the learner's run at the
+path, sent as instants rather than a day count: a **Day** is a calendar day in
+the *learner's* local timezone (CONTEXT.md), and this route takes no
+`tz_offset_minutes` — the client owns that arithmetic, as it does for the
+activity strip.
 
 **Known dead-end: completing past a failed head.** Completion gates on the
 **unlock** axis only (§6) and is orthogonal to generation, so an *available* but

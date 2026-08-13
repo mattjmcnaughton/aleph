@@ -43,6 +43,9 @@ interface StoredLesson {
   readPassage: string;
   /** First-wins recorded Attempt, or null until the learner attempts. */
   attempt: LessonAttempt | null;
+  /** ISO instant stamped by `POST /complete`; null while incomplete. Feeds the
+   *  `path_completion` span the same way `lessons.completed_at` does server-side. */
+  completedAt: string | null;
   /** Overrides the generic failure copy when generation resolves to `failed`. */
   generationError?: string;
 }
@@ -128,6 +131,10 @@ export function seedLesson(input: SeedLessonInput): void {
     explanation,
     readPassage: input.readPassage ?? "TypeScript is JavaScript with syntax for types.",
     attempt: null,
+    // A lesson seeded already `complete` carries a span end, so a path seeded
+    // part-finished reports an honest `first_completed_at` when its last
+    // lesson lands rather than dating the whole path from that final tap.
+    completedAt: (input.unlock_state ?? "available") === "complete" ? nowIso() : null,
     generationError: input.generationError,
   };
   if (input.attemptSelectedIndex !== undefined) {
@@ -277,6 +284,37 @@ export const lessonsHandlers = [
       );
     }
     lesson.unlock_state = "complete";
-    return HttpResponse.json({ id: lesson.id, unlock_state: "complete" });
+    lesson.completedAt ??= nowIso();
+    return HttpResponse.json({
+      id: lesson.id,
+      unlock_state: "complete",
+      path_completion: pathCompletionFor(lesson.path_id),
+    });
   }),
 ];
+
+function nowIso(): string {
+  return new Date().toISOString();
+}
+
+/**
+ * The path's completion roll-up, or null while a lesson on it is outstanding —
+ * mirroring `LessonRepository.path_completion` (docs/api.md).
+ *
+ * The store is this fake's whole universe of lessons, so a path is "finished"
+ * once every lesson **seeded on it** is complete. A test that seeds one lesson
+ * and completes it therefore does finish a one-lesson path, which is the honest
+ * reading: seeding a second, incomplete lesson is how a test says "this path has
+ * more to go".
+ */
+function pathCompletionFor(pathId: string) {
+  const lessons = [...store.values()].filter((lesson) => lesson.path_id === pathId);
+  const stamps = lessons.map((lesson) => lesson.completedAt);
+  if (lessons.length === 0 || stamps.some((stamp) => stamp === null)) return null;
+  const sorted = (stamps as string[]).slice().sort();
+  return {
+    lesson_count: lessons.length,
+    first_completed_at: sorted[0],
+    completed_at: sorted[sorted.length - 1],
+  };
+}

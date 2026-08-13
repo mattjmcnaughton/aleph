@@ -512,10 +512,28 @@ export interface LessonDetail {
   generation_error: string | null;
 }
 
-/** `POST /api/v1/lessons/{id}/complete` body — `200 {id, unlock_state}`. */
+/**
+ * The path has no incomplete lesson left, as of this completion (docs/api.md).
+ *
+ * Present on the completion response only when the path is finished — its
+ * presence *is* the "was that the last one?" answer, so there is no boolean
+ * beside it. Carried on the response rather than derived from a refetched path
+ * detail so the celebration renders on the same frame as the tap.
+ */
+export interface PathCompletion {
+  lesson_count: number;
+  /** Earliest `completed_at` on the path (ISO-8601, UTC). */
+  first_completed_at: string;
+  /** Latest `completed_at` on the path — i.e. this lesson's (ISO-8601, UTC). */
+  completed_at: string;
+}
+
+/** `POST /api/v1/lessons/{id}/complete` body — `200 {id, unlock_state, …}`. */
 export interface LessonCompleted {
   id: string;
   unlock_state: LessonUnlockState;
+  /** Null unless every lesson on the path is now complete. */
+  path_completion: PathCompletion | null;
 }
 
 /** Poll a lesson's detail (generation state + content once generated). */

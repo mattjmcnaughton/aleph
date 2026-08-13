@@ -340,6 +340,54 @@ async def test_complete_available_unlocks_next_and_is_idempotent(
 
 
 @pytest.mark.anyio
+@pytest.mark.workflow("W3")
+async def test_complete_reports_path_completion_only_on_the_last_lesson(
+    app: FastAPI, spawn: CollectingSpawn, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``path_completion`` is absent mid-path and populated on the final lesson.
+
+    The learner-facing half of W3: the completion response is what the
+    celebration renders from, so it has to answer "was that the last one?" in
+    the same round trip as the tap, and it has to keep answering it on a
+    re-complete (a double tap, a retried mutation).
+    """
+    async with _client(app) as client:
+        await _sign_in(client, monkeypatch, OWNER)
+        path = await _create_and_ready(client, spawn, "Graph algorithms")
+        lessons = _lessons(path)
+        assert len(lessons) > 1, "this test needs a multi-lesson path"
+
+        # Mid-path: complete every lesson but the last one. None of them is the
+        # end of the path, so none of them reports a completion.
+        for lesson in lessons[:-1]:
+            await _lesson(client, spawn, lesson["id"])
+            resp = await client.post(f"/api/v1/lessons/{lesson['id']}/complete")
+            await spawn.drain()
+            assert resp.status_code == 200, resp.text
+            assert resp.json()["path_completion"] is None
+
+        last = lessons[-1]
+        await _lesson(client, spawn, last["id"])
+        resp = await client.post(f"/api/v1/lessons/{last['id']}/complete")
+        await spawn.drain()
+        assert resp.status_code == 200, resp.text
+        completion = resp.json()["path_completion"]
+        assert completion is not None
+        assert completion["lesson_count"] == len(lessons)
+        # The span's ends are both real instants, ordered.
+        first_at = datetime.fromisoformat(completion["first_completed_at"])
+        last_at = datetime.fromisoformat(completion["completed_at"])
+        assert first_at <= last_at
+
+        # Idempotent: a re-complete of the final lesson answers the same way,
+        # rather than dropping the learner back to the mid-path screen.
+        again = await client.post(f"/api/v1/lessons/{last['id']}/complete")
+        await spawn.drain()
+        assert again.status_code == 200
+        assert again.json()["path_completion"] == completion
+
+
+@pytest.mark.anyio
 async def test_attempt_on_ungenerated_lesson_is_409(
     app: FastAPI, spawn: CollectingSpawn, monkeypatch: pytest.MonkeyPatch
 ) -> None:

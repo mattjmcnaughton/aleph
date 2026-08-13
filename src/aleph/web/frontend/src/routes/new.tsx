@@ -30,6 +30,15 @@ import { makePollingRefetchInterval } from "../lib/polling";
 import { useRetryGeneration } from "../lib/use-retry-generation";
 
 export const Route = createFileRoute("/new")({
+  // `?topic=` seeds the field and nothing else (same shape as `/review?path=`
+  // and `/cards?path=`). It is a *starting value*, not a lock: the learner is
+  // looking at an editable input, and the Topic is only frozen once the path
+  // exists. The one caller today is the path-complete card's "Go deeper" door
+  // (AL-420), which hands over the finished path's Topic so the learner is not
+  // retyping a subject Aleph already knows.
+  validateSearch: (search: Record<string, unknown>): { topic?: string } => ({
+    topic: typeof search.topic === "string" ? search.topic : undefined,
+  }),
   component: NewPath,
 });
 
@@ -47,8 +56,11 @@ const pathPollConfig = {
 function NewPath() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const search = Route.useSearch();
 
-  const [topic, setTopic] = useState("");
+  // Seeded once, as the initial value — not synced to the search param, so a
+  // learner who edits the field keeps their edit.
+  const [topic, setTopic] = useState(search.topic ?? "");
   const [level, setLevel] = useState<Level>("new_to_it");
   // Optional creation input alongside topic (§5.1, docs/api.md): free text the
   // learner pastes to shape the outline. Preserved across the failed→editing

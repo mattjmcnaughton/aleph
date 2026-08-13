@@ -1,0 +1,1263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aleph — mock: Path complete</title>
+<style>
+  /* ── Page chrome: theme-aware. The phones inside are always Nocturne dark,
+     because Nocturne is a committed dark system (index.css: color-scheme: dark).
+     Tokens below are the same set the other mocks in this folder use. ── */
+  :root {
+    --page-bg: #f4f4f6;
+    --page-fg: #1b1c24;
+    --page-muted: #5c6070;
+    --page-rule: #d8d9e0;
+    --page-card: #ffffff;
+    --page-accent: #2f7f88;
+    --page-iris: #5d5294;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --page-bg: #101119;
+      --page-fg: #e9e9ed;
+      --page-muted: #9397ab;
+      --page-rule: #2c2e3d;
+      --page-card: #191b26;
+      --page-accent: #6fced9;
+      --page-iris: #b5abfc;
+    }
+  }
+  :root[data-theme="dark"] {
+    --page-bg: #101119;
+    --page-fg: #e9e9ed;
+    --page-muted: #9397ab;
+    --page-rule: #2c2e3d;
+    --page-card: #191b26;
+    --page-accent: #6fced9;
+    --page-iris: #b5abfc;
+  }
+  :root[data-theme="light"] {
+    --page-bg: #f4f4f6;
+    --page-fg: #1b1c24;
+    --page-muted: #5c6070;
+    --page-rule: #d8d9e0;
+    --page-card: #ffffff;
+    --page-accent: #2f7f88;
+    --page-iris: #5d5294;
+  }
+
+  /* Nocturne tokens — lifted from tailwind.config.ts, unchanged. */
+  .noc {
+    --night: #161826;
+    --surface: #232532;
+    --elevated: #292b31;
+    --porcelain: #e9e9ed;
+    --mist: #9397ab;
+    --slate: #75798c;
+    --faint: #595d6c;
+    --teal: #4fb8c4;
+    --teal-bright: #6fced9;
+    --teal-dim: #3f959f;
+    --iris: #9184d9;
+    --iris-300: #d2cefd;
+    --iris-400: #b5abfc;
+    --iris-700: #5d5294;
+    --iris-900: #2b2741;
+    --divider: #e9e9ed29;
+    --danger: #ff8a80;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--page-bg);
+    color: var(--page-fg);
+    font-family: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+    line-height: 1.5;
+  }
+
+  .wrap {
+    max-width: 1240px;
+    margin: 0 auto;
+    padding: 40px 24px 72px;
+  }
+
+  /* ── Masthead ── */
+  .masthead { display: flex; flex-direction: column; gap: 14px; max-width: 66ch; }
+  .kicker {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--page-muted);
+    margin: 0;
+  }
+  h1 {
+    font-size: clamp(28px, 4vw, 40px);
+    line-height: 1.12;
+    letter-spacing: -0.02em;
+    font-weight: 600;
+    text-wrap: balance;
+    margin: 0;
+  }
+  h2.sec {
+    font-size: clamp(20px, 2.4vw, 25px);
+    line-height: 1.2;
+    letter-spacing: -0.018em;
+    font-weight: 600;
+    margin: 0;
+    text-wrap: balance;
+  }
+  .standfirst { color: var(--page-muted); font-size: 16.5px; margin: 0; }
+  .caveat {
+    margin: 4px 0 0;
+    padding: 10px 14px;
+    border-left: 2px solid var(--page-iris);
+    background: color-mix(in srgb, var(--page-iris) 8%, transparent);
+    border-radius: 0 8px 8px 0;
+    font-size: 14px;
+    color: var(--page-fg);
+    max-width: 66ch;
+  }
+  .caveat + .caveat { margin-top: 10px; }
+
+  hr.rule { border: 0; border-top: 1px solid var(--page-rule); margin: 44px 0 34px; }
+
+  .sec-head { display: flex; flex-direction: column; gap: 10px; max-width: 66ch; margin-bottom: 26px; }
+  .sec-note { color: var(--page-muted); font-size: 15px; margin: 0; }
+  .sec-note strong { color: var(--page-fg); font-weight: 600; }
+
+  /* ── Phone rail ── */
+  .rail {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(324px, 1fr));
+    gap: 40px 28px;
+    align-items: start;
+  }
+  .slot { display: flex; flex-direction: column; gap: 13px; min-width: 0; }
+  .slot-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .slot-tag {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px;
+    color: var(--page-accent);
+    font-weight: 600;
+  }
+  .slot-title { font-size: 16px; font-weight: 600; letter-spacing: -0.01em; }
+  .slot-note { font-size: 13.5px; color: var(--page-muted); max-width: 44ch; margin: 0; }
+  .slot-note b { color: var(--page-fg); font-weight: 600; }
+
+  /* Verdict line under each concept — the studio's own read. */
+  .verdict {
+    font-size: 13px;
+    display: flex;
+    gap: 8px;
+    align-items: baseline;
+    margin: 0;
+    color: var(--page-muted);
+  }
+  .verdict-label {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    flex: none;
+    padding: 1px 6px;
+    border-radius: 4px;
+  }
+  .v-yes { background: color-mix(in srgb, var(--page-accent) 16%, transparent); color: var(--page-accent); }
+  .v-maybe { background: color-mix(in srgb, var(--page-iris) 16%, transparent); color: var(--page-iris); }
+  .v-no { background: color-mix(in srgb, #b4453c 14%, transparent); color: #b4453c; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .v-no { background: rgba(255, 138, 128, 0.14); color: #ff8a80; }
+  }
+  :root[data-theme="dark"] .v-no { background: rgba(255, 138, 128, 0.14); color: #ff8a80; }
+
+  /* The device. Fixed phone metrics — this is a phone-first product. */
+  .phone {
+    background: var(--night);
+    border-radius: 26px;
+    padding: 10px;
+    box-shadow: 0 0 0 1px var(--page-rule), 0 18px 44px rgba(0, 0, 0, 0.28);
+  }
+  .screen {
+    position: relative;
+    background: var(--night);
+    border-radius: 18px;
+    height: 640px;
+    overflow: hidden;
+    color: var(--porcelain);
+    font-size: 14px;
+  }
+  .screen-scroll {
+    height: 100%;
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-width: thin;
+    scrollbar-color: var(--faint) transparent;
+  }
+  .screen-scroll::-webkit-scrollbar { width: 6px; }
+  .screen-scroll::-webkit-scrollbar-thumb { background: var(--faint); border-radius: 3px; }
+
+  .appbar {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    height: 52px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 16px;
+    background: var(--night);
+    border-bottom: 1px solid var(--divider);
+  }
+  .glyph {
+    font-family: Georgia, "Times New Roman", serif;
+    font-size: 20px;
+    color: var(--iris-400);
+    line-height: 1;
+  }
+  .appbar-right { font-size: 12px; color: var(--slate); display: flex; align-items: center; gap: 9px; }
+
+  .pad { padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+  .noc .kicker { color: var(--mist); }
+
+  .h-lesson { font-size: 19px; font-weight: 600; letter-spacing: -0.01em; line-height: 1.25; margin: 0; }
+  .muted { color: var(--mist); }
+  .dim { color: var(--slate); }
+  .tiny { font-size: 12px; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .num { font-variant-numeric: tabular-nums; }
+  .screen p { margin: 0; }
+
+  /* Cards */
+  .card {
+    background: var(--surface);
+    border-radius: 14px;
+    padding: 16px;
+    box-shadow: 0 0 0 1px #3f424d;
+  }
+  .card-teal {
+    background: rgba(79, 184, 196, 0.1);
+    box-shadow: inset 0 0 0 1px rgba(79, 184, 196, 0.4);
+  }
+  .card-center { text-align: center; }
+
+  .tickring {
+    width: 32px;
+    height: 32px;
+    margin: 0 auto;
+    border-radius: 999px;
+    display: grid;
+    place-items: center;
+    box-shadow: inset 0 0 0 1px var(--teal);
+    color: var(--teal);
+  }
+  .tickring svg { width: 15px; height: 15px; display: block; }
+
+  /* Buttons */
+  .btn {
+    font: inherit;
+    font-size: 14px;
+    font-weight: 600;
+    border: 0;
+    border-radius: 8px;
+    padding: 12px 16px;
+    cursor: pointer;
+    width: 100%;
+    background: var(--teal);
+    color: #08252a;
+    transition: background 120ms ease;
+    text-align: center;
+  }
+  .btn:hover { background: var(--teal-bright); }
+  .btn-ghost {
+    background: transparent;
+    color: var(--mist);
+    box-shadow: inset 0 0 0 1px var(--faint);
+    font-weight: 500;
+  }
+  .btn-ghost:hover { background: #ffffff0a; color: var(--porcelain); }
+  .btn:focus-visible, .replay:focus-visible { outline: 2px solid var(--teal-bright); outline-offset: 2px; }
+
+  /* The replay control lives outside the device — it is mock furniture, not UI. */
+  .replay {
+    align-self: flex-start;
+    font: inherit;
+    font-size: 12.5px;
+    font-weight: 600;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    letter-spacing: 0.02em;
+    color: var(--page-accent);
+    background: transparent;
+    border: 1px solid var(--page-rule);
+    border-radius: 999px;
+    padding: 5px 13px;
+    cursor: pointer;
+  }
+  .replay:hover { border-color: var(--page-accent); }
+
+  /* ── Drafts block (Phase 3, renders under the completion state) ── */
+  .draft-block { display: flex; flex-direction: column; gap: 9px; }
+  .draft {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    padding: 10px 11px;
+    border-radius: 10px;
+    background: var(--elevated);
+    box-shadow: inset 0 0 0 1px #ffffff0f;
+  }
+  .draft-front { font-weight: 600; font-size: 13px; line-height: 1.35; }
+  .draft-back { font-size: 12px; color: var(--mist); line-height: 1.4; margin-top: 3px; }
+  .toggle {
+    flex: none;
+    width: 24px; height: 24px;
+    border-radius: 7px; border: 0;
+    background: var(--teal); color: #08252a;
+    font-size: 13px; font-weight: 700; line-height: 24px;
+    padding: 0; cursor: pointer;
+  }
+
+  /* ── A. The line completes ── */
+  .ladder { display: flex; gap: 3px; }
+  .rung {
+    flex: 1;
+    height: 22px;
+    border-radius: 3px;
+    background: #ffffff12;
+    transform-origin: 50% 100%;
+  }
+  .rung.done { background: var(--teal); }
+  .play-a .rung.fill {
+    animation: rung-fill 260ms cubic-bezier(0.2, 0.9, 0.3, 1) both;
+    animation-delay: var(--d);
+  }
+  @keyframes rung-fill {
+    0%   { background: #ffffff12; transform: scaleY(1); }
+    45%  { background: var(--teal-bright); transform: scaleY(1.5); }
+    100% { background: var(--teal); transform: scaleY(1); }
+  }
+  .bar { height: 7px; border-radius: 999px; background: #e9e9ed1a; overflow: hidden; }
+  .bar > span { display: block; height: 100%; background: var(--teal); width: 88%; }
+  .play-a .bar > span { animation: bar-sweep 900ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+  @keyframes bar-sweep { from { width: 88%; } to { width: 100%; } }
+
+  .swap { position: relative; }
+  .swap .after { display: none; }
+  .play-a .swap .before { animation: fade-out 220ms ease both; }
+  .play-a .swap .after {
+    display: block;
+    animation: rise-in 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation-delay: 900ms;
+  }
+  .play-a .swap .before { animation-delay: 820ms; }
+  @keyframes fade-out { to { opacity: 0; transform: translateY(-4px); height: 0; margin: 0; overflow: hidden; } }
+  @keyframes rise-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+  /* ── B. The seal ── */
+  .seal { position: relative; width: 108px; height: 108px; margin: 4px auto 0; }
+  .seal svg { position: absolute; inset: 0; width: 100%; height: 100%; transform: rotate(-90deg); }
+  .seal-track { fill: none; stroke: #ffffff14; stroke-width: 2; }
+  .seal-arc {
+    fill: none;
+    stroke: var(--teal);
+    stroke-width: 2.5;
+    stroke-linecap: round;
+    stroke-dasharray: 302;
+    stroke-dashoffset: 0;
+  }
+  .play-b .seal-arc { animation: arc-draw 1100ms cubic-bezier(0.65, 0, 0.35, 1) both; }
+  @keyframes arc-draw { from { stroke-dashoffset: 302; } to { stroke-dashoffset: 0; } }
+
+  .seal-glyph {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    font-family: Georgia, "Times New Roman", serif;
+    font-size: 44px;
+    line-height: 1;
+    color: var(--iris-400);
+  }
+  .play-b .seal-glyph { animation: glyph-set 700ms cubic-bezier(0.22, 1, 0.36, 1) both; animation-delay: 700ms; }
+  @keyframes glyph-set {
+    from { opacity: 0; transform: scale(0.72); filter: blur(3px); }
+    60%  { opacity: 1; transform: scale(1.06); filter: blur(0); }
+    to   { opacity: 1; transform: scale(1); }
+  }
+  .seal-halo {
+    position: absolute;
+    inset: -6px;
+    border-radius: 999px;
+    box-shadow: 0 0 0 1px rgba(79, 184, 196, 0.45), 0 10px 34px rgba(79, 184, 196, 0.16);
+    opacity: 0;
+  }
+  .play-b .seal-halo { animation: halo 900ms ease-out both; animation-delay: 1000ms; }
+  @keyframes halo {
+    from { opacity: 0.9; transform: scale(0.9); }
+    to   { opacity: 0; transform: scale(1.22); }
+  }
+  .play-b .seal-copy { animation: rise-in 480ms cubic-bezier(0.22, 1, 0.36, 1) both; animation-delay: 1150ms; }
+
+  /* ── C. Confetti ── */
+  .confetti-layer { position: absolute; inset: 0; pointer-events: none; overflow: hidden; z-index: 3; }
+  .conf {
+    position: absolute;
+    width: 6px;
+    height: 9px;
+    border-radius: 1px;
+    opacity: 0;
+    animation: conf-fly var(--dur) cubic-bezier(0.15, 0.65, 0.4, 1) both;
+    animation-delay: var(--d);
+  }
+  @keyframes conf-fly {
+    0%   { opacity: 1; transform: translate(0, 0) rotate(0deg); }
+    70%  { opacity: 1; }
+    100% { opacity: 0; transform: translate(var(--dx), var(--dy)) rotate(var(--rot)); }
+  }
+
+  /* ── D. The receipt ── */
+  .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--divider); border-radius: 10px; overflow: hidden; }
+  .stat { background: var(--surface); padding: 12px 13px; display: flex; flex-direction: column; gap: 3px; }
+  .stat-n { font-size: 24px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.1; color: var(--porcelain); font-variant-numeric: tabular-nums; }
+  .stat-n small { font-size: 13px; font-weight: 500; color: var(--mist); margin-left: 2px; letter-spacing: 0; }
+  .stat-l { font-size: 11px; color: var(--slate); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; text-transform: uppercase; letter-spacing: 0.08em; }
+  .play-d .stat { animation: rise-in 420ms cubic-bezier(0.22, 1, 0.36, 1) both; animation-delay: var(--d); }
+  .play-d .receipt-head { animation: rise-in 420ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+  .play-d .doors { animation: rise-in 460ms cubic-bezier(0.22, 1, 0.36, 1) both; animation-delay: 620ms; }
+
+  .doors { display: flex; flex-direction: column; gap: 8px; }
+  .door {
+    display: flex; align-items: center; gap: 11px;
+    padding: 11px 13px;
+    border-radius: 10px;
+    background: var(--surface);
+    box-shadow: inset 0 0 0 1px #ffffff12;
+    text-align: left;
+    font: inherit;
+    font-size: 13px;
+    color: var(--porcelain);
+    border: 0;
+    cursor: pointer;
+    width: 100%;
+  }
+  .door:hover { box-shadow: inset 0 0 0 1px rgba(79, 184, 196, 0.4); }
+  .door-icon { flex: none; width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center; font-size: 13px; }
+  .door-teal { background: rgba(79, 184, 196, 0.14); color: var(--teal); }
+  .door-iris { background: rgba(145, 132, 217, 0.16); color: var(--iris-400); }
+  .door-sub { display: block; font-size: 11.5px; color: var(--slate); margin-top: 1px; }
+  .door-chev { margin-left: auto; color: var(--slate); flex: none; }
+
+  /* ── E. Takeover ── */
+  .takeover {
+    position: absolute;
+    inset: 0;
+    z-index: 4;
+    background: rgba(22, 24, 38, 0.94);
+    backdrop-filter: blur(3px);
+    display: grid;
+    place-items: center;
+    text-align: center;
+    padding: 28px;
+    opacity: 0;
+    pointer-events: none;
+  }
+  .play-e .takeover { animation: takeover 2600ms ease both; }
+  @keyframes takeover {
+    0%   { opacity: 0; }
+    12%  { opacity: 1; }
+    82%  { opacity: 1; }
+    100% { opacity: 0; }
+  }
+  .takeover-inner { display: flex; flex-direction: column; gap: 12px; align-items: center; }
+  .play-e .takeover-inner { animation: rise-in 620ms cubic-bezier(0.22, 1, 0.36, 1) both; animation-delay: 160ms; }
+  .takeover-n {
+    font-size: 62px; font-weight: 600; letter-spacing: -0.04em; line-height: 1;
+    color: var(--teal); font-variant-numeric: tabular-nums;
+  }
+
+  /* ── Recommendation section ── */
+  .rec {
+    display: grid;
+    grid-template-columns: minmax(324px, 380px) minmax(0, 1fr);
+    gap: 34px;
+    align-items: start;
+  }
+  @media (max-width: 760px) { .rec { grid-template-columns: 1fr; } }
+  .rec-body { display: flex; flex-direction: column; gap: 18px; }
+  .beat-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; counter-reset: beat; }
+  /* Deliberately NOT a grid row: `<b>` and `<code>` inside a grid container are
+     blockified into grid items of their own, which shreds the sentence into one
+     word per line. Absolute-positioned marker, ordinary block text. */
+  .beat-list li {
+    position: relative;
+    padding-left: 30px;
+    font-size: 14.5px;
+    color: var(--page-muted);
+  }
+  .beat-list li::before {
+    counter-increment: beat;
+    content: counter(beat);
+    position: absolute;
+    left: 0;
+    top: 3px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--page-accent);
+  }
+  .beat-list b { color: var(--page-fg); font-weight: 600; }
+
+  /* ── Copy comparison + data table ── */
+  .table-scroll { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; min-width: 560px; }
+  th, td { text-align: left; padding: 10px 14px 10px 0; border-bottom: 1px solid var(--page-rule); vertical-align: top; }
+  th {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--page-muted);
+    font-weight: 600;
+  }
+  td.have { color: var(--page-accent); font-weight: 600; }
+  td.need { color: var(--page-iris); font-weight: 600; }
+  td code, .rec-body code, .slot-note code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.9em;
+    background: color-mix(in srgb, var(--page-fg) 7%, transparent);
+    padding: 1px 5px;
+    border-radius: 4px;
+  }
+
+  .copy-pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+  .copy-card {
+    background: var(--page-card);
+    border: 1px solid var(--page-rule);
+    border-radius: 12px;
+    padding: 16px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .copy-card p { margin: 0; }
+  .copy-say { font-size: 15px; }
+  .copy-why { font-size: 13px; color: var(--page-muted); }
+
+  footer.note {
+    margin-top: 46px;
+    padding-top: 22px;
+    border-top: 1px solid var(--page-rule);
+    color: var(--page-muted);
+    font-size: 13.5px;
+    max-width: 70ch;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .rung, .bar > span, .swap .before, .swap .after, .seal-arc, .seal-glyph,
+    .seal-halo, .seal-copy, .conf, .stat, .receipt-head, .doors, .takeover, .takeover-inner {
+      animation-duration: 1ms !important;
+      animation-delay: 0ms !important;
+    }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="masthead">
+    <p class="kicker">Mock · finishing a path</p>
+    <h1>The last Mark complete should not look like the first</h1>
+    <p class="standfirst">
+      Five directions for the moment a learner taps <b>Mark complete</b> on the final lesson of a
+      path, drawn in Nocturne against the surface that renders today. Every phone below is live —
+      press <span class="mono">Replay</span> to run the motion.
+    </p>
+    <p class="caveat">
+      <b>Vocabulary</b> (docs/CONTEXT.md): the action is <b>Mark complete</b>, the thing being
+      finished is a <b>Path</b> of <b>Units</b> and <b>Lessons</b>, and the only streak worth
+      celebrating is the <b>Daily streak</b> — the <b>Path streak</b> is deliberately quiet
+      (Phase 5 PRD §4.3), so it stays off these screens.
+    </p>
+  </header>
+
+  <hr class="rule">
+
+  <!-- ─────────────────────────  BASELINE  ───────────────────────── -->
+  <section>
+    <div class="sec-head">
+      <h2 class="sec">Where it stands today</h2>
+      <p class="sec-note">
+        The completed state is one component for every lesson in the product. Finish lesson 3 of 24
+        and finish lesson 24 of 24 and you get the same card, including
+        <strong>“Head back to your path to keep going”</strong> — at the exact moment there is
+        nothing left to keep going to. The path-level acknowledgement (<code>CompleteBanner</code>,
+        “Path complete.”) does exist, but it lives on the path view, so the learner only meets it
+        <em>after</em> tapping away from the thing they just finished. The moment and its
+        acknowledgement are one screen apart.
+      </p>
+    </div>
+
+    <div class="rail">
+      <div class="slot">
+        <div class="slot-head"><span class="slot-tag">now</span><span class="slot-title">Final lesson, marked complete</span></div>
+        <div class="phone noc">
+          <div class="screen">
+            <div class="screen-scroll">
+              <div class="appbar">
+                <span class="glyph">א</span>
+                <span class="appbar-right"><span>Day 9 🔥</span></span>
+              </div>
+              <div class="pad">
+                <p class="kicker">Lesson</p>
+                <p class="h-lesson">Lifetimes in function signatures</p>
+                <div class="card card-teal card-center">
+                  <div class="tickring">
+                    <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.2 3.2L13 5" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                  </div>
+                  <p style="margin-top:11px;font-size:17px;font-weight:600;">Lesson complete.</p>
+                  <p class="muted" style="margin-top:7px;font-size:13px;line-height:1.55;">
+                    Nice work. Head back to your path to keep going.
+                  </p>
+                  <button class="btn" style="margin-top:15px;">Back to your path</button>
+                </div>
+
+                <div class="draft-block">
+                  <p class="kicker">Aleph drafted 4 cards</p>
+                  <div class="draft">
+                    <div style="flex:1;min-width:0;">
+                      <div class="draft-front">What does <code style="background:#ffffff10;padding:1px 4px;border-radius:4px;">'a</code> in <code style="background:#ffffff10;padding:1px 4px;border-radius:4px;">fn longest&lt;'a&gt;</code> declare?</div>
+                      <div class="draft-back">A generic lifetime parameter — a name for a region the borrows must share.</div>
+                    </div>
+                    <button class="toggle" aria-label="Discard this card">✓</button>
+                  </div>
+                  <div class="draft">
+                    <div style="flex:1;min-width:0;">
+                      <div class="draft-front">When can the compiler elide a lifetime?</div>
+                      <div class="draft-back">When the three elision rules assign every output lifetime unambiguously.</div>
+                    </div>
+                    <button class="toggle" aria-label="Discard this card">✓</button>
+                  </div>
+                  <button class="btn" style="margin-top:4px;">Keep 4 cards</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <p class="slot-note">
+          Note the <b>drafts block</b> sitting under the card. Phase 3 puts 3–5 flashcards here the
+          moment a lesson completes, and it is the highest-value thing on the screen. Any
+          celebration that covers it, or pushes it below a second fold, is taking something away to
+          add something.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <!-- ─────────────────────────  DIRECTIONS  ───────────────────────── -->
+  <section>
+    <div class="sec-head">
+      <h2 class="sec">Five directions</h2>
+      <p class="sec-note">
+        Ordered from most restrained to most ceremonial. They are not exclusive — the recommendation
+        further down is a composite of two of them.
+      </p>
+    </div>
+
+    <div class="rail">
+
+      <!-- ── A ── -->
+      <div class="slot">
+        <div class="slot-head"><span class="slot-tag">A</span><span class="slot-title">The line completes</span></div>
+        <p class="slot-note">
+          No new ornament at all: the celebration is the <b>evidence</b>. The path rail fills in
+          left to right, the progress bar sweeps the last few percent, the number counts to 100, and
+          only then does the card change what it says. The learner watches their own work land.
+        </p>
+        <div class="phone noc" data-concept="a">
+          <div class="screen">
+            <div class="screen-scroll">
+              <div class="appbar">
+                <span class="glyph">א</span>
+                <span class="appbar-right"><span>Day 9 🔥</span></span>
+              </div>
+              <div class="pad js-stage">
+                <p class="kicker">Lesson</p>
+                <p class="h-lesson">Lifetimes in function signatures</p>
+
+                <div class="card">
+                  <div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px;">
+                    <p class="kicker" style="letter-spacing:0.14em;">Rust ownership</p>
+                    <p class="mono num" style="font-size:22px;line-height:1;color:var(--teal);" data-count="88:100">88<span style="font-size:13px;color:var(--mist);">%</span></p>
+                  </div>
+                  <div class="ladder" style="margin-top:12px;" aria-hidden="true">
+                    <span class="rung done"></span><span class="rung done"></span><span class="rung done"></span>
+                    <span class="rung done"></span><span class="rung done"></span><span class="rung done"></span>
+                    <span class="rung done"></span><span class="rung done"></span><span class="rung done"></span>
+                    <span class="rung done"></span><span class="rung done"></span><span class="rung done"></span>
+                    <span class="rung done"></span><span class="rung done"></span><span class="rung done"></span>
+                    <span class="rung done"></span><span class="rung done"></span><span class="rung done"></span>
+                    <span class="rung done"></span><span class="rung done"></span><span class="rung done"></span>
+                    <span class="rung fill" style="--d:80ms;"></span>
+                    <span class="rung fill" style="--d:180ms;"></span>
+                    <span class="rung fill" style="--d:280ms;"></span>
+                  </div>
+                  <div class="bar" style="margin-top:12px;"><span></span></div>
+                  <p class="muted tiny" style="margin-top:8px;">24 of 24 lessons complete</p>
+                </div>
+
+                <div class="card card-teal card-center swap">
+                  <div class="before">
+                    <div class="tickring">
+                      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.2 3.2L13 5" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </div>
+                    <p style="margin-top:11px;font-size:17px;font-weight:600;">Lesson complete.</p>
+                    <p class="muted" style="margin-top:7px;font-size:13px;">That was the last one.</p>
+                  </div>
+                  <div class="after">
+                    <p style="font-size:19px;font-weight:600;letter-spacing:-0.01em;">Path complete.</p>
+                    <p class="muted" style="margin-top:8px;font-size:13px;line-height:1.55;">
+                      Six units, twenty-four lessons, eleven days. Rust ownership is yours.
+                    </p>
+                    <button class="btn" style="margin-top:15px;">See what you finished</button>
+                  </div>
+                </div>
+
+                <div class="draft-block">
+                  <p class="kicker">Aleph drafted 4 cards</p>
+                  <div class="draft">
+                    <div style="flex:1;min-width:0;">
+                      <div class="draft-front">When can the compiler elide a lifetime?</div>
+                      <div class="draft-back">When the three elision rules assign every output lifetime unambiguously.</div>
+                    </div>
+                    <button class="toggle" aria-label="Discard this card">✓</button>
+                  </div>
+                  <button class="btn" style="margin-top:4px;">Keep 4 cards</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <button class="replay" type="button">↻ Replay</button>
+        <p class="verdict"><span class="verdict-label v-yes">Strong</span><span>Cheapest to build, most in character, and it can never feel like another app's confetti. Least likely to make a learner feel <em>celebrated</em>.</span></p>
+      </div>
+
+      <!-- ── B ── -->
+      <div class="slot">
+        <div class="slot-head"><span class="slot-tag">B</span><span class="slot-title">The seal</span></div>
+        <p class="slot-note">
+          The path earns a mark. A teal ring draws itself around the aleph glyph — the brand's own
+          character, already the watermark texture in the mocks — then a single glow pulse
+          (<code>shadow-glow</code>, which Nocturne already defines) and the copy rises under it.
+          One second of ceremony, and it uses no vocabulary the design system doesn't own.
+        </p>
+        <div class="phone noc" data-concept="b">
+          <div class="screen">
+            <div class="screen-scroll">
+              <div class="appbar">
+                <span class="glyph">א</span>
+                <span class="appbar-right"><span>Day 9 🔥</span></span>
+              </div>
+              <div class="pad js-stage">
+                <p class="kicker">Lesson</p>
+                <p class="h-lesson">Lifetimes in function signatures</p>
+
+                <div class="card card-teal card-center" style="padding-top:22px;padding-bottom:20px;">
+                  <div class="seal" aria-hidden="true">
+                    <svg viewBox="0 0 108 108">
+                      <circle class="seal-track" cx="54" cy="54" r="48"></circle>
+                      <circle class="seal-arc" cx="54" cy="54" r="48"></circle>
+                    </svg>
+                    <span class="seal-halo"></span>
+                    <span class="seal-glyph">א</span>
+                  </div>
+                  <div class="seal-copy">
+                    <p style="margin-top:16px;font-size:19px;font-weight:600;letter-spacing:-0.01em;">Path complete.</p>
+                    <p class="muted" style="margin-top:8px;font-size:13px;line-height:1.55;">
+                      You finished <b style="color:var(--porcelain);font-weight:600;">Rust ownership</b> — all 24 lessons.
+                    </p>
+                    <button class="btn" style="margin-top:15px;">See what you finished</button>
+                  </div>
+                </div>
+
+                <div class="draft-block">
+                  <p class="kicker">Aleph drafted 4 cards</p>
+                  <div class="draft">
+                    <div style="flex:1;min-width:0;">
+                      <div class="draft-front">When can the compiler elide a lifetime?</div>
+                      <div class="draft-back">When the three elision rules assign every output lifetime unambiguously.</div>
+                    </div>
+                    <button class="toggle" aria-label="Discard this card">✓</button>
+                  </div>
+                  <button class="btn" style="margin-top:4px;">Keep 4 cards</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <button class="replay" type="button">↻ Replay</button>
+        <p class="verdict"><span class="verdict-label v-yes">Strong</span><span>Reads as <em>earned</em> rather than <em>congratulated</em>, which is the difference between this product and a habit tracker. One SVG, no library.</span></p>
+      </div>
+
+      <!-- ── C ── -->
+      <div class="slot">
+        <div class="slot-head"><span class="slot-tag">C</span><span class="slot-title">The burst</span></div>
+        <p class="slot-note">
+          The obvious one, drawn honestly so it can be judged rather than imagined: sparse particles
+          in teal and iris only — no rainbow, no rotation carnival — thrown from the button that was
+          just pressed, gone in under a second. Shown here <b>with</b> the seal underneath, because
+          confetti alone leaves nothing behind once it lands.
+        </p>
+        <div class="phone noc" data-concept="c">
+          <div class="screen">
+            <div class="confetti-layer" aria-hidden="true"></div>
+            <div class="screen-scroll">
+              <div class="appbar">
+                <span class="glyph">א</span>
+                <span class="appbar-right"><span>Day 9 🔥</span></span>
+              </div>
+              <div class="pad js-stage">
+                <p class="kicker">Lesson</p>
+                <p class="h-lesson">Lifetimes in function signatures</p>
+
+                <div class="card card-teal card-center" style="padding-top:22px;padding-bottom:20px;">
+                  <div class="seal" aria-hidden="true">
+                    <svg viewBox="0 0 108 108">
+                      <circle class="seal-track" cx="54" cy="54" r="48"></circle>
+                      <circle class="seal-arc" cx="54" cy="54" r="48"></circle>
+                    </svg>
+                    <span class="seal-halo"></span>
+                    <span class="seal-glyph">א</span>
+                  </div>
+                  <div class="seal-copy">
+                    <p style="margin-top:16px;font-size:19px;font-weight:600;letter-spacing:-0.01em;">Path complete.</p>
+                    <p class="muted" style="margin-top:8px;font-size:13px;line-height:1.55;">
+                      All 24 lessons of <b style="color:var(--porcelain);font-weight:600;">Rust ownership</b>, finished.
+                    </p>
+                    <button class="btn" style="margin-top:15px;">See what you finished</button>
+                  </div>
+                </div>
+
+                <div class="draft-block">
+                  <p class="kicker">Aleph drafted 4 cards</p>
+                  <div class="draft">
+                    <div style="flex:1;min-width:0;">
+                      <div class="draft-front">When can the compiler elide a lifetime?</div>
+                      <div class="draft-back">When the three elision rules assign every output lifetime unambiguously.</div>
+                    </div>
+                    <button class="toggle" aria-label="Discard this card">✓</button>
+                  </div>
+                  <button class="btn" style="margin-top:4px;">Keep 4 cards</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <button class="replay" type="button">↻ Replay</button>
+        <p class="verdict"><span class="verdict-label v-maybe">Optional</span><span>Fine as a one-line addition <em>on top of</em> B — nothing is lost if it's cut, and it's the first thing that will read as generic six months from now.</span></p>
+      </div>
+
+      <!-- ── D ── -->
+      <div class="slot">
+        <div class="slot-head"><span class="slot-tag">D</span><span class="slot-title">The receipt</span></div>
+        <p class="slot-note">
+          Earn the moment with facts instead of motion. Numbers count up, then three doors appear —
+          and this is where completion stops being a dead end: a harder path on the same topic, a
+          <b>Beat</b> on it (the subject keeps moving after the curriculum stops), and the cards this
+          path left behind.
+        </p>
+        <div class="phone noc" data-concept="d">
+          <div class="screen">
+            <div class="screen-scroll">
+              <div class="appbar">
+                <span class="glyph">א</span>
+                <span class="appbar-right"><span>Day 9 🔥</span></span>
+              </div>
+              <div class="pad js-stage">
+                <div class="receipt-head" style="text-align:center;">
+                  <p class="kicker">Path complete</p>
+                  <p style="margin-top:6px;font-size:22px;font-weight:600;letter-spacing:-0.02em;">Rust ownership</p>
+                  <p class="dim tiny" style="margin-top:5px;">Some experience · started 2 August</p>
+                </div>
+
+                <div class="stat-grid">
+                  <div class="stat" style="--d:80ms;"><span class="stat-n" data-count="0:24">24</span><span class="stat-l">Lessons</span></div>
+                  <div class="stat" style="--d:150ms;"><span class="stat-n" data-count="0:6">6</span><span class="stat-l">Units</span></div>
+                  <div class="stat" style="--d:220ms;"><span class="stat-n" data-count="0:11">11</span><span class="stat-l">Days</span></div>
+                  <div class="stat" style="--d:290ms;"><span class="stat-n" data-count="0:21">21<small>/24</small></span><span class="stat-l">Quick checks</span></div>
+                </div>
+
+                <div class="card" style="display:flex;align-items:center;gap:11px;padding:13px 14px;">
+                  <span style="font-size:16px;">🔥</span>
+                  <div style="min-width:0;">
+                    <p style="font-size:13.5px;font-weight:600;">Day 9 of your streak</p>
+                    <p class="dim tiny" style="margin-top:2px;">Best yet. Tomorrow makes ten.</p>
+                  </div>
+                </div>
+
+                <div class="doors">
+                  <button class="door">
+                    <span class="door-icon door-teal">↗</span>
+                    <span>Go deeper on Rust ownership<span class="door-sub">A new path at “I work in it”</span></span>
+                    <span class="door-chev">›</span>
+                  </button>
+                  <button class="door">
+                    <span class="door-icon door-iris">◈</span>
+                    <span>Follow it as a Beat<span class="door-sub">Weekly Briefs on what changes</span></span>
+                    <span class="door-chev">›</span>
+                  </button>
+                  <button class="door">
+                    <span class="door-icon door-teal">▤</span>
+                    <span>Your 14 cards from this path<span class="door-sub">3 due today</span></span>
+                    <span class="door-chev">›</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <button class="replay" type="button">↻ Replay</button>
+        <p class="verdict"><span class="verdict-label v-yes">Strong</span><span>The only direction that answers “what now?”. Two of its four stats need data the API doesn't expose yet — see the table below.</span></p>
+      </div>
+
+      <!-- ── E ── -->
+      <div class="slot">
+        <div class="slot-head"><span class="slot-tag">E</span><span class="slot-title">The takeover</span></div>
+        <p class="slot-note">
+          Maximum ceremony: the lesson dims, a full-screen statement holds for a beat, then it
+          releases back to the page. Drawn here at its most restrained — one number, one line — and
+          it still has the problem that it interrupts a learner mid-gesture and lands them back on a
+          screen they've already stopped reading.
+        </p>
+        <div class="phone noc" data-concept="e">
+          <div class="screen">
+            <div class="takeover">
+              <div class="takeover-inner">
+                <span class="mono kicker" style="color:var(--mist);">Path complete</span>
+                <span class="takeover-n">24</span>
+                <span style="font-size:15px;line-height:1.5;color:var(--porcelain);max-width:22ch;">
+                  lessons of Rust ownership, finished over 11 days.
+                </span>
+              </div>
+            </div>
+            <div class="screen-scroll">
+              <div class="appbar">
+                <span class="glyph">א</span>
+                <span class="appbar-right"><span>Day 9 🔥</span></span>
+              </div>
+              <div class="pad">
+                <p class="kicker">Lesson</p>
+                <p class="h-lesson">Lifetimes in function signatures</p>
+                <div class="card card-teal card-center">
+                  <div class="tickring">
+                    <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.2 3.2L13 5" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                  </div>
+                  <p style="margin-top:11px;font-size:17px;font-weight:600;">Path complete.</p>
+                  <p class="muted" style="margin-top:7px;font-size:13px;line-height:1.55;">
+                    Every lesson done. See what you finished, or start something new.
+                  </p>
+                  <button class="btn" style="margin-top:15px;">See what you finished</button>
+                </div>
+                <div class="draft-block">
+                  <p class="kicker">Aleph drafted 4 cards</p>
+                  <div class="draft">
+                    <div style="flex:1;min-width:0;">
+                      <div class="draft-front">When can the compiler elide a lifetime?</div>
+                      <div class="draft-back">When the three elision rules assign every output lifetime unambiguously.</div>
+                    </div>
+                    <button class="toggle" aria-label="Discard this card">✓</button>
+                  </div>
+                  <button class="btn" style="margin-top:4px;">Keep 4 cards</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <button class="replay" type="button">↻ Replay</button>
+        <p class="verdict"><span class="verdict-label v-no">Weak</span><span>Buries the drafts block behind a scrim at the one moment it's offered, and a timed overlay is the hardest thing here to get right on a slow phone.</span></p>
+      </div>
+
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <!-- ─────────────────────────  RECOMMENDATION  ───────────────────────── -->
+  <section>
+    <div class="sec-head">
+      <h2 class="sec">Recommended: the seal, then the receipt</h2>
+      <p class="sec-note">
+        <strong>B into D, in place, on the lesson screen.</strong> The seal draws where the completed
+        card already is — so the ceremony happens exactly where the thumb was — and as it settles the
+        card grows into the receipt beneath it. Nothing is covered, nothing is dismissed, and the
+        drafts block still lands right under it. Confetti (C) is a one-line addition on top if it
+        wants testing; the rail fill (A) is the second beat a learner sees when they tap through to
+        the path.
+      </p>
+    </div>
+
+    <div class="rec">
+      <div class="slot">
+        <div class="phone noc" data-concept="r">
+          <div class="screen">
+            <div class="confetti-layer" aria-hidden="true"></div>
+            <div class="screen-scroll">
+              <div class="appbar">
+                <span class="glyph">א</span>
+                <span class="appbar-right"><span>Day 9 🔥</span></span>
+              </div>
+              <div class="pad js-stage">
+                <p class="kicker">Lesson</p>
+                <p class="h-lesson">Lifetimes in function signatures</p>
+
+                <div class="card card-teal" style="padding-top:22px;">
+                  <div class="seal" aria-hidden="true">
+                    <svg viewBox="0 0 108 108">
+                      <circle class="seal-track" cx="54" cy="54" r="48"></circle>
+                      <circle class="seal-arc" cx="54" cy="54" r="48"></circle>
+                    </svg>
+                    <span class="seal-halo"></span>
+                    <span class="seal-glyph">א</span>
+                  </div>
+                  <div class="seal-copy">
+                    <p style="margin-top:16px;text-align:center;font-size:19px;font-weight:600;letter-spacing:-0.01em;">Path complete.</p>
+                    <p class="muted" style="margin-top:7px;text-align:center;font-size:13px;line-height:1.55;">
+                      You finished <b style="color:var(--porcelain);font-weight:600;">Rust ownership</b>.
+                    </p>
+                    <div class="stat-grid" style="margin-top:15px;">
+                      <div class="stat" style="--d:0ms;"><span class="stat-n" data-count="0:24">24</span><span class="stat-l">Lessons</span></div>
+                      <div class="stat" style="--d:0ms;"><span class="stat-n" data-count="0:11">11</span><span class="stat-l">Days</span></div>
+                    </div>
+                    <div class="doors" style="margin-top:12px;">
+                      <button class="door">
+                        <span class="door-icon door-teal">↗</span>
+                        <span>Go deeper on Rust ownership<span class="door-sub">A new path at “I work in it”</span></span>
+                        <span class="door-chev">›</span>
+                      </button>
+                      <button class="door">
+                        <span class="door-icon door-iris">◈</span>
+                        <span>Follow it as a Beat<span class="door-sub">Weekly Briefs on what changes</span></span>
+                        <span class="door-chev">›</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="draft-block">
+                  <p class="kicker">Aleph drafted 4 cards</p>
+                  <div class="draft">
+                    <div style="flex:1;min-width:0;">
+                      <div class="draft-front">What does <code style="background:#ffffff10;padding:1px 4px;border-radius:4px;">'a</code> in <code style="background:#ffffff10;padding:1px 4px;border-radius:4px;">fn longest&lt;'a&gt;</code> declare?</div>
+                      <div class="draft-back">A generic lifetime parameter — a name for a region the borrows must share.</div>
+                    </div>
+                    <button class="toggle" aria-label="Discard this card">✓</button>
+                  </div>
+                  <div class="draft">
+                    <div style="flex:1;min-width:0;">
+                      <div class="draft-front">When can the compiler elide a lifetime?</div>
+                      <div class="draft-back">When the three elision rules assign every output lifetime unambiguously.</div>
+                    </div>
+                    <button class="toggle" aria-label="Discard this card">✓</button>
+                  </div>
+                  <button class="btn" style="margin-top:4px;">Keep 4 cards</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <button class="replay" type="button">↻ Replay</button>
+      </div>
+
+      <div class="rec-body">
+        <ol class="beat-list">
+          <li><b>0–200ms.</b> The button's own press state resolves. Nothing else moves yet — the tap has to feel like it worked before it feels like it mattered.</li>
+          <li><b>200–1300ms.</b> The ring draws. This is the whole ceremony; it is one <code>stroke-dashoffset</code> transition and it degrades to “the ring is just there” under <code>prefers-reduced-motion</code>.</li>
+          <li><b>1300–1500ms.</b> The glyph sets, one glow pulse, done. No loop, no shimmer, nothing that keeps asking for attention after the point is made.</li>
+          <li><b>1500ms+.</b> Copy, stats and doors rise in together. From here the screen is ordinary UI again — scrollable, tappable, and with the drafts block exactly where a learner expects it.</li>
+        </ol>
+        <p class="sec-note">
+          The whole thing is under 1.6 seconds and involves no new dependency: a circle, a transform,
+          two fades, and numbers that count. It fires once per path, ever.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <!-- ─────────────────────────  COPY  ───────────────────────── -->
+  <section>
+    <div class="sec-head">
+      <h2 class="sec">The copy is half the fix</h2>
+      <p class="sec-note">
+        Before any of the motion is built, the final lesson needs to stop saying the mid-path thing.
+        This much is a one-branch change to <code>CompletedState</code> and is worth shipping on its
+        own.
+      </p>
+    </div>
+    <div class="copy-pair">
+      <div class="copy-card">
+        <p class="kicker">Today, on lesson 24 of 24</p>
+        <p class="copy-say">“Lesson complete. Nice work. Head back to your path to keep going.”</p>
+        <p class="copy-why">Points the learner at a path with nothing left in it, and calls the end of twenty-four lessons the same thing it called the end of the first one.</p>
+      </div>
+      <div class="copy-card">
+        <p class="kicker">Proposed</p>
+        <p class="copy-say">“Path complete. You finished <b>Rust ownership</b> — 24 lessons over 11 days.”</p>
+        <p class="copy-why">Names the path, states the shape of the work, and hands off to somewhere that exists. Specific numbers, no exclamation mark — the product doesn't shout anywhere else.</p>
+      </div>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <!-- ─────────────────────────  DATA  ───────────────────────── -->
+  <section>
+    <div class="sec-head">
+      <h2 class="sec">What the screens need, and what exists</h2>
+      <p class="sec-note">
+        Directions A, B and the copy fix need <strong>nothing new</strong>. The receipt is where
+        cost appears, and it appears in exactly two rows.
+      </p>
+    </div>
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr><th>On screen</th><th>Source</th><th>Status</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Lessons, units, 100%</td><td><code>GET /paths/{id}</code> — units → lessons</td><td class="have">Already there</td></tr>
+          <tr><td>Path title, level</td><td>same payload</td><td class="have">Already there</td></tr>
+          <tr><td>Daily streak, best streak</td><td><code>GET /progress/summary</code></td><td class="have">Already there</td></tr>
+          <tr><td>Cards from this path, due count</td><td>flashcards carry a source-lesson citation</td><td class="have">A query away</td></tr>
+          <tr><td>“11 days”, started date</td><td><code>lessons.completed_at</code> — stored, never served</td><td class="need">New fields</td></tr>
+          <tr><td>“21 of 24 Quick checks”</td><td>Attempt outcomes — recorded, never aggregated</td><td class="need">New aggregate</td></tr>
+          <tr><td>Knowing this <em>was</em> the last lesson</td><td><code>POST /lessons/{id}/complete</code> returns only <code>unlock_state</code></td><td class="need">Add <code>path_complete</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="caveat" style="margin-top:22px;">
+      <b>The last row matters most.</b> The client <em>could</em> infer path completion by waiting
+      for the invalidated path detail to come back — but that's a round trip after the tap, so the
+      card would render the mid-path copy first and then change its mind. Returning
+      <code>path_complete</code> (and the two stats with it) from the completion call is what lets
+      the celebration fire on the same frame as the tap, which is the entire point.
+    </p>
+  </section>
+
+  <footer class="note">
+    Nocturne tokens are lifted unchanged from <code>tailwind.config.ts</code>; the phone chrome and
+    page furniture follow the other mocks in this folder. Every animation here honours
+    <code>prefers-reduced-motion</code> by resolving instantly to its end state — nothing in these
+    screens is only legible in motion.
+  </footer>
+
+</div>
+
+<script>
+  (function () {
+    var reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    var CONF_COLORS = ["#4fb8c4", "#6fced9", "#9184d9", "#b5abfc", "#e9e9ed"];
+
+    // Count-up on any [data-count="from:to"] inside a stage. Reduced motion (or
+    // a stage replayed mid-count) jumps straight to the final value — the number
+    // is information, the animation is not.
+    function countUp(el, from, to, duration) {
+      if (reduce) { el.firstChild.nodeValue = String(to); return; }
+      var start = null;
+      function step(ts) {
+        if (start === null) start = ts;
+        var t = Math.min(1, (ts - start) / duration);
+        var eased = 1 - Math.pow(1 - t, 3);
+        el.firstChild.nodeValue = String(Math.round(from + (to - from) * eased));
+        if (t < 1) requestAnimationFrame(step);
+      }
+      requestAnimationFrame(step);
+    }
+
+    function runCounts(root, delay) {
+      root.querySelectorAll("[data-count]").forEach(function (el) {
+        var parts = el.getAttribute("data-count").split(":");
+        var from = parseInt(parts[0], 10);
+        var to = parseInt(parts[1], 10);
+        el.firstChild.nodeValue = String(reduce ? to : from);
+        if (reduce) return;
+        window.setTimeout(function () { countUp(el, from, to, 850); }, delay);
+      });
+    }
+
+    function burst(layer) {
+      layer.textContent = "";
+      if (reduce) return;
+      // Thrown from the button that was pressed: roughly two-thirds down the
+      // screen, centred. Sparse on purpose — 22 pieces, not 200.
+      for (var i = 0; i < 22; i++) {
+        var p = document.createElement("span");
+        var angle = (-115 + Math.random() * 50) * (Math.PI / 180);
+        var dist = 120 + Math.random() * 190;
+        p.className = "conf";
+        p.style.left = "calc(50% + " + (Math.random() * 60 - 30).toFixed(0) + "px)";
+        p.style.top = "62%";
+        p.style.background = CONF_COLORS[i % CONF_COLORS.length];
+        p.style.setProperty("--dx", (Math.cos(angle) * dist).toFixed(0) + "px");
+        p.style.setProperty("--dy", (Math.sin(angle) * dist + 210).toFixed(0) + "px");
+        p.style.setProperty("--rot", (Math.random() * 720 - 360).toFixed(0) + "deg");
+        p.style.setProperty("--dur", (900 + Math.random() * 500).toFixed(0) + "ms");
+        p.style.setProperty("--d", (Math.random() * 160).toFixed(0) + "ms");
+        layer.appendChild(p);
+      }
+    }
+
+    function play(phone) {
+      var concept = phone.getAttribute("data-concept");
+      var screen = phone.querySelector(".screen");
+      var cls = "play-" + (concept === "r" ? "b" : concept);
+
+      // Restart the CSS animations: drop the class, force a reflow, re-add.
+      screen.classList.remove("play-a", "play-b", "play-d", "play-e");
+      void screen.offsetWidth;
+      // The composite runs B's timeline only: its stats and doors ride in with
+      // the seal copy they sit inside, so D's own staggered reveals would be
+      // animating behind a parent that is still faded out.
+      screen.classList.add(cls);
+
+      var layer = phone.querySelector(".confetti-layer");
+      if (layer) window.setTimeout(function () { burst(layer); }, concept === "r" ? 1150 : 900);
+
+      var stage = phone.querySelector(".js-stage");
+      if (stage) runCounts(stage, concept === "a" ? 260 : concept === "r" ? 1500 : 200);
+
+      phone.querySelector(".screen-scroll").scrollTop = 0;
+    }
+
+    document.querySelectorAll(".phone[data-concept]").forEach(function (phone) {
+      var replay = phone.parentElement.querySelector(".replay");
+      if (replay) replay.addEventListener("click", function () { play(phone); });
+    });
+
+    // Play each phone once, the first time it comes into view — the page should
+    // demonstrate itself rather than wait to be asked.
+    if ("IntersectionObserver" in window) {
+      var seen = new WeakSet();
+      var io = new IntersectionObserver(function (entries) {
+        entries.forEach(function (entry) {
+          if (!entry.isIntersecting || seen.has(entry.target)) return;
+          seen.add(entry.target);
+          window.setTimeout(function () { play(entry.target); }, 260);
+        });
+      }, { threshold: 0.45 });
+      document.querySelectorAll(".phone[data-concept]").forEach(function (p) { io.observe(p); });
+    } else {
+      document.querySelectorAll(".phone[data-concept]").forEach(play);
+    }
+  })();
+</script>
+</body>
+</html>

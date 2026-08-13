@@ -12,6 +12,22 @@ import { resetTutor } from "../src/mocks/tutor";
 
 window.scrollTo = vi.fn();
 
+// jsdom implements no media queries at all, so any component that asks about
+// `prefers-reduced-motion` (`components/path-complete.tsx`) would throw rather
+// than read a preference. Stubbed as "no preference" — the browser default, and
+// the branch the celebration's motion actually renders under. A test that wants
+// the reduced-motion branch overrides `window.matchMedia` for its own case.
+window.matchMedia = ((query: string) => ({
+  matches: false,
+  media: query,
+  onchange: null,
+  addListener: vi.fn(),
+  removeListener: vi.fn(),
+  addEventListener: vi.fn(),
+  removeEventListener: vi.fn(),
+  dispatchEvent: vi.fn(),
+})) as unknown as typeof window.matchMedia;
+
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterEach(() => {
   server.resetHandlers();
