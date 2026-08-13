@@ -1,3 +1,15 @@
+# [1.38.0](https://github.com/mattjmcnaughton/aleph/compare/v1.37.2...v1.38.0) (2026-08-13)
+
+
+### Bug Fixes
+
+* **home:** rebuild the switcher around resuming work ([#199](https://github.com/mattjmcnaughton/aleph/issues/199)) ([466bdec](https://github.com/mattjmcnaughton/aleph/commit/466bdecfd0aad4486131655dc1810111c64233a8))
+
+
+### Features
+
+* **paths:** celebrate the last Mark complete on a path ([#200](https://github.com/mattjmcnaughton/aleph/issues/200)) ([56fdced](https://github.com/mattjmcnaughton/aleph/commit/56fdced8733d91f70f922f21204dc621b099ceb0))
+
 ## [1.37.2](https://github.com/mattjmcnaughton/aleph/compare/v1.37.1...v1.37.2) (2026-08-11)
 
 
