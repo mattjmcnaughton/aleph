@@ -31,6 +31,7 @@ from aleph.repositories.flashcards import (
 from aleph.repositories.lessons import (
     CompletionDay,
     LessonRepository,
+    NextLesson,
     PathGenerationProgress,
 )
 from aleph.repositories.paths import PathRepository
@@ -56,6 +57,7 @@ __all__ = [
     "NewSource",
     "OwnedChange",
     "OwnedShapingMessage",
+    "NextLesson",
     "PathGenerationProgress",
     "PathRepository",
     "QuickCheckRepository",

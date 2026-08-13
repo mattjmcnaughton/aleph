@@ -465,10 +465,20 @@ async def test_list_paths_switcher_shape(
 
         listing = (await client.get("/api/v1/paths")).json()
         rows = listing["paths"]
-        # Newest first (created_at desc).
+        # Neither path has a completion, so both sort in the nulls-last group
+        # and the created_at desc tiebreak decides: newest first, as before.
         assert [row["id"] for row in rows] == [second_id, first_id]
         row = rows[0]
-        assert set(row) == {"id", "topic", "title", "level", "status", "progress"}
+        assert set(row) == {
+            "id",
+            "topic",
+            "title",
+            "level",
+            "status",
+            "progress",
+            "last_activity_at",
+            "next_lesson",
+        }
         assert row["topic"] == "Second topic"
         assert row["title"] == "Second topic"  # no rename yet: falls back to topic
         assert row["level"] == "work_in_it"
@@ -479,6 +489,45 @@ async def test_list_paths_switcher_shape(
             "completed_lessons",
         }
         assert row["progress"]["total_lessons"] >= 1
+        # Never worked, so nothing to show as activity — but a fresh path always
+        # has somewhere to resume: its first lesson.
+        assert row["last_activity_at"] is None
+        assert set(row["next_lesson"]) == {"id", "title", "position_in_path"}
+
+
+@pytest.mark.anyio
+async def test_list_paths_orders_by_last_activity_not_creation(
+    app: FastAPI, spawn: CollectingSpawn, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The path worked most recently leads, however old the idea behind it is.
+
+    The regression this pins: ordering by ``created_at`` desc buries the path a
+    learner is actually working under every idea they have had since.
+    """
+    async with _client(app) as client:
+        await _sign_in(client, monkeypatch, OWNER)
+        old_id = await _create(client, spawn, "Old topic", "new_to_it")
+        new_id = await _create(client, spawn, "New topic", "new_to_it")
+        await _poll(client, spawn, old_id)
+        await _poll(client, spawn, new_id)
+
+        # Creation order alone puts the newer path first.
+        rows = (await client.get("/api/v1/paths")).json()["paths"]
+        assert [row["id"] for row in rows] == [new_id, old_id]
+
+        # Working the *older* path lifts it above the newer, untouched one.
+        first_lesson = rows[1]["next_lesson"]
+        assert first_lesson is not None
+        completed = await client.post(f"/api/v1/lessons/{first_lesson['id']}/complete")
+        assert completed.status_code == 200
+
+        rows = (await client.get("/api/v1/paths")).json()["paths"]
+        assert [row["id"] for row in rows] == [old_id, new_id]
+        assert rows[0]["last_activity_at"] is not None
+        assert rows[1]["last_activity_at"] is None
+        # And the resume target advanced past the lesson just completed.
+        assert rows[0]["progress"]["total_lessons"] > 1, "needs a second lesson"
+        assert rows[0]["next_lesson"]["id"] != first_lesson["id"]
 
 
 # --------------------------------------------------------------------------- #

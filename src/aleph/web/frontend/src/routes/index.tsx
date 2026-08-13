@@ -15,9 +15,13 @@ import {
 } from "../lib/api";
 import { ActivityStrip } from "../components/activity-strip";
 import { BeatCard } from "../components/beat-card";
+import { ContinueCard, pickResumeTarget } from "../components/continue-card";
+import { ListRow, type RowVariant, RowTitle, RowActions } from "../components/list-row";
+import { CardsSection } from "../components/review/cards-section";
 import { DueTodayCard } from "../components/review/due-today-card";
 import { ReviewChip } from "../components/review/review-chip";
-import { PRIMARY_CTA, PRIMARY_CTA_BASE, StateCard } from "../components/state-card";
+import { SectionHeader } from "../components/section-header";
+import { PRIMARY_CTA_BASE, StateCard } from "../components/state-card";
 import { StreakChip } from "../components/streak-chip";
 import { StreakLine } from "../components/streak-line";
 import { Workspace } from "../components/workspace";
@@ -64,6 +68,18 @@ function deleteButtonId(pathId: string): string {
 // is destructive and not undoable, so it goes through an inline confirm (W5) —
 // no browser `confirm()`, which is unusable on a phone — and removes only the
 // target path, updating the list in place.
+//
+// **Two columns at `lg`** (design critique, theme 3). The page used to be one
+// tall stack: a mobile layout rendered on a desktop, with the paths table
+// stranded in the middle of 1100px and everything else queued below it. The
+// work (paths, Beats) now holds the main column and the day's state (streak,
+// due cards, the cards door) sits in a rail beside it. CSS only — one flex
+// container, `order` swapped at the breakpoint — so below `lg` the rail's
+// content is simply back above the list where it has always been. No
+// `matchMedia`, no width-conditional rendering (the D12 rule `workspace.tsx`
+// holds to), and crucially no second copy of the markup: this is one tree in
+// two presentations, so nothing on this route can render on a phone but not a
+// desktop.
 function Home() {
   const session = useQuery(sessionQueryOptions);
   const navigate = useNavigate();
@@ -168,18 +184,30 @@ function Home() {
     ? session.data.user.display_name.split(" ")[0]
     : "learner";
   const paths = pathsQuery.data?.paths;
+  // A finished path is the one path on the screen that needs nothing from the
+  // learner, and it was carrying the most eye-catching progress bar on it (a
+  // full teal one). Splitting the list is cheaper than styling that away, and
+  // it shortens the working list too — both halves of the same complaint.
+  const activePaths = paths?.filter((path) => !isFinished(path));
+  const finishedPaths = paths?.filter(isFinished) ?? [];
+  const resumeTarget = pickResumeTarget(paths);
 
   return (
     <Workspace testid="paths-switcher" width="switcher">
       <div className="lg:flex lg:items-end lg:justify-between lg:gap-8">
         <div className="min-w-0">
-          <p className="kicker">Your paths</p>
-          <h1 className="mt-2 text-3xl font-semibold leading-tight tracking-tight">
+          <h1 className="text-3xl font-semibold leading-tight tracking-tight">
             Welcome back, {firstName}.
           </h1>
-          <p className="mt-3 text-base leading-6 text-mist">
-            Name a topic and Aleph drafts a learning path you can work through, lesson by lesson.
-          </p>
+          {/* Onboarding copy, shown once it can still teach something. A
+              returning learner with paths already knows what Aleph does, and
+              was being told every visit; the empty state below says the same
+              thing where it is genuinely the first thing on the screen. */}
+          {paths !== undefined && paths.length === 0 ? (
+            <p data-testid="home-intro" className="mt-3 text-base leading-6 text-mist">
+              Name a topic and Aleph drafts a learning path you can work through, lesson by lesson.
+            </p>
+          ) : null}
         </div>
 
         <button
@@ -187,115 +215,137 @@ function Home() {
           ref={newPathRef}
           data-testid="new-path-button"
           onClick={() => navigate({ to: "/new" })}
-          className={`mt-6 ${PRIMARY_CTA} lg:mt-0 lg:w-auto lg:shrink-0`}
+          className={`mt-6 ${PRIMARY_CTA_BASE} lg:mt-0 lg:w-auto lg:shrink-0`}
         >
           New path
         </button>
       </div>
 
-      {/* Above the list, never blocking it (TDD §5.4's last row): both read
-          straight off `progressQuery.data` and render nothing when it is
-          `undefined` — loading, flag off, or a failed GET all look the same
-          to the paths list below, which is the whole point. No wrapper margin
-          when there is nothing to show — an empty decoration must not even
-          cost the layout a gap. */}
-      {progressQuery.data !== undefined ? (
-        <div className="mt-6">
-          <StreakLine summary={progressQuery.data} />
-          <ActivityStrip activity={progressQuery.data.activity} />
-        </div>
-      ) : null}
+      {/* One tap back into yesterday's work, above everything else on the page
+          — and outside the two-column split below, so it stays first at every
+          width rather than sliding into a rail. */}
+      <ContinueCard path={resumeTarget} />
 
-      <DueTodayCard summary={reviewSummaryQuery.data} pathTitles={pathTitles} />
-
-      {/* Home's one door into `/cards` (AL-410 review finding 1) — gated only
-          on the `flashcards` flag, never on `due_count`: `DueTodayCard` above
-          hides outright at zero due (PRD §3's own restraint for that card),
-          which used to leave a learner with kept cards and nothing due today
-          with no in-app route to browse them — exactly the day they would
-          want to. This is *not* a third, always-visible app-bar item (PRD §3
-          keeps the due pill the sole persistent nav this phase adds); it is
-          one always-rendered link among this route's own decoration, in the
-          same place `session-complete.tsx` offers the other of the two doors
-          the plan specifies. Plain text, no kept-card total (product call
-          #1: two teal numbers meaning different things on one screen is
-          worse than dropping one) — and the only door, now that
-          `DueTodayCard` no longer carries a duplicate of its own. */}
-      {flashcardsEnabled ? (
-        <Link
-          to="/cards"
-          data-testid="due-today-your-cards"
-          className="mt-4 block text-center text-sm text-mist transition-colors hover:text-porcelain"
+      <div className="mt-2 flex flex-col lg:mt-6 lg:flex-row lg:items-start lg:gap-8">
+        {/* The day's state. `order-first`/`lg:order-last` is the whole of the
+            desktop rail: on a phone this stays exactly where it has always
+            been (above the paths list), and at `lg` it moves to a column
+            beside the work instead of pushing it further down the page. */}
+        <aside
+          data-testid="today-rail"
+          className="order-first lg:order-last lg:w-[260px] lg:shrink-0"
         >
-          Your cards
-        </Link>
-      ) : null}
+          {/* Both read straight off `progressQuery.data` and render nothing
+              when it is `undefined` — loading, flag off, or a failed GET all
+              look the same to the paths list, which is the whole point. No
+              wrapper margin when there is nothing to show: an empty decoration
+              must not even cost the layout a gap. */}
+          {progressQuery.data !== undefined ? (
+            <div className="mt-6 lg:mt-0">
+              <StreakLine summary={progressQuery.data} />
+              <ActivityStrip activity={progressQuery.data.activity} />
+            </div>
+          ) : null}
 
-      {paths === undefined ? (
-        pathsQuery.isError ? (
-          <UnavailableState />
-        ) : (
-          <LoadingState />
-        )
-      ) : paths.length === 0 ? (
-        <EmptyState />
-      ) : (
-        <ul
-          data-testid="paths-list"
-          className="mt-8 space-y-3 lg:space-y-0 lg:border-t lg:border-divider"
-        >
-          {paths.map((path) => (
-            <li key={path.id}>
-              <PathRow
-                path={path}
-                deletion={deletion}
-                streak={pathStreaks.get(path.id)}
-                reviewDue={reviewDueByPath.get(path.id)}
-              />
-            </li>
-          ))}
-        </ul>
-      )}
+          <DueTodayCard summary={reviewSummaryQuery.data} pathTitles={pathTitles} />
 
-      {/* Beats live in a section beside "Your paths", not mixed into it —
-          the same card grammar (title, a line of state) with a different
-          verb (PRD §3/§4.10). `analystEnabled` guards the whole section, not
-          just the query: flag off means no rendered surface at all, not an
-          empty one. */}
-      {analystEnabled ? (
-        <section data-testid="beats-section" className="mt-10">
-          <div className="flex items-center justify-between gap-4">
-            <p className="kicker">Your beats</p>
-            <Link
-              to="/beats/new"
-              data-testid="deploy-analyst-button"
-              // >=44px touch target (code-review FIX 2): the primary entry
-              // point into the whole feature was a 20px text link before this
-              // fix — `min-h-[44px]` alone isn't enough on an inline link
-              // whose box is only as tall as its text, so `inline-flex
-              // items-center` is what actually gives the padding somewhere
-              // to expand the hit area into.
-              className="inline-flex min-h-[44px] items-center rounded-md px-3 text-sm font-semibold text-teal transition-colors hover:text-teal-bright focus-visible:outline focus-visible:outline-2 focus-visible:outline-teal"
-            >
-              Deploy analyst
-            </Link>
-          </div>
+          {/* Home's one door into `/cards` (AL-410 review finding 1) — gated
+              only on the `flashcards` flag, never on `due_count`: `DueTodayCard`
+              above hides outright at zero due (PRD §3's own restraint for that
+              card), which would otherwise leave a learner with kept cards and
+              nothing due today with no in-app route to browse them, on exactly
+              the day they would want one. */}
+          {flashcardsEnabled ? <CardsSection summary={reviewSummaryQuery.data} /> : null}
+        </aside>
 
-          {beats === undefined ? null : beats.length === 0 ? (
-            <p data-testid="beats-empty" className="mt-3 text-sm text-mist">
-              No Beats yet. Deploy one to keep watch on a topic that's still moving.
-            </p>
+        <div className="min-w-0 lg:flex-1">
+          <SectionHeader kicker="Your paths" spacing="mt-8 lg:mt-0" />
+
+          {paths === undefined ? (
+            pathsQuery.isError ? (
+              <UnavailableState />
+            ) : (
+              <LoadingState />
+            )
+          ) : paths.length === 0 ? (
+            <EmptyState />
           ) : (
-            <ul data-testid="beats-list" className="mt-3 space-y-3">
-              {beats.map((beat) => (
-                <li key={beat.id}>
-                  <BeatCard beat={beat} />
-                </li>
-              ))}
-            </ul>
+            <>
+              <ul
+                data-testid="paths-list"
+                className="mt-3 space-y-3 lg:space-y-0 lg:border-t lg:border-divider"
+              >
+                {(activePaths ?? []).map((path) => (
+                  <li key={path.id}>
+                    <PathRow
+                      path={path}
+                      deletion={deletion}
+                      streak={pathStreaks.get(path.id)}
+                      reviewDue={reviewDueByPath.get(path.id)}
+                    />
+                  </li>
+                ))}
+              </ul>
+
+              {finishedPaths.length > 0 ? (
+                <section data-testid="finished-paths">
+                  <SectionHeader kicker="Finished" spacing="mt-8" />
+                  {/* Dimmed as a group rather than per row: nothing here is
+                      asking for anything, and `hover:opacity-100` keeps it
+                      fully legible the moment the learner goes looking. */}
+                  <ul className="mt-3 space-y-3 opacity-60 transition-opacity hover:opacity-100 lg:space-y-0 lg:border-t lg:border-divider">
+                    {finishedPaths.map((path) => (
+                      <li key={path.id}>
+                        <PathRow
+                          path={path}
+                          deletion={deletion}
+                          streak={pathStreaks.get(path.id)}
+                          reviewDue={reviewDueByPath.get(path.id)}
+                        />
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              ) : null}
+            </>
           )}
-        </section>
-      ) : null}
+
+          {/* Beats live in a section beside "Your paths", not mixed into it —
+              the same row grammar (title, a line of state) with a different
+              verb (PRD §3/§4.10), now literally the same `ListRow`.
+              `analystEnabled` guards the whole section, not just the query:
+              flag off means no rendered surface at all, not an empty one. */}
+          {analystEnabled ? (
+            <section data-testid="beats-section">
+              <SectionHeader
+                kicker="Your beats"
+                action={{
+                  to: "/beats/new",
+                  label: "Deploy analyst",
+                  testid: "deploy-analyst-button",
+                }}
+              />
+
+              {beats === undefined ? null : beats.length === 0 ? (
+                <p data-testid="beats-empty" className="mt-3 text-sm text-mist">
+                  No Beats yet. Deploy one to keep watch on a topic that's still moving.
+                </p>
+              ) : (
+                <ul
+                  data-testid="beats-list"
+                  className="mt-3 space-y-3 lg:space-y-0 lg:border-t lg:border-divider"
+                >
+                  {beats.map((beat) => (
+                    <li key={beat.id}>
+                      <BeatCard beat={beat} />
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          ) : null}
+        </div>
+      </div>
     </Workspace>
   );
 }
@@ -303,41 +353,16 @@ function Home() {
 // --- One row ----------------------------------------------------------------
 
 /** Card treatment per status — refusal is iris, failure is danger (CONTEXT). */
-const ROW_VARIANT: Partial<Record<PathStatus, "refusal" | "error">> = {
+const ROW_VARIANT: Partial<Record<PathStatus, Exclude<RowVariant, "neutral">>> = {
   refused: "refusal",
   failed: "error",
 };
 
-// Phone: a full card fill per status. Desktop (`lg:`): the row becomes a
-// table-ish line and the tint becomes a 2px inset bar instead (mock #2c rows
-// 4-5) — `lg:shadow-none` for the ordinary row, an inset `lg:shadow-[...]` for
-// refusal/error, so exactly one `lg:shadow-*` utility is ever active per row.
-const ROW_TONE = {
-  neutral: "border-divider bg-surface lg:shadow-none",
-  refusal: "border-iris-700 bg-iris-900 lg:shadow-[inset_2px_0_0_theme(colors.iris.700)]",
-  error:
-    "border-danger-border/60 bg-danger-bg lg:shadow-[inset_2px_0_0_theme(colors.danger.DEFAULT)]",
-} as const;
-
-const ROW_BASE =
-  "rounded-lg border p-4 shadow-sm lg:flex lg:items-center lg:gap-8 lg:rounded-none lg:border-0 lg:border-b lg:border-divider lg:bg-transparent lg:px-2 lg:py-5";
-
-const ROW_STATUS_TONE = {
-  neutral: "text-mist",
-  refusal: "text-iris-300",
-  error: "text-danger",
-} as const;
-
-// How wide the status column gets at `lg` (mock #2c). A neutral row's status is
-// two words in a fixed column, so every row's Delete button lines up. Refusal
-// and failure are whole sentences and take the flexible column the mock gives
-// them instead — those rows carry no progress block, so the width is free, and
-// squeezing a sentence into 110px wraps it to three ragged lines.
-const ROW_STATUS_WIDTH = {
-  neutral: "lg:w-[110px] lg:shrink-0",
-  refusal: "lg:min-w-0 lg:flex-1",
-  error: "lg:min-w-0 lg:flex-1",
-} as const;
+/** A path with every lesson done — sorted into its own group, not the work. */
+function isFinished(path: PathSummary): boolean {
+  const { completed_lessons: done, total_lessons: total } = path.progress;
+  return path.status === "ready" && total > 0 && done === total;
+}
 
 /**
  * The learner-facing one-liner per row. `ready` splits on progress so a finished
@@ -391,25 +416,28 @@ function PathRow({
   const { completed_lessons: done, total_lessons: total } = path.progress;
   const percent = total === 0 ? 0 : Math.round((done / total) * 100);
 
+  // The confirm step replaces the whole row's controls rather than sitting in
+  // the actions cell: it is a paragraph plus two buttons, and squeezing that
+  // into a track sized for one button wraps it into nonsense.
+  const confirming = deletion.confirmingId === path.id;
+
   return (
-    <div
-      data-testid="path-list-item"
-      data-path-id={path.id}
-      data-status={path.status}
-      data-variant={rowVariant}
-      className={`${ROW_BASE} ${ROW_TONE[variant]}`}
-    >
-      <Link
-        to="/paths/$pathId"
-        params={{ pathId: path.id }}
-        data-testid="path-item-open"
-        className="block rounded-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-teal lg:flex lg:flex-1 lg:items-center lg:gap-8"
-      >
-        <div className="min-w-0 lg:flex-1">
-          <p data-testid="path-item-topic" className="text-base font-semibold leading-snug">
-            {path.title}
-          </p>
-          <div className="mt-1 flex items-center gap-2">
+    <ListRow
+      testid="path-list-item"
+      variant={variant}
+      dataAttrs={{
+        "data-path-id": path.id,
+        "data-status": path.status,
+        "data-variant": rowVariant,
+      }}
+      main={
+        <Link
+          to="/paths/$pathId"
+          params={{ pathId: path.id }}
+          data-testid="path-item-open"
+          className="block min-w-0 rounded-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-teal"
+        >
+          <RowTitle title={path.title} titleTestid="path-item-topic">
             <p
               data-testid="path-item-level"
               className="font-mono text-[11px] uppercase tracking-kicker text-slate"
@@ -417,69 +445,74 @@ function PathRow({
               {levelLabel(path.level)}
             </p>
             {/* Hidden below 2 days by the chip itself (PRD §4.3) — `?? 0`
-                covers the "absent from `paths`" case (D5) the same way. */}
+                  covers the "absent from `paths`" case (D5) the same way. */}
             <StreakChip days={streak?.current_streak ?? 0} />
-          </div>
-        </div>
-
-        {total > 0 ? (
-          <div className="lg:w-[260px] lg:shrink-0">
-            {/* Decorative bar; the text below is the accessible readout. */}
+          </RowTitle>
+        </Link>
+      }
+      meta={
+        total > 0 ? (
+          <div className="mt-3 lg:mt-0">
+            {/* Decorative bar; the text below is the accessible readout.
+                  Neutral fill, not teal (design critique, theme 4): teal was
+                  marking the primary CTA, progress, the review chip, section
+                  links *and* the Due-today accent all at once, so it had
+                  stopped meaning anything. It marks what is actionable now;
+                  progress is a fact, not an invitation. */}
             <div
               aria-hidden="true"
-              className="mt-3 h-[6px] overflow-hidden rounded-full bg-porcelain/10 lg:mt-0"
+              className="h-[6px] overflow-hidden rounded-full bg-porcelain/10"
             >
-              <span className="block h-full bg-teal" style={{ width: `${percent}%` }} />
+              <span className="block h-full bg-porcelain/45" style={{ width: `${percent}%` }} />
             </div>
             <p data-testid="path-item-progress" className="mt-2 text-sm text-mist">
               {done} of {total} {total === 1 ? "lesson" : "lessons"} complete
             </p>
           </div>
-        ) : null}
-
-        <p
-          data-testid="path-item-status"
-          className={`mt-1 text-sm lg:mt-0 ${ROW_STATUS_WIDTH[variant]} ${ROW_STATUS_TONE[variant]}`}
-        >
-          {statusLabel(path)}
-        </p>
-      </Link>
-
-      {/* A sibling of the row's own link, not nested inside it (a link inside
-          a link is invalid HTML and would race the row's own navigation) —
-          this one's destination is a filtered review session, Door 3 (PRD's
-          navigation map), not the path view. `ReviewChip` owns its own
-          visibility guard and layout wrapper (absent/zero means no chip, D5) —
-          not spelled a second time here. */}
-      <ReviewChip pathId={path.id} dueCount={reviewDue} />
-
-      {deletion.confirmingId === path.id ? (
-        <DeleteConfirm
-          title={path.title}
-          onCancel={deletion.cancel}
-          onConfirm={() => deletion.confirm(path.id)}
-          deleting={deletion.isDeleting(path.id)}
-          errored={deletion.isErrored(path.id)}
-        />
-      ) : (
-        <button
-          type="button"
-          id={deleteButtonId(path.id)}
-          data-testid="path-delete-button"
-          aria-label={`Delete ${path.title}`}
-          onClick={() => deletion.ask(path.id)}
-          className="mt-3 rounded-md border border-divider px-3 py-1.5 text-sm text-mist transition-colors hover:border-danger-border hover:text-danger lg:mt-0 lg:shrink-0"
-        >
-          Delete
-        </button>
-      )}
-
-      {/* Desktop-only row chevron (mock #2c) — decorative, the whole row is a
-          link via `path-item-open`. */}
-      <span aria-hidden="true" className="hidden shrink-0 text-slate lg:block">
-        ›
-      </span>
-    </div>
+        ) : null
+      }
+      status={<span data-testid="path-item-status">{statusLabel(path)}</span>}
+      // A sibling of the row's own link, not nested inside it (a link inside
+      // a link is invalid HTML and would race the row's own navigation) —
+      // this one's destination is a filtered review session, Door 3 (PRD's
+      // navigation map), not the path view. `ReviewChip` owns its own
+      // visibility guard (absent/zero means no chip, D5).
+      chip={<ReviewChip pathId={path.id} dueCount={reviewDue} />}
+      actions={
+        confirming ? null : (
+          <>
+            <RowActions>
+              <button
+                type="button"
+                id={deleteButtonId(path.id)}
+                data-testid="path-delete-button"
+                aria-label={`Delete ${path.title}`}
+                onClick={() => deletion.ask(path.id)}
+                className="rounded-md border border-divider px-3 py-1.5 text-sm text-mist transition-colors hover:border-danger-border hover:text-danger focus-visible:outline focus-visible:outline-2 focus-visible:outline-teal lg:border-0 lg:px-2"
+              >
+                Delete
+              </button>
+            </RowActions>
+            {/* Desktop-only row chevron (mock #2c) — decorative, the whole
+                  row is a link via `path-item-open`. */}
+            <span aria-hidden="true" className="hidden shrink-0 text-slate lg:block">
+              ›
+            </span>
+          </>
+        )
+      }
+      footer={
+        confirming ? (
+          <DeleteConfirm
+            title={path.title}
+            onCancel={deletion.cancel}
+            onConfirm={() => deletion.confirm(path.id)}
+            deleting={deletion.isDeleting(path.id)}
+            errored={deletion.isErrored(path.id)}
+          />
+        ) : null
+      }
+    />
   );
 }
 
@@ -557,7 +590,7 @@ function DeleteConfirm({
 
 function EmptyState() {
   return (
-    <StateCard testid="paths-empty" spacing="mt-8">
+    <StateCard testid="paths-empty" spacing="mt-3">
       <div className="flex justify-center">
         <AlephGlyph size="md" />
       </div>
@@ -575,7 +608,7 @@ function EmptyState() {
 
 function LoadingState() {
   return (
-    <p data-testid="paths-loading" className="mt-8 text-sm text-mist">
+    <p data-testid="paths-loading" className="mt-3 text-sm text-mist">
       Loading your paths…
     </p>
   );
@@ -583,7 +616,7 @@ function LoadingState() {
 
 function UnavailableState() {
   return (
-    <StateCard testid="paths-unavailable" spacing="mt-8">
+    <StateCard testid="paths-unavailable" spacing="mt-3">
       <h2 className="text-lg font-semibold">We couldn't load your paths.</h2>
       <p className="mx-auto mt-2 max-w-[24rem] text-sm leading-6 text-mist">
         Something went wrong reaching Aleph. Reload the page, or start a new path in the meantime.

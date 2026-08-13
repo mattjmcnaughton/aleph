@@ -1,32 +1,27 @@
 import { Link } from "@tanstack/react-router";
 import type { BeatResearchState, BeatSummary } from "../lib/api";
 import { formatElapsed } from "../lib/beats";
+import { ListRow, type RowVariant, RowTitle } from "./list-row";
 
 /** Card treatment per research state — refusal is iris, failure is danger
  *  (CONTEXT.md), the identical mapping `routes/index.tsx`'s `PathRow` uses
  *  for a path's own `ROW_VARIANT`. */
-const BEAT_ROW_VARIANT: Partial<Record<BeatResearchState, "refusal" | "error">> = {
+const BEAT_ROW_VARIANT: Partial<Record<BeatResearchState, Exclude<RowVariant, "neutral">>> = {
   refused: "refusal",
   failed: "error",
 };
 
-const BEAT_ROW_TONE = {
-  neutral: "border-divider bg-surface",
-  refusal: "border-iris-700 bg-iris-900",
-  error: "border-danger-border/60 bg-danger-bg",
-} as const;
-
-const BEAT_ROW_STATUS_TONE = {
-  neutral: "text-mist",
-  refusal: "text-iris-300",
-  error: "text-danger",
-} as const;
-
 /**
- * The learner-facing one-liner (PRD §3's own examples): `3 new briefs ·
- * weekly` is the steady state, `Researching… · started 30s ago` while a run
- * is in flight. Mirrors `routes/index.tsx`'s own `statusLabel(path)` for the
- * "same card grammar, different verb" (PRD §3).
+ * The learner-facing one-liner (PRD §3's own examples): `3 new briefs` is the
+ * steady state, `Researching… · started 30s ago` while a run is in flight.
+ * Mirrors `routes/index.tsx`'s own `statusLabel(path)` for the "same card
+ * grammar, different verb" (PRD §3).
+ *
+ * The cadence clause moved out of this string and into the row's own meta
+ * cell, where a path's progress readout sits — it is the Beat's answer to
+ * "how much of this is there", which is the column's question, and leaving it
+ * inside the status sentence was what made a Beat's one line read as prose
+ * where a path's read as data.
  */
 function beatStatusLabel(beat: BeatSummary, now: Date): string {
   switch (beat.research_state) {
@@ -40,8 +35,8 @@ function beatStatusLabel(beat: BeatSummary, now: Date): string {
         : "Researching…";
     case "idle":
       return beat.unread_count > 0
-        ? `${beat.unread_count} new ${beat.unread_count === 1 ? "brief" : "briefs"} · ${beat.cadence}`
-        : `Up to date · ${beat.cadence}`;
+        ? `${beat.unread_count} new ${beat.unread_count === 1 ? "brief" : "briefs"}`
+        : "Up to date";
     default: {
       // Exhaustive: a state added to `BeatResearchState` fails the build
       // here rather than silently reading as "Up to date" on a shipped row.
@@ -52,34 +47,49 @@ function beatStatusLabel(beat: BeatSummary, now: Date): string {
 }
 
 /**
- * One row of the home Beats section (PRD §3: "the same card grammar (title,
- * a line of state) with a different verb" as a path row). `now` is
- * injectable so a test can pin the elapsed-time readout.
+ * One row of the home Beats section — the **same** `ListRow` a path renders
+ * through (PRD §3: "the same card grammar (title, a line of state) with a
+ * different verb"). It used to be a bordered `rounded-lg` card with its own
+ * shadow while a path was a bare table line, so at `lg` the two sections read
+ * as unrelated kinds of object; now the only difference between them is which
+ * cells they fill. A Beat leaves `chip` empty and puts its cadence where a
+ * path puts progress.
+ *
+ * `now` is injectable so a test can pin the elapsed-time readout.
  */
 export function BeatCard({ beat, now = new Date() }: { beat: BeatSummary; now?: Date }) {
   const variant = BEAT_ROW_VARIANT[beat.research_state] ?? "neutral";
+
   return (
-    <Link
-      to="/beats/$beatId"
-      params={{ beatId: beat.id }}
-      data-testid="beat-list-item"
-      data-beat-id={beat.id}
-      data-research-state={beat.research_state}
-      data-variant={BEAT_ROW_VARIANT[beat.research_state]}
-      className={`block min-h-[44px] rounded-lg border p-4 shadow-sm transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-teal ${BEAT_ROW_TONE[variant]}`}
-    >
-      {/* min-w-0 + truncate (code-review FIX 6): the project's convention
-          for user text (`paths.$pathId.tsx`, `sidebar.tsx`) — a pasted URL
-          or an over-long Topic must not overflow the card at 390px. */}
-      <p
-        data-testid="beat-item-topic"
-        className="min-w-0 truncate text-base font-semibold leading-snug"
-      >
-        {beat.topic}
-      </p>
-      <p data-testid="beat-item-status" className={`mt-1 text-sm ${BEAT_ROW_STATUS_TONE[variant]}`}>
-        {beatStatusLabel(beat, now)}
-      </p>
-    </Link>
+    <ListRow
+      testid="beat-list-item"
+      variant={variant}
+      dataAttrs={{
+        "data-beat-id": beat.id,
+        "data-research-state": beat.research_state,
+        "data-variant": BEAT_ROW_VARIANT[beat.research_state],
+      }}
+      main={
+        <Link
+          to="/beats/$beatId"
+          params={{ beatId: beat.id }}
+          data-testid="beat-item-open"
+          className="block min-w-0 rounded-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-teal"
+        >
+          <RowTitle title={beat.topic} titleTestid="beat-item-topic" />
+        </Link>
+      }
+      meta={
+        <p data-testid="beat-item-cadence" className="mt-1 text-sm text-mist lg:mt-0">
+          {beat.cadence}
+        </p>
+      }
+      status={<span data-testid="beat-item-status">{beatStatusLabel(beat, now)}</span>}
+      actions={
+        <span aria-hidden="true" className="hidden shrink-0 text-slate lg:block">
+          ›
+        </span>
+      }
+    />
   );
 }

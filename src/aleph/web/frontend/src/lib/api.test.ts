@@ -179,6 +179,8 @@ describe("isPathListTerminal", () => {
       level: "new_to_it",
       status,
       progress: { total_lessons: 0, generated_lessons: 0, completed_lessons: 0 },
+      last_activity_at: null,
+      next_lesson: null,
     };
   }
 

@@ -53,8 +53,13 @@ describe("Your paths switcher — /", () => {
     await gotoHome();
 
     await screen.findByTestId("paths-list");
-    // Newest first (docs/api.md): the last-created path leads the list.
-    expect(itemIds()).toEqual(["p-done", "p-mid"]);
+    // `p-mid` is the working list; `p-done` has every lesson complete and sits
+    // in the "Finished" group below it, so it comes last in document order
+    // however recently it was worked.
+    expect(itemIds()).toEqual(["p-mid", "p-done"]);
+    expect(within(screen.getByTestId("finished-paths")).getByTestId("path-list-item")).toBe(
+      await findItem("p-done"),
+    );
 
     const mid = within(await findItem("p-mid"));
     expect(mid.getByTestId("path-item-topic").textContent).toBe("TypeScript");
