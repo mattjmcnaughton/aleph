@@ -83,9 +83,49 @@ export default {
           "0%, 70%, 100%": { opacity: "0.3", transform: "translateY(0)" },
           "35%": { opacity: "1", transform: "translateY(-2px)" },
         },
+        // The path-complete seal (docs/mocks/aleph-path-complete.html). Four
+        // one-shot steps, staggered by delay utilities at the call site rather
+        // than by a single composite keyframe, so each element owns its own
+        // motion and any one of them can be dropped without re-timing the rest.
+        // `seal-draw`'s dash length is the circle's circumference (2πr, r=48),
+        // set as a literal here because Tailwind keyframes take no arguments —
+        // `path-complete.tsx` sets the matching `strokeDasharray`.
+        "seal-draw": {
+          from: { strokeDashoffset: "302" },
+          to: { strokeDashoffset: "0" },
+        },
+        "seal-glyph": {
+          from: { opacity: "0", transform: "scale(0.72)" },
+          "60%": { opacity: "1", transform: "scale(1.06)" },
+          to: { opacity: "1", transform: "scale(1)" },
+        },
+        "seal-halo": {
+          from: { opacity: "0.9", transform: "scale(0.9)" },
+          to: { opacity: "0", transform: "scale(1.22)" },
+        },
+        "rise-in": {
+          from: { opacity: "0", transform: "translateY(8px)" },
+          to: { opacity: "1", transform: "none" },
+        },
+        // One piece of confetti. The distance, drift and spin are per-particle
+        // custom properties the component sets inline; only the shape of the
+        // arc lives here.
+        confetti: {
+          "0%": { opacity: "1", transform: "translate(0, 0) rotate(0deg)" },
+          "70%": { opacity: "1" },
+          "100%": {
+            opacity: "0",
+            transform: "translate(var(--conf-dx), var(--conf-dy)) rotate(var(--conf-rot))",
+          },
+        },
       },
       animation: {
         thinking: "thinking 1.2s ease-in-out infinite",
+        "seal-draw": "seal-draw 1.1s cubic-bezier(0.65, 0, 0.35, 1) both",
+        "seal-glyph": "seal-glyph 0.7s cubic-bezier(0.22, 1, 0.36, 1) both",
+        "seal-halo": "seal-halo 0.9s ease-out both",
+        "rise-in": "rise-in 0.48s cubic-bezier(0.22, 1, 0.36, 1) both",
+        confetti: "confetti var(--conf-dur) cubic-bezier(0.15, 0.65, 0.4, 1) both",
       },
     },
   },

@@ -48,6 +48,7 @@ from aleph.dtos.lessons import (
     CompleteLessonResponse,
     GenerateLessonResponse,
     LessonDetailResponse,
+    PathCompletionDTO,
     QuickCheckDTO,
 )
 from aleph.models import (  # noqa: TC001 - FastAPI resolves annotations.
@@ -63,6 +64,7 @@ from aleph.services.lessons_read import (
 from aleph.services.rate_limit import build_daily_rate_limiter
 
 if TYPE_CHECKING:
+    from aleph.repositories.lessons import PathCompletion
     from aleph.services.lessons_read import LessonDetailView
 
 router = APIRouter(prefix="/api/v1", tags=["lessons"])
@@ -108,6 +110,25 @@ def _lesson_not_generated() -> HTTPException:
     return HTTPException(
         status_code=status.HTTP_409_CONFLICT,
         detail="lesson content has not been generated yet",
+    )
+
+
+def _complete_response(
+    lesson_id: UUID, completion: PathCompletion | None
+) -> CompleteLessonResponse:
+    """Translate the repo roll-up to the wire DTO (the one place that mapping lives)."""
+    return CompleteLessonResponse(
+        id=lesson_id,
+        unlock_state=UnlockState.COMPLETE,
+        path_completion=(
+            PathCompletionDTO(
+                lesson_count=completion.lesson_count,
+                first_completed_at=completion.first_completed_at,
+                completed_at=completion.completed_at,
+            )
+            if completion is not None
+            else None
+        ),
     )
 
 
@@ -343,7 +364,14 @@ async def complete_lesson(
     if unlock_state is UnlockState.LOCKED:
         raise _lesson_locked()
     if unlock_state is UnlockState.COMPLETE:
-        return CompleteLessonResponse(id=lesson.id, unlock_state=UnlockState.COMPLETE)
+        # Re-read rather than short-circuit to `path_completion=None`: this is the
+        # branch a retried mutation and a double tap land in, and answering "not
+        # complete" here would drop the learner from the path-complete screen back
+        # to the mid-path one purely because they pressed twice.
+        return _complete_response(
+            lesson.id,
+            await LessonRepository(session).path_completion(path_id=lesson.path_id),
+        )
 
     lessons_repo = LessonRepository(session)
     # Mark complete and derive path completion in one fenced, path-locked step:
@@ -381,4 +409,14 @@ async def complete_lesson(
         # already reflects it, AL-040 note); only on the real transition, so a
         # raced double-complete never re-advances the window on a no-op write.
         await generation_orchestrator.on_lesson_completed(lesson.id)
-    return CompleteLessonResponse(id=lesson.id, unlock_state=UnlockState.COMPLETE)
+    # Read the span only for the completion that finished the path — one extra
+    # aggregate, once per path, ever. `path_now_complete` is the gate rather than
+    # the source: it says *this call* did it, while the roll-up the response
+    # carries is a fact about the path now, and the two are only ever computed
+    # apart on the idempotent branch above.
+    completion = (
+        await lessons_repo.path_completion(path_id=lesson.path_id)
+        if path_now_complete
+        else None
+    )
+    return _complete_response(lesson.id, completion)

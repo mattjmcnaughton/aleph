@@ -15,6 +15,7 @@ else*, so a pre-Attempt ``GET`` payload contains no correct answer anywhere.
 Grading is server-side; the client cannot self-grade.
 """
 
+from datetime import datetime
 from uuid import UUID
 
 from pydantic import BaseModel
@@ -106,6 +107,31 @@ class GenerateLessonResponse(BaseModel):
     id: UUID
 
 
+class PathCompletionDTO(BaseModel):
+    """The path this lesson belongs to has no incomplete lesson left.
+
+    Present on a completion response **only** when every lesson on the path is
+    complete — its presence *is* the "was that the last one?" answer, which is
+    why there is no separate boolean beside it. Carried on the completion
+    response rather than left for the client to derive from a refetched path
+    detail, because the celebration this feeds has to render on the same frame
+    as the tap: inferring it from the invalidated ``GET /paths/{id}`` would put
+    a round trip between "Mark complete" and the acknowledgement, and the card
+    would show the mid-path copy first and then change its mind.
+
+    ``first_completed_at``/``completed_at`` are the span of the learner's work
+    on this path, sent as instants rather than a day count on purpose: a
+    **Day** is a calendar day in the *learner's* local timezone (CONTEXT.md),
+    and this route — unlike the streak reader — takes no ``tz_offset_minutes``.
+    The client owns the local-day arithmetic, the same way it owns it for the
+    activity strip.
+    """
+
+    lesson_count: int
+    first_completed_at: datetime
+    completed_at: datetime
+
+
 class CompleteLessonResponse(BaseModel):
     """``200`` body for ``POST /lessons/{id}/complete`` — the new unlock state.
 
@@ -114,7 +140,15 @@ class CompleteLessonResponse(BaseModel):
     no-op that returns the same. A locked lesson never reaches this response —
     it is rejected with ``403`` (only the available lesson may be completed,
     AL-012 / TDD §6).
+
+    ``path_completion`` is idempotent in the same way: it reflects the state of
+    the path *after* this call, not what this call changed, so re-completing the
+    final lesson answers "yes, the path is complete" a second time rather than
+    only for the request that happened to perform the transition. That keeps a
+    retried mutation (a flaky first POST, a double tap) from silently
+    downgrading the learner's completion screen to the mid-path one.
     """
 
     id: UUID
     unlock_state: UnlockState
+    path_completion: PathCompletionDTO | None = None

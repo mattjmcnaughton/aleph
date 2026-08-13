@@ -60,6 +60,23 @@ class CompletionDay:
 
 
 @dataclass(frozen=True)
+class PathCompletion:
+    """A path with no incomplete lesson left, and the span of work that got there.
+
+    Returned by :meth:`LessonRepository.path_completion` and only ever
+    constructed for a path where every lesson is complete, so the timestamps are
+    never ``None`` by the time a caller holds one. ``first_completed_at`` is the
+    earliest ``completed_at`` on the path and ``completed_at`` the latest — the
+    two ends of the learner's run at it, left as instants for the caller to
+    resolve into local **Days** (CONTEXT.md).
+    """
+
+    lesson_count: int
+    first_completed_at: datetime.datetime
+    completed_at: datetime.datetime
+
+
+@dataclass(frozen=True)
 class PathGenerationProgress:
     """Per-path lesson roll-up for the paths API progress summary (§6).
 
@@ -400,6 +417,49 @@ class LessonRepository:
         )
         path_now_complete = newly_completed and remaining == 0
         return newly_completed, path_now_complete, int(lesson_count or 0)
+
+    async def path_completion(self, *, path_id: uuid.UUID) -> PathCompletion | None:
+        """The path's completion roll-up, or ``None`` while a lesson is outstanding.
+
+        One aggregate over ``lessons`` — total, outstanding, and the two ends of
+        the ``completed_at`` span — so the completion route can answer "was that
+        the last one, and how long did it take?" without a second round trip.
+
+        Distinct from ``mark_completed_and_finalize``'s ``path_now_complete``,
+        which is deliberately narrower: that flag answers *"did **this call**
+        finish the path"* and exists so ``path_completed`` is emitted exactly
+        once, while this answers *"is the path finished **now**"* and is safe to
+        re-read on an idempotent re-complete. Reading it through the event flag
+        instead would make the learner-facing response fire once and then
+        silently degrade on a retried POST.
+
+        An empty path (no lessons at all) reads as **not** complete: nothing was
+        finished, and a zero-lesson completion span has no ends to report.
+        """
+        row = (
+            await self.session.execute(
+                select(
+                    func.count(),
+                    func.count().filter(Lesson.completed_at.is_(None)),
+                    func.min(Lesson.completed_at),
+                    func.max(Lesson.completed_at),
+                ).where(Lesson.path_id == path_id)
+            )
+        ).one()
+        lesson_count, outstanding, first_completed_at, completed_at = row
+        if not lesson_count or outstanding:
+            return None
+        # Unreachable given `outstanding == 0` and `lesson_count > 0` — every
+        # lesson has a `completed_at`, so min/max are populated. Kept as a
+        # narrowing guard so the dataclass's non-optional timestamps are true by
+        # construction rather than by argument.
+        if first_completed_at is None or completed_at is None:  # pragma: no cover
+            return None
+        return PathCompletion(
+            lesson_count=int(lesson_count),
+            first_completed_at=first_completed_at,
+            completed_at=completed_at,
+        )
 
     # -- shaping: apply / undo writes (Phase 2B §5.6/§5.7) ------------------ #
     #

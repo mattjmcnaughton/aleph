@@ -16,6 +16,13 @@ import { useFeatureFlag } from "../lib/feature-flags";
 import { GUIDANCE_MAX_LENGTH, TOPIC_MAX_LENGTH, canSubmitTopic } from "../lib/onboarding";
 
 export const Route = createFileRoute("/beats/new")({
+  // `?topic=` seeds the field, exactly as on `/new` — the door the
+  // path-complete card offers ("Follow it as a Beat", AL-420) carries the
+  // finished path's Topic across. Standing orders are frozen at deployment,
+  // but not until then: this is an editable initial value.
+  validateSearch: (search: Record<string, unknown>): { topic?: string } => ({
+    topic: typeof search.topic === "string" ? search.topic : undefined,
+  }),
   component: DeployAnalyst,
 });
 
@@ -37,8 +44,9 @@ function DeployAnalyst() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const analystEnabled = useFeatureFlag("analyst");
+  const search = Route.useSearch();
 
-  const [topic, setTopic] = useState("");
+  const [topic, setTopic] = useState(search.topic ?? "");
   const [level, setLevel] = useState<Level>("new_to_it");
   const [anchorWeekday, setAnchorWeekday] = useState(DEFAULT_ANCHOR_WEEKDAY);
   const [guidance, setGuidance] = useState("");

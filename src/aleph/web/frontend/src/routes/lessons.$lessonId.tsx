@@ -29,6 +29,7 @@ import {
 } from "../lib/api";
 import { Breadcrumbs } from "../components/breadcrumbs";
 import { Markdown } from "../components/markdown";
+import { PathCompleteCard, localDaySpan } from "../components/path-complete";
 import { DraftList } from "../components/review/draft-list";
 import { Sidebar, SwitcherSection, OutlineSection } from "../components/sidebar";
 import {
@@ -316,6 +317,36 @@ function LessonView() {
     return () => clearTimeout(timer);
   }, [awaitingGeneration]);
 
+  // Path completion (AL-420): the celebration's two inputs, in priority order.
+  //
+  // The completion response is the authority — it is the only source that
+  // carries the `completed_at` span, and it lands in the same round trip as the
+  // tap, which is the whole reason the field is on that response rather than
+  // inferred from a refetched path detail (docs/api.md).
+  //
+  // The cached path detail is the fallback for a learner *revisiting* the final
+  // lesson of a finished path, where no mutation ran this session. It knows how
+  // many lessons there were but not when they were done, so that render gets a
+  // lesson count and no Days — see `PathCompleteCard`'s `days` prop. Reading it
+  // from `readyPathDetail` (not `detail`) keeps the check on the same payload
+  // the sidebar outline and the prev/next footer already derive from; a ghost
+  // row is never in it, because ghosts live on the shaping rail's pending
+  // proposal, not on this cache.
+  const completionPayload = completeMutation.data?.path_completion ?? null;
+  const revisitLessons = readyPathDetail?.units.flatMap((unit) => unit.lessons) ?? [];
+  const revisitComplete =
+    completionPayload === null &&
+    revisitLessons.length > 0 &&
+    revisitLessons.every((lesson) => lesson.unlock_state === "complete");
+  const pathCompletion = completionPayload
+    ? {
+        lessonCount: completionPayload.lesson_count,
+        days: localDaySpan(completionPayload.first_completed_at, completionPayload.completed_at),
+      }
+    : revisitComplete
+      ? { lessonCount: revisitLessons.length, days: null }
+      : null;
+
   // The tutor rail (AL-230). Gated twice — `useFeatureFlag("tutor")` inside the
   // hook, and a lesson with generated content here — because lesson scope is
   // empty without a Read passage to ground on. Neither gate renders a disabled
@@ -384,6 +415,10 @@ function LessonView() {
           onComplete={() => completeMutation.mutate(detail.id)}
           completing={completeMutation.isPending}
           completeErrored={completeMutation.isError}
+          pathCompletion={pathCompletion}
+          celebrate={completeMutation.isSuccess}
+          pathTitle={pathDetail?.title ?? ""}
+          topic={pathDetail?.topic ?? ""}
         />
       )}
 
@@ -504,6 +539,10 @@ function ReadyLesson({
   onComplete,
   completing,
   completeErrored,
+  pathCompletion,
+  celebrate,
+  pathTitle,
+  topic,
 }: {
   detail: LessonDetail;
   onAttempt: (index: number) => void;
@@ -512,6 +551,11 @@ function ReadyLesson({
   onComplete: () => void;
   completing: boolean;
   completeErrored: boolean;
+  /** Non-null only when every lesson on this path is complete (AL-420). */
+  pathCompletion: { lessonCount: number; days: number | null } | null;
+  celebrate: boolean;
+  pathTitle: string;
+  topic: string;
 }) {
   const quickCheck = detail.quick_check;
   const reveal = detail.attempt;
@@ -549,7 +593,22 @@ function ReadyLesson({
 
       <div className="mt-8">
         {isComplete ? (
-          <CompletedState pathId={detail.path_id} />
+          // The last lesson of a path gets its own card (AL-420). Falls back to
+          // the per-lesson one whenever the path is not finished — including the
+          // window where the path detail has yet to load on a deep link, which
+          // resolves into the card a beat later rather than guessing.
+          pathCompletion ? (
+            <PathCompleteCard
+              pathId={detail.path_id}
+              pathTitle={pathTitle}
+              topic={topic}
+              lessonCount={pathCompletion.lessonCount}
+              days={pathCompletion.days}
+              celebrate={celebrate}
+            />
+          ) : (
+            <CompletedState pathId={detail.path_id} />
+          )
         ) : completeEligible ? (
           <>
             {completeErrored ? (
