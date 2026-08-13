@@ -43,6 +43,7 @@ from aleph.dtos.paths import (
     CreatePathRequest,
     CreatePathResponse,
     LessonSummaryDTO,
+    NextLessonDTO,
     PathDetailResponse,
     PathListResponse,
     PathProgressDTO,
@@ -63,7 +64,7 @@ from aleph.services.paths_read import load_path_detail
 from aleph.services.rate_limit import build_daily_rate_limiter
 
 if TYPE_CHECKING:
-    from aleph.repositories import PathGenerationProgress
+    from aleph.repositories import NextLesson, PathGenerationProgress
     from aleph.services.paths_read import PathDetailView
 
 router = APIRouter(prefix="/api/v1", tags=["paths"])
@@ -227,20 +228,27 @@ async def create_path(
 
 @router.get("/paths")
 async def list_paths(user: CurrentUser, session: Session) -> PathListResponse:
-    """The "Your paths" switcher: topic, level, status, progress (§6).
+    """The "Your paths" switcher: topic, level, status, progress, resume (§6).
 
-    Two queries regardless of path count: the learner's paths (newest first) with
-    their **effective** status, and a single grouped progress roll-up over all of
-    them. ``status`` is effective (a stale ``generating`` reads as ``failed``),
+    Three queries regardless of path count: the learner's paths (**most recently
+    worked first**) with their **effective** status, a single grouped progress
+    roll-up over all of them, and one ``DISTINCT ON`` for every path's available
+    lesson. ``status`` is effective (a stale ``generating`` reads as ``failed``),
     matching the detail poll — so the switcher and the path view never disagree on
     a crashed outline.
+
+    The ordering is the repository's (last activity desc, nulls last); this route
+    does not re-sort. ``last_activity_at`` ships on each row from the same
+    roll-up that produced the sort key, so the list and the field it is sorted
+    by cannot drift apart.
     """
     paths = await PathRepository(session).list_for_user_with_effective_status(
         user_id=user.id
     )
-    summaries = await LessonRepository(session).progress_summaries(
-        [path.id for path, _ in paths]
-    )
+    lessons = LessonRepository(session)
+    path_ids = [path.id for path, _ in paths]
+    summaries = await lessons.progress_summaries(path_ids)
+    next_lessons = await lessons.next_lessons(path_ids)
     return PathListResponse(
         paths=[
             PathSummaryDTO(
@@ -250,9 +258,22 @@ async def list_paths(user: CurrentUser, session: Session) -> PathListResponse:
                 level=path.level,
                 status=effective_status,
                 progress=_progress_dto(summaries[path.id]),
+                last_activity_at=summaries[path.id].last_completed_at,
+                next_lesson=_next_lesson_dto(next_lessons.get(path.id)),
             )
             for path, effective_status in paths
         ]
+    )
+
+
+def _next_lesson_dto(next_lesson: NextLesson | None) -> NextLessonDTO | None:
+    """A path with nothing left to do carries no resume target (``None``)."""
+    if next_lesson is None:
+        return None
+    return NextLessonDTO(
+        id=next_lesson.id,
+        title=next_lesson.title,
+        position_in_path=next_lesson.position_in_path,
     )
 
 

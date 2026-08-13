@@ -246,10 +246,31 @@ export interface PathSummary {
   /** Effective status — a stale `generating` reads as `failed` (docs/api.md). */
   status: PathStatus;
   progress: PathProgress;
+  /**
+   * The path's most recent lesson completion, or `null` for one never worked.
+   * This is the field the list is **ordered** by (last activity desc, nulls
+   * last) — it ships on the row as well so the client can tell "never started"
+   * from "started and stalled" without a second request.
+   */
+  last_activity_at: string | null;
+  /** Where *continue* resumes; `null` when there is nothing left to do. */
+  next_lesson: NextLesson | null;
 }
 
 /**
- * `GET /api/v1/paths` body — the learner's paths, newest first. Wrapped in an
+ * A path's **available** lesson (`domains/progression`: the first incomplete
+ * one in `position_in_path` order) — the resume target home's Continue card
+ * links straight into.
+ */
+export interface NextLesson {
+  id: string;
+  title: string;
+  position_in_path: number;
+}
+
+/**
+ * `GET /api/v1/paths` body — the learner's paths, most recently worked first
+ * (`last_activity_at` desc, nulls last; docs/api.md). Wrapped in an
  * object (never a bare top-level array) so the payload can grow fields without
  * a breaking shape change (`PathListResponse`, docs/api.md).
  */
@@ -319,7 +340,7 @@ export function updatePathTitle(input: { pathId: string; title: string }): Promi
   });
 }
 
-/** The learner's paths, newest first — the switcher's payload (§5.5). */
+/** The learner's paths, most recently worked first — the switcher's payload (§5.5). */
 export function listPaths(): Promise<PathList> {
   return apiFetch<PathList>(apiV1Path("/paths"));
 }

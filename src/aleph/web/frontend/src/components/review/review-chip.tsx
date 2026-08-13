@@ -36,7 +36,9 @@ export function ReviewChip({
         to="/review"
         search={{ path: pathId }}
         data-testid="review-chip"
-        className="inline-flex items-center rounded-full bg-teal px-2 py-0.5 text-xs font-semibold text-night"
+        // `whitespace-nowrap`: the chip sits in a fixed grid track on the home
+        // row, and without this "Review 1" breaks across two lines inside it.
+        className="inline-flex items-center whitespace-nowrap rounded-full bg-teal px-2 py-0.5 text-xs font-semibold text-night"
       >
         Review {dueCount}
       </Link>

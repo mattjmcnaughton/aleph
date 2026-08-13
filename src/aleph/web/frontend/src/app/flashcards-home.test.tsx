@@ -169,9 +169,10 @@ describe("Flashcards — the home surfaces (PRD §3, Phase 3 TDD §8)", () => {
     expect(screen.queryByTestId("due-today-card")).toBeNull();
     // …but the door itself is not: it renders straight off the flag, never
     // off `due_count`.
-    const link = await screen.findByTestId("due-today-your-cards");
-    expect(link.textContent).toBe("Your cards");
+    const link = await screen.findByTestId("your-cards-link");
     expect(link.getAttribute("href")).toBe("/cards");
+    // The section says so out loud on the quiet day, rather than vanishing.
+    expect(screen.getByTestId("cards-section-summary").textContent).toBe("Nothing due today");
   });
 
   it("[AL-410 finding 1] 'Your cards' still renders alongside a non-empty Due today card — one door, not two", async () => {
@@ -183,9 +184,10 @@ describe("Flashcards — the home surfaces (PRD §3, Phase 3 TDD §8)", () => {
     await gotoHome();
 
     await screen.findByTestId("due-today-card");
-    // Exactly one "Your cards" link on the page — not a second copy inside
+    // Exactly one "Your cards" door on the page — not a second copy inside
     // `DueTodayCard` itself.
-    expect(screen.getAllByTestId("due-today-your-cards")).toHaveLength(1);
+    expect(screen.getAllByTestId("your-cards-link")).toHaveLength(1);
+    expect(screen.getByTestId("cards-section-summary").textContent).toBe("3 due today");
   });
 
   it("[AL-410 finding 1] 'Your cards' is absent with the flag off — same gate as everything else", async () => {
@@ -194,6 +196,6 @@ describe("Flashcards — the home surfaces (PRD §3, Phase 3 TDD §8)", () => {
     await gotoHome();
 
     await screen.findByTestId("path-list-item");
-    expect(screen.queryByTestId("due-today-your-cards")).toBeNull();
+    expect(screen.queryByTestId("your-cards-link")).toBeNull();
   });
 });

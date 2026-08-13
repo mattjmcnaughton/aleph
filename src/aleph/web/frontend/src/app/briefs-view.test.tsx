@@ -503,10 +503,14 @@ describe("Brief view — /briefs/$briefId", () => {
     window.history.pushState({}, "", "/");
     render(<App />);
 
-    const card = await screen.findByTestId("beat-list-item");
-    expect(screen.getByTestId("beat-item-status").textContent).toBe("1 new brief · weekly");
+    await screen.findByTestId("beat-list-item");
+    expect(screen.getByTestId("beat-item-status").textContent).toBe("1 new brief");
 
-    fireEvent.click(card);
+    // The row's link, not the row: a `ListRow` is a grid whose destination
+    // lives on `beat-item-open`, exactly as a path row's does on
+    // `path-item-open` (the row itself must stay a plain element so the
+    // delete/actions cell can be a sibling of the link, never nested in it).
+    fireEvent.click(screen.getByTestId("beat-item-open"));
     const publishedRow = await screen.findByTestId("beat-rail-published");
     const railLink = publishedRow.querySelector("a");
     if (!railLink) throw new Error("expected the rail row to render a link");
@@ -523,7 +527,7 @@ describe("Brief view — /briefs/$briefId", () => {
     fireEvent.click(screen.getByRole("link", { name: /your beats/i }));
 
     await waitFor(() => {
-      expect(screen.getByTestId("beat-item-status").textContent).toBe("Up to date · weekly");
+      expect(screen.getByTestId("beat-item-status").textContent).toBe("Up to date");
     });
   });
 });

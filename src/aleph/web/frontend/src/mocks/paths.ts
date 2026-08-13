@@ -204,6 +204,8 @@ interface StoredPath {
   pollsRemaining: number;
   /** Outline once `ready` (AL-062 rail fixtures). Defaults to READY_UNITS. */
   units?: PathUnit[];
+  /** Pinned `last_activity_at`; derived from the outline when omitted. */
+  lastActivityAt?: string;
 }
 
 interface PathsConfig {
@@ -328,6 +330,14 @@ export function seedPath(path: {
   pollsRemaining?: number;
   /** Custom outline for a `ready` path (the rail fixtures above). */
   units?: PathUnit[];
+  /**
+   * Pin this path's `last_activity_at` — the field `GET /paths` orders by.
+   * Omit and it is derived: a fixed instant when the outline has a completed
+   * lesson, `null` when it has none. Set it when a test needs to pin the
+   * *relative* order of two worked paths, which the derived constant (equal
+   * for every worked path) deliberately cannot express.
+   */
+  lastActivityAt?: string;
 }): void {
   store.set(path.id, {
     id: path.id,
@@ -337,6 +347,7 @@ export function seedPath(path: {
     level: path.level,
     resolution: path.resolution ?? "ready",
     pollsRemaining: path.pollsRemaining ?? 0,
+    lastActivityAt: path.lastActivityAt,
     // **Copied, never referenced.** The fixtures above are module constants
     // shared by every test in the run, and AL-331's Apply/Undo mutate a stored
     // path's outline in place — a reference here would let one test's applied
@@ -560,6 +571,15 @@ function detailFor(path: StoredPath): PathDetail {
  */
 function summaryFor(path: StoredPath): PathSummary {
   const detail = detailFor(path);
+  const lessons = detail.units.flatMap((unit) => unit.lessons);
+  // `domains/progression`: available *is* the first incomplete lesson in
+  // `position_in_path` order, so the mock derives the resume target the same
+  // way the server does rather than storing a second, driftable copy.
+  const next = [...lessons]
+    .sort((a, b) => a.position_in_path - b.position_in_path)
+    .find((lesson) => lesson.unlock_state !== "complete");
+  const hasCompletion = lessons.some((lesson) => lesson.unlock_state === "complete");
+
   return {
     id: detail.id,
     topic: detail.topic,
@@ -567,8 +587,18 @@ function summaryFor(path: StoredPath): PathSummary {
     level: detail.level,
     status: detail.status,
     progress: detail.progress,
+    // A fixed instant, never `Date.now()`: these fixtures back snapshot-ish
+    // assertions, and a clock-derived field would make them time-dependent.
+    last_activity_at: path.lastActivityAt ?? (hasCompletion ? MOCK_LAST_ACTIVITY_AT : null),
+    next_lesson:
+      next === undefined
+        ? null
+        : { id: next.id, title: next.title, position_in_path: next.position_in_path },
   };
 }
+
+/** The stand-in "most recent completion" for any mock path that has one. */
+const MOCK_LAST_ACTIVITY_AT = "2025-01-15T10:00:00Z";
 
 function rateLimitEnvelope() {
   return HttpResponse.json(
@@ -691,9 +721,19 @@ export const pathsHandlers = [
   // regardless, so the two never collide.
   http.get(`${API_V1_BASE}/paths`, () => {
     listRequests += 1;
-    // Newest first (docs/api.md). The store is insertion-ordered, so the most
-    // recently seeded/created path leads.
-    const paths = [...store.values()].reverse().map(summaryFor);
+    // Most recently worked first (docs/api.md): `last_activity_at` desc with
+    // **nulls last**, `created_at` desc as tiebreak. The store is
+    // insertion-ordered, so reversing it first *is* creation-desc, and a
+    // stable sort then only has to express the activity key on top of it.
+    const paths = [...store.values()]
+      .reverse()
+      .map(summaryFor)
+      .sort((a, b) => {
+        if (a.last_activity_at === b.last_activity_at) return 0;
+        if (a.last_activity_at === null) return 1;
+        if (b.last_activity_at === null) return -1;
+        return a.last_activity_at < b.last_activity_at ? 1 : -1;
+      });
     // Keep the generating clock moving under whichever poll is running, so a
     // path seeded with `pollsRemaining` resolves on the switcher too.
     for (const path of store.values()) {

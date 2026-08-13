@@ -63,7 +63,11 @@ describe("Home — the Beats section (PRD §3/§4.10, TDD §8)", () => {
     const card = await screen.findByTestId("beat-list-item");
     expect(card.getAttribute("data-beat-id")).toBe("beat-unread");
     const status = screen.getByTestId("beat-item-status");
-    expect(status.textContent).toBe("1 new brief · weekly");
+    // Cadence moved out of the status sentence into the row's own meta cell —
+    // the column where a path shows its progress, i.e. the same "how much of
+    // this is there" question, answered in the same place.
+    expect(status.textContent).toBe("1 new brief");
+    expect(screen.getByTestId("beat-item-cadence").textContent).toBe("weekly");
     // "Your paths" is still its own, separate section — never merged.
     screen.getByTestId("paths-switcher");
   });

@@ -148,18 +148,39 @@ class PathRepository:
     async def list_for_user_with_effective_status(
         self, *, user_id: uuid.UUID
     ) -> list[tuple[Path, PathStatus]]:
-        """A learner's paths (newest first) each paired with **effective** status.
+        """A learner's paths (**most recently worked first**) with effective status.
 
         The switcher list (``GET /paths``, §6) reports the same effective status
         the detail poll does (a stale ``generating`` reads as ``failed``), so the
         two surfaces never disagree on a crashed outline — computed in SQL here
-        (one query) rather than per-row. Ordering matches
-        :meth:`list_for_user` (``created_at`` desc, ``id`` tiebreak).
+        (one query) rather than per-row.
+
+        **Ordering is last activity, not creation.** ``created_at`` desc — what
+        this used to sort by, and what :meth:`list_for_user` still sorts by —
+        ranks paths by when the learner had the *idea*, which after a few weeks
+        is precisely not the order they want to resume in: the path they worked
+        yesterday sinks under every idea they have had since. The key is the
+        path's most recent lesson completion, descending, with paths that have
+        never been touched sorted **after** every path that has (``NULLS LAST``,
+        spelled explicitly rather than relying on Postgres' desc default, which
+        is the opposite for ascending) — a brand-new path still lands at the top
+        of that group via the ``created_at`` desc tiebreak, so "I just made
+        this" and "I just did this" both stay near the top.
         """
+        last_activity = (
+            select(func.max(Lesson.completed_at))
+            .where(Lesson.path_id == Path.id)
+            .correlate(Path)
+            .scalar_subquery()
+        )
         result = await self.session.execute(
             select(Path, self._effective_status_expr().label("effective_status"))
             .where(Path.user_id == user_id)
-            .order_by(Path.created_at.desc(), Path.id)
+            .order_by(
+                last_activity.desc().nullslast(),
+                Path.created_at.desc(),
+                Path.id,
+            )
         )
         return [(path, PathStatus(status)) for path, status in result.all()]
 

@@ -87,10 +87,17 @@ class PathGenerationProgress:
     ``generated_lessons`` are derived from ``by_state`` (they cannot disagree);
     ``completed_lessons`` is an independent count (completion is orthogonal to
     generation state).
+
+    ``last_completed_at`` is the most recent completion on the path, or ``None``
+    for a path with no completions at all. It is what orders the switcher (a
+    learner returns to the path they last worked on, not the one they last had
+    the idea for), and it rides on this roll-up rather than a query of its own
+    because the grouped scan below already visits exactly these rows.
     """
 
     completed_lessons: int
     by_state: dict[LessonGenerationState, int]
+    last_completed_at: datetime.datetime | None = None
 
     @property
     def total_lessons(self) -> int:
@@ -99,6 +106,23 @@ class PathGenerationProgress:
     @property
     def generated_lessons(self) -> int:
         return self.by_state[LessonGenerationState.GENERATED]
+
+
+@dataclass(frozen=True)
+class NextLesson:
+    """A path's **available** lesson, for the switcher's resume affordance.
+
+    Deliberately not a whole ``Lesson``: home needs somewhere to point and a
+    label to point with, never the lesson's content (which is the lesson API's
+    payload and, for an ungenerated row, does not exist yet). ``unlock_state``
+    is absent for the same reason it is absent from ``PathSummaryDTO`` — this
+    row *is* the available one by construction, so carrying the derived state
+    beside it would be a second, desynchronisable copy of that fact.
+    """
+
+    id: uuid.UUID
+    title: str
+    position_in_path: int
 
 
 class LessonRepository:
@@ -642,6 +666,12 @@ class LessonRepository:
 
         Every requested path id is present (zeroed when it has no lessons).
         Stale ``generating`` lessons count as ``failed`` (§5.4).
+
+        ``last_completed_at`` comes out of the same grouped scan: ``max`` over a
+        group that is already keyed by ``path_id``, then folded across that
+        path's per-state groups. No extra query, and no extra index — the
+        partial ``ix_lessons_path_id_completed_at`` this walks is the one the
+        streak read already put there.
         """
         if not path_ids:
             return {}
@@ -651,6 +681,9 @@ class LessonRepository:
             for path_id in path_ids
         }
         completed: dict[uuid.UUID, int] = dict.fromkeys(path_ids, 0)
+        last_completed: dict[uuid.UUID, datetime.datetime | None] = dict.fromkeys(
+            path_ids, None
+        )
 
         effective = self._effective_state_expr()
         state_rows = await self.session.execute(
@@ -659,20 +692,65 @@ class LessonRepository:
                 effective.label("effective_state"),
                 func.count(),
                 func.count(Lesson.completed_at),
+                func.max(Lesson.completed_at),
             )
             .where(Lesson.path_id.in_(path_ids))
             .group_by(Lesson.path_id, effective)
         )
-        for path_id, state_value, count, completed_count in state_rows.all():
+        for (
+            path_id,
+            state_value,
+            count,
+            completed_count,
+            group_last_completed,
+        ) in state_rows.all():
             summaries[path_id][LessonGenerationState(state_value)] = count
             completed[path_id] += completed_count
+            # One path yields one group per effective state, so the path's real
+            # latest completion is the max across its groups — `None` from a
+            # group with no completions must never overwrite a live timestamp.
+            current = last_completed[path_id]
+            if group_last_completed is not None and (
+                current is None or group_last_completed > current
+            ):
+                last_completed[path_id] = group_last_completed
 
         return {
             path_id: PathGenerationProgress(
                 completed_lessons=completed[path_id],
                 by_state=by_state,
+                last_completed_at=last_completed[path_id],
             )
             for path_id, by_state in summaries.items()
+        }
+
+    async def next_lessons(
+        self, path_ids: Sequence[uuid.UUID]
+    ) -> dict[uuid.UUID, NextLesson]:
+        """Each path's **available** lesson — where "continue" resumes (§4).
+
+        ``domains/progression`` defines available as "the first incomplete
+        lesson in ``position_in_path`` order", so this is that row and no
+        derivation is duplicated here: the ordering *is* the definition. A path
+        with every lesson complete (or with no lessons yet) is simply absent
+        from the returned mapping — there is nothing to continue to, which is
+        what lets home render a finished path without a resume affordance.
+
+        One query for every path, via ``DISTINCT ON`` — the switcher's whole
+        list has to stay two queries plus this one, never one per row.
+        """
+        if not path_ids:
+            return {}
+
+        rows = await self.session.execute(
+            select(Lesson.path_id, Lesson.id, Lesson.title, Lesson.position_in_path)
+            .where(Lesson.path_id.in_(path_ids), Lesson.completed_at.is_(None))
+            .distinct(Lesson.path_id)
+            .order_by(Lesson.path_id, Lesson.position_in_path)
+        )
+        return {
+            path_id: NextLesson(id=lesson_id, title=title, position_in_path=position)
+            for path_id, lesson_id, title, position in rows.all()
         }
 
     # -- streaks: the one read (Phase 5 TDD §5.2, D3/D5) -------------------- #

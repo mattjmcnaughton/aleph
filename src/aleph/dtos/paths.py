@@ -13,6 +13,7 @@ reads as ``failed``, §5.4) and ``unlock_state`` (the derived learner axis —
 ``locked``/``available``/``complete``, from ``domains/progression``).
 """
 
+from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
@@ -118,6 +119,22 @@ class PathProgressDTO(BaseModel):
     completed_lessons: int
 
 
+class NextLessonDTO(BaseModel):
+    """Where a path resumes: its **available** lesson (CONTEXT.md: *Unlock state*).
+
+    Present only when the path has an incomplete lesson — a finished path, a
+    refused one, and one whose outline has not landed yet all carry ``None``,
+    which is what lets home render them without a resume affordance rather than
+    with a dead one. ``position_in_path`` is the total order (1-based on the
+    wire is *not* assumed: this is the stored position, and the client labels
+    with the title, never the number).
+    """
+
+    id: UUID
+    title: str
+    position_in_path: int
+
+
 class PathSummaryDTO(BaseModel):
     """One row of the "Your paths" switcher (``GET /api/v1/paths``, §6).
 
@@ -126,6 +143,13 @@ class PathSummaryDTO(BaseModel):
     client never has to respell "no title yet, show the topic" itself.
     ``topic`` is retained alongside it (unchanged, still the generation input)
     rather than replaced, so any existing reader of the raw topic keeps working.
+
+    ``last_activity_at`` is the path's most recent lesson completion (``None``
+    for a path never worked). It is the field the list is **ordered** by, and
+    it ships on the row as well as governing the sort so the client can name
+    the ordering it is rendering instead of inferring one.
+
+    ``next_lesson`` is where "continue" goes — see :class:`NextLessonDTO`.
     """
 
     id: UUID
@@ -134,10 +158,12 @@ class PathSummaryDTO(BaseModel):
     level: Level
     status: PathStatus
     progress: PathProgressDTO
+    last_activity_at: datetime | None
+    next_lesson: NextLessonDTO | None
 
 
 class PathListResponse(BaseModel):
-    """``GET /api/v1/paths`` body: the learner's paths, newest first.
+    """``GET /api/v1/paths`` body: the learner's paths, most recently worked first.
 
     Wrapped in an object (never a bare top-level array) so the payload can grow
     fields without a breaking shape change.

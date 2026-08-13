@@ -23,7 +23,10 @@ import type { ReactNode } from "react";
 const WIDTH_CAP = {
   lesson: "lg:max-w-[680px]",
   path: "lg:max-w-[900px]",
-  switcher: "lg:max-w-[1100px]",
+  // Widened from 1100 once home became two real columns: 1100 was sized for a
+  // single stack, and a work column plus a 260px rail inside it left the row
+  // grid too little for a path title to survive untruncated.
+  switcher: "lg:max-w-[1280px]",
 } as const;
 
 /**
