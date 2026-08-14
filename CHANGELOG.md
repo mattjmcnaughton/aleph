@@ -1,3 +1,10 @@
+## [1.38.1](https://github.com/mattjmcnaughton/aleph/compare/v1.38.0...v1.38.1) (2026-08-14)
+
+
+### Bug Fixes
+
+* **home:** collapsible work lists and one New menu ([#201](https://github.com/mattjmcnaughton/aleph/issues/201)) ([cd479f3](https://github.com/mattjmcnaughton/aleph/commit/cd479f394f31c9d559276ab6890fbbf054e7beee))
+
 # [1.38.0](https://github.com/mattjmcnaughton/aleph/compare/v1.37.2...v1.38.0) (2026-08-13)
 
 
