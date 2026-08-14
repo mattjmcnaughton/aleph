@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it, vi } from "vitest";
 import { API_V1_BASE, type AuthSession } from "../lib/api";
@@ -138,12 +138,17 @@ describe("Home — the Beats section (PRD §3/§4.10, TDD §8)", () => {
     }
   });
 
-  it("[AL-530] the empty state offers Deploy analyst, with no Beats yet", async () => {
+  it("[AL-530] the empty state points at the one door there is, with no Beats yet", async () => {
     useAnalystSession();
     await gotoHome();
 
+    // The section carries no CTA of its own any more: deploying an analyst
+    // lives in home's New menu, and the empty line names it rather than
+    // stranding a second copy of the link in the header.
     await screen.findByTestId("beats-empty");
-    const cta = screen.getByTestId("deploy-analyst-button");
-    expect(cta.getAttribute("href")).toBe("/beats/new");
+    expect(screen.queryByTestId("deploy-analyst-button")).toBeNull();
+
+    fireEvent.click(screen.getByTestId("new-menu-button"));
+    expect(screen.getByTestId("new-beat-menu-item").getAttribute("href")).toBe("/beats/new");
   });
 });

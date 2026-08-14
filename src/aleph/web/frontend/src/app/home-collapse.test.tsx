@@ -87,9 +87,10 @@ describe("Home — collapsible sections", () => {
     // The other section is untouched — two toggles, two pieces of state.
     expect(screen.getByTestId("paths-section-toggle").getAttribute("aria-expanded")).toBe("true");
     expect(screen.getAllByTestId("path-list-item")).toHaveLength(1);
-    // Deploying another Beat is still reachable with the list folded: the
-    // section's action sits in the header, not in the region that collapsed.
-    expect(screen.getByTestId("deploy-analyst-button")).toBeTruthy();
+    // Deploying another Beat is still reachable with the list folded — from
+    // the New menu, which is the section's only door now and sits outside
+    // anything that can collapse.
+    expect(screen.getByTestId("new-menu-button")).toBeTruthy();
 
     fireEvent.click(beats);
     expect(screen.getAllByTestId("beat-list-item")).toHaveLength(1);
