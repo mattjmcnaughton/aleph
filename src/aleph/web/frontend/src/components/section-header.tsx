@@ -12,6 +12,7 @@
 
 import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
+import { ChevronIcon } from "./chevron-icon";
 
 /**
  * The action beside a section's kicker.
@@ -49,6 +50,23 @@ function SectionAction({
 }
 
 /**
+ * What makes a section's kicker a disclosure control.
+ *
+ * The state is the *caller's*, not this component's: home owns which sections
+ * are open, because the thing being collapsed is the caller's own subtree and
+ * only the caller can label the header with what is hidden inside it ("8
+ * paths"). The chevron and the ARIA wiring live here so the two collapsible
+ * lists cannot disagree about either.
+ */
+export interface SectionCollapse {
+  open: boolean;
+  onToggle: () => void;
+  /** The `id` of the region this header discloses — its `aria-controls`. */
+  controls: string;
+  testid: string;
+}
+
+/**
  * A section's kicker, an optional one-line summary beneath it, and an optional
  * action on the right.
  *
@@ -60,18 +78,39 @@ export function SectionHeader({
   kicker,
   summary,
   action,
+  collapse,
   spacing = "mt-10",
 }: {
   kicker: string;
   /** e.g. "10 due today" — the section's state, in the row grammar's voice. */
   summary?: ReactNode;
   action?: { to: string; label: string; testid: string };
+  /** Present when the section collapses; the kicker becomes its toggle. */
+  collapse?: SectionCollapse;
   spacing?: string;
 }) {
   return (
     <div className={`${spacing} flex items-center justify-between gap-4`}>
       <div className="min-w-0">
-        <p className="kicker">{kicker}</p>
+        {collapse ? (
+          // The kicker *is* the toggle rather than growing a separate control
+          // beside it: the whole label is the hit area (a 11px chevron alone is
+          // not a touch target), and the section keeps exactly one affordance
+          // on its left, which is the rule this file exists to hold.
+          <button
+            type="button"
+            data-testid={collapse.testid}
+            aria-expanded={collapse.open}
+            aria-controls={collapse.controls}
+            onClick={collapse.onToggle}
+            className="kicker inline-flex min-h-[44px] items-center gap-1.5 rounded-md pr-2 transition-colors hover:text-porcelain focus-visible:outline focus-visible:outline-2 focus-visible:outline-teal"
+          >
+            <ChevronIcon open={collapse.open} />
+            {kicker}
+          </button>
+        ) : (
+          <p className="kicker">{kicker}</p>
+        )}
         {summary ? <p className="mt-1 text-sm text-mist">{summary}</p> : null}
       </div>
       {action ? (

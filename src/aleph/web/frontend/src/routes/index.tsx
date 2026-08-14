@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
+import { Link, createFileRoute } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { AlephGlyph } from "../components/aleph-logo";
 import {
@@ -17,6 +17,7 @@ import { ActivityStrip } from "../components/activity-strip";
 import { BeatCard } from "../components/beat-card";
 import { ContinueCard, pickResumeTarget } from "../components/continue-card";
 import { ListRow, type RowVariant, RowTitle, RowActions } from "../components/list-row";
+import { type NewMenuItem, NewMenu } from "../components/new-menu";
 import { CardsSection } from "../components/review/cards-section";
 import { DueTodayCard } from "../components/review/due-today-card";
 import { ReviewChip } from "../components/review/review-chip";
@@ -57,6 +58,33 @@ function deleteButtonId(pathId: string): string {
   return `delete-path-${pathId}`;
 }
 
+/** The two things a learner can start, in the order the menu offers them. */
+const NEW_PATH_ITEM: NewMenuItem = {
+  to: "/new",
+  label: "New path",
+  description: "Learn a topic, lesson by lesson.",
+  // The name this control has always had, kept so every surface that reaches
+  // for home's primary CTA — including the delete flow's focus fallback below
+  // — still finds it when the menu collapses back to a single button.
+  testid: "new-path-button",
+};
+
+const NEW_BEAT_ITEM: NewMenuItem = {
+  to: "/beats/new",
+  label: "Deploy analyst",
+  description: "Keep watch on a topic that's still moving.",
+  testid: "new-beat-menu-item",
+};
+
+/** The DOM ids the two collapsible section headers disclose (`aria-controls`). */
+const PATHS_REGION_ID = "home-paths-section";
+const BEATS_REGION_ID = "home-beats-section";
+
+/** A collapsed section still says what is inside it (the row grammar's voice). */
+function countSummary(count: number, noun: string): string {
+  return `${count} ${count === 1 ? noun : `${noun}s`}`;
+}
+
 // "Your paths" — the switcher (§5.5, TDD §8), and the signed-in home route.
 // Placement: the PRD calls it the "'Your paths' list / sidebar switcher" and the
 // mock's phone home screen *is* that list, so it lives at `/` rather than on a
@@ -82,10 +110,17 @@ function deleteButtonId(pathId: string): string {
 // desktop.
 function Home() {
   const session = useQuery(sessionQueryOptions);
-  const navigate = useNavigate();
 
   // Give up on a row that never resolves rather than poll behind it forever.
   const [stalled, setStalled] = useState(false);
+
+  // Both work lists collapse (design ask). Open is the default and the state is
+  // per-visit — deliberately not persisted: a section that is still shut when
+  // you come back tomorrow reads as "your paths are gone", which is the one
+  // impression this screen must never give. Collapsing is for getting one list
+  // out of the way while you work in the other, and that is a visit-length job.
+  const [pathsOpen, setPathsOpen] = useState(true);
+  const [beatsOpen, setBeatsOpen] = useState(true);
 
   const pathsQuery = useQuery({
     ...pathsListQueryOptions,
@@ -210,15 +245,13 @@ function Home() {
           ) : null}
         </div>
 
-        <button
-          type="button"
-          ref={newPathRef}
-          data-testid="new-path-button"
-          onClick={() => navigate({ to: "/new" })}
-          className={`mt-6 ${PRIMARY_CTA_BASE} lg:mt-0 lg:w-auto lg:shrink-0`}
-        >
-          New path
-        </button>
+        {/* One control for both kinds of top-level thing (a path, a Beat) —
+            a menu when the analyst flag makes that a real choice, and the
+            plain "New path" button it has always been when it does not. */}
+        <NewMenu
+          triggerRef={newPathRef}
+          items={analystEnabled ? [NEW_PATH_ITEM, NEW_BEAT_ITEM] : [NEW_PATH_ITEM]}
+        />
       </div>
 
       {/* One tap back into yesterday's work, above everything else on the page
@@ -259,56 +292,80 @@ function Home() {
         </aside>
 
         <div className="min-w-0 lg:flex-1">
-          <SectionHeader kicker="Your paths" spacing="mt-8 lg:mt-0" />
+          {/* Collapsible (both lists are): a learner with eight paths and a
+              handful of Beats has a long page, and the section they are not
+              working in today is pure scroll. Collapsed, the header still says
+              how much is in there — a disclosure that hides the count as well
+              as the rows makes you open it just to find out. */}
+          <SectionHeader
+            kicker="Your paths"
+            spacing="mt-8 lg:mt-0"
+            summary={!pathsOpen && paths !== undefined ? countSummary(paths.length, "path") : null}
+            collapse={{
+              open: pathsOpen,
+              onToggle: () => setPathsOpen((wasOpen) => !wasOpen),
+              controls: PATHS_REGION_ID,
+              testid: "paths-section-toggle",
+            }}
+          />
 
-          {paths === undefined ? (
-            pathsQuery.isError ? (
-              <UnavailableState />
+          {/* The region element is always in the DOM and always carries the id
+              its header points at — `aria-controls` must resolve whether or
+              not the section is open, or the toggle references nothing exactly
+              when a screen reader is being told it just closed something. Its
+              *contents*, on the other hand, are genuinely unmounted rather
+              than hidden with CSS: a collapsed section holds no focusable
+              rows, no live regions and no delete confirms. */}
+          <div id={PATHS_REGION_ID}>
+            {!pathsOpen ? null : paths === undefined ? (
+              pathsQuery.isError ? (
+                <UnavailableState />
+              ) : (
+                <LoadingState />
+              )
+            ) : paths.length === 0 ? (
+              <EmptyState />
             ) : (
-              <LoadingState />
-            )
-          ) : paths.length === 0 ? (
-            <EmptyState />
-          ) : (
-            <>
-              <ul
-                data-testid="paths-list"
-                className="mt-3 space-y-3 lg:space-y-0 lg:border-t lg:border-divider"
-              >
-                {(activePaths ?? []).map((path) => (
-                  <li key={path.id}>
-                    <PathRow
-                      path={path}
-                      deletion={deletion}
-                      streak={pathStreaks.get(path.id)}
-                      reviewDue={reviewDueByPath.get(path.id)}
-                    />
-                  </li>
-                ))}
-              </ul>
+              <>
+                <ul
+                  data-testid="paths-list"
+                  className="mt-3 space-y-3 lg:space-y-0 lg:border-t lg:border-divider"
+                >
+                  {(activePaths ?? []).map((path) => (
+                    <li key={path.id}>
+                      <PathRow
+                        path={path}
+                        deletion={deletion}
+                        streak={pathStreaks.get(path.id)}
+                        reviewDue={reviewDueByPath.get(path.id)}
+                      />
+                    </li>
+                  ))}
+                </ul>
 
-              {finishedPaths.length > 0 ? (
-                <section data-testid="finished-paths">
-                  <SectionHeader kicker="Finished" spacing="mt-8" />
-                  {/* Dimmed as a group rather than per row: nothing here is
-                      asking for anything, and `hover:opacity-100` keeps it
-                      fully legible the moment the learner goes looking. */}
-                  <ul className="mt-3 space-y-3 opacity-60 transition-opacity hover:opacity-100 lg:space-y-0 lg:border-t lg:border-divider">
-                    {finishedPaths.map((path) => (
-                      <li key={path.id}>
-                        <PathRow
-                          path={path}
-                          deletion={deletion}
-                          streak={pathStreaks.get(path.id)}
-                          reviewDue={reviewDueByPath.get(path.id)}
-                        />
-                      </li>
-                    ))}
-                  </ul>
-                </section>
-              ) : null}
-            </>
-          )}
+                {finishedPaths.length > 0 ? (
+                  <section data-testid="finished-paths">
+                    <SectionHeader kicker="Finished" spacing="mt-8" />
+                    {/* Dimmed as a group rather than per row: nothing here is
+                        asking for anything, and `hover:opacity-100` keeps it
+                        fully legible the moment the learner goes looking. */}
+                    <ul className="mt-3 space-y-3 opacity-60 transition-opacity hover:opacity-100 lg:space-y-0 lg:border-t lg:border-divider">
+                      {finishedPaths.map((path) => (
+                        <li key={path.id}>
+                          <PathRow
+                            path={path}
+                            deletion={deletion}
+                            streak={pathStreaks.get(path.id)}
+                            reviewDue={reviewDueByPath.get(path.id)}
+                          />
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                ) : null}
+              </>
+            )}
+          </div>
 
           {/* Beats live in a section beside "Your paths", not mixed into it —
               the same row grammar (title, a line of state) with a different
@@ -319,6 +376,15 @@ function Home() {
             <section data-testid="beats-section">
               <SectionHeader
                 kicker="Your beats"
+                summary={
+                  !beatsOpen && beats !== undefined ? countSummary(beats.length, "Beat") : null
+                }
+                collapse={{
+                  open: beatsOpen,
+                  onToggle: () => setBeatsOpen((wasOpen) => !wasOpen),
+                  controls: BEATS_REGION_ID,
+                  testid: "beats-section-toggle",
+                }}
                 action={{
                   to: "/beats/new",
                   label: "Deploy analyst",
@@ -326,22 +392,24 @@ function Home() {
                 }}
               />
 
-              {beats === undefined ? null : beats.length === 0 ? (
-                <p data-testid="beats-empty" className="mt-3 text-sm text-mist">
-                  No Beats yet. Deploy one to keep watch on a topic that's still moving.
-                </p>
-              ) : (
-                <ul
-                  data-testid="beats-list"
-                  className="mt-3 space-y-3 lg:space-y-0 lg:border-t lg:border-divider"
-                >
-                  {beats.map((beat) => (
-                    <li key={beat.id}>
-                      <BeatCard beat={beat} />
-                    </li>
-                  ))}
-                </ul>
-              )}
+              <div id={BEATS_REGION_ID}>
+                {!beatsOpen || beats === undefined ? null : beats.length === 0 ? (
+                  <p data-testid="beats-empty" className="mt-3 text-sm text-mist">
+                    No Beats yet. Deploy one to keep watch on a topic that's still moving.
+                  </p>
+                ) : (
+                  <ul
+                    data-testid="beats-list"
+                    className="mt-3 space-y-3 lg:space-y-0 lg:border-t lg:border-divider"
+                  >
+                    {beats.map((beat) => (
+                      <li key={beat.id}>
+                        <BeatCard beat={beat} />
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
             </section>
           ) : null}
         </div>
