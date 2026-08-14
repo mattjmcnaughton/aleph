@@ -10,6 +10,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { Children, type ReactNode, useState } from "react";
 import { type PathDetail, type PathLesson, pathsListQueryOptions } from "../lib/api";
+import { ChevronIcon } from "./chevron-icon";
 import { LessonMarker, UNLOCK_STATE_LABEL } from "./lesson-marker";
 
 /** The sidebar shell: stacks whichever sections a route passes, with a hairline
@@ -22,30 +23,6 @@ export function Sidebar({ children }: { children: ReactNode }) {
       {sections.length > 1 ? <div className="h-px bg-divider" /> : null}
       {sections[1]}
     </div>
-  );
-}
-
-function ChevronIcon({ open }: { open: boolean }) {
-  return (
-    <svg viewBox="0 0 16 16" width="11" height="11" fill="none" aria-hidden="true">
-      {open ? (
-        <path
-          d="M4 6l4 4 4-4"
-          stroke="currentColor"
-          strokeWidth="1.6"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      ) : (
-        <path
-          d="M6 4l4 4-4 4"
-          stroke="currentColor"
-          strokeWidth="1.6"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      )}
-    </svg>
   );
 }
 
