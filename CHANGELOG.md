@@ -1,3 +1,10 @@
+## [1.38.2](https://github.com/mattjmcnaughton/aleph/compare/v1.38.1...v1.38.2) (2026-08-14)
+
+
+### Bug Fixes
+
+* **home:** drop the Beats section's Deploy analyst link ([#202](https://github.com/mattjmcnaughton/aleph/issues/202)) ([5a4a475](https://github.com/mattjmcnaughton/aleph/commit/5a4a4756d03f8644f74f40a2f6db80fae4e0c0bc))
+
 ## [1.38.1](https://github.com/mattjmcnaughton/aleph/compare/v1.38.0...v1.38.1) (2026-08-14)
 
 
