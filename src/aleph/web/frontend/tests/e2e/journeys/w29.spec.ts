@@ -64,7 +64,13 @@ test.describe("W29 deploy an analyst, get a cited Brief", { tag: "@w29" }, () =>
     await page.goto("/");
     await expect(page.getByTestId("beats-section")).toBeVisible();
     await expectNoHorizontalOverflow(page);
-    await expectMinTouchTarget(page.getByTestId("deploy-analyst-button"));
+    // Home's one door into deploying an analyst: the New menu in the hero.
+    // The Beats section carries no CTA of its own — it used to, and a second
+    // copy of the same link is what this checked before.
+    await expectMinTouchTarget(page.getByTestId("new-menu-button"));
+    await page.getByTestId("new-menu-button").click();
+    await expectMinTouchTarget(page.getByTestId("new-beat-menu-item"));
+    await expectNoHorizontalOverflow(page);
 
     // --- the deploy form -------------------------------------------------------
     await page.goto("/beats/new");

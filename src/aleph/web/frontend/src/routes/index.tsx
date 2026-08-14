@@ -385,17 +385,22 @@ function Home() {
                   controls: BEATS_REGION_ID,
                   testid: "beats-section-toggle",
                 }}
-                action={{
-                  to: "/beats/new",
-                  label: "Deploy analyst",
-                  testid: "deploy-analyst-button",
-                }}
+                // No section action: the New menu above already carries
+                // "Deploy analyst", and a second copy here was a teal link
+                // stranded mid-page — most obviously with the section
+                // collapsed, where it floated beside a one-line count with no
+                // list under it to belong to.
               />
 
               <div id={BEATS_REGION_ID}>
                 {!beatsOpen || beats === undefined ? null : beats.length === 0 ? (
                   <p data-testid="beats-empty" className="mt-3 text-sm text-mist">
-                    No Beats yet. Deploy one to keep watch on a topic that's still moving.
+                    {/* Names the one door there is now, rather than carrying a
+                        second copy of it: an inline link here would be a
+                        sub-44px touch target, and a full CTA block would make
+                        the emptier section the louder one. */}
+                    No Beats yet. Deploy one from New above, to keep watch on a topic that's still
+                    moving.
                   </p>
                 ) : (
                   <ul

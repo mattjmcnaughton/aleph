@@ -15,14 +15,15 @@ import type { ReactNode } from "react";
 import { ChevronIcon } from "./chevron-icon";
 
 /**
- * The action beside a section's kicker.
+ * The action beside a section's kicker: teal text at a real touch size, never
+ * a filled button — that treatment belongs to the page's one primary CTA, on a
+ * screen that already had teal doing five different jobs (theme 4).
  *
- * Deliberately **one affordance**, not a per-section choice: "New path" and
- * "Deploy analyst" are the same kind of move (start a new thing of this
- * section's kind) and were rendering as a filled 44px-tall primary button and
- * a 20px inline text link respectively. Teal text at a real touch size is the
- * shape both get, which also takes a filled teal button off a screen that had
- * teal doing five different jobs (theme 4).
+ * Deliberately **one affordance**, not a per-section choice. Note what is left
+ * using it: "Browse" on the cards section, which goes *somewhere else*. The
+ * two "start a new thing of this section's kind" actions — "New path" and
+ * "Deploy analyst" — have both moved into home's New menu, since duplicating
+ * the same door per section is what stranded a teal link mid-page.
  */
 function SectionAction({
   to,
