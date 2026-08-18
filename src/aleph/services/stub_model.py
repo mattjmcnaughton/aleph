@@ -653,9 +653,13 @@ def _build_lesson(
             options=options,
             correct_index=correct_index,
             # Inline Markdown only, matching the contract the real prompt states
-            # for an explanation (no block structure in the small callout).
+            # for an explanation (no block structure in the small callout) — and
+            # naming the correct option by its **text**, never by its position,
+            # for the same reason the real prompt does: the options are re-ordered
+            # before a learner sees them (``domains/answer_order.py``), so "option
+            # 2" would point at the wrong choice by the time it is read.
             explanation=(
-                f"Option **{correct_index + 1}** matches the passage's treatment "
+                f"**{options[correct_index]}** matches the passage's treatment "
                 f"of {topic}; the others distort or misattribute it."
             ),
         ),
@@ -1211,8 +1215,10 @@ def build_stub_tutor_check(question: str) -> TutorCheckPayload:
         ),
         options=options,
         correct_index=correct_index,
+        # By text, not by position — the delivered options are re-ordered
+        # (``domains/answer_order.py``), exactly as for a Quick check.
         explanation=(
-            f"Option **{correct_index + 1}** is the one the passage supports; "
+            f"**{options[correct_index]}** is the one the passage supports; "
             "the others drift away from it."
         ),
     )

@@ -36,6 +36,7 @@ import pytest
 
 from aleph import db
 from aleph.config import settings
+from aleph.domains.answer_order import shuffle_options
 from aleph.models import (
     Attempt,
     Conversation,
@@ -607,7 +608,26 @@ async def test_posed_tutor_check_rides_the_wire_and_the_persisted_row(
         )
 
     assert wire.names[-1] == "done", wire.names
-    expected = dict(build_stub_tutor_check("quiz me on this"))
+    # The posed payload, with its options re-ordered exactly as the service does
+    # (``domains/answer_order.py``, seeded on the stem): the model keys the
+    # correct option to the same slot far too often for a check to test
+    # anything, so the delivered order is the app's, not the model's.
+    posed_by_stub = build_stub_tutor_check("quiz me on this")
+    ordered = shuffle_options(
+        posed_by_stub["options"],
+        posed_by_stub["correct_index"],
+        seed=posed_by_stub["stem"],
+    )
+    expected = {
+        **posed_by_stub,
+        "options": list(ordered.options),
+        "correct_index": ordered.correct_index,
+    }
+    # Same check, only re-ordered: the keyed answer is still the same text.
+    assert (
+        expected["options"][expected["correct_index"]]
+        == (posed_by_stub["options"][posed_by_stub["correct_index"]])
+    )
     posed = wire.only("tutor_check")
     assert posed == {**expected, "answered_index": None}
     # The check is delivered *before* the reply text it accompanies.

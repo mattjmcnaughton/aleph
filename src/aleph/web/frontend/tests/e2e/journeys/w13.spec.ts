@@ -3,10 +3,16 @@
 // **How the journey knows the answer it is checking for.** The keyed option is
 // precisely what the learner may not be told, so the spec borrows W6's trick:
 // two paths on the **same topic**. The stub model is deterministic in (topic,
-// position), so both paths' lesson 1 carries identical content. An Attempt on
-// the first path discloses the keyed option and its explanation legitimately;
-// the second path is then a lesson whose answer this spec knows and whose tutor
-// must not say it.
+// position), so both paths' lesson 1 carries the same stem, the same options and
+// the same keyed answer. An Attempt on the first path discloses the keyed option
+// and its explanation legitimately; the second path is then a lesson whose
+// answer this spec knows and whose tutor must not say it.
+//
+// The twin is the keyed option's **text**, never its index — each lesson's
+// options are re-ordered at generation, seeded on its own id
+// (`domains/answer_order.py`), so the answer deliberately sits in a different
+// slot in the two. Which suits this spec exactly: what the tutor must not leak
+// is the option's wording, and that is what the assertions look for.
 //
 // **What is asserted, and where.** The reply text, and the conversation payload
 // behind it — never `page.content()`, because the Quick check's own options are
@@ -56,7 +62,8 @@ test.describe("W13 the tutor does not leak the Quick check answer", { tag: "@w13
   test("direct and oblique asks are unanswerable before an Attempt, and open after", async ({
     page,
   }) => {
-    // One topic, two paths — identical lesson content in both (see the header).
+    // One topic, two paths — the same lesson in both, twinned by option text
+    // rather than by slot (see the header).
     const topic = uniqueTopic("Sourdough");
 
     // --- path 1: learn the key, legitimately ---------------------------------
@@ -73,7 +80,12 @@ test.describe("W13 the tutor does not leak the Quick check answer", { tag: "@w13
     await createPath(page, topic);
     const pathId = pathIdFromUrl(page.url());
     await openLessonAt(page, 0);
-    expect(await quickCheckOptionTexts(page)).toEqual(options);
+    // The same options, in this lesson's own order — so the keyed one is found
+    // by its text, not by the slot it held on the first path.
+    const secondOptions = await quickCheckOptionTexts(page);
+    expect([...secondOptions].sort()).toEqual([...options].sort());
+    const keyedIndex = secondOptions.map((option) => option.trim()).indexOf(keyedOption);
+    expect(keyedIndex).toBeGreaterThanOrEqual(0);
     // Nothing has been revealed here: this is the pre-Attempt lesson W6 pins.
     await expect(page.getByTestId("outcome-reveal")).toHaveCount(0);
     const slice = await passageSlice(page);
@@ -104,11 +116,10 @@ test.describe("W13 the tutor does not leak the Quick check answer", { tag: "@w13
     // is nothing left to withhold (see the header for what this tier proves).
     await closeRail(page);
     const second = await answerQuickCheck(page, 1);
-    expect(second.correctIndex).toBe(reveal.correctIndex);
-    await expect(quickCheckOptions(page).nth(reveal.correctIndex)).toHaveAttribute(
-      "data-correct",
-      "true",
-    );
+    // The same keyed option as path 1, in this lesson's own slot.
+    expect(secondOptions[second.correctIndex].trim()).toBe(keyedOption);
+    expect(second.correctIndex).toBe(keyedIndex);
+    await expect(quickCheckOptions(page).nth(keyedIndex)).toHaveAttribute("data-correct", "true");
 
     await openRail(page);
     const after = await askTutor(page, ANSWER_SEEKING[0]);

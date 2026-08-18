@@ -76,6 +76,7 @@ from aleph.agents.outline import (
 )
 from aleph.config import settings as global_settings
 from aleph.db import new_session
+from aleph.domains.answer_order import shuffle_options
 from aleph.models import LessonGenerationState, Level
 from aleph.repositories import (
     ChangeRepository,
@@ -873,6 +874,21 @@ class GenerationOrchestrator:
     async def _persist_lesson(
         self, lesson_id: uuid.UUID, fence: datetime.datetime, content: LessonContent
     ) -> bool:
+        """Write the generated passage + Quick check under the fence.
+
+        The Quick check's options are **re-ordered on the way in**
+        (:func:`~aleph.domains.answer_order.shuffle_options`): the model keys the
+        correct one to the same slot far too often for the check to test
+        anything, so the served position is decided here instead. Seeded on the
+        lesson id — stable, unique per check, and independent of which option is
+        correct, which is what makes the position uniform (see that module).
+
+        Shuffling **at persist**, not at read, is what keeps one order in play:
+        the row is the single source of truth for grading, for the tutor's view
+        of the keyed answer, and for a Revision's snapshot and undo. A per-read
+        shuffle would move the answer out from under an Attempt already recorded
+        against it.
+        """
         async with self._session_factory() as session:
             marked = await self._lessons(session).mark_generated(
                 lesson_id=lesson_id, read_passage=content.read_passage, fence=fence
@@ -881,11 +897,14 @@ class GenerationOrchestrator:
                 await session.rollback()
                 return False  # lost the claim to a re-claim; drop silently
             quick_check = content.quick_check
+            ordered = shuffle_options(
+                quick_check.options, quick_check.correct_index, seed=str(lesson_id)
+            )
             await QuickCheckRepository(session).create(
                 lesson_id=lesson_id,
                 stem=quick_check.stem,
-                options=quick_check.options,
-                correct_index=quick_check.correct_index,
+                options=list(ordered.options),
+                correct_index=ordered.correct_index,
                 explanation=quick_check.explanation,
             )
             await session.commit()

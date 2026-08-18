@@ -34,6 +34,7 @@ from sqlalchemy import func, select
 
 from aleph import db
 from aleph.config import Settings
+from aleph.domains.answer_order import shuffle_options
 from aleph.models import (
     Lesson,
     LessonGenerationState,
@@ -77,6 +78,8 @@ if TYPE_CHECKING:
     from pydantic_ai.messages import ModelMessage
     from pydantic_ai.models import Model
     from pydantic_ai.models.function import AgentInfo
+
+    from aleph.agents.lesson import QuickCheck as QuickCheckPayload
 
 
 # --------------------------------------------------------------------------- #
@@ -172,6 +175,43 @@ def capturing_outline_resolver(captured: list[str]) -> Callable[[str], Model]:
         content = stub_build_lesson(topic, stub_read_position(text) or 1)
         return ModelResponse(
             parts=[ToolCallPart(tool_name=lesson_tool.name, args=content.model_dump())]
+        )
+
+    model = FunctionModel(respond)
+    return lambda _model_id: model
+
+
+def quick_check_capturing_resolver(
+    posed: dict[int, QuickCheckPayload],
+) -> Callable[[str], Model]:
+    """A resolver whose model records the Quick check it posed, by position.
+
+    A test cannot rebuild what the stub posed from the topic alone: the stub
+    seeds its content on ``clean_topic(prompt)``, which is the *whole* collapsed
+    user prompt, not the topic string the path was created with. So the only
+    honest source for "what did the model key?" is the call itself — which is
+    exactly what the option-order assertion needs, since its claim is "the
+    persisted row is what the model posed, re-ordered".
+    """
+
+    async def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        text = stub_user_text(messages)
+        topic = stub_clean_topic(text) or "the topic"
+        lesson_tool = stub_tool_with(info.output_tools, "read_passage")
+        if lesson_tool is not None:
+            position = stub_read_position(text) or 1
+            content = stub_build_lesson(topic, position)
+            posed[position] = content.quick_check
+            return ModelResponse(
+                parts=[
+                    ToolCallPart(tool_name=lesson_tool.name, args=content.model_dump())
+                ]
+            )
+        outline_tool = stub_tool_with(info.output_tools, "units")
+        assert outline_tool is not None
+        outline = stub_build_outline(topic)
+        return ModelResponse(
+            parts=[ToolCallPart(tool_name=outline_tool.name, args=outline.model_dump())]
         )
 
     model = FunctionModel(respond)
@@ -356,6 +396,63 @@ async def test_create_path_generates_outline_and_prefetch_window() -> None:
     assert [lesson.position_in_path for lesson in generated] == list(
         range(1, len(generated) + 1)
     )
+
+
+# --------------------------------------------------------------------------- #
+# Quick check option order (``domains/answer_order.py``)
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.anyio
+async def test_persisted_quick_check_options_are_reordered_not_taken_as_keyed() -> None:
+    """The row's option order is the app's, not the model's — same keyed answer.
+
+    The model keys the correct option to the same slot far more often than
+    chance ("always B"), so the served order is decided at persist by
+    :func:`~aleph.domains.answer_order.shuffle_options`, seeded on the lesson id.
+    Asserted against what the model *actually posed* (captured at the call, since
+    the stub seeds on the whole prompt rather than the topic): the persisted
+    options are exactly those options re-ordered by that function, and
+    ``correct_index`` still addresses the same option **text** the model keyed.
+    """
+    posed: dict[int, QuickCheckPayload] = {}
+    orch, spawn = make_orchestrator(
+        resolve_model_fn=quick_check_capturing_resolver(posed), prefetch_n=2
+    )
+    async with db.async_session() as session:
+        user = await create_user(session)
+        await session.commit()
+        user_id = user.id
+
+    path = await orch.create_path(
+        user_id=user_id, topic="Rust ownership", level=Level.SOME_EXPERIENCE
+    )
+    await spawn.drain()
+
+    generated = [
+        lesson
+        for lesson in await _generated_lessons(path.id)
+        if lesson.generation_state is LessonGenerationState.GENERATED
+    ]
+    assert generated, "no lesson was generated"
+
+    for lesson in generated:
+        check = posed[lesson.position_in_path]
+        async with db.async_session() as session:
+            row = (
+                await session.execute(
+                    select(QuickCheck).where(QuickCheck.lesson_id == lesson.id)
+                )
+            ).scalar_one()
+
+        expected = shuffle_options(
+            check.options, check.correct_index, seed=str(lesson.id)
+        )
+        assert row.options == list(expected.options)
+        assert row.correct_index == expected.correct_index
+        # Nothing about the check itself changed — only where the answer sits.
+        assert sorted(row.options) == sorted(check.options)
+        assert row.options[row.correct_index] == check.options[check.correct_index]
 
 
 # --------------------------------------------------------------------------- #
