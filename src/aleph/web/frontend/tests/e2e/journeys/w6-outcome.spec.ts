@@ -18,11 +18,20 @@
 // Proving *hiding* needs something to look for, and the correct answer is
 // precisely what the learner may not see. So the journey uses two paths on the
 // **same topic**: the stub model is deterministic in (topic, position), so both
-// paths' lesson 1 carries identical content. The Attempt on the first path
-// discloses the keyed answer and explanation legitimately; the second path is
-// then a lesson whose answer we know but whose DOM must not contain it — and
-// knowing the key is also what lets the journey aim deliberately at each Outcome
-// branch instead of guessing.
+// paths' lesson 1 carries the same stem, the same options and the same keyed
+// answer. The Attempt on the first path discloses the keyed answer and
+// explanation legitimately; the second path is then a lesson whose answer we
+// know but whose DOM must not contain it — and knowing the key is also what lets
+// the journey aim deliberately at each Outcome branch instead of guessing.
+//
+// The twin is by option **text**, never by index. Each lesson's options are
+// re-ordered at generation, seeded on its own id (`domains/answer_order.py`), so
+// the correct answer deliberately does *not* sit in the same slot in both — two
+// learners on one topic getting the answer in the same position is the bias that
+// module exists to remove. The journey therefore finds the keyed option in the
+// second lesson by looking its text up in that lesson's own order, which is also
+// the stronger form of the hiding claim: knowing the answer by content, and
+// still finding no key in the payload or the DOM.
 
 import { expect, test } from "@playwright/test";
 import { DEV_STORAGE_STATE } from "../fixtures/auth";
@@ -40,6 +49,7 @@ import {
   waitForLessonGenerated,
   waitForSurface,
 } from "../fixtures/journey";
+import { quickCheckOptionTexts } from "../fixtures/tutor";
 
 test.use({ storageState: DEV_STORAGE_STATE });
 
@@ -61,11 +71,14 @@ test.describe("W6 Quick-check Outcome and answer-hiding", { tag: "@w6" }, () => 
     expect(await revealedCorrectIndex(page)).toBe(-1);
     await expect(page.getByTestId("quick-check-submit")).toBeDisabled();
 
+    const firstOptions = await quickCheckOptionTexts(page);
     const first = await answerQuickCheck(page, 0);
     await expect(quickCheckOptions(page).nth(first.correctIndex)).toHaveAttribute(
       "data-correct",
       "true",
     );
+    // What the twin is: the correct option's *text*. Its slot is this lesson's.
+    const keyedOption = firstOptions[first.correctIndex];
     // Non-gating: whichever branch this was, the lesson can be completed.
     await markComplete(page);
 
@@ -98,13 +111,22 @@ test.describe("W6 Quick-check Outcome and answer-hiding", { tag: "@w6" }, () => 
     await expect(page.locator("[data-correct]")).toHaveCount(0);
     await expect(page.getByTestId("outcome-reveal")).toHaveCount(0);
 
+    // The same options, in this lesson's own order — so the keyed answer is
+    // found by its text, not by the slot it held on the first path.
+    const secondOptions = await quickCheckOptionTexts(page);
+    expect([...secondOptions].sort()).toEqual([...firstOptions].sort());
+    const keyedIndex = secondOptions.indexOf(keyedOption);
+    expect(keyedIndex).toBeGreaterThanOrEqual(0);
+
     // Aim at the branch the first Attempt did not take.
     const wantIncorrect = first.outcome === "correct";
-    const answer = wantIncorrect ? (first.correctIndex + 1) % optionCount : first.correctIndex;
+    const answer = wantIncorrect ? (keyedIndex + 1) % optionCount : keyedIndex;
     const second = await answerQuickCheck(page, answer);
 
-    // Same topic + position => same keyed answer: the twin the journey relies on.
-    expect(second.correctIndex).toBe(first.correctIndex);
+    // Same topic + position => the same keyed option and the same explanation:
+    // the twin the journey relies on. Its index is this lesson's own.
+    expect(secondOptions[second.correctIndex]).toBe(keyedOption);
+    expect(second.correctIndex).toBe(keyedIndex);
     expect(second.explanation).toBe(first.explanation);
     // ...and the two Attempts between them covered both Outcome branches.
     expect(second.outcome).not.toBe(first.outcome);
