@@ -9,6 +9,27 @@ Python web application using FastAPI, uvicorn, OpenTelemetry, uv, ruff, ty, and 
 > "course", **Quick check** not "quiz", **Read passage** in prose and schemas. Read it before
 > naming anything new.
 
+## Agent Environment Setup
+
+Amp automatically runs [`.agents/setup`](.agents/setup) when creating a fresh orb
+and [`.agents/resume`](.agents/resume) when an existing orb wakes. Other agents and
+IDEs, including Cursor, do not automatically recognize this lifecycle, but the
+scripts are a good starting point for their environments and can be run manually.
+
+The prerequisites and order are:
+
+1. Debian 12 with Bash, `curl`, `sudo`, systemd, and outbound internet access.
+2. A checkout of this repository at any path.
+3. Run `.agents/setup` once. It installs Docker, PostgreSQL, Node 22, pnpm 10.33,
+   uv, Python 3.12, just, Docker Compose, and the locked project dependencies.
+4. After machine sleep or restart, run `.agents/resume` to restore Docker and
+   PostgreSQL.
+5. Start Keycloak when needed with `just compose-keycloak-up`.
+
+The scripts use `apt`, systemd, and Linux-specific paths, so they do not run
+directly on macOS or Windows. Use a Debian dev container or VM there. Adaptations
+for other Linux distributions or agent runtimes may be necessary.
+
 ## Quick Reference
 
 | Command | Purpose |
