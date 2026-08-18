@@ -88,6 +88,7 @@ from aleph import events
 from aleph.agents.tutor import TUTOR_CHECK_TOOL_NAME, build_tutor_agent
 from aleph.config import settings as global_settings
 from aleph.db import new_session
+from aleph.domains.answer_order import shuffle_options
 from aleph.dtos.tutor import (
     MessageDeltaDTO,
     MessageDoneDTO,
@@ -561,7 +562,14 @@ class TutorTurnService:
                                 # the thread read returns later, so the
                                 # check-answer endpoint has an ``answered_index``
                                 # key to overwrite rather than one to invent.
-                                card = TutorCheckDTO.model_validate(payload)
+                                # Re-ordered once, here, for the same reason a
+                                # Quick check is at persist: the model keys the
+                                # correct option to the same slot far too often,
+                                # and this is the single point both the frame and
+                                # the row are cut from.
+                                card = _ordered_check(
+                                    TutorCheckDTO.model_validate(payload)
+                                )
                                 check = card.model_dump(mode="json")
                                 await queue.put(sse_event("tutor_check", card))
                                 # Emitted where the card reaches the rail, which
@@ -657,6 +665,29 @@ def _text_of(event: object) -> str:
     if isinstance(event, PartDeltaEvent) and isinstance(event.delta, TextPartDelta):
         return event.delta.content_delta
     return ""
+
+
+def _ordered_check(card: TutorCheckDTO) -> TutorCheckDTO:
+    """The same Tutor check with its options re-ordered (``domains.answer_order``).
+
+    A Tutor check is non-scoring, but it is still a question the learner answers,
+    and it comes out of the same generator with the same habit: the correct
+    option lands in the same slot far more often than chance. Shuffling it costs
+    nothing and keeps the tutor's quizzing honest.
+
+    Seeded on the **stem** — stable, varying from check to check, and (unlike the
+    tool-call id) reproducible from the payload itself, so the delivered order is
+    assertable in a test rather than a provider-generated accident. The seed is
+    independent of ``correct_index``, which is what makes the served position
+    uniform however the model keyed it.
+    """
+    ordered = shuffle_options(card.options, card.correct_index, seed=card.stem)
+    return card.model_copy(
+        update={
+            "options": list(ordered.options),
+            "correct_index": ordered.correct_index,
+        }
+    )
 
 
 def _record_call(

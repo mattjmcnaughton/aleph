@@ -34,6 +34,7 @@ from sqlalchemy import func, select
 
 from aleph import db
 from aleph.config import Settings
+from aleph.domains.answer_order import shuffle_options
 from aleph.models import (
     Lesson,
     LessonGenerationState,
@@ -356,6 +357,60 @@ async def test_create_path_generates_outline_and_prefetch_window() -> None:
     assert [lesson.position_in_path for lesson in generated] == list(
         range(1, len(generated) + 1)
     )
+
+
+# --------------------------------------------------------------------------- #
+# Quick check option order (``domains/answer_order.py``)
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.anyio
+async def test_persisted_quick_check_options_are_reordered_not_taken_as_keyed() -> None:
+    """The row's option order is the app's, not the model's — same keyed answer.
+
+    The model keys the correct option to the same slot far more often than
+    chance ("always B"), so the served order is decided at persist by
+    :func:`~aleph.domains.answer_order.shuffle_options`, seeded on the lesson id.
+    Asserted against the stub's *own* output for the same slot: the persisted
+    options are exactly those options re-ordered by that function, and
+    ``correct_index`` still addresses the same option **text** the stub keyed.
+    """
+    topic = "Rust ownership"
+    orch, spawn = make_orchestrator(resolve_model_fn=stub_resolver(), prefetch_n=2)
+    async with db.async_session() as session:
+        user = await create_user(session)
+        await session.commit()
+        user_id = user.id
+
+    path = await orch.create_path(
+        user_id=user_id, topic=topic, level=Level.SOME_EXPERIENCE
+    )
+    await spawn.drain()
+
+    generated = [
+        lesson
+        for lesson in await _generated_lessons(path.id)
+        if lesson.generation_state is LessonGenerationState.GENERATED
+    ]
+    assert generated, "no lesson was generated"
+
+    for lesson in generated:
+        posed = stub_build_lesson(topic, lesson.position_in_path).quick_check
+        async with db.async_session() as session:
+            row = (
+                await session.execute(
+                    select(QuickCheck).where(QuickCheck.lesson_id == lesson.id)
+                )
+            ).scalar_one()
+
+        expected = shuffle_options(
+            posed.options, posed.correct_index, seed=str(lesson.id)
+        )
+        assert row.options == list(expected.options)
+        assert row.correct_index == expected.correct_index
+        # Nothing about the check itself changed — only where the answer sits.
+        assert sorted(row.options) == sorted(posed.options)
+        assert row.options[row.correct_index] == posed.options[posed.correct_index]
 
 
 # --------------------------------------------------------------------------- #
