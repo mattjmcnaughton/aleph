@@ -1,3 +1,10 @@
+## [1.38.3](https://github.com/mattjmcnaughton/aleph/compare/v1.38.2...v1.38.3) (2026-08-18)
+
+
+### Bug Fixes
+
+* **quick-check:** shuffle MCQ options so the answer is not always B ([#204](https://github.com/mattjmcnaughton/aleph/issues/204)) ([4c6d1e4](https://github.com/mattjmcnaughton/aleph/commit/4c6d1e4ea5c387b8ced63c7f8006df51c95462ca))
+
 ## [1.38.2](https://github.com/mattjmcnaughton/aleph/compare/v1.38.1...v1.38.2) (2026-08-14)
 
 
