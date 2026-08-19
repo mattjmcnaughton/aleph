@@ -1,3 +1,10 @@
+# [1.39.0](https://github.com/mattjmcnaughton/aleph/compare/v1.38.3...v1.39.0) (2026-08-19)
+
+
+### Features
+
+* **lessons:** three ways on from a completed lesson ([#205](https://github.com/mattjmcnaughton/aleph/issues/205)) ([822709b](https://github.com/mattjmcnaughton/aleph/commit/822709b2b88b8f28979d0c746b33733b98016b50))
+
 ## [1.38.3](https://github.com/mattjmcnaughton/aleph/compare/v1.38.2...v1.38.3) (2026-08-18)
 
 
