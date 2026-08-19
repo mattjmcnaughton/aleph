@@ -1,7 +1,7 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { configureLessons, seedLesson } from "../mocks/lessons";
-import { seedPath } from "../mocks/paths";
+import { FRESH_PATH_UNITS, MID_PATH_UNITS, seedPath } from "../mocks/paths";
 import { App } from "./app";
 
 // Lesson view (§8, TDD): the Read passage → Quick check → Outcome/explanation →
@@ -404,6 +404,94 @@ describe("Lesson view — /lessons/$lessonId", () => {
     // The content is still there to revisit, with the reveal shown.
     await screen.findByTestId("lesson-read-passage");
     await screen.findByTestId("outcome-reveal");
+  });
+
+  it("[navigation] the completed card offers the next lesson, the path, and home", async () => {
+    const NAV_PATH = "p2000000-0000-4000-8000-000000000001";
+    seedPath({
+      id: NAV_PATH,
+      topic: "TypeScript",
+      level: "some_experience",
+      units: MID_PATH_UNITS,
+    });
+    const current = MID_PATH_UNITS[1].lessons[0]; // position 3, the one just finished
+    const next = MID_PATH_UNITS[1].lessons[1]; // position 4
+    seedLesson({
+      id: current.id,
+      path_id: NAV_PATH,
+      title: current.title,
+      position_in_path: current.position_in_path,
+      unlock_state: "complete",
+    });
+    await gotoLesson(current.id);
+
+    // Forward first: straight on, without a detour through the path view. Awaited
+    // rather than read outright — the door is derived from the path outline, which
+    // lands a beat after the lesson itself on a deep link.
+    expect((await screen.findByTestId("lesson-completed-next")).getAttribute("href")).toBe(
+      `/lessons/${next.id}`,
+    );
+    // ...and the card names where that goes.
+    expect(screen.getByTestId("lesson-completed").textContent).toContain(next.title);
+    // The two ways out, both still one tap away.
+    expect(screen.getByTestId("lesson-completed-back").getAttribute("href")).toContain(NAV_PATH);
+    expect(screen.getByTestId("lesson-completed-home").getAttribute("href")).toBe("/");
+  });
+
+  it("[navigation] Next lesson opens the next lesson", async () => {
+    const NAV_PATH = "p2000000-0000-4000-8000-000000000002";
+    seedPath({
+      id: NAV_PATH,
+      topic: "TypeScript",
+      level: "some_experience",
+      units: MID_PATH_UNITS,
+    });
+    const current = MID_PATH_UNITS[1].lessons[0];
+    const next = MID_PATH_UNITS[1].lessons[1];
+    seedLesson({
+      id: current.id,
+      path_id: NAV_PATH,
+      title: current.title,
+      position_in_path: current.position_in_path,
+      unlock_state: "complete",
+    });
+    seedLesson({
+      id: next.id,
+      path_id: NAV_PATH,
+      title: next.title,
+      position_in_path: next.position_in_path,
+    });
+    await gotoLesson(current.id);
+
+    fireEvent.click(await screen.findByTestId("lesson-completed-next"));
+    await waitFor(() => {
+      expect(screen.getByTestId("lesson-view-id").textContent).toBe(next.id);
+    });
+  });
+
+  it("[navigation] with nothing after it, the completed card keeps the path as its primary door", async () => {
+    // The last lesson of a path whose earlier lessons are not all done: no
+    // forward door to offer, and not the path-complete card either.
+    const NAV_PATH = "p2000000-0000-4000-8000-000000000003";
+    seedPath({ id: NAV_PATH, topic: "TypeScript", level: "new_to_it", units: FRESH_PATH_UNITS });
+    const last = FRESH_PATH_UNITS[0].lessons[2];
+    seedLesson({
+      id: last.id,
+      path_id: NAV_PATH,
+      title: last.title,
+      position_in_path: last.position_in_path,
+      unlock_state: "complete",
+    });
+    await gotoLesson(last.id);
+
+    await screen.findByTestId("lesson-completed");
+    // Wait for the outline to land before asserting its absence — the breadcrumb's
+    // path crumb is drawn from the same payload, so it is the proof that "no next
+    // lesson" is a fact about the path rather than a query still in flight.
+    await screen.findByRole("link", { name: "TypeScript" });
+    expect(screen.queryByTestId("lesson-completed-next")).toBeNull();
+    expect(screen.getByTestId("lesson-completed-back").getAttribute("href")).toContain(NAV_PATH);
+    expect(screen.getByTestId("lesson-completed-home").getAttribute("href")).toBe("/");
   });
 
   it("[AL-063] a missing lesson shows an unavailable state, no content", async () => {

@@ -73,6 +73,12 @@ test.describe("W1 first path", { tag: "@w1" }, () => {
 
     // --- mark complete -> lesson 2 unlocks -----------------------------------
     await markComplete(page);
+    // Three ways on from a finished lesson, never one: straight into the next
+    // lesson, back to the path, or out to home. The forward door is the one a
+    // learner mid-session wants and the one the phone never had — it is present
+    // here because a path with more lessons ahead of it always has a next one.
+    await expect(page.getByTestId("lesson-completed-next")).toBeVisible();
+    await expect(page.getByTestId("lesson-completed-home")).toBeVisible();
     await backToPath(page);
 
     // In place, on the page the learner is looking at: a reload would refresh a
