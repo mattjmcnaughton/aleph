@@ -7,6 +7,7 @@ import {
   type LessonAttempt,
   type LessonDetail,
   type PathDetail,
+  type PathLesson,
   PATHS_QUERY_PREFIX,
   PROGRESS_QUERY_PREFIX,
   type ProgressSummary,
@@ -347,6 +348,16 @@ function LessonView() {
       ? { lessonCount: revisitLessons.length, days: null }
       : null;
 
+  // The next lesson, for the completed card's forward door. Derived from the
+  // same cached outline the desktop footer walks (`lessonAtPosition`), so a
+  // learner never sees the two point at different lessons. `undefined` until
+  // that outline is cached — the card renders its two-door fallback for that
+  // window and grows the third door a beat later, rather than guessing an id.
+  const nextLesson =
+    detail && readyPathDetail
+      ? (lessonAtPosition(readyPathDetail, detail.position_in_path + 1) ?? null)
+      : null;
+
   // The tutor rail (AL-230). Gated twice — `useFeatureFlag("tutor")` inside the
   // hook, and a lesson with generated content here — because lesson scope is
   // empty without a Read passage to ground on. Neither gate renders a disabled
@@ -419,6 +430,7 @@ function LessonView() {
           celebrate={completeMutation.isSuccess}
           pathTitle={pathDetail?.title ?? ""}
           topic={pathDetail?.topic ?? ""}
+          nextLesson={nextLesson}
         />
       )}
 
@@ -457,6 +469,20 @@ function LessonView() {
   );
 }
 
+/**
+ * The lesson sitting at `position` in the path's single total order
+ * (docs/CONTEXT.md), or `undefined` when there is none.
+ *
+ * The one place either neighbour is looked up: the desktop footer below and the
+ * completed card's "Next lesson" both walk the same cached outline, so they can
+ * never disagree about which lesson comes next.
+ */
+function lessonAtPosition(pathDetail: PathDetail, position: number): PathLesson | undefined {
+  return pathDetail.units
+    .flatMap((unit) => unit.lessons)
+    .find((lesson) => lesson.position_in_path === position);
+}
+
 // --- Desktop-only prev/next footer (mock #2a) -------------------------------
 
 /**
@@ -473,9 +499,8 @@ function LessonNav({
   pathDetail: PathDetail;
   currentPosition: number;
 }) {
-  const lessons = pathDetail.units.flatMap((unit) => unit.lessons);
-  const prev = lessons.find((lesson) => lesson.position_in_path === currentPosition - 1);
-  const next = lessons.find((lesson) => lesson.position_in_path === currentPosition + 1);
+  const prev = lessonAtPosition(pathDetail, currentPosition - 1);
+  const next = lessonAtPosition(pathDetail, currentPosition + 1);
 
   if (!prev && !next) return null;
 
@@ -543,6 +568,7 @@ function ReadyLesson({
   celebrate,
   pathTitle,
   topic,
+  nextLesson,
 }: {
   detail: LessonDetail;
   onAttempt: (index: number) => void;
@@ -556,6 +582,8 @@ function ReadyLesson({
   celebrate: boolean;
   pathTitle: string;
   topic: string;
+  /** The lesson after this one, or null when there is none to offer. */
+  nextLesson: PathLesson | null;
 }) {
   const quickCheck = detail.quick_check;
   const reveal = detail.attempt;
@@ -607,7 +635,7 @@ function ReadyLesson({
               celebrate={celebrate}
             />
           ) : (
-            <CompletedState pathId={detail.path_id} />
+            <CompletedState pathId={detail.path_id} nextLesson={nextLesson} />
           )
         ) : completeEligible ? (
           <>
@@ -787,7 +815,29 @@ function OutcomeReveal({ reveal }: { reveal: LessonAttempt }) {
   );
 }
 
-function CompletedState({ pathId }: { pathId: string }) {
+/**
+ * The end of an ordinary lesson (the final one of a path gets `PathCompleteCard`
+ * instead). Three ways on, ranked so the obvious one needs no reading:
+ *
+ * * **Next lesson** — the forward door, teal, whenever there is a lesson after
+ *   this one. Straight on without a detour through the path view, which is what
+ *   a learner in a session actually wants and what the desktop footer has always
+ *   offered; the phone had only the way back.
+ * * **Back to your path** — unchanged in destination, demoted to the outline
+ *   treatment once something is ahead of it. It is still the teal door on the
+ *   last lesson of an unfinished path, where there is nothing to go on to.
+ * * **Home** — the quiet way out, phrased and styled like `/review`'s "Done for
+ *   now": leaving is a legitimate end to a session, not a failure to continue,
+ *   so it is present without competing.
+ *
+ * `nextLesson` is offered without consulting its `unlock_state`. This card only
+ * renders on a *complete* lesson, and progression unlocks the next as the prior
+ * completes (docs/CONTEXT.md) — so a cached `locked` here is the path query
+ * being a beat behind the tap that just unlocked it, never the truth. Gating on
+ * it would blank the door in exactly the moment it exists for. An ungenerated
+ * next lesson is likewise fine: that route resolves its own generating state.
+ */
+function CompletedState({ pathId, nextLesson }: { pathId: string; nextLesson: PathLesson | null }) {
   return (
     <section
       data-testid="lesson-completed"
@@ -801,15 +851,46 @@ function CompletedState({ pathId }: { pathId: string }) {
       </span>
       <h2 className="mt-3 text-lg font-semibold text-porcelain">Lesson complete.</h2>
       <p className="mx-auto mt-2 max-w-[24rem] text-sm leading-6 text-mist">
-        Nice work. Head back to your path to keep going.
+        {nextLesson ? (
+          <>
+            Nice work. Next up: <span className="text-porcelain">{nextLesson.title}</span>.
+          </>
+        ) : (
+          "Nice work. Head back to your path to keep going."
+        )}
       </p>
+
+      <div className="mt-5 flex flex-col gap-2">
+        {nextLesson ? (
+          <Link
+            to="/lessons/$lessonId"
+            params={{ lessonId: nextLesson.id }}
+            data-testid="lesson-completed-next"
+            className={PRIMARY_CTA_BASE}
+          >
+            Next lesson
+          </Link>
+        ) : null}
+
+        {/* One link, two ranks: the teal door when it is the only way forward,
+            the outline one under "Next lesson" when it is not. Written once so
+            the destination and its testid cannot drift between the two. */}
+        <Link
+          to="/paths/$pathId"
+          params={{ pathId }}
+          data-testid="lesson-completed-back"
+          className={nextLesson ? SECONDARY_CTA : PRIMARY_CTA_BASE}
+        >
+          Back to your path
+        </Link>
+      </div>
+
       <Link
-        to="/paths/$pathId"
-        params={{ pathId }}
-        data-testid="lesson-completed-back"
-        className={`mt-5 ${PRIMARY_CTA_BASE}`}
+        to="/"
+        data-testid="lesson-completed-home"
+        className="mt-4 block text-sm text-mist transition-colors hover:text-porcelain"
       >
-        Back to your path
+        Home
       </Link>
     </section>
   );
