@@ -1437,3 +1437,116 @@ def test_earlier_tables_are_unchanged_by_the_beat_research_runs_migration(
     after = {table: asyncio.run(_columns(database_url, table)) for table in tracked}
 
     assert before == after
+
+
+# --------------------------------------------------------------------------- #
+# Learner Settings' step (CONTEXT.md: Settings / Auto-draft): one table,
+# ``user_settings`` — one row per learner, created on their first change.
+# --------------------------------------------------------------------------- #
+
+SETTINGS_HEAD = "0014_user_settings"
+SETTINGS_TABLE = "user_settings"
+
+
+async def _seed_settings_row(database_url: str) -> None:
+    """Insert a settings row for the seeded learner, with a non-default value."""
+    connection = await connect(database_url)
+    try:
+        await connection.execute(
+            "INSERT INTO user_settings (user_id, auto_draft_flashcards) "
+            "SELECT id, false FROM users WHERE username = 'migration-user'"
+        )
+    finally:
+        await connection.close()
+
+
+async def _column_default(database_url: str, table: str, column: str) -> str | None:
+    connection = await connect(database_url)
+    try:
+        return await connection.fetchval(
+            "SELECT column_default FROM information_schema.columns "
+            "WHERE table_name = $1 AND column_name = $2",
+            table,
+            column,
+        )
+    finally:
+        await connection.close()
+
+
+def test_user_settings_migration_downgrades_and_reapplies_cleanly(
+    isolated_database: str,
+) -> None:
+    database_url = isolated_database
+
+    at_head = asyncio.run(_tables(database_url))
+    assert SETTINGS_TABLE in at_head
+
+    username = asyncio.run(_seed_phase_1_row(database_url))
+    asyncio.run(_seed_settings_row(database_url))
+    assert asyncio.run(_count(database_url, SETTINGS_TABLE)) == 1
+
+    run_alembic(database_url, BEAT_RESEARCH_RUNS_HEAD, downgrade=True)
+
+    after_downgrade = asyncio.run(_tables(database_url))
+    assert SETTINGS_TABLE not in after_downgrade
+    # Everything through the analyst branch survives the reversal, rows
+    # included — this step is purely additive on top of it.
+    assert BEAT_RESEARCH_RUNS_TABLE in after_downgrade
+    assert set(ANALYST_TABLES) <= after_downgrade
+    assert set(PHASE_1_TABLES) <= after_downgrade
+    assert set(PHASE_2_TABLES) <= after_downgrade
+    assert set(FLASHCARDS_TABLES) <= after_downgrade
+    assert asyncio.run(_count(database_url, "users")) == 1
+
+    run_alembic(database_url, SETTINGS_HEAD)
+
+    reapplied = asyncio.run(_tables(database_url))
+    assert SETTINGS_TABLE in reapplied
+    assert asyncio.run(_count(database_url, "users")) == 1
+    assert username == "migration-user"
+    # The table comes back empty — a migration reapply is schema-only, and a
+    # learner with no row is simply back on the defaults.
+    assert asyncio.run(_count(database_url, SETTINGS_TABLE)) == 0
+
+
+def test_user_settings_migration_creates_the_documented_columns(
+    isolated_database: str,
+) -> None:
+    database_url = isolated_database
+
+    assert asyncio.run(_columns(database_url, SETTINGS_TABLE)) == {
+        "user_id",
+        "auto_draft_flashcards",
+        "updated_at",
+    }
+    # The server default *is* the code default (``services/user_settings.py``):
+    # a row created by a first change to some other setting must not flip this
+    # one off.
+    assert (
+        asyncio.run(
+            _column_default(database_url, SETTINGS_TABLE, "auto_draft_flashcards")
+        )
+        == "true"
+    )
+
+
+def test_earlier_tables_are_unchanged_by_the_user_settings_migration(
+    isolated_database: str,
+) -> None:
+    """The step adds one table; it alters no existing one."""
+    database_url = isolated_database
+    tracked = (
+        *PHASE_1_TABLES,
+        *PHASE_2_TABLES,
+        FLAGS_TABLE,
+        CHANGES_TABLE,
+        *FLASHCARDS_TABLES,
+        *ANALYST_TABLES,
+        BEAT_RESEARCH_RUNS_TABLE,
+    )
+
+    before = {table: asyncio.run(_columns(database_url, table)) for table in tracked}
+    run_alembic(database_url, BEAT_RESEARCH_RUNS_HEAD, downgrade=True)
+    after = {table: asyncio.run(_columns(database_url, table)) for table in tracked}
+
+    assert before == after

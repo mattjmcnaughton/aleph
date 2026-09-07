@@ -126,6 +126,46 @@ export interface AuthUser {
    * makes an absent key resolve to off.
    */
   feature_flags: Record<string, boolean>;
+  /**
+   * The learner's effective Settings (CONTEXT.md: Settings) — every setting,
+   * defaults filled in server-side. Delivered on the session for the same
+   * reason the flag map is: the lesson view honours Auto-draft on open with
+   * no second request. Read it through `useSettings` in `lib/settings.ts`;
+   * `PATCH /settings` (`updateSettings`) is the one write path, and its
+   * response is folded back into this cached session by `useUpdateSettings`.
+   */
+  settings: UserSettings;
+}
+
+// --- Settings contract (CONTEXT.md: Settings / Auto-draft) ------------------
+
+/** The learner's per-account preferences (`GET`/`PATCH /settings`). */
+export interface UserSettings {
+  /**
+   * Auto-draft: whether Aleph drafts flashcards as a lesson opens (Phase 3
+   * TDD D5) — on — or only when the learner asks from the completed lesson.
+   * Independent of the `flashcards` flag, which decides whether drafting
+   * exists at all.
+   */
+  auto_draft_flashcards: boolean;
+}
+
+/** `GET /settings` — the same shape the session already carries. */
+export function getSettings(): Promise<UserSettings> {
+  return apiFetch<UserSettings>(apiV1Path("/settings"));
+}
+
+/**
+ * `PATCH /settings` — change any subset; the response is the full new state.
+ * Only the keys sent change (the server reads the body `exclude_unset`), so a
+ * caller flipping one switch never resets another.
+ */
+export function updateSettings(patch: Partial<UserSettings>): Promise<UserSettings> {
+  return apiFetch<UserSettings>(apiV1Path("/settings"), {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
 }
 
 export type AuthSession =

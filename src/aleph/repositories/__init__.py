@@ -38,6 +38,7 @@ from aleph.repositories.paths import PathRepository
 from aleph.repositories.quick_checks import QuickCheckRepository
 from aleph.repositories.units import UnitRepository
 from aleph.repositories.usage import UsageRepository
+from aleph.repositories.user_settings import UserSettingsRepository
 from aleph.repositories.users import UserRepository
 
 __all__ = [
@@ -65,4 +66,5 @@ __all__ = [
     "UnitRepository",
     "UsageRepository",
     "UserRepository",
+    "UserSettingsRepository",
 ]

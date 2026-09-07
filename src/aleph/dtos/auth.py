@@ -8,6 +8,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
 
+from aleph.dtos.settings import SettingsDTO
+
 
 class UserDTO(BaseModel):
     # ``model_allowlist`` starts with the ``model_`` prefix pydantic protects by
@@ -36,6 +38,12 @@ class UserDTO(BaseModel):
     # payload on every load. Keys outside the registry never appear, so a stale
     # row cannot invent a flag.
     feature_flags: dict[str, bool] = {}
+    # The learner's effective Settings (CONTEXT.md: Settings), delivered on
+    # the session probe for the same reason the flag map is: the lesson
+    # view honours Auto-draft on open with no second request. ``PATCH
+    # /settings`` is the one write path; the SPA folds its response back
+    # into this cached payload.
+    settings: SettingsDTO = SettingsDTO()
 
 
 class SessionDTO(BaseModel):

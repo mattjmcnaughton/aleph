@@ -21,6 +21,7 @@ from aleph.routers.v1 import flashcards as v1_flashcards
 from aleph.routers.v1 import lessons as v1_lessons
 from aleph.routers.v1 import paths as v1_paths
 from aleph.routers.v1 import progress as v1_progress
+from aleph.routers.v1 import settings as v1_settings
 from aleph.routers.v1 import shaping as v1_shaping
 from aleph.routers.v1 import tutor as v1_tutor
 from aleph.services.generation import generation_orchestrator
@@ -84,6 +85,10 @@ def create_app() -> FastAPI:
     app.include_router(v1_paths.router)
     app.include_router(v1_lessons.router)
     app.include_router(v1_feature_flags.router)
+    # Learner Settings (CONTEXT.md: Settings). Deliberately not behind a
+    # flag: it is the learner's controls over already-launched surfaces,
+    # not a surface of its own to ship dark.
+    app.include_router(v1_settings.router)
     # Every route on this one is hidden behind the ``tutor`` feature flag
     # (404 when it resolves off), so mounting it is safe in production while
     # Phase 2 is still being built (epic #82, owner amendment 1).

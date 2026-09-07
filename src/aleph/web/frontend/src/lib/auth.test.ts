@@ -13,6 +13,7 @@ const signedIn: AuthSession = {
     is_admin: false,
     model_allowlist: [],
     feature_flags: {},
+    settings: { auto_draft_flashcards: true },
   },
 };
 
