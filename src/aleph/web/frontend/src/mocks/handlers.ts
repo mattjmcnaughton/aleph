@@ -6,6 +6,7 @@ import { lessonsHandlers } from "./lessons";
 import { ADMIN_MODEL_ALLOWLIST } from "./models";
 import { pathsHandlers } from "./paths";
 import { progressHandlers } from "./progress";
+import { settingsHandlers } from "./settings";
 import { shapingHandlers } from "./shaping";
 import { tutorHandlers } from "./tutor";
 
@@ -36,6 +37,10 @@ export const learnerUser: AuthUser = {
   // 2/5/3 twins) rather than inheriting an accident of whatever the backend
   // default happens to be this week.
   feature_flags: { tutor: false, streaks: false, flashcards: false, analyst: false },
+  // The code defaults (`services/user_settings.py`) — what a learner who has
+  // never opened Settings is served. A test about Auto-draft *off* overrides
+  // the session, the same way it opts a flag on.
+  settings: { auto_draft_flashcards: true },
 };
 
 export const authenticatedSession: AuthSession = {
@@ -61,6 +66,7 @@ export const adminUser: AuthUser = {
   model_allowlist: [...ADMIN_MODEL_ALLOWLIST],
   // Admins dogfood the tutor before launch (ADMIN_DEFAULT_FLAGS, AL-203).
   feature_flags: { tutor: true },
+  settings: { auto_draft_flashcards: true },
 };
 
 export const adminSession: AuthSession = {
@@ -96,4 +102,5 @@ export const handlers = [
   ...progressHandlers,
   ...flashcardHandlers,
   ...beatHandlers,
+  ...settingsHandlers,
 ];

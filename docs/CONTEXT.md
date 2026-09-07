@@ -126,7 +126,7 @@ the foot of this document. Spec: [Phase 3 PRD](prds/phase-3-flashcards.md) ·
 | Term | Meaning |
 | --- | --- |
 | **Flashcard** | A front/back pair generated from a lesson's Read passage. Owned by the learner, not the lesson that produced it (Phase 3 PRD §4.1) — the source lesson is kept only as a citation, so shaping, a Revision, or deletion never takes the card down with it. Not a Quick check: no options, no explanation, and it enters a review schedule instead of ending a lesson. |
-| **Draft** | One of 3–5 AI-proposed cards **drafted when a lesson opens, offered when it completes** — front and back, kept by default with a per-card discard toggle (`Aleph drafted 4 cards`). The split is deliberate: drafting takes seconds and reading takes minutes, so starting at open means the cards are already waiting at the completion rather than behind a spinner (Phase 3 TDD D5). A row in `flashcards` with `kept_at IS NULL` (Phase 3 TDD D6); unsaved until kept — a discarded Draft is deleted outright, never archived (Phase 3 PRD §3, §4.2). |
+| **Draft** | One of 3–5 AI-proposed cards **drafted when a lesson opens, offered when it completes** (while **Auto-draft** is on — the default; off, drafting waits for the learner to ask from the completed lesson — see Settings below) — front and back, kept by default with a per-card discard toggle (`Aleph drafted 4 cards`). The split is deliberate: drafting takes seconds and reading takes minutes, so starting at open means the cards are already waiting at the completion rather than behind a spinner (Phase 3 TDD D5). A row in `flashcards` with `kept_at IS NULL` (Phase 3 TDD D6); unsaved until kept — a discarded Draft is deleted outright, never archived (Phase 3 PRD §3, §4.2). |
 | **Kept card** | A Draft the learner explicitly kept, via `Keep N cards`. Enters the spaced-repetition ladder at **rung 0**, due **tomorrow** — never today, which falls out of entering at rung 0 with no case coded to say so (Phase 3 TDD §5.1). `Got it` promotes it a rung; `Again` demotes it (see **Lapse**); the top rung is a fixed point, so a mature card settles at a wide interval rather than growing without bound. |
 | **Due** | A Kept card whose `due_on` has arrived: on or before the end of the learner's local day. The candidate pool the Daily queue draws from — being Due is necessary to be reviewed today, not sufficient, since the cap can leave it waiting. |
 | **Daily queue** | The learner's capped set of cards to review today, spanning every path — a path is a filter on it, never a second queue (Phase 3 PRD §4.3). All Due cards when there are 10 or fewer; otherwise the **7 most overdue plus 3 drawn at random** from the rest — anti-starvation, not top-up, since a not-yet-due card is never pulled forward (Phase 3 PRD §4.4). Derived, never stored: decided once, on the first request of the learner's local day, and stable for the rest of it — grading and reloading never re-roll it (Phase 3 PRD §4.5, TDD D3). Home and the app bar show only its size; the true backlog is never displayed (Phase 3 PRD §4.8). |
@@ -165,6 +165,19 @@ Spec: [Phase 6 PRD](prds/phase-6-analyst.md), [Phase 6 TDD](tdds/phase-6-analyst
 | **Activated learner** | A learner who has completed **more than 3 lessons** (≥ 4) **on a single path**, each with a recorded **Attempt**, within **7 days** of signup. The unit behind the north-star **Activation rate** (% of new accounts that activate). Signals real value, not curiosity. |
 | **Session** | A run of learner activity with no gap longer than 30 minutes. Used in metrics. |
 | **Day** | A calendar day in the learner's local timezone. Used in metrics ("second distinct day"). |
+
+## Settings
+
+The learner's own controls over their experience — distinct from feature flags, which are the
+operator's (defined in code, overridden per learner only by an admin, a kill switch mid-incident).
+A setting is the learner's to change, always honoured, and never resolved through an admin
+baseline. Defined in code (`services/user_settings.py`), stored only once changed, read from the
+session probe and changed at `/settings`.
+
+| Term | Meaning |
+| --- | --- |
+| **Settings** | A learner's per-account preferences that shape how launched surfaces behave for them — the `/settings` page behind the app header's gear, and the `user_settings` row (one per account, created on their first change; absent means every default). Each setting is a single independent value that saves as it is flipped. Not a **Feature flag**: a flag decides whether a surface *exists* for a learner; a setting decides how an existing surface *behaves* for them. |
+| **Auto-draft** | The first setting: whether Aleph drafts flashcards on its own as a lesson opens (Phase 3 TDD D5) — **on by default**, the launched Phase 3 behaviour — or only when the learner asks. Off, the completed lesson offers `Draft flashcards` in place of `Aleph drafted N cards`, and tapping it fires the same trigger the open would have; the Daily queue, review and every kept card are untouched. Wire name `auto_draft_flashcards`; independent of the `flashcards` flag, which still decides whether drafting exists at all. |
 
 ## Design
 
