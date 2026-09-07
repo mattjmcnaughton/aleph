@@ -182,6 +182,41 @@ describe("Flashcards — drafting below a lesson's completion (PRD §3, Phase 3 
     await waitFor(() => expect(flashcardTriggerRequests()).toContain(LESSON_2_ID));
   });
 
+  it("[Auto-draft off] opening a lesson fires no trigger; the completed lesson offers to draft on request", async () => {
+    // Auto-draft (CONTEXT.md: Settings) off: neither the open-time effect
+    // (AL-400) nor the completion re-fire may start drafting on its own.
+    server.use(
+      http.get(`${API_V1_BASE}/auth/session`, () =>
+        HttpResponse.json({
+          ...flashcardsSession,
+          user: { ...flashcardsSession.user, settings: { auto_draft_flashcards: false } },
+        }),
+      ),
+    );
+    seedJourney();
+
+    await completeTheLesson();
+
+    // No run was started at open or at completion — the poll answered
+    // `not_started` and the block renders the learner's way to ask instead.
+    const draftButton = await screen.findByTestId("flashcard-drafts-draft-button");
+    expect(flashcardTriggerRequests()).toEqual([]);
+    expect(screen.queryByTestId("draft-list")).toBeNull();
+
+    // Asking is the same trigger the open-time effect would have fired. Seeded
+    // `generated` first so the fake's D7 claim is a no-op and the poll's next
+    // read (the trigger's `onSuccess` invalidation) resolves to cards.
+    seedFlashcardDraftRun(LESSON_ID, {
+      state: "generated",
+      cards: [{ id: "d1", front: "What does `extends` mean?", back: "It constrains T." }],
+    });
+    fireEvent.click(draftButton);
+
+    await waitFor(() => expect(flashcardTriggerRequests()).toEqual([LESSON_ID]));
+    await screen.findByTestId("draft-list");
+    expect(screen.queryByTestId("flashcard-drafts-manual")).toBeNull();
+  });
+
   it("keeping some of the drafts posts exactly those ids and the block clears", async () => {
     useFlashcardsSession();
     seedJourney();

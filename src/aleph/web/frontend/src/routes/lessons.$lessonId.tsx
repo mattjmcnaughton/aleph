@@ -48,6 +48,7 @@ import { useTutorRail } from "../components/tutor/use-tutor-rail";
 import { Workspace } from "../components/workspace";
 import { useFeatureFlag } from "../lib/feature-flags";
 import { makePollingRefetchInterval } from "../lib/polling";
+import { useSettings } from "../lib/settings";
 import { useRetryGeneration } from "../lib/use-retry-generation";
 
 export const Route = createFileRoute("/lessons/$lessonId")({
@@ -136,6 +137,12 @@ function LessonView() {
   //   as a narrowing of the poll gate so the two cannot drift: there is nothing
   //   to render that the poll did not fetch.
   const flashcardsEnabled = useFeatureFlag("flashcards");
+  // Auto-draft (CONTEXT.md: Settings): off means neither the open-time
+  // effect nor the completion re-fire below may start drafting on its own —
+  // the learner asks from the completed lesson instead (`DraftList`'s
+  // `onDraft`). The poll and the render gates are untouched by it: a lesson
+  // whose drafting the learner *did* ask for still needs both.
+  const { auto_draft_flashcards: autoDraft } = useSettings();
   const draftsPollEnabled =
     flashcardsEnabled &&
     detail?.generation_state === "generated" &&
@@ -185,11 +192,13 @@ function LessonView() {
   const triggerDrafts = triggerDraftsMutation.mutate;
   const resetTriggerDrafts = triggerDraftsMutation.reset;
   useEffect(() => {
-    if (!draftsPollEnabled || draftsTriggeredForRef.current === lessonId) return;
+    if (!draftsPollEnabled || !autoDraft || draftsTriggeredForRef.current === lessonId) {
+      return;
+    }
     draftsTriggeredForRef.current = lessonId;
     resetTriggerDrafts();
     triggerDrafts();
-  }, [draftsPollEnabled, lessonId, triggerDrafts, resetTriggerDrafts]);
+  }, [draftsPollEnabled, autoDraft, lessonId, triggerDrafts, resetTriggerDrafts]);
 
   // TDD §5.6's two frontend-owned failure rows (ticket 3): a capped or
   // not-yet-generated trigger never claims a run, so the poll it fired for is
@@ -295,8 +304,16 @@ function LessonView() {
       // exists for, and `DraftList` renders nothing on `undefined`, so the
       // learner would get silence. Idempotent (D7), so the happy-path `POST`
       // this occasionally duplicates costs nothing.
+      //
+      // Gated on Auto-draft too: with it off, "not yet drafted" at completion
+      // is the learner's choice, not a dropped request.
       const draftsState = draftsQuery.data?.state;
-      if (flashcardsEnabled && draftsState !== "generating" && draftsState !== "generated") {
+      if (
+        flashcardsEnabled &&
+        autoDraft &&
+        draftsState !== "generating" &&
+        draftsState !== "generated"
+      ) {
         triggerDraftsMutation.mutate();
       }
     },
@@ -450,6 +467,8 @@ function LessonView() {
           retrying={triggerDraftsMutation.isPending}
           triggerRateLimited={triggerRateLimited}
           triggerErrored={triggerErrored}
+          onDraft={autoDraft ? undefined : () => triggerDraftsMutation.mutate()}
+          drafting={triggerDraftsMutation.isPending}
         />
       ) : null}
 

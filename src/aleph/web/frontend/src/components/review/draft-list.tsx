@@ -3,7 +3,10 @@
 // the primary action naming its own count, and "Skip — keep none" equally
 // reachable. Rendered by `routes/lessons.$lessonId.tsx`, which owns the
 // trigger + poll + keep mutations; this component owns the toggle state and
-// the drafting-run's own state branches (generating / failed / generated).
+// the drafting-run's own state branches (generating / failed / generated) —
+// plus, when Auto-draft is off (CONTEXT.md: Settings), the `not_started`
+// branch's one affordance: a "Draft flashcards" button in place of the run
+// that would otherwise already be underway.
 
 import { useState } from "react";
 import type { FlashcardDraftCard, FlashcardDrafts } from "../../lib/api";
@@ -18,6 +21,8 @@ export function DraftList({
   retrying,
   triggerRateLimited,
   triggerErrored,
+  onDraft,
+  drafting = false,
 }: {
   /** The poll's latest value — `undefined` while loading, gated off, or on a
    *  failed fetch. Drafting is optional next to an already-recorded
@@ -46,23 +51,61 @@ export function DraftList({
    *  generating) — the same swallow, a generic notice instead of the
    *  daily-cap one. */
   triggerErrored: boolean;
+  /**
+   * Auto-draft off (CONTEXT.md: Settings): nothing fired when the lesson
+   * opened, so `not_started` is the *expected* state here rather than a
+   * transient one — and this is the learner's way to ask. Absent when
+   * Auto-draft is on, where `not_started` stays silent as before.
+   */
+  onDraft?: () => void;
+  /** The manual trigger is in flight. */
+  drafting?: boolean;
 }) {
   if (drafts === undefined) return null;
 
   if (drafts.state === "not_started") {
-    // The ordinary case — drafting was never triggered for this lesson, or the
-    // trigger is still in flight and hasn't landed `generating` yet — is
-    // silent, same as before. Only a trigger that actually failed earns a line
-    // here, beside the state the failure leaves the poll stuck in (§5.6).
-    if (!triggerRateLimited && !triggerErrored) return null;
-    return (
-      <div data-testid="flashcard-drafts-trigger-error" className="mt-6">
+    const notices =
+      triggerRateLimited || triggerErrored ? (
         <RetryNotices
           testidPrefix="flashcard-drafts-trigger"
           rateLimited={triggerRateLimited}
           errored={triggerErrored}
           rateLimitMessage="Drafting is unavailable today — you've reached today's limit. Try again tomorrow."
         />
+      ) : null;
+
+    if (onDraft) {
+      return (
+        <div
+          data-testid="flashcard-drafts-manual"
+          className="mt-6 rounded-lg border border-iris-700 bg-iris-900 p-4"
+        >
+          <p className="kicker text-iris-400">Flashcards</p>
+          <p className="mt-2 text-xs leading-5 text-mist">
+            Auto-draft is off. Want a few cards from this lesson to review later?
+          </p>
+          {notices ? <div className="mt-3">{notices}</div> : null}
+          <button
+            type="button"
+            data-testid="flashcard-drafts-draft-button"
+            onClick={onDraft}
+            disabled={drafting}
+            className={`mt-4 ${PRIMARY_CTA}`}
+          >
+            {drafting ? "Drafting…" : "Draft flashcards"}
+          </button>
+        </div>
+      );
+    }
+
+    // The ordinary case — drafting was never triggered for this lesson, or the
+    // trigger is still in flight and hasn't landed `generating` yet — is
+    // silent, same as before. Only a trigger that actually failed earns a line
+    // here, beside the state the failure leaves the poll stuck in (§5.6).
+    if (!notices) return null;
+    return (
+      <div data-testid="flashcard-drafts-trigger-error" className="mt-6">
+        {notices}
       </div>
     );
   }

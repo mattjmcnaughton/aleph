@@ -467,7 +467,7 @@ registered as a kill switch.
 
 | Method | Path | Query / Body | Success | Notes |
 | ------ | ---- | ------------- | ------- | ----- |
-| `POST` | `/api/v1/lessons/{lesson_id}/flashcard-drafts` | — | `202 {id}` | Trigger drafting for a generated lesson (CONTEXT.md: *Draft*) — the client fires this on lesson *open*, not on completion (AL-400), so the cards are usually ready by the time the learner finishes. Idempotent — a second `POST` while the run is `generating`, or once it is `generated`, is a structural no-op (D7): the claim wins at most once, so this is safe to fire from a mutation `onSuccess` React may run twice, or from a mount effect on a route React may also re-run. `409 lesson_not_generated` if `generation_state != 'generated'`; `429` over `FLASHCARD_DRAFTS_PER_DAY`; an unowned/unknown lesson is `404`. |
+| `POST` | `/api/v1/lessons/{lesson_id}/flashcard-drafts` | — | `202 {id}` | Trigger drafting for a generated lesson (CONTEXT.md: *Draft*) — the client fires this on lesson *open*, not on completion (AL-400), so the cards are usually ready by the time the learner finishes; with **Auto-draft** off (see [Settings](#settings-apiv1)) it fires only when the learner taps `Draft flashcards` on the completed lesson. The route itself is the same either way — the setting decides *when* the client asks, never whether the server answers. Idempotent — a second `POST` while the run is `generating`, or once it is `generated`, is a structural no-op (D7): the claim wins at most once, so this is safe to fire from a mutation `onSuccess` React may run twice, or from a mount effect on a route React may also re-run. `409 lesson_not_generated` if `generation_state != 'generated'`; `429` over `FLASHCARD_DRAFTS_PER_DAY`; an unowned/unknown lesson is `404`. |
 | `GET` | `/api/v1/lessons/{lesson_id}/flashcard-drafts` | — | `200 {state, cards}` | Poll target. `state` is `"not_started"` (never triggered), `"generating"`, `"generated"` (with every pending draft, creation order), or `"failed"` — retryable by re-`POST`ing the trigger route, rendering the existing retry affordance rather than a dead spinner. Abandoned drafts wait: revisiting a lesson long after the run resolved still re-serves them. |
 | `POST` | `/api/v1/lessons/{lesson_id}/flashcard-drafts/keep` | `{kept_ids, tz_offset_minutes}` | `200 {kept_ids}` | Keep the listed drafts (`kept_at = now()`, `rung = 0`, `due_on = today + ladder[0]` — never today, D1); every other pending draft of this lesson is deleted in the same transaction (PRD §3: discarded, not soft-deleted). `kept_ids: []` is "Skip — keep none." A `kept_id` that is not a pending draft **of this lesson** is `404` and mutates nothing. `tz_offset_minutes` is the client's `getTimezoneOffset()` value, same band as everywhere else — the service is the sole owner of "today" for the `due_on` arithmetic. |
 
@@ -606,6 +606,45 @@ surface is not where that changes.
 before any work; or an unowned/unknown/draft/already-deleted card id) · `422
 validation_error` (a malformed `cursor`, an out-of-range `limit`, or an edit
 that is empty, over the word cap, or leaves both sides identical).
+
+## Settings (`/api/v1`)
+
+Session-cookie protected (`401` via the shared envelope when anonymous). The
+learner's own per-account preferences (CONTEXT.md: *Settings*, *Auto-draft*) —
+distinct from [feature flags](#feature-flags-admin-apiv1admin-al-203), which
+are the operator's. Settings are **defined in code**
+(`services/user_settings.py`, every setting with its default); the database
+holds one `user_settings` row per learner, created on their first change, so a
+learner who has never opened Settings has no row and reads the defaults.
+**Not feature-flagged**: this is the learner's control over launched surfaces,
+not a surface of its own.
+
+| Method | Path | Body | Success | Notes |
+| ------ | ---- | ---- | ------- | ----- |
+| `GET` | `/api/v1/settings` | — | `200 {auto_draft_flashcards}` | Every setting with its effective value, defaults filled in. |
+| `PATCH` | `/api/v1/settings` | any subset, e.g. `{auto_draft_flashcards: false}` | `200 {…}` (the full new state) | Only the settings named change (the body is read `exclude_unset`); `{}` is a read. `422 validation_error` for a key that is not a setting — never a silent `200` — or a value of the wrong type. A first change inserts the row; later changes update it in place (one row per learner). |
+
+```jsonc
+// PATCH /api/v1/settings   {"auto_draft_flashcards": false}
+{ "auto_draft_flashcards": false }
+```
+
+**Session delivery.** `GET /api/v1/auth/session` carries the signed-in
+learner's settings as `user.settings` (the same shape `GET /settings`
+returns), on the feature-flag precedent: the lesson view honours Auto-draft
+the moment it opens with no second request. The frontend reads them through
+`useSettings()` (`lib/settings.ts`) and changes them through
+`useUpdateSettings()`, which folds the `PATCH` response back into the cached
+session so every reader sees the change at once.
+
+**Registered settings.**
+
+| Key | Default | What it controls |
+| --- | ------- | ---------------- |
+| `auto_draft_flashcards` | `true` | **Auto-draft**: whether the client starts flashcard drafting on its own as a lesson opens (Phase 3 TDD D5) or only when the learner taps `Draft flashcards` on the completed lesson. Independent of the `flashcards` flag, which decides whether drafting exists at all; the trigger route is unchanged either way. |
+
+No product event is emitted for a settings change (structlog only): it is not
+one of PRD §5.7's learner-behaviour signals.
 
 ## Analyst (`/api/v1`, AL-522, issue #172, Phase 6 TDD §6)
 
