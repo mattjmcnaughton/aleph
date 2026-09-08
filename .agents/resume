@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "Ensuring orb backing services are running"
+sudo systemctl start postgresql docker.socket docker.service
+docker info --format 'Docker {{.ServerVersion}} ready' >/dev/null
+sudo -u postgres pg_isready -q
+echo "Orb backing services ready"
