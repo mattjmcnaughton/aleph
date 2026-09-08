@@ -1,3 +1,10 @@
+# [1.40.0](https://github.com/mattjmcnaughton/aleph/compare/v1.39.0...v1.40.0) (2026-09-08)
+
+
+### Features
+
+* **settings:** let learners turn flashcard Auto-draft off ([ce557cc](https://github.com/mattjmcnaughton/aleph/commit/ce557ccab99175828997d932ef57ba029c682e6f))
+
 # [1.39.0](https://github.com/mattjmcnaughton/aleph/compare/v1.38.3...v1.39.0) (2026-08-19)
 
 
