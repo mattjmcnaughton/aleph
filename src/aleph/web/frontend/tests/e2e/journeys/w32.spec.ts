@@ -53,10 +53,16 @@ test.describe("W32 a flow opens the next lesson on its own", { tag: "@w32" }, ()
     // Trim the selection back to this spec's own two paths (see the
     // "Isolation" note above) — anything `Select all` also picked up from
     // the shared account's residue gets clicked off again.
-    const pressed = page.locator('[data-testid^="flow-path-"][aria-pressed="true"]');
-    for (const row of await pressed.all()) {
-      const id = (await row.getAttribute("data-testid"))?.replace("flow-path-", "");
-      if (id !== pathA && id !== pathB) await row.click();
+    // Read the pressed ids once, then click each by its own stable testid.
+    // Not `locator.all()`: that hands back index-based locators over the
+    // live `[aria-pressed="true"]` selection, so the first deselect shrinks
+    // the set and every later index waits out the test timeout.
+    const pressedIds = await page
+      .locator('[data-testid^="flow-path-"][aria-pressed="true"]')
+      .evaluateAll((rows) => rows.map((row) => row.getAttribute("data-testid") ?? ""));
+    for (const testid of pressedIds) {
+      const id = testid.replace("flow-path-", "");
+      if (id !== pathA && id !== pathB) await page.getByTestId(testid).click();
     }
     await expect(page.getByTestId(`flow-path-${pathA}`)).toHaveAttribute("aria-pressed", "true");
     await expect(page.getByTestId(`flow-path-${pathB}`)).toHaveAttribute("aria-pressed", "true");
