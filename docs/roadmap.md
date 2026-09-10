@@ -34,6 +34,7 @@ afterthought.
 | **4 — Adaptive paths** | ⬜ Not started — **no PRD yet** (2B pre-built the proposal/apply machinery) | — |
 | **5 — Momentum** | 🟡 In progress — streaks shipped **and launched**; goal ring and daily minutes unbuilt | streaks: [PRD](prds/phase-5-streaks.md) · [TDD](tdds/phase-5-streaks.md) |
 | **6 — The analyst** | ✅ Shipped & launched (`analyst` flag on) — a second pillar beside paths, not a deepening of one | [PRD](prds/phase-6-analyst.md) · [TDD](tdds/phase-6-analyst.md) |
+| **Flow** | 🟡 In progress — behind the `flow` flag | [TDD](tdds/flow.md) · [mock](mocks/aleph-flow-mode.html) |
 | **Beyond** | ⬜ Unscoped, sequenced against real usage | — |
 
 Three tails hang off the shipped phases and are tracked as open issues rather than
@@ -295,6 +296,25 @@ Brief, "teach me the fundamentals of what I keep reading about", a Brief feeding
 Phase 4 proposal — is named in the PRD and built in none of it. That sequencing is
 the point of building the sibling rather than forcing Briefs into `lessons` on day
 one.
+
+## Flow
+
+> 🟡 **Status:** in progress, behind the `flow` flag — dark by default, admin-on,
+> the same dark-then-flip playbook as the flags above. Unlike every one of them,
+> Flow is **100% client-side**: no table, no route, no migration; the flag is a
+> plain client check rather than a router `404`.
+> 📄 **Full spec:** [Flow TDD](tdds/flow.md), mock: [Flow mode](mocks/aleph-flow-mode.html)
+
+Today every finished lesson ends in a choice — next lesson, back to the path,
+home. **Flow** collapses that choice to one tap at the door: pick a **Flow
+length** (3, 5, 8, or until you stop) and a **Flow scope** (which paths, and
+whether they interleave, draw at random, or run one at a time), and each
+completed lesson simply opens the next until the count is reached, the scope
+runs dry, or you end it. Nothing new is counted — every completion inside a
+flow is an ordinary Mark complete, so streaks and Activation see exactly what
+they always have — and nothing new is stored, since a flow is a small record
+kept in the browser tab that runs it. Flashcard drafting is unchanged; only the
+keep/discard moment moves, from every lesson to one batch on the flow's receipt.
 
 ## Beyond
 

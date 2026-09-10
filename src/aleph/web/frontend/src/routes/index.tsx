@@ -16,6 +16,7 @@ import {
 import { ActivityStrip } from "../components/activity-strip";
 import { BeatCard } from "../components/beat-card";
 import { ContinueCard, pickResumeTarget } from "../components/continue-card";
+import { FlowDoor } from "../components/flow/flow-door";
 import { ListRow, type RowVariant, RowTitle, RowActions } from "../components/list-row";
 import { type NewMenuItem, NewMenu } from "../components/new-menu";
 import { CardsSection } from "../components/review/cards-section";
@@ -167,6 +168,11 @@ function Home() {
   const beatsQuery = useQuery(beatsListQueryOptions(analystEnabled));
   const beats = beatsQuery.data?.beats;
 
+  // Flow (flow TDD D10): dark until the launch flip, client-only gate — there
+  // is no route to 404, so `FlowDoor` itself decides whether it has anything
+  // to show once this says the surface exists at all.
+  const flowEnabled = useFeatureFlag("flow");
+
   // Armed only while some row is still non-terminal; a poll that resolves the
   // last one flips this false and tears the timer down.
   const awaitingResolution = pathsQuery.data !== undefined && !isPathListTerminal(pathsQuery.data);
@@ -258,6 +264,7 @@ function Home() {
           — and outside the two-column split below, so it stays first at every
           width rather than sliding into a rail. */}
       <ContinueCard path={resumeTarget} />
+      {flowEnabled ? <FlowDoor paths={paths} /> : null}
 
       <div className="mt-2 flex flex-col lg:mt-6 lg:flex-row lg:items-start lg:gap-8">
         {/* The day's state. `order-first`/`lg:order-last` is the whole of the

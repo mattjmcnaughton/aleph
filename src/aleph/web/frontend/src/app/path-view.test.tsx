@@ -1,6 +1,8 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
-import type { PathUnit } from "../lib/api";
+import { API_V1_BASE, type AuthSession, type PathUnit } from "../lib/api";
+import { learnerUser } from "../mocks/handlers";
 import {
   COMPLETE_PATH_UNITS,
   FRESH_PATH_UNITS,
@@ -9,6 +11,7 @@ import {
   pathRenameRequestCount,
   seedPath,
 } from "../mocks/paths";
+import { server } from "../mocks/server";
 import { App } from "./app";
 
 // Path view (§5.4, TDD §8): the units/lessons rail renders every state from a
@@ -392,5 +395,52 @@ describe("Path view — /paths/$pathId", () => {
     expect(stillOpen.value).toBe("Won't stick");
     // The h1 never changed to the failed attempt.
     expect(screen.queryByRole("heading", { name: "Won't stick" })).toBeNull();
+  });
+});
+
+describe("Path view — the Flow link (flow TDD §2/§6)", () => {
+  function useFlowSession(): void {
+    const session: AuthSession = {
+      authenticated: true,
+      provider: "keycloak",
+      user: { ...learnerUser, feature_flags: { flow: true } },
+    };
+    server.use(http.get(`${API_V1_BASE}/auth/session`, () => HttpResponse.json(session)));
+  }
+
+  it("preselects this path via ?path= when the flag is on and a lesson is available", async () => {
+    useFlowSession();
+    seedPath({ id: "p-flow", topic: "TypeScript", level: "new_to_it", units: FRESH_PATH_UNITS });
+    await gotoPath("p-flow");
+
+    const link = await screen.findByTestId("flow-path-link");
+    expect(link.getAttribute("href")).toBe("/flow/new?path=p-flow");
+  });
+
+  it("is absent when the flag is off", async () => {
+    seedPath({
+      id: "p-flow-off",
+      topic: "TypeScript",
+      level: "new_to_it",
+      units: FRESH_PATH_UNITS,
+    });
+    await gotoPath("p-flow-off");
+
+    await screen.findByTestId("path-progress");
+    expect(screen.queryByTestId("flow-path-link")).toBeNull();
+  });
+
+  it("is absent on a finished path — nothing left to flow", async () => {
+    useFlowSession();
+    seedPath({
+      id: "p-flow-done",
+      topic: "TypeScript",
+      level: "new_to_it",
+      units: COMPLETE_PATH_UNITS,
+    });
+    await gotoPath("p-flow-done");
+
+    await screen.findByTestId("path-complete");
+    expect(screen.queryByTestId("flow-path-link")).toBeNull();
   });
 });

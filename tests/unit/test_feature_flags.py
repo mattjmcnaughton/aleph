@@ -182,12 +182,35 @@ def test_analyst_is_registered_and_launched_on_by_default() -> None:
     assert feature_flags.FeatureFlag.ANALYST in feature_flags.ADMIN_DEFAULT_FLAGS
 
 
-def test_the_registry_is_exactly_the_five_phase_flags() -> None:
+@pytest.mark.anyio
+async def test_flow_is_registered_dark_and_admin_on(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Flow's one flag (flow TDD D10): dark by default, admin-on.
+
+    Flow spends its whole build-out at ``False``, exactly like the five phase
+    flags above did — the difference is that Flow is 100% client-side, so this
+    is the *only* backend touch the whole feature needs: no route to gate
+    ``404``, just a key the client reads with ``useFeatureFlag("flow")``.
+    Membership in :data:`ADMIN_DEFAULT_FLAGS` is what makes it dogfoodable by
+    admins before the launch ticket (flow TDD §8, ticket 7) flips the default.
+    """
+    monkeypatch.setattr(settings, "feature_flag_defaults", "")
+    service = _service(StubFeatureFlagRepository())
+
+    assert feature_flags.FeatureFlag.FLOW == "flow"
+    assert feature_flags.FLAG_DEFAULTS[feature_flags.FeatureFlag.FLOW] is False
+    assert feature_flags.FeatureFlag.FLOW in feature_flags.ADMIN_DEFAULT_FLAGS
+    assert (await service.resolve_for_user(_admin_user()))["flow"] is True
+    assert (await service.resolve_for_user(_user()))["flow"] is False
+
+
+def test_the_registry_is_exactly_the_six_phase_flags() -> None:
     # The whole registry in one assertion: a flag added to the enum but missed by
     # ``FLAG_DEFAULTS`` does not exist as far as resolution is concerned, and
     # would silently resolve off everywhere.
     assert feature_flags.known_flag_keys() == frozenset(
-        {"tutor", "shaping", "streaks", "flashcards", "analyst"}
+        {"tutor", "shaping", "streaks", "flashcards", "analyst", "flow"}
     )
 
 

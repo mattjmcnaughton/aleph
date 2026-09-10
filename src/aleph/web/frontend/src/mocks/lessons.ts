@@ -69,11 +69,21 @@ const defaultConfig: LessonsConfig = {
 };
 let config: LessonsConfig = { ...defaultConfig };
 const store = new Map<string, StoredLesson>();
+/** `GET /lessons/{id}` calls per id — the flow look-ahead's own assertion
+ *  seam (flow TDD D8/§7): "the prefetch fired" is otherwise unobservable,
+ *  since `queryClient.prefetchQuery` is fire-and-forget by design. */
+const getRequests = new Map<string, number>();
 
 /** Reset store + config between tests (wired into tests/setup.ts). */
 export function resetLessons(): void {
   store.clear();
   config = { ...defaultConfig };
+  getRequests.clear();
+}
+
+/** How many times `GET /lessons/{id}` has been served for this id. */
+export function lessonGetRequestCount(id: string): number {
+  return getRequests.get(id) ?? 0;
 }
 
 /** Tune the fake's polling/rate-limit behaviour for a single test. */
@@ -210,7 +220,9 @@ function rateLimitEnvelope() {
 
 export const lessonsHandlers = [
   http.get(`${API_V1_BASE}/lessons/:id`, ({ params }) => {
-    const lesson = store.get(params.id as string);
+    const id = params.id as string;
+    getRequests.set(id, (getRequests.get(id) ?? 0) + 1);
+    const lesson = store.get(id);
     if (!lesson) {
       return notFoundEnvelope();
     }

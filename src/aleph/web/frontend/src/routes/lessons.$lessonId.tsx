@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, createFileRoute } from "@tanstack/react-router";
+import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import {
   FLASHCARDS_QUERY_PREFIX,
@@ -8,6 +8,7 @@ import {
   type LessonDetail,
   type PathDetail,
   type PathLesson,
+  type PathList,
   PATHS_QUERY_PREFIX,
   PROGRESS_QUERY_PREFIX,
   type ProgressSummary,
@@ -25,10 +26,13 @@ import {
   lessonQueryKey,
   lessonQueryOptions,
   pathQueryOptions,
+  pathsListQueryOptions,
   progressSummaryQueryOptions,
   triggerFlashcardDrafts,
 } from "../lib/api";
 import { Breadcrumbs } from "../components/breadcrumbs";
+import { FlowAdvanceCard } from "../components/flow/flow-advance-card";
+import { FlowBar } from "../components/flow/flow-bar";
 import { Markdown } from "../components/markdown";
 import { PathCompleteCard, localDaySpan } from "../components/path-complete";
 import { DraftList } from "../components/review/draft-list";
@@ -47,6 +51,15 @@ import { TutorMark, TutorRail } from "../components/tutor/tutor-rail";
 import { useTutorRail } from "../components/tutor/use-tutor-rail";
 import { Workspace } from "../components/workspace";
 import { useFeatureFlag } from "../lib/feature-flags";
+import {
+  type FlowCompletion,
+  type FlowRecord,
+  clearFlow,
+  readFlow,
+  useFlow,
+  writeFlow,
+} from "../lib/flow";
+import { advanceRecord, eligiblePaths, pickNext } from "../lib/flow-order";
 import { makePollingRefetchInterval } from "../lib/polling";
 import { useSettings } from "../lib/settings";
 import { useRetryGeneration } from "../lib/use-retry-generation";
@@ -83,14 +96,121 @@ const GENERATION_STALL_MS = 45_000;
 // A learner can also deep-link onto a non-ready lesson (a reload mid-generation,
 // a bookmarked link). Those states render minimally so the learner never
 // dead-ends: a generating spinner, a failed+retry surface (W8), a locked notice.
+
+/**
+ * True when `lessonId` is the *last* entry of `flow.completed` — the advance
+ * screen the route shows right after Mark complete succeeds (§5.3 step 5),
+ * where `flow.current` has already moved on to the next lesson while this
+ * route is still mounted on the one that just finished. Only the last entry
+ * counts: an earlier completed lesson reached via the path rail or browser
+ * back is not on-track (§5.4, flow-fix plan item 1). Shared by the open
+ * effect's on-track check and the flow bar's `position` (item 3), so the two
+ * can never disagree about which screen this is.
+ */
+function isFlowAdvanceScreen(flow: FlowRecord, lessonId: string): boolean {
+  return flow.completed[flow.completed.length - 1]?.lessonId === lessonId;
+}
+
 function LessonView() {
   const { lessonId } = Route.useParams();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
 
   // Degrade an eternally-unresolving generation to a recovery notice (C1). Once
   // stalled we stop polling too, so we don't keep spawning backend resumes for a
   // lesson only the path's failed head can unblock.
   const [stalled, setStalled] = useState(false);
+
+  // Flow (flow TDD §5.3/§5.4): the live record, or null. `readFlow`/`useFlow`
+  // don't care whether `useFeatureFlag("flow")` is on — the flag only gates
+  // the *entry points* that can ever create a record (the door, the setup
+  // sheet); once one exists it is driven by its own presence, here.
+  const flow = useFlow();
+  // This lesson is on the flow's track — either it is where the flow is
+  // headed right now, or the flow already logged a completion for it (the
+  // window between Mark complete succeeding and the learner actually
+  // navigating on, while still mounted on this same route). Drives both the
+  // bar and the drafts suppression (D7); the advance card below has its own,
+  // narrower condition.
+  const inFlow =
+    flow !== null &&
+    (flow.current?.lessonId === lessonId || flow.completed.some((c) => c.lessonId === lessonId));
+
+  // The paths list, read only while a flow exists (§5.4's look-ahead reads
+  // this same cache, and the advance card's "Next: <title>" preview below
+  // reads whatever `completeMutation`'s own fresh fetch (§5.3 step 2) just
+  // primed this cache with — no second fetch of its own).
+  const pathsListQuery = useQuery({ ...pathsListQueryOptions, enabled: flow !== null });
+  // Whether that list has landed at least once — a boolean, not the data
+  // itself, so it is stable to compare across renders. The open effect below
+  // depends on this (flow-fix plan item 6): a reload straight onto a lesson
+  // whose record has `next === null` finds no cache yet on the effect's first
+  // pass and returns early (below); without this dependency, the list
+  // arriving moments later would never re-run the effect, and that lesson
+  // would go without a look-ahead until the *next* navigation primed it.
+  const pathsListLoaded = pathsListQuery.data !== undefined;
+
+  // The open effect (§5.4), keyed on `lessonId` alone — deliberately NOT on
+  // `flow`, whose own reference changes the instant `completeMutation`
+  // advances it (to the *next* lesson) while still mounted on *this* one.
+  // Reacting to that write here would misread "the record moved on" as "the
+  // learner navigated away" and clear a flow that is working exactly as
+  // designed. Reading `readFlow()` fresh (rather than closing over the `flow`
+  // state above) is what lets this run only on a genuine route change.
+  // `pathsListLoaded` is a deliberate re-run trigger (flow-fix plan item 6),
+  // not a value the body reads — it re-reads the cache itself via
+  // `queryClient` once the list has landed.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: see comment above.
+  useEffect(() => {
+    const current = readFlow();
+    if (current === null) return;
+    if (current.current?.lessonId !== lessonId) {
+      // The advance screen (flow-fix-plan item 1): `advanceRecord` (§5.3)
+      // already moved `current` on to the *next* lesson the instant Mark
+      // complete succeeded, while this route is still mounted on the one
+      // that just finished. A reload here must read that as "still on
+      // track", not "the learner left" — only the *last* completion counts;
+      // an earlier one reached via the path rail or browser back still
+      // clears below.
+      if (isFlowAdvanceScreen(current, lessonId)) return;
+      // The learner navigated somewhere the flow did not send them — the path
+      // rail, the sidebar, browser back to a stale lesson. Leaving is ending.
+      clearFlow();
+      return;
+    }
+    if (current.next !== null) return;
+    const list = queryClient.getQueryData<PathList>(pathsListQueryOptions.queryKey);
+    if (list === undefined) return; // Nothing cached yet; the advance below primes it.
+    const eligible = eligiblePaths(list.paths, current.paths);
+    const picked = pickNext(current, eligible, Math.random);
+    if (picked === null) return; // Scope is dry; the next advance ends it properly.
+    // A look-ahead only means anything on a *different* path (D8: an
+    // interleaved flow's next lesson is elsewhere; same-path is already
+    // covered by backend Prefetch (+N)) — otherwise `picked` is just the
+    // lesson already on screen, and prefetching it would duplicate the
+    // route's own query. The cursor still advances either way
+    // (flow-fix-plan item 2).
+    if (picked.next.pathId === current.current.pathId) {
+      writeFlow({ ...current, next: null, cursor: picked.cursor });
+      return;
+    }
+    writeFlow({ ...current, next: picked.next, cursor: picked.cursor });
+    // Fire-and-forget (D8) — never awaited, never surfaced. The GET itself is
+    // the generation trigger (`isLessonViewTerminal`'s docstring).
+    void queryClient.prefetchQuery(lessonQueryOptions(picked.next.lessonId));
+  }, [lessonId, queryClient, pathsListLoaded]);
+
+  /** §5.7: completed.length > 0 goes to the receipt; an empty flow just ends. */
+  function endFlow(pathId: string) {
+    if (flow === null) return;
+    if (flow.completed.length > 0) {
+      writeFlow({ ...flow, current: null, next: null, endedReason: "ended" });
+      navigate({ to: "/flow/done" });
+    } else {
+      clearFlow();
+      navigate({ to: "/paths/$pathId", params: { pathId } });
+    }
+  }
 
   const lessonQuery = useQuery({
     ...lessonQueryOptions(lessonId),
@@ -316,6 +436,31 @@ function LessonView() {
       ) {
         triggerDraftsMutation.mutate();
       }
+
+      // The advance (flow TDD §5.3, steps 1-5). Only when this completion is
+      // the flow's own current lesson — a revisit-complete of an
+      // already-finished lesson elsewhere on the path must never move it.
+      if (flow !== null && flow.current?.lessonId === id) {
+        const completion: FlowCompletion = {
+          lessonId: id,
+          pathId: flow.current.pathId,
+          title: detail?.title ?? "",
+          outcome: detail?.attempt?.outcome ?? null,
+        };
+        // A *fresh* fetch, not the cache: this lesson's own completion just
+        // landed server-side, and the invalidation above may not have
+        // refetched yet (§9: "stale next_lesson after completion" — do not
+        // shortcut this by reading `pathsListQuery.data` instead).
+        const list = await queryClient.fetchQuery(pathsListQueryOptions);
+        const updated = advanceRecord(flow, completion, list.paths, Math.random);
+        writeFlow(updated);
+        if (updated.endedReason !== null) {
+          navigate({ to: "/flow/done" });
+        }
+        // Else: stays on this route. The render below picks up the new
+        // `flow.current` reactively and shows the advance card in place of
+        // the plain completed state.
+      }
     },
   });
 
@@ -386,6 +531,29 @@ function LessonView() {
     lessonReady: detail?.generation_state === "generated" && detail.unlock_state !== "locked",
   });
 
+  // The advance card's props (flow TDD §5.3 step 5), or null when this
+  // completed lesson is not the one the active flow just logged. Checking the
+  // *last* ledger entry (not merely "some entry") keeps this precise to the
+  // completion that just happened, rather than an earlier one on the same
+  // lesson id a flow could in principle revisit.
+  const lastFlowCompletion = flow?.completed[flow.completed.length - 1];
+  const flowAdvance =
+    flow !== null && detail !== undefined && lastFlowCompletion?.lessonId === detail.id
+      ? buildFlowAdvance({
+          flow,
+          detail,
+          pathsList: pathsListQuery.data,
+          pathCompletion,
+          tutorOpen: tutor.open,
+          onGoNow: () => {
+            if (flow.current) {
+              navigate({ to: "/lessons/$lessonId", params: { lessonId: flow.current.lessonId } });
+            }
+          },
+          onEnd: () => endFlow(detail.path_id),
+        })
+      : null;
+
   return (
     <Workspace
       testid="lesson-view"
@@ -402,6 +570,22 @@ function LessonView() {
         </Sidebar>
       }
     >
+      {/* Above the breadcrumbs (flow TDD §2/§5.7) — sticky under the app
+          header, so "where am I in this flow" is visible before anything
+          about the lesson itself. */}
+      {inFlow && flow ? (
+        <FlowBar
+          flow={flow}
+          // 1-based (flow-fix plan item 3): one past every logged completion,
+          // unless this lesson *is* the last one logged (the advance screen,
+          // §5.4) — that screen is still "position `completed.length`", not
+          // one further on. Reads "1 of 3" on the first lesson and again on
+          // its own advance screen, then "2 of 3" once the next lesson opens.
+          position={flow.completed.length + (isFlowAdvanceScreen(flow, lessonId) ? 0 : 1)}
+          onEndFlow={() => endFlow(detail?.path_id ?? flow.current?.pathId ?? "")}
+        />
+      ) : null}
+
       {detail ? (
         <Breadcrumbs
           current={detail.title}
@@ -448,6 +632,7 @@ function LessonView() {
           pathTitle={pathDetail?.title ?? ""}
           topic={pathDetail?.topic ?? ""}
           nextLesson={nextLesson}
+          flowAdvance={flowAdvance}
         />
       )}
 
@@ -456,8 +641,11 @@ function LessonView() {
           wrong. `DraftList` returns null on every non-actionable state
           (undefined, `generating`, `failed` with no retry yet pressed, or
           `generated` with nothing left to keep), so this costs nothing when
-          there is nothing to show. */}
-      {draftsEnabled ? (
+          there is nothing to show. Suppressed entirely inside a flow (D7) —
+          drafting still runs in the background (the open-time trigger above is
+          untouched), but the keep/discard moment waits for the receipt, where
+          `FlowDrafts` renders the whole flow's batch at once. */}
+      {draftsEnabled && !inFlow ? (
         <DraftList
           drafts={draftsQuery.data}
           onKeep={(keptIds) => keepDraftsMutation.mutate(keptIds)}
@@ -500,6 +688,68 @@ function lessonAtPosition(pathDetail: PathDetail, position: number): PathLesson 
   return pathDetail.units
     .flatMap((unit) => unit.lessons)
     .find((lesson) => lesson.position_in_path === position);
+}
+
+// --- Flow: the advance card's props ------------------------------------------
+
+interface FlowAdvanceProps {
+  nextTitle: string;
+  nextPathTitle: string | null;
+  startPaused: boolean;
+  tutorOpen: boolean;
+  onGoNow: () => void;
+  onEnd: () => void;
+}
+
+/**
+ * Resolve the advance card's "Next: …" preview from the paths list cache
+ * (flow TDD §5.3 step 5) — the record itself carries only ids (`FlowRecord`,
+ * §4), never a title, so this is where the two are joined back together.
+ * `null` only when `flow.current` is itself null, meaning the flow just ended
+ * and `completeMutation`'s `onSuccess` has already navigated to
+ * `/flow/done` — the caller's render this guards against is a one-frame
+ * window before that navigation lands.
+ */
+function buildFlowAdvance({
+  flow,
+  detail,
+  pathsList,
+  pathCompletion,
+  tutorOpen,
+  onGoNow,
+  onEnd,
+}: {
+  flow: FlowRecord;
+  detail: LessonDetail;
+  pathsList: PathList | undefined;
+  /** Non-null exactly when `PathCompleteCard` is also rendering (§9) — the
+   *  advance card starts paused so the celebration is not raced by a count. */
+  pathCompletion: { lessonCount: number; days: number | null } | null;
+  tutorOpen: boolean;
+  onGoNow: () => void;
+  onEnd: () => void;
+}): FlowAdvanceProps | null {
+  if (flow.current === null) return null;
+  const nextPath = pathsList?.paths.find((path) => path.id === flow.current?.pathId);
+  // The fresh list's own `next_lesson` for that path *is* the lesson the flow
+  // just picked, immediately after an advance — this only reads its title
+  // back, never re-derives which lesson is next.
+  const nextLessonSummary =
+    nextPath?.next_lesson?.id === flow.current.lessonId ? nextPath.next_lesson : undefined;
+  return {
+    // A generic fallback, not "" (flow-fix plan item 7): the paths list can
+    // still be catching up to the completion that just landed (§9), and "Next:
+    // " with nothing after it reads as broken rather than merely vague.
+    nextTitle: nextLessonSummary?.title ?? "the next lesson",
+    // Named only when the flow lands somewhere other than this lesson's own
+    // path (interleave/random can go anywhere); a same-path advance already
+    // says enough with the lesson title alone.
+    nextPathTitle: flow.current.pathId !== detail.path_id ? (nextPath?.title ?? null) : null,
+    startPaused: pathCompletion !== null,
+    tutorOpen,
+    onGoNow,
+    onEnd,
+  };
 }
 
 // --- Desktop-only prev/next footer (mock #2a) -------------------------------
@@ -588,6 +838,7 @@ function ReadyLesson({
   pathTitle,
   topic,
   nextLesson,
+  flowAdvance,
 }: {
   detail: LessonDetail;
   onAttempt: (index: number) => void;
@@ -603,6 +854,10 @@ function ReadyLesson({
   topic: string;
   /** The lesson after this one, or null when there is none to offer. */
   nextLesson: PathLesson | null;
+  /** Non-null exactly when this completion was the active flow's own (flow
+   *  TDD §5.3 step 5) — replaces `CompletedState`, or sits beneath
+   *  `PathCompleteCard` when this was also the path's last lesson (§9). */
+  flowAdvance: FlowAdvanceProps | null;
 }) {
   const quickCheck = detail.quick_check;
   const reveal = detail.attempt;
@@ -645,14 +900,28 @@ function ReadyLesson({
           // window where the path detail has yet to load on a deep link, which
           // resolves into the card a beat later rather than guessing.
           pathCompletion ? (
-            <PathCompleteCard
-              pathId={detail.path_id}
-              pathTitle={pathTitle}
-              topic={topic}
-              lessonCount={pathCompletion.lessonCount}
-              days={pathCompletion.days}
-              celebrate={celebrate}
-            />
+            <>
+              <PathCompleteCard
+                pathId={detail.path_id}
+                pathTitle={pathTitle}
+                topic={topic}
+                lessonCount={pathCompletion.lessonCount}
+                days={pathCompletion.days}
+                celebrate={celebrate}
+              />
+              {/* Flow TDD §9 "Path completion inside a flow": the card still
+                  renders — it replaces `CompletedState` today — with the
+                  advance card beneath it, paused, so the celebration is not
+                  raced. The dry path drops out of the flow's scope on the
+                  next pick automatically (its `next_lesson` is now null). */}
+              {flowAdvance ? (
+                <div className="mt-4">
+                  <FlowAdvanceCard key={detail.id} {...flowAdvance} />
+                </div>
+              ) : null}
+            </>
+          ) : flowAdvance ? (
+            <FlowAdvanceCard key={detail.id} {...flowAdvance} />
           ) : (
             <CompletedState pathId={detail.path_id} nextLesson={nextLesson} />
           )

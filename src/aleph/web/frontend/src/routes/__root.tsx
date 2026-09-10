@@ -5,9 +5,11 @@ import {
   redirect,
   useRouterState,
 } from "@tanstack/react-router";
+import { useEffect } from "react";
 import type { RouterContext } from "../app/app";
 import { AppHeader } from "../components/app-header";
 import { LOGIN_PATH, authRedirect, sessionQueryOptions } from "../lib/auth";
+import { clearFlow, readFlow } from "../lib/flow";
 
 export const Route = createRootRouteWithContext<RouterContext>()({
   // The auth gate: resolve the session once (cached), then let the pure
@@ -23,10 +25,30 @@ export const Route = createRootRouteWithContext<RouterContext>()({
   errorComponent: RootError,
 });
 
+/** A flow's own two surfaces (flow TDD §5.4) — everywhere else, arriving is leaving. */
+function isFlowRoute(pathname: string): boolean {
+  return pathname.startsWith("/lessons/") || pathname.startsWith("/flow/");
+}
+
 function RootLayout() {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   // The login screen is its own full-bleed surface — no app chrome.
   const showChrome = pathname !== LOGIN_PATH;
+
+  // Leaving is ending (flow TDD D5): a flow that silently survived a trip to
+  // home would resume itself hours later. This is what makes *Home* in the
+  // header, sign-out, or a typed URL end one — `/flow/new`'s own start
+  // overwrites the record on its own terms, and `/lessons/*`'s open effect
+  // (`routes/lessons.$lessonId.tsx`) is the finer-grained twin of this one,
+  // catching a navigation *within* the lesson surface that the flow itself
+  // did not send the learner to. `readFlow()` (not the reactive `useFlow()`)
+  // because this only needs a snapshot at the moment the route changes, not a
+  // subscription that re-renders the whole shell on every write mid-flow.
+  useEffect(() => {
+    if (!isFlowRoute(pathname) && readFlow() !== null) {
+      clearFlow();
+    }
+  }, [pathname]);
 
   return (
     <div className="min-h-screen bg-night text-porcelain">

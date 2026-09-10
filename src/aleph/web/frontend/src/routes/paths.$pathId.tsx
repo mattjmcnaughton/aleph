@@ -22,6 +22,7 @@ import { type OutlineUnitView, mergeProposalIntoOutline } from "../lib/shaping";
 import type { Proposal } from "../lib/tutor-stream";
 import { Sidebar, SwitcherSection } from "../components/sidebar";
 import { Workspace } from "../components/workspace";
+import { useFeatureFlag } from "../lib/feature-flags";
 import { PATH_TITLE_MAX_LENGTH } from "../lib/onboarding";
 import { makePollingRefetchInterval } from "../lib/polling";
 import { useRetryGeneration } from "../lib/use-retry-generation";
@@ -58,6 +59,7 @@ const pathViewPollConfig = {
 function PathView() {
   const { pathId } = Route.useParams();
   const navigate = useNavigate();
+  const flowEnabled = useFeatureFlag("flow");
 
   const pathQuery = useQuery({
     ...pathQueryOptions(pathId),
@@ -114,6 +116,7 @@ function PathView() {
           detail={detail}
           onOpenLesson={openLesson}
           ghostProposal={shaping.ghostProposal}
+          flowEnabled={flowEnabled}
         />
       )}
 
@@ -130,6 +133,7 @@ function ReadyPath({
   detail,
   onOpenLesson,
   ghostProposal,
+  flowEnabled,
 }: {
   detail: PathDetail;
   onOpenLesson: (lessonId: string) => void;
@@ -141,6 +145,8 @@ function ReadyPath({
    * proposal and progress is a fact. Applying is what turns one into the other.
    */
   ghostProposal: Proposal | null;
+  /** Flow's client-only gate (flow TDD D10) — the "Start a flow" link. */
+  flowEnabled: boolean;
 }) {
   const lessons = detail.units.flatMap((unit) => unit.lessons);
   const total = lessons.length;
@@ -202,12 +208,27 @@ function ReadyPath({
       {allComplete ? (
         <CompleteBanner />
       ) : continueLesson && continueUnit ? (
-        <ContinueCard
-          lesson={continueLesson}
-          unit={continueUnit}
-          total={total}
-          started={complete > 0}
-        />
+        <>
+          <ContinueCard
+            lesson={continueLesson}
+            unit={continueUnit}
+            total={total}
+            started={complete > 0}
+          />
+          {/* Beside the continue panel at both widths (flow TDD §2/§6) — a
+              quiet link, not a second CTA: Continue is still the one-tap
+              answer, Flow is the same tap with a length attached. */}
+          {flowEnabled ? (
+            <Link
+              to="/flow/new"
+              search={{ path: detail.id }}
+              data-testid="flow-path-link"
+              className="mt-3 inline-block text-sm text-teal-bright transition-colors hover:text-teal-dim"
+            >
+              Start a flow
+            </Link>
+          ) : null}
+        </>
       ) : null}
 
       <ol
