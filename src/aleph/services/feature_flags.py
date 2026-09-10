@@ -116,6 +116,12 @@ class FeatureFlag(StrEnum):
     # Off -> ``404``. Its own key, independent of the four above, for the same
     # reason they are independent of each other.
     ANALYST = "analyst"
+    # Flow TDD D10: the one backend touch a 100% client-side feature needs.
+    # There is no route to gate ``404`` — the client reads this key with
+    # ``useFeatureFlag("flow")`` and decides whether the door, the setup
+    # sheet, the flow bar and the receipt render at all. Its own key, for the
+    # same reason every flag above is independent of the others.
+    FLOW = "flow"
 
 
 # Code defaults per flag. Every FeatureFlag member gets an entry here; a flag
@@ -147,6 +153,12 @@ FLAG_DEFAULTS: dict[FeatureFlag, bool] = {
     # and Briefs via ``ADMIN_DEFAULT_FLAGS`` below. This flip is the launch
     # itself: the AL-270/AL-370/streaks/flashcards playbook a fifth time.
     FeatureFlag.ANALYST: True,
+    # Off: Flow (docs/tdds/flow.md) is unbuilt-to-launched, same as every
+    # phase above spent its own build-out — dark here, on for admins via
+    # `ADMIN_DEFAULT_FLAGS` below, so the door, setup sheet, flow bar and
+    # receipt merge and deploy with zero learner exposure until the launch
+    # ticket (flow TDD §8, ticket 7) flips this to `True`.
+    FeatureFlag.FLOW: False,
 }
 
 
@@ -157,7 +169,7 @@ FLAG_DEFAULTS: dict[FeatureFlag, bool] = {
 # ``tutor:off`` there turns the flag off for admins too (kill switch), and a
 # per-user override beats it for everyone, admins included.
 #
-# All five members — ``TUTOR``, ``SHAPING``, ``STREAKS``, ``FLASHCARDS``,
+# The first five members — ``TUTOR``, ``SHAPING``, ``STREAKS``, ``FLASHCARDS``,
 # ``ANALYST`` — are **currently redundant**: a flag whose code default is
 # already ``True`` is on for admins by that default alone, and after a ``:off``
 # kill the settings map outranks this baseline anyway, so membership changes no
@@ -165,7 +177,9 @@ FLAG_DEFAULTS: dict[FeatureFlag, bool] = {
 # because this is the seam the *next* dark phase uses, and re-deriving which
 # flags belong here is exactly the kind of thing that gets forgotten at the
 # moment a flag flips back off — membership costs nothing while a flag is
-# launched and saves a forgotten step the day one isn't.
+# launched and saves a forgotten step the day one isn't. ``FLOW`` is the next
+# dark phase itself: its code default is still ``False``, so membership here
+# is what makes it dogfoodable by admins in production before the launch flip.
 ADMIN_DEFAULT_FLAGS: frozenset[FeatureFlag] = frozenset(
     {
         FeatureFlag.TUTOR,
@@ -173,6 +187,7 @@ ADMIN_DEFAULT_FLAGS: frozenset[FeatureFlag] = frozenset(
         FeatureFlag.STREAKS,
         FeatureFlag.FLASHCARDS,
         FeatureFlag.ANALYST,
+        FeatureFlag.FLOW,
     }
 )
 

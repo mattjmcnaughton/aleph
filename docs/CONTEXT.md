@@ -153,6 +153,18 @@ Spec: [Phase 6 PRD](prds/phase-6-analyst.md), [Phase 6 TDD](tdds/phase-6-analyst
 | **Brief prefetch** | Making a Beat claimable a little *before* its **Anchor day** opens, so a moment when the process is already warm — Sunday evening, for a Monday Beat — produces the next Brief early and it is genuinely waiting. **Prefetch (+N)** on the time axis: same trick, same latency hidden, "ahead" measured in hours instead of lesson positions. **Deferred from the phase's first slice** (PRD §7.1) — the warm moment it exploits does not exist while the app sleeps between visits, so arrival is the trigger that actually fires. |
 | **Skipped** | The outcome when no finding survives the novelty check against prior Briefs: a dated, one-line rail entry saying nothing material happened, instead of a padded Brief. A first-class result the way **Refused** is for a path — and, like Refused, **never conflated with failure**: Skipped means *the analyst found nothing*, and must never become a laundry slot for *we failed to run* (PRD §4.2, §4.6). A Skipped period is the feature working correctly. |
 
+## Flow
+
+Flow vocabulary. A bounded run of lessons, scoped once at the door instead of choosing after every
+one — **built behind the `flow` flag, dark** (default off); see the phase-boundary note at the foot
+of this document. Spec: [Flow TDD](tdds/flow.md), mock: [Flow mode](mocks/aleph-flow-mode.html).
+
+| Term | Meaning |
+| --- | --- |
+| **Flow** | A bounded run of lessons taken one after the other, where each completed lesson opens the next without the learner choosing. Scoped at the door by a **Flow length** and a **Flow scope**; ends when the length is reached, the scope runs dry, or the learner ends it — and leaving *is* ending: any navigation away from the flow's lesson or setup route clears it. A run of ordinary lessons — every completion inside it is an ordinary **Mark complete**; streaks, Active day and Activation are untouched, and nothing about a flow is stored on the server. |
+| **Flow length** | How many lessons the flow will take — a count (3, 5, 8), or open-ended ("until I stop"). Fixed at the door; the only thing that changes it mid-flow is ending it. |
+| **Flow scope** | Which paths the flow draws lessons from, and in what order — **Interleave** (the default; paths take turns in the order picked), **Random** (a path drawn afresh for every lesson), or **one path at a time** (finish the first before touching the next). Within a path the order is always Progression's: that path's next available lesson — Random picks the *path*, never a lesson out of order. Always paths, never a **Beat**: a Beat is not a path, so it is never offered here and a **Brief** is never a lesson a flow can open. |
+
 ## Quality, safety & measurement
 
 | Term | Meaning |
@@ -258,3 +270,12 @@ phase:
   are built and **launched** — the `streaks` flag defaults on, having run the
   same dark-then-flip playbook as `tutor`/`shaping`, and stays registered as a
   kill switch.
+- **Flow** / **Flow length** / **Flow scope** — the Flow section above: **built,
+  behind the `flow` flag, dark** ([TDD](tdds/flow.md)). Unlike every flag above,
+  Flow is **100% client-side** — no table, no route, no migration, gated purely
+  in the client by `useFeatureFlag("flow")` rather than a router `404` — so the
+  dark-then-flip playbook still applies (`FLAG_DEFAULTS[FeatureFlag.FLOW]`
+  starts `False`) but the flip is the only backend deploy this phase ever
+  needs. Drafting is **deferred to the flow's end** by design (TDD D7): every
+  lesson inside a flow still drafts as it opens, but the per-lesson keep/discard
+  moment waits for the receipt, rendered as one batch.

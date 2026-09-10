@@ -227,8 +227,11 @@ def create_stub_app() -> FastAPI:
     # ``tutor``/``shaping``/``streaks``/``flashcards`` now covers ``analyst``
     # too, since its own launch flip removed the one thing that used to make
     # it different (the admin-only default this comment used to describe).
+    # ``flow`` (flow TDD D10) joins the list on the same terms: dark by code
+    # default, so W32 needs the same explicit pin the five flags above already
+    # required before their own launch flips.
     settings.feature_flag_defaults = (
-        "tutor:on,shaping:on,streaks:on,flashcards:on,analyst:on"
+        "tutor:on,shaping:on,streaks:on,flashcards:on,analyst:on,flow:on"
     )
 
     # Phase 6's retrieval seam (ticket AL-560; `services/retrieval.py`,

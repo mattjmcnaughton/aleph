@@ -40,6 +40,10 @@ afterEach(() => {
   resetFlashcards();
   resetBeats();
   resetSettings();
+  // A Flow record (lib/flow.ts) lives in sessionStorage, not the MSW store —
+  // nothing else here resets it, so a flow written by one test would
+  // otherwise still be sitting there for the next.
+  window.sessionStorage.clear();
   vi.restoreAllMocks();
   cleanup();
   window.history.pushState({}, "", "/");

@@ -1,0 +1,1074 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aleph Flow Mode</title>
+<style>
+  /* ── Page chrome: theme-aware. The phones inside are always Nocturne dark,
+     because Nocturne is a committed dark system (index.css: color-scheme: dark). ── */
+  :root {
+    --page-bg: #f4f4f6;
+    --page-fg: #1b1c24;
+    --page-muted: #5c6070;
+    --page-rule: #d8d9e0;
+    --page-card: #ffffff;
+    --page-accent: #2f7f88;
+    --page-iris: #5d5294;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --page-bg: #101119;
+      --page-fg: #e9e9ed;
+      --page-muted: #9397ab;
+      --page-rule: #2c2e3d;
+      --page-card: #191b26;
+      --page-accent: #6fced9;
+      --page-iris: #b5abfc;
+    }
+  }
+  :root[data-theme="dark"] {
+    --page-bg: #101119;
+    --page-fg: #e9e9ed;
+    --page-muted: #9397ab;
+    --page-rule: #2c2e3d;
+    --page-card: #191b26;
+    --page-accent: #6fced9;
+    --page-iris: #b5abfc;
+  }
+
+  /* Nocturne tokens — lifted from tailwind.config.ts, unchanged. */
+  .noc {
+    --night: #161826;
+    --surface: #232532;
+    --elevated: #292b31;
+    --porcelain: #e9e9ed;
+    --mist: #9397ab;
+    --slate: #75798c;
+    --faint: #595d6c;
+    --teal: #4fb8c4;
+    --teal-bright: #6fced9;
+    --teal-dim: #3f959f;
+    --iris: #9184d9;
+    --iris-400: #b5abfc;
+    --iris-700: #5d5294;
+    --iris-900: #2b2741;
+    --divider: #e9e9ed29;
+    --danger: #ff8a80;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--page-bg);
+    color: var(--page-fg);
+    font-family: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+    line-height: 1.5;
+  }
+  p, h1, h2, h3 { margin: 0; }
+  b { font-weight: 600; }
+
+  .wrap { max-width: 1240px; margin: 0 auto; padding: 40px 24px 72px; }
+
+  /* ── Masthead ── */
+  .masthead { display: flex; flex-direction: column; gap: 14px; max-width: 62ch; }
+  .kicker {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--page-muted);
+  }
+  h1 {
+    font-size: clamp(28px, 4vw, 40px);
+    line-height: 1.12;
+    letter-spacing: -0.02em;
+    font-weight: 600;
+    text-wrap: balance;
+  }
+  .standfirst { color: var(--page-muted); font-size: 16.5px; }
+  .caveat {
+    margin-top: 4px;
+    padding: 10px 14px;
+    border-left: 2px solid var(--page-iris);
+    background: color-mix(in srgb, var(--page-iris) 8%, transparent);
+    border-radius: 0 8px 8px 0;
+    font-size: 14px;
+    color: var(--page-fg);
+    max-width: 62ch;
+  }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+  hr.rule { border: 0; border-top: 1px solid var(--page-rule); margin: 40px 0 34px; }
+
+  /* ── Phone rail ── */
+  .rail {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(285px, 1fr));
+    gap: 34px 28px;
+    align-items: start;
+  }
+  .slot { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+  .slot-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .slot-num { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--page-accent); font-weight: 600; }
+  .slot-title { font-size: 16px; font-weight: 600; letter-spacing: -0.01em; }
+  .slot-note { font-size: 13.5px; color: var(--page-muted); max-width: 42ch; }
+
+  /* The device. Fixed phone metrics — this is a phone-first product. */
+  .phone {
+    background: var(--night);
+    border-radius: 26px;
+    padding: 10px;
+    box-shadow: 0 0 0 1px var(--page-rule), 0 18px 44px rgba(0, 0, 0, 0.28);
+  }
+  .screen {
+    background: var(--night);
+    border-radius: 18px;
+    height: 680px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    color: var(--porcelain);
+    font-size: 14px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--faint) transparent;
+    display: flex;
+    flex-direction: column;
+  }
+  .screen::-webkit-scrollbar { width: 6px; }
+  .screen::-webkit-scrollbar-thumb { background: var(--faint); border-radius: 3px; }
+
+  .appbar {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    flex: none;
+    height: 52px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 16px;
+    background: var(--night);
+    border-bottom: 1px solid var(--divider);
+  }
+  .glyph { font-family: Georgia, "Times New Roman", serif; font-size: 20px; color: var(--iris-400); line-height: 1; }
+  .appbar-right { font-size: 12px; color: var(--slate); display: flex; align-items: center; gap: 9px; }
+  .due-pill {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 11.5px; font-weight: 600; color: #08252a; background: var(--teal);
+    border-radius: 999px; padding: 3px 9px 3px 7px; font-variant-numeric: tabular-nums; text-decoration: none;
+  }
+  .due-pill::before { content: ""; width: 6px; height: 6px; border-radius: 999px; background: #08252a; opacity: 0.55; }
+
+  .pad { padding: 16px; display: flex; flex-direction: column; gap: 14px; flex: 1; }
+  .noc .kicker { color: var(--mist); }
+  .noc .kicker-teal { color: var(--teal-bright); }
+  .noc .kicker-iris { color: var(--iris-400); }
+
+  /* Cards */
+  .card { background: var(--surface); border-radius: 14px; padding: 14px; box-shadow: 0 0 0 1px #3f424d; }
+  .card-teal { box-shadow: 0 0 0 1px rgba(79, 184, 196, 0.45), 0 10px 34px rgba(79, 184, 196, 0.16); }
+  .card-iris { box-shadow: 0 0 0 1px rgba(145, 132, 217, 0.45), 0 10px 34px rgba(145, 132, 217, 0.16); }
+  .card-quiet { background: var(--elevated); box-shadow: inset 0 0 0 1px #ffffff14; }
+
+  .h-screen { font-size: 24px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.2; }
+  .h-lesson { font-size: 19px; font-weight: 600; letter-spacing: -0.01em; line-height: 1.25; }
+  .muted { color: var(--mist); }
+  .dim { color: var(--slate); }
+  .tiny { font-size: 12px; }
+  .num { font-variant-numeric: tabular-nums; }
+  .noc code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.92em; background: #ffffff10; padding: 1px 4px; border-radius: 4px; }
+
+  /* Buttons */
+  .btn {
+    font: inherit; font-size: 14px; font-weight: 600; border: 0; border-radius: 8px;
+    padding: 12px 16px; cursor: pointer; width: 100%;
+    background: var(--teal); color: #08252a; transition: background 120ms ease;
+    text-align: center; text-decoration: none; display: block;
+  }
+  .btn:hover { background: var(--teal-bright); }
+  .btn-ghost { background: transparent; color: var(--mist); box-shadow: inset 0 0 0 1px var(--faint); font-weight: 500; }
+  .btn-ghost:hover { background: #ffffff0a; color: var(--porcelain); }
+  .btn-iris { background: var(--iris); color: #14112a; }
+  .btn-iris:hover { background: var(--iris-400); }
+  .btn-outline-teal { background: transparent; color: var(--teal-bright); box-shadow: inset 0 0 0 1px rgba(79, 184, 196, 0.5); }
+  .btn-outline-teal:hover { background: rgba(79, 184, 196, 0.08); }
+  .link { color: var(--mist); font-size: 13px; text-align: center; text-decoration: none; display: block; }
+  .link:hover { color: var(--porcelain); }
+  .btn:focus-visible, .seg:focus-visible, .pick:focus-visible, .order-opt:focus-visible, .link:focus-visible {
+    outline: 2px solid var(--teal-bright); outline-offset: 2px;
+  }
+
+  /* Home: the Continue card as shipped, and the new door beneath it */
+  .continue {
+    display: flex; align-items: center; gap: 12px;
+    padding: 14px; border-radius: 12px; background: var(--surface);
+    box-shadow: 0 0 0 1px rgba(79, 184, 196, 0.4); text-decoration: none; color: inherit;
+  }
+  .continue .chev { font-size: 22px; color: var(--teal); line-height: 1; }
+  .flow-door {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 14px; border-radius: 12px; text-decoration: none; color: inherit;
+    background: transparent; box-shadow: inset 0 0 0 1px var(--faint);
+  }
+  .flow-door:hover { box-shadow: inset 0 0 0 1px var(--teal-dim); }
+  .flow-mark {
+    flex: none; width: 34px; height: 34px; border-radius: 10px;
+    display: grid; place-items: center;
+    background: rgba(79, 184, 196, 0.12); color: var(--teal-bright);
+  }
+  .path-row {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    padding: 13px 14px; border-radius: 12px; background: var(--surface); box-shadow: 0 0 0 1px #3f424d;
+  }
+  .path-name { font-weight: 600; font-size: 14px; }
+  .chip { font-size: 11px; font-weight: 600; color: var(--mist); background: #ffffff0f; border-radius: 999px; padding: 3px 9px; white-space: nowrap; }
+  .chip-teal { color: #08252a; background: var(--teal); }
+  .bar { height: 4px; border-radius: 2px; background: #ffffff14; overflow: hidden; margin-top: 8px; }
+  .bar > span { display: block; height: 100%; background: var(--teal-dim); border-radius: 2px; }
+  .streakline { display: flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--porcelain); }
+
+  /* Setup sheet */
+  .sheet-grip { width: 36px; height: 4px; border-radius: 2px; background: var(--faint); margin: 0 auto; }
+  .field { display: flex; flex-direction: column; gap: 9px; }
+  .field-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  .field-head .side { display: flex; align-items: baseline; gap: 10px; }
+  .textbtn { font: inherit; font-size: 12px; font-weight: 600; color: var(--teal-bright); background: none; border: 0; padding: 0; cursor: pointer; }
+  .textbtn:hover { color: var(--porcelain); }
+  .textbtn:focus-visible { outline: 2px solid var(--teal-bright); outline-offset: 3px; border-radius: 3px; }
+  .segs { display: grid; grid-template-columns: 1fr 1fr 1fr 1.7fr; gap: 7px; }
+  .seg {
+    font: inherit; font-size: 13.5px; font-weight: 600; border: 0; border-radius: 9px;
+    padding: 11px 4px; cursor: pointer; background: var(--elevated); color: var(--mist);
+    box-shadow: inset 0 0 0 1px #ffffff14; font-variant-numeric: tabular-nums;
+  }
+  .seg[aria-pressed="true"] { background: var(--teal); color: #08252a; box-shadow: none; }
+  .picks { display: flex; flex-direction: column; gap: 8px; }
+  .pick {
+    display: flex; align-items: center; gap: 12px; width: 100%; text-align: left;
+    font: inherit; color: var(--porcelain); border: 0; cursor: pointer;
+    padding: 11px 12px; border-radius: 10px; background: var(--elevated); box-shadow: inset 0 0 0 1px #ffffff0f;
+  }
+  .pick[aria-pressed="true"] { box-shadow: inset 0 0 0 1px rgba(79, 184, 196, 0.55); }
+  .pick[disabled] { opacity: 0.45; cursor: not-allowed; }
+  .box {
+    flex: none; width: 22px; height: 22px; border-radius: 6px;
+    box-shadow: inset 0 0 0 1px var(--faint); display: grid; place-items: center;
+    font-size: 13px; font-weight: 700; color: transparent;
+  }
+  .pick[aria-pressed="true"] .box { background: var(--teal); box-shadow: none; color: #08252a; }
+  .pick-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .pick-name { font-weight: 600; font-size: 13.5px; }
+  .pick-next { font-size: 12px; color: var(--mist); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pick-left { font-size: 11.5px; color: var(--slate); font-variant-numeric: tabular-nums; flex: none; }
+  .order { display: flex; flex-direction: column; gap: 7px; }
+  .order-opt {
+    font: inherit; border: 0; cursor: pointer; text-align: left; width: 100%;
+    padding: 9px 12px; border-radius: 10px; background: var(--elevated); color: var(--porcelain);
+    box-shadow: inset 0 0 0 1px #ffffff14; display: flex; align-items: center; gap: 10px;
+  }
+  .order-opt[aria-pressed="true"] { box-shadow: inset 0 0 0 1px rgba(79, 184, 196, 0.6); }
+  .order-opt .radio { flex: none; width: 16px; height: 16px; border-radius: 999px; box-shadow: inset 0 0 0 1px var(--faint); }
+  .order-opt[aria-pressed="true"] .radio { box-shadow: inset 0 0 0 5px var(--teal); }
+  .order-opt b { font-size: 13px; }
+  .order-opt small { font-size: 11.5px; color: var(--mist); margin-left: auto; text-align: right; }
+  .order[hidden] { display: none; }
+  .foot-sticky { margin-top: auto; padding-top: 6px; display: flex; flex-direction: column; gap: 9px; }
+
+  /* In-flow lesson */
+  .flowbar {
+    position: sticky; top: 52px; z-index: 2; flex: none;
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 16px; background: var(--night); border-bottom: 1px solid var(--divider);
+  }
+  .flowbar .lbl { font-size: 11.5px; font-weight: 600; color: var(--teal-bright); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .segbar { flex: 1; display: grid; grid-auto-flow: column; gap: 4px; }
+  .segbar > i { display: block; height: 4px; border-radius: 2px; background: #ffffff14; }
+  .segbar > i.done { background: var(--teal); }
+  .segbar > i.now { background: var(--teal-dim); }
+  .flowbar .end { font-size: 11.5px; color: var(--slate); text-decoration: none; white-space: nowrap; }
+  .flowbar .end:hover { color: var(--porcelain); }
+  .passage { font-size: 13.5px; line-height: 1.55; color: var(--mist); }
+  .qc { border-radius: 12px; background: var(--surface); box-shadow: 0 0 0 1px #3f424d; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+  .opt { display: flex; gap: 9px; align-items: flex-start; font-size: 13px; padding: 8px 10px; border-radius: 8px; background: var(--elevated); }
+  .opt .k { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: var(--slate); padding-top: 2px; }
+  .opt.correct { box-shadow: inset 0 0 0 1px rgba(79, 184, 196, 0.6); }
+  .opt.correct .k { color: var(--teal-bright); }
+  .complete { text-align: center; padding: 18px 14px 14px; border-radius: 12px; background: rgba(79, 184, 196, 0.1); box-shadow: 0 0 0 1px rgba(79, 184, 196, 0.4); display: flex; flex-direction: column; gap: 10px; }
+  .ring { width: 64px; height: 64px; margin: 0 auto; position: relative; }
+  .ring svg { width: 64px; height: 64px; transform: rotate(-90deg); }
+  .ring .n { position: absolute; inset: 0; display: grid; place-items: center; font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .ring circle { fill: none; stroke-width: 4; }
+  .ring .track { stroke: #ffffff14; }
+  .ring .arc { stroke: var(--teal); stroke-linecap: round; transition: stroke-dashoffset 1s linear; }
+  .ring.paused .arc { stroke: var(--slate); transition: none; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .drafts-line { display: flex; align-items: center; gap: 9px; font-size: 12.5px; color: var(--mist); padding: 9px 12px; border-radius: 10px; background: var(--iris-900); }
+  .drafts-line .dot { width: 7px; height: 7px; border-radius: 999px; background: var(--iris-400); flex: none; }
+
+  /* Flow complete */
+  .stat-row { display: flex; gap: 8px; }
+  .stat { flex: 1; padding: 12px; border-radius: 12px; background: var(--surface); box-shadow: 0 0 0 1px #3f424d; }
+  .stat .v { font-size: 24px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.1; color: var(--teal-bright); font-variant-numeric: tabular-nums; }
+  .stat .l { font-size: 11.5px; color: var(--slate); margin-top: 4px; }
+  .ledger { display: flex; flex-direction: column; }
+  .ledger > div { display: flex; justify-content: space-between; gap: 10px; padding: 9px 0; border-top: 1px solid var(--divider); font-size: 13px; }
+  .ledger > div:first-child { border-top: 0; padding-top: 0; }
+  .ledger .r { color: var(--mist); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+  /* Pins — numbered because they map to real decisions below, in order. */
+  .pin {
+    display: inline-flex; align-items: center; justify-content: center; width: 19px; height: 19px;
+    border-radius: 999px; background: var(--page-iris); color: #fff;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; font-weight: 700; flex: none;
+  }
+  .pin-note { display: flex; gap: 9px; align-items: flex-start; font-size: 12.5px; color: var(--page-muted); line-height: 1.45; padding: 10px 12px; border-radius: 10px; background: color-mix(in srgb, var(--page-iris) 10%, transparent); }
+  .pin-note b { color: var(--page-fg); }
+
+  /* ── Decision table ── */
+  .decisions { margin-top: 8px; display: flex; flex-direction: column; gap: 18px; }
+  .dgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+  .dcard { background: var(--page-card); border-radius: 12px; padding: 18px; box-shadow: 0 0 0 1px var(--page-rule); display: flex; flex-direction: column; gap: 9px; }
+  .dcard h3 { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; display: flex; gap: 9px; align-items: center; }
+  .dcard p { font-size: 13.5px; color: var(--page-muted); }
+  .dcard .rec { font-size: 13px; color: var(--page-fg); border-top: 1px solid var(--page-rule); padding-top: 9px; margin-top: auto; }
+  .rec b { color: var(--page-accent); font-weight: 600; }
+  .dcard.open { box-shadow: 0 0 0 1px var(--page-iris); }
+  .tag { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; padding: 2px 7px; border-radius: 999px; }
+  .tag-open { color: var(--page-iris); box-shadow: inset 0 0 0 1px var(--page-iris); }
+  .tag-rec { color: var(--page-accent); box-shadow: inset 0 0 0 1px var(--page-accent); }
+  .tag-settled { color: #fff; background: var(--page-accent); }
+  .dcard.settled { box-shadow: 0 0 0 1px var(--page-accent); }
+
+  .vocab { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  .vocab th, .vocab td { text-align: left; padding: 9px 10px; border-top: 1px solid var(--page-rule); vertical-align: top; }
+  .vocab th { font-weight: 600; white-space: nowrap; }
+  .vocab thead th { border-top: 0; font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--page-muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .scroll-x { overflow-x: auto; }
+
+  footer.foot { margin-top: 42px; font-size: 13px; color: var(--page-muted); max-width: 62ch; }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; }
+  }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header class="masthead">
+    <span class="kicker">Aleph · Flow mode · mock, not a spec</span>
+    <h1>Flow: pick a few lessons, and Aleph takes you from one to the next</h1>
+    <p class="standfirst">
+      Today every finished lesson ends in a choice — next lesson, back to the path, home.
+      A <b>Flow</b> is a bounded run of lessons where that choice was made once, at the
+      door: how many, from which paths. Then each completed lesson simply opens the next.
+      Four surfaces, drawn in Nocturne, phone first.
+    </p>
+    <p class="caveat">
+      A drawing to argue with, not a decision. The numbered pins mark the calls each
+      screen encodes; they are collected at the foot of the page, where three are now
+      settled (client-side only, a Random order, no minutes estimate) and the rest are
+      still yours. Screens 02 and 03 are live — tap around.
+    </p>
+  </header>
+
+  <hr class="rule">
+
+  <div class="rail">
+
+    <!-- ───────────────── Screen 1 ───────────────── -->
+    <section class="slot">
+      <div class="slot-head">
+        <span class="slot-num">01</span>
+        <span class="slot-title">The door</span>
+      </div>
+      <p class="slot-note">
+        Home, as it ships today, plus one row: <b>Start a flow</b> sits directly under
+        Continue. Continue is still the one-tap answer; Flow is the same tap with a
+        length attached.
+      </p>
+
+      <div class="phone noc">
+        <div class="screen">
+          <div class="appbar">
+            <span class="glyph">א</span>
+            <span class="appbar-right">
+              <a class="due-pill" href="#">10 due</a>
+              <span>Sign out</span>
+            </span>
+          </div>
+          <div class="pad">
+            <p class="h-screen">Welcome back, Matt.</p>
+
+            <div class="streakline">
+              <span>🔥</span>
+              <span><b>6-day streak</b></span>
+              <span class="dim">· best 12</span>
+            </div>
+
+            <a class="continue" href="#">
+              <div style="min-width:0;flex:1">
+                <span class="kicker kicker-teal">Continue</span>
+                <p class="h-lesson" style="margin-top:5px;font-size:17px">Utility types</p>
+                <p class="tiny muted" style="margin-top:3px">Learn TypeScript · 12 of 20 complete</p>
+              </div>
+              <span class="chev">›</span>
+            </a>
+
+            <a class="flow-door" href="#">
+              <span class="flow-mark" aria-hidden="true">
+                <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8h9M8 4l4 4-4 4"/><path d="M2 3.5h4M2 12.5h4" opacity=".5"/></svg>
+              </span>
+              <div style="min-width:0;flex:1">
+                <p style="font-weight:600;font-size:14px">Start a flow</p>
+                <p class="tiny muted" style="margin-top:2px">A few lessons, back to back. You pick how many.</p>
+              </div>
+              <span class="chev" style="color:var(--slate);font-size:20px">›</span>
+            </a>
+
+            <div class="card card-teal" style="padding:12px 14px">
+              <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px">
+                <span class="kicker kicker-teal">Due today</span>
+                <span class="tiny dim num">~4 min</span>
+              </div>
+              <p style="font-size:15px;font-weight:600;margin-top:4px">10 cards</p>
+            </div>
+
+            <span class="kicker" style="margin-top:2px">Your paths</span>
+            <div style="display:flex;flex-direction:column;gap:9px">
+              <div class="path-row">
+                <div style="min-width:0;flex:1">
+                  <p class="path-name">Learn TypeScript</p>
+                  <p class="tiny dim num" style="margin-top:2px">Unit 4 · 12 of 20 lessons</p>
+                  <div class="bar"><span style="width:60%"></span></div>
+                </div>
+                <span class="chip">3-day</span>
+              </div>
+              <div class="path-row">
+                <div style="min-width:0;flex:1">
+                  <p class="path-name">SQL performance</p>
+                  <p class="tiny dim num" style="margin-top:2px">Unit 2 · 5 of 18 lessons</p>
+                  <div class="bar"><span style="width:28%"></span></div>
+                </div>
+                <a href="#" class="chip chip-teal" style="text-decoration:none">Review 7</a>
+              </div>
+              <div class="path-row">
+                <div style="min-width:0;flex:1">
+                  <p class="path-name">Rust ownership</p>
+                  <p class="tiny dim num" style="margin-top:2px">Not started</p>
+                  <div class="bar"><span style="width:0%"></span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="pin-note">
+        <span class="pin">1</span>
+        <span>
+          Drawn as a <b>second door under Continue</b>, not a mode toggle on Continue
+          itself. Continue stays exactly what it is; a flow is a different promise
+          ("I have 25 minutes"), so it gets its own row. A path view would offer the
+          same door pre-scoped to that path.
+        </span>
+      </div>
+    </section>
+
+    <!-- ───────────────── Screen 2 ───────────────── -->
+    <section class="slot">
+      <div class="slot-head">
+        <span class="slot-num">02</span>
+        <span class="slot-title">Set up a flow</span>
+      </div>
+      <p class="slot-note">
+        A sheet over home. Two questions — how many, from where — plus an order once two
+        paths are picked. The button names what it will start. Try it: the count, the
+        paths and the order all talk to it.
+      </p>
+
+      <div class="phone noc">
+        <div class="screen">
+          <div class="appbar">
+            <span class="glyph">א</span>
+            <span class="appbar-right">Start a flow</span>
+          </div>
+          <div class="pad" id="setup">
+            <div class="sheet-grip" aria-hidden="true"></div>
+
+            <div class="field">
+              <div class="field-head">
+                <span class="kicker">How many lessons</span>
+              </div>
+              <div class="segs" id="segs" role="group" aria-label="How many lessons">
+                <button class="seg" data-n="3" aria-pressed="false">3</button>
+                <button class="seg" data-n="5" aria-pressed="true">5</button>
+                <button class="seg" data-n="8" aria-pressed="false">8</button>
+                <button class="seg" data-n="0" aria-pressed="false">Until I stop</button>
+              </div>
+            </div>
+
+            <div class="field">
+              <div class="field-head">
+                <span class="kicker">From which paths</span>
+                <span class="side">
+                  <span class="tiny dim num" id="avail">21 lessons left</span>
+                  <button class="textbtn" id="select-all" aria-pressed="false">Select all</button>
+                </span>
+              </div>
+              <div class="picks" id="picks">
+                <button class="pick" data-left="8" data-name="Learn TypeScript" aria-pressed="true">
+                  <span class="box">✓</span>
+                  <span class="pick-body">
+                    <span class="pick-name">Learn TypeScript</span>
+                    <span class="pick-next">Next: Utility types</span>
+                  </span>
+                  <span class="pick-left">8 left</span>
+                </button>
+                <button class="pick" data-left="13" data-name="SQL performance" aria-pressed="true">
+                  <span class="box">✓</span>
+                  <span class="pick-body">
+                    <span class="pick-name">SQL performance</span>
+                    <span class="pick-next">Next: Reading an EXPLAIN plan</span>
+                  </span>
+                  <span class="pick-left">13 left</span>
+                </button>
+                <button class="pick" data-left="24" data-name="Rust ownership" aria-pressed="false">
+                  <span class="box">✓</span>
+                  <span class="pick-body">
+                    <span class="pick-name">Rust ownership</span>
+                    <span class="pick-next">Next: What ownership means</span>
+                  </span>
+                  <span class="pick-left">24 left</span>
+                </button>
+                <button class="pick" data-left="0" data-name="Git internals" aria-pressed="false" disabled>
+                  <span class="box">✓</span>
+                  <span class="pick-body">
+                    <span class="pick-name">Git internals</span>
+                    <span class="pick-next">Finished — nothing left to flow</span>
+                  </span>
+                  <span class="pick-left">0 left</span>
+                </button>
+              </div>
+            </div>
+
+            <div class="field" id="order-field">
+              <span class="kicker">Order</span>
+              <div class="order" id="order" role="group" aria-label="Order">
+                <button class="order-opt" data-order="interleave" aria-pressed="true">
+                  <span class="radio" aria-hidden="true"></span>
+                  <b>Interleave</b>
+                  <small>Take turns, in order</small>
+                </button>
+                <button class="order-opt" data-order="random" aria-pressed="false">
+                  <span class="radio" aria-hidden="true"></span>
+                  <b>Random</b>
+                  <small>A random path, every lesson</small>
+                </button>
+                <button class="order-opt" data-order="serial" aria-pressed="false">
+                  <span class="radio" aria-hidden="true"></span>
+                  <b>One path at a time</b>
+                  <small>Finish the first, then the next</small>
+                </button>
+              </div>
+            </div>
+
+            <div class="foot-sticky">
+              <p class="tiny dim" style="text-align:center" id="first-up">First up: Utility types</p>
+              <button class="btn" id="start-btn">Start flow · 5 lessons</button>
+              <a class="link" href="#">Not now</a>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="pin-note">
+        <span class="pin">2</span>
+        <span>
+          <b>Scope is set at the door, not inside the flow</b> — the Phase 3 rule for
+          review, reused. Mid-flow there is one control, <i>End flow</i>. "3 of 5" is a
+          contract with the learner, and the denominator does not move under them.
+        </span>
+      </div>
+      <div class="pin-note">
+        <span class="pin">3</span>
+        <span>
+          A <b>Beat is not a path</b>, so Briefs never appear here. A finished path is
+          listed but greyed, so the learner can see why it is not offered rather than
+          wonder where it went.
+        </span>
+      </div>
+    </section>
+
+    <!-- ───────────────── Screen 3 ───────────────── -->
+    <section class="slot">
+      <div class="slot-head">
+        <span class="slot-num">03</span>
+        <span class="slot-title">In the flow</span>
+      </div>
+      <p class="slot-note">
+        The lesson view, unchanged, with a strip under the app bar saying where you are.
+        The moment that changes is the end: <b>Mark complete</b> still happens, and
+        then the next lesson opens on a short count — unless you pause it.
+      </p>
+
+      <div class="phone noc">
+        <div class="screen">
+          <div class="appbar">
+            <span class="glyph">א</span>
+            <span class="appbar-right"><a class="due-pill" href="#">10 due</a><span>Learn TypeScript</span></span>
+          </div>
+          <div class="flowbar">
+            <span class="lbl">Flow · 2 of 5</span>
+            <div class="segbar" aria-hidden="true"><i class="done"></i><i class="done"></i><i class="now"></i><i></i><i></i></div>
+            <a class="end" href="#">End flow</a>
+          </div>
+          <div class="pad">
+            <div>
+              <span class="kicker">Unit 4 · Lesson 13</span>
+              <p class="h-lesson" style="margin-top:6px">Utility types</p>
+            </div>
+
+            <p class="passage">
+              …<code>Partial&lt;T&gt;</code> and <code>Required&lt;T&gt;</code> are the pair
+              you reach for first. Both are <i>mapped types</i>: they walk every key of
+              <code>T</code> and rewrite its modifier, which is why they compose with the
+              constraints you met last lesson.
+            </p>
+
+            <div class="qc">
+              <span class="kicker">Quick check · correct</span>
+              <p style="font-size:13.5px;font-weight:600;line-height:1.35">Which utility type makes every property of <code>T</code> optional?</p>
+              <div class="opt correct"><span class="k">B</span><span><code>Partial&lt;T&gt;</code></span></div>
+              <p class="tiny muted">Right — it maps each key to <code>?:</code>. <code>Pick</code> selects keys; it never changes modifiers.</p>
+            </div>
+
+            <div class="complete" id="complete">
+              <div class="ring" id="ring">
+                <svg viewBox="0 0 64 64" aria-hidden="true">
+                  <circle class="track" cx="32" cy="32" r="28"></circle>
+                  <circle class="arc" id="arc" cx="32" cy="32" r="28" stroke-dasharray="175.93" stroke-dashoffset="0"></circle>
+                </svg>
+                <span class="n num" id="count">5</span>
+              </div>
+              <div>
+                <p style="font-size:16px;font-weight:600">Lesson complete.</p>
+                <p class="tiny muted" style="margin-top:4px" id="next-line">
+                  Next: <span style="color:var(--porcelain)">Reading an EXPLAIN plan</span> · SQL performance
+                </p>
+              </div>
+              <div class="two">
+                <button class="btn" id="go-now">Go now</button>
+                <button class="btn btn-ghost" id="pause" aria-pressed="false">Pause</button>
+              </div>
+            </div>
+
+            <div class="drafts-line">
+              <span class="dot" aria-hidden="true"></span>
+              <span><b style="color:var(--iris-400)">4 cards drafted</b> · kept for the end of your flow</span>
+            </div>
+
+            <a class="link" href="#" style="margin-top:auto">End flow · back to your path</a>
+          </div>
+        </div>
+      </div>
+
+      <div class="pin-note">
+        <span class="pin">4</span>
+        <span>
+          <b>Flow removes the choice, not the completion.</b> Mark complete is still the
+          learner's tap and still the thing streaks count; the auto-advance only replaces
+          the three doors that follow it. The count is there so the explanation can be
+          read — <i>Go now</i> skips it, <i>Pause</i> holds the screen.
+        </span>
+      </div>
+      <div class="pin-note">
+        <span class="pin">5</span>
+        <span>
+          Drafts are <b>deferred to the end of the flow</b>. Aleph still drafts as each
+          lesson opens (Auto-draft is untouched); the keep/discard moment would break
+          the very thing a flow is for, so it moves to screen 04 as one batch.
+        </span>
+      </div>
+    </section>
+
+    <!-- ───────────────── Screen 4 ───────────────── -->
+    <section class="slot">
+      <div class="slot-head">
+        <span class="slot-num">04</span>
+        <span class="slot-title">Flow complete</span>
+      </div>
+      <p class="slot-note">
+        The receipt. What you did, where it landed, the drafts you skipped past — and
+        one more door, because a learner who finished five is the learner most likely
+        to want three more.
+      </p>
+
+      <div class="phone noc">
+        <div class="screen">
+          <div class="appbar">
+            <span class="glyph">א</span>
+            <span class="appbar-right"><a class="due-pill" href="#">10 due</a><span>Flow</span></span>
+          </div>
+          <div class="pad">
+            <div>
+              <span class="kicker kicker-teal">Flow complete</span>
+              <p class="h-screen" style="margin-top:6px">Five lessons, back to back.</p>
+            </div>
+
+            <div class="stat-row">
+              <div class="stat"><p class="v">5</p><p class="l">lessons</p></div>
+              <div class="stat"><p class="v">2</p><p class="l">paths</p></div>
+              <div class="stat"><p class="v">4<span style="font-size:14px;color:var(--slate)">/5</span></p><p class="l">Quick checks</p></div>
+            </div>
+
+            <div class="streakline">
+              <span>🔥</span>
+              <span><b>Day 7</b></span>
+              <span class="dim">· 5 lessons today</span>
+            </div>
+
+            <div class="card">
+              <span class="kicker">Where it landed</span>
+              <div class="ledger" style="margin-top:10px">
+                <div><span>Learn TypeScript</span><span class="r">3 lessons · 15 of 20</span></div>
+                <div><span>SQL performance</span><span class="r">2 lessons · 7 of 18</span></div>
+              </div>
+            </div>
+
+            <div class="card card-iris">
+              <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px">
+                <span class="kicker kicker-iris">Aleph drafted 11 cards</span>
+                <span class="tiny dim">5 lessons</span>
+              </div>
+              <p class="tiny muted" style="margin:8px 0 12px">
+                Set aside while you were in the flow. Keep the ones worth seeing again.
+              </p>
+              <button class="btn btn-iris">Review 11 drafts</button>
+            </div>
+
+            <div class="foot-sticky">
+              <button class="btn">Go again · 5 more</button>
+              <button class="btn btn-ghost">Home</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="pin-note">
+        <span class="pin">6</span>
+        <span>
+          <b>Nothing new is counted here.</b> Five ordinary Mark completes, one ordinary
+          Active day. The screen is a summary of records that already exist, which is
+          also why it can be drawn with no new table behind it.
+        </span>
+      </div>
+    </section>
+
+  </div>
+
+  <hr class="rule">
+
+  <section class="decisions">
+    <div class="masthead">
+      <span class="kicker">Vocabulary</span>
+      <h1 style="font-size:clamp(22px,3vw,28px)">Three words, if we build it</h1>
+      <p class="standfirst" style="font-size:15.5px">
+        Proposed for <span class="mono">docs/CONTEXT.md</span> once the details are
+        settled — nothing below is in the vocabulary yet. "Flow mode" is the feature's
+        working name; the noun the product would use is simply a <b>Flow</b>.
+      </p>
+    </div>
+    <div class="scroll-x">
+      <table class="vocab">
+        <thead><tr><th>Term</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><th>Flow</th><td>A bounded run of lessons taken one after the other, where each completed lesson opens the next without the learner choosing. Scoped at the door by a <b>Flow length</b> and a <b>Flow scope</b>; ends when the length is reached, the scope runs dry, or the learner ends it. A run of ordinary lessons — every completion inside it is an ordinary <b>Mark complete</b>.</td></tr>
+          <tr><th>Flow length</th><td>How many lessons the flow will take — a count (3, 5, 8), or open-ended ("until I stop"). Fixed at the door; the only thing that changes it mid-flow is ending it.</td></tr>
+          <tr><th>Flow scope</th><td>Which paths the flow draws lessons from, and in what order — <b>interleaved</b> (paths take turns), <b>random</b> (a path drawn afresh for every lesson), or one path at a time. Within a path the order is always Progression's: the next available lesson. Always paths — a Beat is not a path and a Brief is not a lesson.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <section class="decisions">
+    <div class="masthead">
+      <span class="kicker">Decisions</span>
+      <h1 style="font-size:clamp(22px,3vw,28px)">What the drawing assumes, and what it leaves to you</h1>
+      <p class="standfirst" style="font-size:15.5px">
+        Each card is one call. <span class="tag tag-settled">settled</span> means you
+        have decided it; <span class="tag tag-rec">drawn</span> means the screens above
+        encode a recommendation; <span class="tag tag-open">open</span> means the
+        screens picked something so they could be drawn, and the real answer is yours.
+      </p>
+    </div>
+
+    <div class="dgrid">
+      <article class="dcard">
+        <h3><span class="pin">1</span> Where the door is</h3>
+        <p>
+          Home, directly under Continue — the place a learner already goes to resume.
+          A path view gets the same door with that path pre-selected. No header pill:
+          a flow is a thing you start, not a thing you are owed.
+        </p>
+        <p class="rec"><span class="tag tag-rec">drawn</span> Route: <b>/flow/new</b> as a sheet over home; <b>/flow/new?path=…</b> from a path.</p>
+      </article>
+
+      <article class="dcard">
+        <h3><span class="pin">2</span> Scope at the door</h3>
+        <p>
+          Length and paths are set once, before the first lesson. Inside the flow the
+          only control is <b>End flow</b>. Widening is offered where it is wanted — at
+          the end, as <i>Go again</i> — exactly as review offers "Review those too".
+        </p>
+        <p class="rec"><span class="tag tag-rec">drawn</span> Same rule as Phase 3 PRD §4.10. A mid-flow "add 3 more" is the first thing to argue for if you disagree.</p>
+      </article>
+
+      <article class="dcard settled">
+        <h3><span class="pin">3</span> Order across paths</h3>
+        <p>
+          Three orders when two or more paths are picked. <b>Interleave</b> takes turns
+          (TypeScript, SQL, TypeScript…). <b>Random</b> draws a path afresh for every
+          lesson. <b>One path at a time</b> finishes the first before touching the next.
+          In every order a path's own lessons stay linear — Random picks the <i>path</i>,
+          and then that path's next available lesson, because Progression is unchanged.
+        </p>
+        <p class="rec"><span class="tag tag-settled">settled</span> Interleave is the default. Random draws with the same anti-starvation rule the review queue uses: a path just taken is not excluded, but with "until I stop" no path can be skipped forever.</p>
+      </article>
+
+      <article class="dcard open">
+        <h3><span class="pin">4</span> How the advance happens</h3>
+        <p>
+          Drawn as a <b>5-second count after Mark complete</b>, with Go now and Pause.
+          The count exists so the Quick check explanation can be read; the pause exists
+          so a learner can stop and ask the tutor. Opening the rail should pause it too.
+        </p>
+        <p class="rec"><span class="tag tag-open">open</span> The number (3? 5? 8?), and whether an <i>incorrect</i> Quick check gets a longer count than a correct one. Instant-advance with an undo toast is the other shape.</p>
+      </article>
+
+      <article class="dcard open">
+        <h3><span class="pin">5</span> Drafts wait for the end</h3>
+        <p>
+          Auto-draft keeps drafting as each lesson opens; the keep/discard moment moves
+          to the flow's end as one batch of 11 rather than five interruptions of 3–4. A
+          learner who ends the flow early still gets the batch.
+        </p>
+        <p class="rec"><span class="tag tag-open">open</span> Whether an ended-early flow shows the batch, or drops back to today's per-lesson behaviour for the lesson it stopped on.</p>
+      </article>
+
+      <article class="dcard settled">
+        <h3><span class="pin">6</span> Nothing new is stored</h3>
+        <p>
+          A flow is client state: a length, a list of path ids, an order, a cursor.
+          Every completion is an ordinary Mark complete; streaks, Active day and
+          Activation are untouched. No table, no route on the backend, no migration.
+        </p>
+        <p class="rec"><span class="tag tag-settled">settled</span> 100% client-side. Survives a reload via the URL (<span class="mono">?flow=…</span>) or session storage; does <b>not</b> survive leaving. A flow is a Session, and a Session is 30 minutes. The one backend touch left is the early generation trigger below, which is an existing endpoint called sooner.</p>
+      </article>
+
+      <article class="dcard">
+        <h3>When a path runs out</h3>
+        <p>
+          A path with nothing left drops out of the scope and the flow continues on the
+          rest. When every path is dry the flow ends early with the same receipt,
+          saying so ("3 of 5 — SQL performance is finished"). A flow never grows a
+          path; that is shaping's job.
+        </p>
+        <p class="rec"><span class="tag tag-rec">drawn</span> The sheet already caps the button at what is left, so this is rare and never a surprise.</p>
+      </article>
+
+      <article class="dcard">
+        <h3>Generation latency</h3>
+        <p>
+          The one backend touch. Prefetch (+N) looks ahead on <i>one</i> path; an
+          interleaved flow knows its next lesson is on a <i>different</i> path. The flow
+          should ask for that lesson's generation as soon as the current one opens.
+        </p>
+        <p class="rec"><span class="tag tag-rec">drawn</span> Reuse trigger + poll: the client fires the next lesson's existing generation trigger early. No new endpoint; the count doubles as the latency hider.</p>
+      </article>
+
+      <article class="dcard open">
+        <h3>Do due cards belong in a flow?</h3>
+        <p>
+          The tempting version: "5 lessons and your 10 due cards" — one sitting, both
+          habits. It would also make a flow the first surface that mixes a lesson and a
+          review, which are counted, scheduled and celebrated differently.
+        </p>
+        <p class="rec"><span class="tag tag-open">open</span> Drawn <b>lessons only</b>. Cards stay behind their own door; the receipt could offer "10 due" as the next thing, which is a link, not a merge.</p>
+      </article>
+
+    </div>
+  </section>
+
+  <footer class="foot">
+    Nocturne tokens taken from <span class="mono">tailwind.config.ts</span>. The Continue
+    card, the Due today card, the path rows and the streak line are the surfaces that
+    ship today, redrawn only so the new ones can be seen sitting beside them.
+  </footer>
+</div>
+
+<script>
+  // Screen 2 — the setup sheet. The count, the paths and the order all drive the
+  // button and the estimate, so the mock shows the rule instead of asserting it:
+  // the primary action names exactly what it will start, capped at what is left.
+  (function () {
+    var segs = document.getElementById("segs");
+    var picks = document.getElementById("picks");
+    var order = document.getElementById("order");
+    var orderField = document.getElementById("order-field");
+    var btn = document.getElementById("start-btn");
+    var avail = document.getElementById("avail");
+    var firstUp = document.getElementById("first-up");
+    var selectAll = document.getElementById("select-all");
+
+    function chosen() {
+      var seg = segs.querySelector('[aria-pressed="true"]');
+      return seg ? Number(seg.dataset.n) : 5;
+    }
+    function selected() {
+      return Array.prototype.slice.call(picks.querySelectorAll('.pick[aria-pressed="true"]'));
+    }
+    // Only paths with something left can be selected — a finished path stays
+    // greyed, so "all" means "everything that can flow".
+    function selectable() {
+      return Array.prototype.slice.call(picks.querySelectorAll(".pick:not([disabled])"));
+    }
+    function sync() {
+      var rows = selected();
+      var left = rows.reduce(function (sum, row) { return sum + Number(row.dataset.left); }, 0);
+      var want = chosen();
+      var open = want === 0;
+      var n = open ? left : Math.min(want, left);
+
+      avail.textContent = left + (left === 1 ? " lesson left" : " lessons left");
+      var all = rows.length === selectable().length;
+      selectAll.textContent = all ? "Clear" : "Select all";
+      selectAll.setAttribute("aria-pressed", String(all));
+      orderField.hidden = rows.length < 2;
+
+      if (rows.length === 0) {
+        btn.textContent = "Pick a path to start";
+        btn.disabled = true;
+        btn.style.opacity = "0.5";
+        firstUp.textContent = "Nothing to flow yet";
+        return;
+      }
+      btn.disabled = false;
+      btn.style.opacity = "";
+
+      var capped = !open && want > left;
+      btn.textContent = open
+        ? "Start flow · until I stop"
+        : "Start flow · " + n + (n === 1 ? " lesson" : " lessons") + (capped ? " (all that's left)" : "");
+
+      var pickedOrder = order.querySelector('[aria-pressed="true"]').dataset.order;
+      if (pickedOrder === "random" && rows.length > 1) {
+        firstUp.textContent = "First up: whichever path the draw lands on";
+      } else {
+        var first = rows[0];
+        firstUp.textContent = "First up: " + first.querySelector(".pick-next").textContent.replace("Next: ", "");
+      }
+    }
+
+    segs.addEventListener("click", function (e) {
+      var seg = e.target.closest(".seg");
+      if (!seg) return;
+      segs.querySelectorAll(".seg").forEach(function (s) { s.setAttribute("aria-pressed", "false"); });
+      seg.setAttribute("aria-pressed", "true");
+      sync();
+    });
+    picks.addEventListener("click", function (e) {
+      var pick = e.target.closest(".pick");
+      if (!pick || pick.disabled) return;
+      var on = pick.getAttribute("aria-pressed") === "true";
+      pick.setAttribute("aria-pressed", String(!on));
+      sync();
+    });
+    // One tap toggles the whole list: everything selectable, or nothing. The
+    // label says which of the two it will do, so it never reads as a checkbox.
+    selectAll.addEventListener("click", function () {
+      var all = selectAll.getAttribute("aria-pressed") === "true";
+      selectable().forEach(function (pick) { pick.setAttribute("aria-pressed", String(!all)); });
+      sync();
+    });
+    order.addEventListener("click", function (e) {
+      var opt = e.target.closest(".order-opt");
+      if (!opt) return;
+      order.querySelectorAll(".order-opt").forEach(function (o) { o.setAttribute("aria-pressed", "false"); });
+      opt.setAttribute("aria-pressed", "true");
+      sync();
+    });
+    sync();
+  })();
+
+  // Screen 3 — the advance. A count that can be paused and skipped. When it
+  // reaches zero the mock says what would happen and starts over, because a
+  // mock that navigates away is a mock you can only read once.
+  (function () {
+    var TOTAL = 5;
+    var CIRC = 175.93;
+    var ring = document.getElementById("ring");
+    var arc = document.getElementById("arc");
+    var count = document.getElementById("count");
+    var pause = document.getElementById("pause");
+    var goNow = document.getElementById("go-now");
+    var nextLine = document.getElementById("next-line");
+    var nextHtml = nextLine.innerHTML;
+    var left = TOTAL;
+    var paused = false;
+    var timer = null;
+
+    function paint() {
+      count.textContent = left;
+      arc.style.strokeDashoffset = String(CIRC * (1 - left / TOTAL));
+    }
+    function advance() {
+      clearInterval(timer);
+      timer = null;
+      count.textContent = "›";
+      nextLine.innerHTML = 'Opening <span style="color:var(--porcelain)">Reading an EXPLAIN plan</span>…';
+      setTimeout(reset, 1600);
+    }
+    function reset() {
+      left = TOTAL;
+      paused = false;
+      ring.classList.remove("paused");
+      pause.textContent = "Pause";
+      pause.setAttribute("aria-pressed", "false");
+      nextLine.innerHTML = nextHtml;
+      arc.style.transition = "none";
+      paint();
+      // Restore the transition after the jump back to full.
+      requestAnimationFrame(function () { arc.style.transition = ""; start(); });
+    }
+    function tick() {
+      if (paused) return;
+      left -= 1;
+      if (left <= 0) { left = 0; paint(); advance(); return; }
+      paint();
+    }
+    function start() {
+      if (timer) clearInterval(timer);
+      timer = setInterval(tick, 1000);
+    }
+
+    pause.addEventListener("click", function () {
+      paused = !paused;
+      ring.classList.toggle("paused", paused);
+      pause.textContent = paused ? "Resume" : "Pause";
+      pause.setAttribute("aria-pressed", String(paused));
+    });
+    goNow.addEventListener("click", advance);
+
+    var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reduce) { arc.style.transition = "none"; }
+    paint();
+    start();
+  })();
+</script>
+</body>
+</html>
