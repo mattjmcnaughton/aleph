@@ -1,3 +1,10 @@
+# [1.41.0](https://github.com/mattjmcnaughton/aleph/compare/v1.40.0...v1.41.0) (2026-09-10)
+
+
+### Features
+
+* **flow:** a bounded run of lessons that opens the next on its own ([#207](https://github.com/mattjmcnaughton/aleph/issues/207)) ([a4c6e75](https://github.com/mattjmcnaughton/aleph/commit/a4c6e75baa37d2aa2132de5775d9de416b750c01))
+
 # [1.40.0](https://github.com/mattjmcnaughton/aleph/compare/v1.39.0...v1.40.0) (2026-09-08)
 
 
