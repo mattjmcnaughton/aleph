@@ -33,19 +33,7 @@ export function FlowBar({
       <span className="whitespace-nowrap font-mono text-[11.5px] font-semibold tabular-nums text-teal-bright">
         {label}
       </span>
-      <div className="flex flex-1 gap-1" aria-hidden="true">
-        {/* The strip is purely positional (done/now/empty cells with no
-            identity of their own), so the index is the key's whole meaning. */}
-        {segments(flow, position).map((state, index) => (
-          <i
-            // biome-ignore lint/suspicious/noArrayIndexKey: see the comment above this map.
-            key={index}
-            className={`block h-1 flex-1 rounded-full ${
-              state === "done" ? "bg-teal" : state === "now" ? "bg-teal-dim" : "bg-porcelain/10"
-            }`}
-          />
-        ))}
-      </div>
+      <FlowSegments states={segments(flow, position)} />
       <button
         type="button"
         data-testid="flow-bar-end"
@@ -58,7 +46,63 @@ export function FlowBar({
   );
 }
 
-type Segment = "done" | "now" | "empty";
+export type Segment = "done" | "now" | "empty";
+
+/** How far apart the receipt's cells light, and how long the first one waits. */
+const SEG_LIGHT_STEP_MS = 180;
+const SEG_LIGHT_LEAD_MS = 250;
+
+/**
+ * The segment strip itself — the bar's cells, and the receipt's
+ * (`routes/flow.done.tsx`), which shows the finished strip one last time.
+ *
+ * `lightUp` is the receipt's celebration: each cell lights in turn, left to
+ * right, and the last one lands with a pulse. Every cell's resting class is
+ * its final colour, so the motion is a `motion-safe:` addition — under
+ * `prefers-reduced-motion` the strip simply stands complete.
+ */
+export function FlowSegments({
+  states,
+  lightUp = false,
+  testid,
+}: {
+  states: Segment[];
+  lightUp?: boolean;
+  testid?: string;
+}) {
+  const last = states.length - 1;
+  return (
+    <div className="flex flex-1 gap-1" aria-hidden="true" data-testid={testid}>
+      {/* The strip is purely positional (done/now/empty cells with no
+          identity of their own), so the index is the key's whole meaning. */}
+      {states.map((state, index) => {
+        const lead = SEG_LIGHT_LEAD_MS + index * SEG_LIGHT_STEP_MS;
+        return (
+          <i
+            // biome-ignore lint/suspicious/noArrayIndexKey: see the comment above this map.
+            key={index}
+            className={`block h-1 flex-1 rounded-full ${
+              state === "done" ? "bg-teal" : state === "now" ? "bg-teal-dim" : "bg-porcelain/10"
+            } ${
+              lightUp && state === "done"
+                ? index === last
+                  ? "motion-safe:animate-seg-last"
+                  : "motion-safe:animate-seg-light"
+                : ""
+            }`}
+            style={
+              lightUp && state === "done"
+                ? // `seg-last` is two animations; the pulse starts as the light
+                  // finishes (a comma list delays each in turn).
+                  { animationDelay: index === last ? `${lead}ms, ${lead + 300}ms` : `${lead}ms` }
+                : undefined
+            }
+          />
+        );
+      })}
+    </div>
+  );
+}
 
 /**
  * The strip's cells (§5.7, flow-fix plan item 3): `done` for `0..k-1`
@@ -69,7 +113,7 @@ type Segment = "done" | "now" | "empty";
  * has no "rest" to draw, so it shows exactly `position` cells, capped to the
  * most recent 12.
  */
-function segments(flow: FlowRecord, position: number): Segment[] {
+export function segments(flow: FlowRecord, position: number): Segment[] {
   const k = flow.completed.length;
   const nowIndex = position - 1;
   const count = flow.length ?? position;
