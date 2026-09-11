@@ -2,6 +2,7 @@ import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, vi } from "vitest";
 import { resetBeats } from "../src/mocks/beats";
+import { resetFlowCelebrations } from "../src/lib/flow-celebration";
 import { resetFlashcards } from "../src/mocks/flashcards";
 import { resetLessons } from "../src/mocks/lessons";
 import { resetPaths } from "../src/mocks/paths";
@@ -44,6 +45,10 @@ afterEach(() => {
   // nothing else here resets it, so a flow written by one test would
   // otherwise still be sitting there for the next.
   window.sessionStorage.clear();
+  // ...and the receipt remembers which flow it last celebrated in module
+  // memory (lib/flow-celebration.ts), which every test seeds with the same
+  // `startedAt`.
+  resetFlowCelebrations();
   vi.restoreAllMocks();
   cleanup();
   window.history.pushState({}, "", "/");

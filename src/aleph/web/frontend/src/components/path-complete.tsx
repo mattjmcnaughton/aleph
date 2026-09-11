@@ -25,6 +25,7 @@
 import { Link } from "@tanstack/react-router";
 import { useMemo } from "react";
 import { useFeatureFlag } from "../lib/feature-flags";
+import { prefersReducedMotion } from "../lib/motion";
 import { PRIMARY_CTA_BASE } from "./state-card";
 
 /** Circumference of the seal's r=48 circle — matches `seal-draw`'s dash length. */
@@ -34,18 +35,6 @@ const SEAL_DASH = 302;
 const CONFETTI_COUNT = 22;
 
 const CONFETTI_COLORS = ["#4fb8c4", "#6fced9", "#9184d9", "#b5abfc", "#e9e9ed"];
-
-// The one place the celebration reads the preference in JS. Everything else is
-// a `motion-safe:` class, which CSS honours without asking — this exists only
-// because confetti has to be *not created*, not merely not animated: 22 nodes
-// parked at their start position would sit on top of the card forever.
-function prefersReducedMotion(): boolean {
-  return (
-    typeof window !== "undefined" &&
-    typeof window.matchMedia === "function" &&
-    window.matchMedia("(prefers-reduced-motion: reduce)").matches
-  );
-}
 
 /**
  * Whole **Days**, in the learner's local timezone, spanned by a path's work —
@@ -104,7 +93,11 @@ function makeConfetti(): ConfettiPiece[] {
 
 function Confetti() {
   // Rolled once per mount. The card only ever mounts on the completion that
-  // finished the path, so "once per mount" is also once per path.
+  // finished the path, so "once per mount" is also once per path. Everything
+  // else here is a `motion-safe:` class, which CSS honours without asking —
+  // the JS read exists only because confetti has to be *not created*, not
+  // merely not animated: 22 nodes parked at their start position would sit
+  // on top of the card forever.
   const pieces = useMemo(() => (prefersReducedMotion() ? [] : makeConfetti()), []);
   if (pieces.length === 0) return null;
 

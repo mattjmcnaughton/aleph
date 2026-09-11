@@ -253,6 +253,17 @@ Reads the record. If none, redirect to `/`. Renders, in order (mock screen 04):
 - Doors: **Go again · n more** (primary; `n = length ?? completed.length || 3`), **Home**
   (secondary). If `reviewSummary.due_count > 0`, a quiet link "N cards due · Review" (D11).
 
+**How it lands.** A flow that reached its length (`endedReason === "length"`) is celebrated on
+arrival, in three beats: the segment strip is drawn one last time above the kicker and lights cell
+by cell, the last with a pulse; the stat tiles count up from zero; and the rest of the receipt
+rises in a beat at a time. The path seal's three rules apply whole (`components/path-complete.tsx`):
+in place, never over; earned, not congratulated — *Flow ended* and *Flow ran dry* get the receipt
+standing still, no strip; and motion is never the message — every element's resting state is its
+final state, so `prefers-reduced-motion` gets the complete receipt with nothing moving and the
+tiles reading their final numbers on the first frame. It plays once per flow: `lib/flow-celebration.ts`
+remembers the last `startedAt` celebrated (module memory, not storage), so a revisit of the same
+receipt stands still.
+
 ### 5.6 The setup sheet (`/flow/new`)
 
 Search: `{ path?: string; length?: string; order?: string; paths?: string }` (all optional;

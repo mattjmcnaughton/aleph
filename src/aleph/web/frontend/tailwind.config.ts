@@ -107,6 +107,18 @@ export default {
           from: { opacity: "0", transform: "translateY(8px)" },
           to: { opacity: "1", transform: "none" },
         },
+        // The flow receipt's strip (`components/flow/flow-bar.tsx`,
+        // `FlowSegments`): a done cell lights from the empty-cell tint to teal,
+        // and the last cell then pulses once. `to` is the cell's resting
+        // colour, so an un-animated cell looks exactly like a finished one.
+        "seg-light": {
+          from: { backgroundColor: "rgb(233 233 237 / 0.1)" },
+          to: { backgroundColor: "#4fb8c4" },
+        },
+        "seg-pulse": {
+          from: { boxShadow: "0 0 0 0 rgb(111 206 217 / 0.55)" },
+          to: { boxShadow: "0 0 0 9px rgb(111 206 217 / 0)" },
+        },
         // One piece of confetti. The distance, drift and spin are per-particle
         // custom properties the component sets inline; only the shape of the
         // arc lives here.
@@ -125,6 +137,8 @@ export default {
         "seal-glyph": "seal-glyph 0.7s cubic-bezier(0.22, 1, 0.36, 1) both",
         "seal-halo": "seal-halo 0.9s ease-out both",
         "rise-in": "rise-in 0.48s cubic-bezier(0.22, 1, 0.36, 1) both",
+        "seg-light": "seg-light 0.32s ease-out both",
+        "seg-last": "seg-light 0.32s ease-out both, seg-pulse 0.7s ease-out both",
         confetti: "confetti var(--conf-dur) cubic-bezier(0.15, 0.65, 0.4, 1) both",
       },
     },

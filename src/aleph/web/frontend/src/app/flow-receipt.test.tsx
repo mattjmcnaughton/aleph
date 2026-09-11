@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { API_V1_BASE, type AuthSession, type PathUnit } from "../lib/api";
 import type { FlowRecord } from "../lib/flow";
 import { readFlow, writeFlow } from "../lib/flow";
@@ -77,9 +77,16 @@ describe("Flow receipt — /flow/done", () => {
     seedReceiptRecord();
     await gotoReceipt();
 
-    expect(screen.getByTestId("flow-receipt-lessons").textContent).toBe("3");
-    expect(screen.getByTestId("flow-receipt-paths").textContent).toBe("2");
-    expect(screen.getByTestId("flow-receipt-checks").textContent).toBe("2/3");
+    // A completed flow's tiles count up to their values (the celebration,
+    // below), so the stats are awaited rather than read on the first frame.
+    await waitFor(
+      () => {
+        expect(screen.getByTestId("flow-receipt-lessons").textContent).toBe("3");
+        expect(screen.getByTestId("flow-receipt-paths").textContent).toBe("2");
+        expect(screen.getByTestId("flow-receipt-checks").textContent).toBe("2/3");
+      },
+      { timeout: 3000 },
+    );
 
     await waitFor(() => {
       const ledger = screen.getByTestId("flow-receipt-ledger");
@@ -110,6 +117,96 @@ describe("Flow receipt — /flow/done", () => {
     seedReceiptRecord({ endedReason: "ended" });
     await gotoReceipt();
     expect(screen.getByText("Flow ended")).toBeTruthy();
+  });
+
+  describe("how it lands (the celebration)", () => {
+    function reduceMotion(): void {
+      vi.spyOn(window, "matchMedia").mockImplementation(
+        (query: string) =>
+          ({
+            matches: query.includes("prefers-reduced-motion"),
+            media: query,
+            onchange: null,
+            addListener: vi.fn(),
+            removeListener: vi.fn(),
+            addEventListener: vi.fn(),
+            removeEventListener: vi.fn(),
+            dispatchEvent: vi.fn(),
+          }) as unknown as MediaQueryList,
+      );
+    }
+
+    it("a flow that reached its length lands with the strip lighting and the tiles counting up", async () => {
+      useFlowSession();
+      seedLandedPaths();
+      seedReceiptRecord({ endedReason: "length" });
+      await gotoReceipt();
+
+      const strip = screen.getByTestId("flow-receipt-strip");
+      expect(strip.getAttribute("data-celebrate")).toBe("true");
+      expect(strip.textContent).toContain("Flow · 3 of 3");
+      const cells = strip.querySelectorAll("i");
+      expect(cells).toHaveLength(3);
+      expect(cells[0].className).toContain("animate-seg-light");
+      expect(cells[2].className).toContain("animate-seg-last");
+      expect(strip.className).toContain("animate-rise-in");
+
+      // The tiles start at zero on the frame that arrives, and settle on the
+      // record's own numbers — never a number the record does not carry.
+      expect(screen.getByTestId("flow-receipt-lessons").textContent).toBe("0");
+      await waitFor(
+        () => {
+          expect(screen.getByTestId("flow-receipt-lessons").textContent).toBe("3");
+          expect(screen.getByTestId("flow-receipt-paths").textContent).toBe("2");
+          expect(screen.getByTestId("flow-receipt-checks").textContent).toBe("2/3");
+        },
+        { timeout: 3000 },
+      );
+    });
+
+    it("earned, not congratulated: an ended or dry flow gets the receipt standing still", async () => {
+      useFlowSession();
+      seedLandedPaths();
+      seedReceiptRecord({ endedReason: "ended" });
+      await gotoReceipt();
+
+      expect(screen.queryByTestId("flow-receipt-strip")).toBeNull();
+      expect(screen.getByTestId("flow-receipt-lessons").textContent).toBe("3");
+      expect(screen.getByTestId("flow-receipt-lessons").closest(".grid")?.className).not.toContain(
+        "animate-rise-in",
+      );
+    });
+
+    it("[a11y] prefers-reduced-motion: the tiles read their final numbers on the first frame", async () => {
+      reduceMotion();
+      useFlowSession();
+      seedLandedPaths();
+      seedReceiptRecord({ endedReason: "length" });
+      await gotoReceipt();
+
+      // The strip still stands complete (its resting state is its final
+      // state; CSS drops the motion), but nothing counts up in JS.
+      expect(screen.getByTestId("flow-receipt-strip")).toBeTruthy();
+      expect(screen.getByTestId("flow-receipt-lessons").textContent).toBe("3");
+      expect(screen.getByTestId("flow-receipt-paths").textContent).toBe("2");
+      expect(screen.getByTestId("flow-receipt-checks").textContent).toBe("2/3");
+    });
+
+    it("once: the same flow's receipt stands still on a revisit", async () => {
+      useFlowSession();
+      seedLandedPaths();
+      seedReceiptRecord({ endedReason: "length" });
+      window.history.pushState({}, "", "/flow/done");
+      const first = render(<App />);
+      await screen.findByTestId("flow-receipt-strip");
+      first.unmount();
+
+      await gotoReceipt();
+      const strip = screen.getByTestId("flow-receipt-strip");
+      expect(strip.getAttribute("data-celebrate")).toBe("false");
+      expect(strip.querySelector("i")?.className).not.toContain("animate-seg");
+      expect(screen.getByTestId("flow-receipt-lessons").textContent).toBe("3");
+    });
   });
 
   it("the drafts batch renders one DraftList per lesson and keeps post the right body", async () => {
