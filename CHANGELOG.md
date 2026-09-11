@@ -1,3 +1,10 @@
+# [1.42.0](https://github.com/mattjmcnaughton/aleph/compare/v1.41.0...v1.42.0) (2026-09-11)
+
+
+### Features
+
+* **flow:** celebrate a flow that reached its length on the receipt ([0ffacb7](https://github.com/mattjmcnaughton/aleph/commit/0ffacb7b26a2c476c4d1f0c678ed06085edd9bc1))
+
 # [1.41.0](https://github.com/mattjmcnaughton/aleph/compare/v1.40.0...v1.41.0) (2026-09-10)
 
 
