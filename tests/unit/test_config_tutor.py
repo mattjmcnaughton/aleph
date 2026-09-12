@@ -40,9 +40,7 @@ def default_settings(monkeypatch: pytest.MonkeyPatch) -> Settings:
 
 
 def test_tutor_defaults_match_tdd_section_13(default_settings: Settings) -> None:
-    # TDD §13, verbatim. The tutor slot starts on the same strong model as every
-    # other slot (D4's uniform-start discipline); the cap knob ships disabled (D8).
-    assert default_settings.model_tutor == "anthropic/claude-sonnet-5"
+    assert default_settings.model_tutor == "openai/gpt-5.6-luna"
     assert default_settings.tutor_context_turns == 10
     assert default_settings.tutor_reply_timeout == 90
     assert default_settings.max_concurrent_tutor_replies == 8

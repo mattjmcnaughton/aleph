@@ -8,26 +8,30 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from aleph.config import Settings
+from aleph.config import MODEL_SLOTS, Settings
 
 
-def test_model_slots_default_to_sonnet() -> None:
-    # TDD §14: all three slots start at one strong model, no premature tiering.
+def test_model_slots_default_to_luna() -> None:
+    # All generation and conversation slots use the cost-efficient default.
     settings = Settings()
-    assert settings.model_outline == "anthropic/claude-sonnet-5"
-    assert settings.model_lesson == "anthropic/claude-sonnet-5"
-    assert settings.model_judge == "anthropic/claude-sonnet-5"
-    # Phase 2 added a fourth slot on the same uniform start (Phase 2 TDD §5.3/D4),
-    # Phase 2B a fifth (Phase 2B TDD §5.3/D10).
-    assert settings.model_tutor == "anthropic/claude-sonnet-5"
-    assert settings.model_shaper == "anthropic/claude-sonnet-5"
+    assert {slot: getattr(settings, slot) for slot in MODEL_SLOTS} == {
+        "model_outline": "openai/gpt-5.6-luna",
+        "model_lesson": "openai/gpt-5.6-luna",
+        "model_judge": "openai/gpt-5.6-luna",
+        "model_tutor": "openai/gpt-5.6-luna",
+        "model_shaper": "openai/gpt-5.6-luna",
+        "model_flashcard": "openai/gpt-5.6-luna",
+        "model_research": "openai/gpt-5.6-luna",
+        "model_brief": "openai/gpt-5.6-luna",
+    }
 
 
 def test_allowlist_default_and_parsing() -> None:
     settings = Settings()
     ids = settings.allowlist_ids
-    # The §14 default: the starting model plus the four refinement candidates.
+    # The default model is first; prior options remain available for comparison.
     assert ids == (
+        "openai/gpt-5.6-luna",
         "anthropic/claude-sonnet-5",
         "anthropic/claude-haiku-4-5",
         "anthropic/claude-opus-4-8",
