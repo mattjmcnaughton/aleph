@@ -48,7 +48,7 @@ def test_flashcard_defaults_match_tdd_section_13(default_settings: Settings) -> 
     assert default_settings.flashcard_drafts_max == 5
     assert default_settings.flashcard_seconds_per_card == 25
     assert default_settings.flashcard_drafts_per_day == 50
-    assert default_settings.model_flashcard == "anthropic/claude-sonnet-5"
+    assert default_settings.model_flashcard == "openai/gpt-5.6-luna"
 
 
 def test_model_flashcard_is_listed_in_model_slots() -> None:
