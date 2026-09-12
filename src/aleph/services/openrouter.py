@@ -33,6 +33,7 @@ _model_cache: dict[tuple[str, str], OpenAIChatModel] = {}
 # Display names for the admin model picker (§5.3). Ids outside this map fall back
 # to the raw OpenRouter id — accurate if less pretty, never a blocker.
 _MODEL_LABELS = {
+    "openai/gpt-5.6-luna": "GPT-5.6 Luna",
     "anthropic/claude-sonnet-5": "Claude Sonnet 5",
     "anthropic/claude-haiku-4-5": "Claude Haiku 4.5",
     "anthropic/claude-opus-4-8": "Claude Opus 4.8",

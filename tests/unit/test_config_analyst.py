@@ -48,8 +48,8 @@ def default_settings(monkeypatch: pytest.MonkeyPatch) -> Settings:
 
 def test_analyst_defaults_match_tdd_section_13(default_settings: Settings) -> None:
     assert default_settings.exa_api_key == ""
-    assert default_settings.model_research == "anthropic/claude-sonnet-5"
-    assert default_settings.model_brief == "anthropic/claude-sonnet-5"
+    assert default_settings.model_research == "openai/gpt-5.6-luna"
+    assert default_settings.model_brief == "openai/gpt-5.6-luna"
     assert default_settings.max_beats_per_learner == 3  # noqa: PLR2004 - TDD §13
     assert default_settings.rate_limit_brief_research_per_day == 5  # noqa: PLR2004
     assert default_settings.max_concurrent_brief_research == 2  # noqa: PLR2004

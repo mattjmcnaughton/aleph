@@ -116,22 +116,20 @@ class Settings(BaseSettings):
 
     # The three model slots (TDD §8/§5.3). All start on one strong model — no
     # premature tiering; per-slot refinement is driven by evals + cost data.
-    model_outline: str = "anthropic/claude-sonnet-5"
-    model_lesson: str = "anthropic/claude-sonnet-5"
+    model_outline: str = "openai/gpt-5.6-luna"
+    model_lesson: str = "openai/gpt-5.6-luna"
     # MODEL_JUDGE is **eval-only**: it is read by ``evals/`` (the Layer 2 binary
     # judge, TDD §11) and by nothing on the request path — asserted by
     # ``tests/unit/test_evals_judge.py``. Its refinement direction differs in
-    # kind from the other two (§5.3): move it **cross-provider** (e.g.
-    # ``openai/gpt-5.6-terra``), because LLM judges show self-preference bias
-    # and a Claude judge grading Claude-written lessons would inflate the very
-    # ≥ 90% ship gate the judge exists to make trustworthy. Switching provider
-    # is this env var plus a re-run of ``just evals --agreement``; judge↔human
-    # calibration is the real control either way (docs/evals.md).
-    model_judge: str = "anthropic/claude-sonnet-5"
+    # kind from the other two (§5.3): LLM judges show self-preference bias, so
+    # using Luna for both generation and judging requires judge↔human agreement
+    # calibration to keep the ≥ 90% ship gate trustworthy (docs/evals.md).
+    model_judge: str = "openai/gpt-5.6-luna"
 
     # Comma-separated OpenRouter ids an admin may select per-request for the
     # outline/lesson slots (the picker allowlist, D14/§5.3), in display order.
     model_allowlist: str = (
+        "openai/gpt-5.6-luna,"
         "anthropic/claude-sonnet-5,"
         "anthropic/claude-haiku-4-5,"
         "anthropic/claude-opus-4-8,"
@@ -385,7 +383,7 @@ class Settings(BaseSettings):
     # would let the deterministic stub serve production tutoring. Admins may
     # override it per message (never persisted, §5.3); the override rides the
     # same shared ``model_allowlist``.
-    model_tutor: str = "anthropic/claude-sonnet-5"
+    model_tutor: str = "openai/gpt-5.6-luna"
 
     # Carried-history window in *turns* (a learner message + its tutor reply, as
     # a unit), most recent first, dropped rather than summarized (D6). Bounded
@@ -473,7 +471,7 @@ class Settings(BaseSettings):
     # deterministic stub propose production path edits. Admins may override it
     # per message (never persisted, §5.3); the override rides the same shared
     # ``model_allowlist`` as the other slots.
-    model_shaper: str = "anthropic/claude-sonnet-5"
+    model_shaper: str = "openai/gpt-5.6-luna"
 
     # Hard cap on the lessons a single Proposal may add or revise (§13): both the
     # validator's bound and the prompt's instruction, so one Proposal stays small
@@ -599,7 +597,7 @@ class Settings(BaseSettings):
     # it down. **It is also listed in ``MODEL_SLOTS``** — the production stub
     # guard iterates that constant, so a slot missing from it would let the
     # deterministic stub draft production flashcards.
-    model_flashcard: str = "anthropic/claude-sonnet-5"
+    model_flashcard: str = "openai/gpt-5.6-luna"
 
     @model_validator(mode="after")
     def _check_flashcard_config(self) -> Self:
@@ -676,8 +674,8 @@ class Settings(BaseSettings):
     # production Briefs. The admin per-request picker reaches them too, but
     # stored on the ``beats`` row rather than held on the request (D7) — a
     # later ticket's concern.
-    model_research: str = "anthropic/claude-sonnet-5"
-    model_brief: str = "anthropic/claude-sonnet-5"
+    model_research: str = "openai/gpt-5.6-luna"
+    model_brief: str = "openai/gpt-5.6-luna"
 
     # PRD §4.7's cap on how many Beats a learner may deploy, as config rather
     # than a constant (D14) — an open question (§15) dogfooding may move.

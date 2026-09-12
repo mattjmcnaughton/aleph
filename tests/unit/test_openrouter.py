@@ -24,6 +24,7 @@ if TYPE_CHECKING:
 
 
 def test_model_label_maps_known_ids() -> None:
+    assert model_label("openai/gpt-5.6-luna") == "GPT-5.6 Luna"
     assert model_label("anthropic/claude-sonnet-5") == "Claude Sonnet 5"
     assert model_label("anthropic/claude-haiku-4-5") == "Claude Haiku 4.5"
     assert model_label("minimax/minimax-m3") == "MiniMax M3"
