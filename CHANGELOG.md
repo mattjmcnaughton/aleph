@@ -1,3 +1,10 @@
+## [1.42.1](https://github.com/mattjmcnaughton/aleph/compare/v1.42.0...v1.42.1) (2026-09-14)
+
+
+### Bug Fixes
+
+* **web:** re-pin the floating Tutor mark after iOS's keyboard leaves ([#210](https://github.com/mattjmcnaughton/aleph/issues/210)) ([9eb1078](https://github.com/mattjmcnaughton/aleph/commit/9eb10780081e84c632395f55c1b615918ca34cd2))
+
 # [1.42.0](https://github.com/mattjmcnaughton/aleph/compare/v1.41.0...v1.42.0) (2026-09-11)
 
 
