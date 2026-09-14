@@ -10,6 +10,7 @@ import type { RouterContext } from "../app/app";
 import { AppHeader } from "../components/app-header";
 import { LOGIN_PATH, authRedirect, sessionQueryOptions } from "../lib/auth";
 import { clearFlow, readFlow } from "../lib/flow";
+import { useRepinAfterKeyboard } from "../lib/keyboard";
 
 export const Route = createRootRouteWithContext<RouterContext>()({
   // The auth gate: resolve the session once (cached), then let the pure
@@ -49,6 +50,10 @@ function RootLayout() {
       clearFlow();
     }
   }, [pathname]);
+
+  // The one place every `fixed` surface (the rails' sheets, their floating
+  // marks) is re-pinned after iOS's keyboard leaves — see `lib/keyboard.ts`.
+  useRepinAfterKeyboard();
 
   return (
     <div className="min-h-screen bg-night text-porcelain">
