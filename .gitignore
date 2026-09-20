@@ -54,3 +54,6 @@ src/aleph/web/frontend/playwright-report/
 src/aleph/web/frontend/tests/e2e/.auth/
 
 .pnpm-store
+
+# Orb portal metadata
+.amp/portals/

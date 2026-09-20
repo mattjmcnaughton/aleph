@@ -6,9 +6,13 @@
 - [uv](https://docs.astral.sh/uv/)
 - [just](https://just.systems/)
 - [Docker](https://www.docker.com/) (for dependencies)
-- [Node.js](https://nodejs.org/) 20+ and [pnpm](https://pnpm.io/) (for frontend)
+- [Node.js](https://nodejs.org/) 22 (exact development version in `.nvmrc`)
+  and [pnpm](https://pnpm.io/) 10.33.0 (matches CI and Docker)
 
 ## Setup
+
+With nvm, run `nvm install && nvm use` from the repo root before installing
+JavaScript dependencies. Other version managers should use the version in `.nvmrc`.
 
 ```sh
 # Install backend dependencies
@@ -20,6 +24,26 @@ cp .env.example .env
 # Install frontend dependencies
 cd src/aleph/web/frontend && pnpm install
 ```
+
+### Amp orbs
+
+`.agents/setup` installs the Node version in `.nvmrc`, pnpm 10.33.0, Python
+3.12, just 1.58.0, and the backend, frontend, and release dependencies from lockfiles.
+The official just release binary is verified against a pinned SHA-256 checksum
+and installed in `~/.local/bin`; no Rust compiler or Python wrapper is needed.
+It leaves `.env` untouched; copy the template when configuring the app. Node is installed
+under the user's home directory; a login-shell hook makes the toolchain
+available to subsequent Amp commands and supervised services.
+
+Setup is safe to rerun (`.agents/setup`). Amp runs it when preparing an orb
+without an exact cached snapshot; it does not run on every resume. No resume
+script is needed for these installed tools. Changes must reach the project's
+default branch before new orbs pick them up automatically.
+
+This prepares the development toolchain and `just gate`, not a running app.
+Postgres and Keycloak still need to be started separately as described below
+before integration tests, browser journeys, or authenticated development.
+Setup does not run migrations, start servers, or configure provider credentials.
 
 ## Regenerating from templates (`copier update`)
 
