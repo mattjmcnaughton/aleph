@@ -176,7 +176,7 @@ if TYPE_CHECKING:
 
     from aleph.agents.shaper import ChangeStatus, ProposalResolution
     from aleph.models import Attempt, Lesson, Message, Path, PathChange
-    from aleph.repositories import LessonAnswer
+    from aleph.repositories import LessonAnswer, LessonDigestRow
 
 
 @dataclass(frozen=True)
@@ -415,7 +415,7 @@ def _attempt_view(attempt: Attempt | None, *, correct_index: int) -> AttemptView
 
 
 def _build_digest(
-    lessons: Sequence[Lesson], unit_titles: dict[uuid.UUID, str]
+    lessons: Sequence[LessonDigestRow], unit_titles: dict[uuid.UUID, str]
 ) -> tuple[DigestEntry, ...]:
     """The path digest: every lesson's names + derived unlock state, in order.
 

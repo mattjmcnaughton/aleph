@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from dataclasses import is_dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -86,6 +87,27 @@ async def _seed() -> tuple[uuid.UUID, list[uuid.UUID]]:
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize(
+    "reader",
+    [
+        "list_progress_for_path",
+        "list_digest_for_path",
+        "list_for_path_with_effective_state",
+    ],
+)
+async def test_summary_reads_return_records_without_orm_identity(reader: str) -> None:
+    path_id, ids = await _seed()
+    async with db.async_session() as session:
+        rows = await getattr(LessonRepository(session), reader)(path_id)
+        assert not session.identity_map
+        assert all(is_dataclass(row) for row in rows)
+        assert [row.id for row in rows] == ids
+        assert rows[0].completed_at is not None
+        assert rows[1].completed_at is None
+        assert all(not hasattr(row, "read_passage") for row in rows)
+
+
+@pytest.mark.anyio
 async def test_unlock_reads_only_progress(
     lesson_selects: list[tuple[str, Any]],
 ) -> None:
@@ -120,13 +142,15 @@ async def test_outline_does_not_read_content(
         rows = await LessonRepository(session).list_for_path_with_effective_state(
             path_id
         )
-        assert [lesson.id for lesson, _ in rows] == ids
-        assert [lesson.title for lesson, _ in rows] == [
+        assert [lesson.id for lesson in rows] == ids
+        assert [lesson.title for lesson in rows] == [
             "Lesson 1",
             "Lesson 2",
             "Lesson 3",
         ]
-        assert all(state is LessonGenerationState.GENERATED for _, state in rows)
+        assert all(
+            row.effective_state is LessonGenerationState.GENERATED for row in rows
+        )
 
     assert len(lesson_selects) == 1
     statement, _ = lesson_selects[0]
@@ -144,8 +168,7 @@ async def test_tutor_reads_only_current_passage(
     async with db.async_session() as session:
         path = await session.get(Path, path_id)
         assert path is not None
-        # Keep the partially loaded objects alive in the identity map: a plain
-        # session.get() must not leave the current lesson's passage deferred.
+        # Reading an outline first must not affect current-lesson content.
         summaries = (
             await LessonRepository(session).list_for_path_with_effective_state(path_id)
             if summary_first
@@ -154,7 +177,8 @@ async def test_tutor_reads_only_current_passage(
         lesson_selects.clear()
         context = await assemble_lesson_context(session, path=path, lesson_id=ids[1])
         if summary_first:
-            assert summaries[1][0].read_passage == context.deps.read_passage
+            assert summaries[1].id == ids[1]
+            assert not hasattr(summaries[1], "read_passage")
 
     assert context.deps.read_passage == "Passage 2: " + "large body " * 1000
     assert [entry.unlock_state for entry in context.deps.path_digest] == [

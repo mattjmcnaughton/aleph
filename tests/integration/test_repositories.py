@@ -980,8 +980,8 @@ async def test_list_for_path_with_effective_state_bulk_read() -> None:
         rows = await LessonRepository(session).list_for_path_with_effective_state(
             path_id
         )
-        assert [lesson.position_in_path for lesson, _ in rows] == [1, 2, 3, 4]
-        assert [state for _, state in rows] == [
+        assert [lesson.position_in_path for lesson in rows] == [1, 2, 3, 4]
+        assert [lesson.effective_state for lesson in rows] == [
             LessonGenerationState.FAILED,  # stale generating
             LessonGenerationState.GENERATING,  # fresh
             LessonGenerationState.GENERATED,

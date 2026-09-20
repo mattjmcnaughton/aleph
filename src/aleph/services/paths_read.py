@@ -110,20 +110,18 @@ async def load_path_detail(
                 position_in_path=lesson.position_in_path,
                 completed_at=lesson.completed_at,
             )
-            for lesson, _ in lessons
+            for lesson in lessons
         ]
     )
     lessons_by_unit: dict[uuid.UUID, list[LessonSlotView]] = defaultdict(list)
-    for (lesson, effective_state), unlock_state in zip(
-        lessons, unlock_states, strict=True
-    ):
+    for lesson, unlock_state in zip(lessons, unlock_states, strict=True):
         lessons_by_unit[lesson.unit_id].append(
             LessonSlotView(
                 id=lesson.id,
                 title=lesson.title,
                 position_in_path=lesson.position_in_path,
                 position_in_unit=lesson.position_in_unit,
-                generation_state=effective_state,
+                generation_state=lesson.effective_state,
                 unlock_state=unlock_state,
             )
         )
