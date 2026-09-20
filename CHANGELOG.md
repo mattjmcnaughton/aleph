@@ -1,3 +1,10 @@
+## [1.42.2](https://github.com/mattjmcnaughton/aleph/compare/v1.42.1...v1.42.2) (2026-09-20)
+
+
+### Bug Fixes
+
+* **config:** default all model slots to GPT-5.6 Luna ([a1068d4](https://github.com/mattjmcnaughton/aleph/commit/a1068d4a81e43d988d434881f41b099d06fa8c05))
+
 ## [1.42.1](https://github.com/mattjmcnaughton/aleph/compare/v1.42.0...v1.42.1) (2026-09-14)
 
 
