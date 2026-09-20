@@ -21,6 +21,9 @@ venv/
 htmlcov/
 .artifacts/
 
+# Local agent task workspaces
+.agentic/
+
 # IDE
 .idea/
 .vscode/

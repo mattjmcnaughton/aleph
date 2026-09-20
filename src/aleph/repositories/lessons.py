@@ -14,7 +14,6 @@ from sqlalchemy import (
     select,
     update,
 )
-from sqlalchemy.orm import load_only
 
 from aleph.config import settings
 from aleph.models import Attempt, Lesson, LessonGenerationState, Path, QuickCheck, Unit
@@ -126,6 +125,39 @@ class NextLesson:
     position_in_path: int
 
 
+@dataclass(frozen=True)
+class LessonProgressRow:
+    """The persisted facts needed to derive a lesson's unlock state."""
+
+    id: uuid.UUID
+    position_in_path: int
+    completed_at: datetime.datetime | None
+
+
+@dataclass(frozen=True)
+class LessonDigestRow:
+    """Names and progress for the tutor's Path digest."""
+
+    id: uuid.UUID
+    unit_id: uuid.UUID
+    title: str
+    position_in_path: int
+    completed_at: datetime.datetime | None
+
+
+@dataclass(frozen=True)
+class LessonOutlineRow:
+    """One outline slot with its effective generation state."""
+
+    id: uuid.UUID
+    unit_id: uuid.UUID
+    title: str
+    position_in_path: int
+    position_in_unit: int
+    completed_at: datetime.datetime | None
+    effective_state: LessonGenerationState
+
+
 class LessonRepository:
     """Data access for :class:`~aleph.models.Lesson` rows.
 
@@ -180,11 +212,7 @@ class LessonRepository:
     async def get_for_path(
         self, *, lesson_id: uuid.UUID, path_id: uuid.UUID
     ) -> Lesson | None:
-        """Load one lesson's content, restricted to an already-owned path.
-
-        An explicit SELECT also fills deferred fields if a summary of this
-        lesson is already in the session's identity map.
-        """
+        """Load one lesson's content, restricted to an already-owned path."""
         result = await self.session.execute(
             select(Lesson).where(Lesson.id == lesson_id, Lesson.path_id == path_id)
         )
@@ -210,45 +238,49 @@ class LessonRepository:
         )
         return list(result.scalars())
 
-    async def list_progress_for_path(self, path_id: uuid.UUID) -> list[Lesson]:
+    async def list_progress_for_path(
+        self, path_id: uuid.UUID
+    ) -> list[LessonProgressRow]:
         """Only IDs, positions, and completion timestamps for unlock derivation."""
         result = await self.session.execute(
-            select(Lesson)
-            .options(
-                load_only(
-                    Lesson.id,
-                    Lesson.position_in_path,
-                    Lesson.completed_at,
-                    raiseload=True,
-                )
-            )
+            select(Lesson.id, Lesson.position_in_path, Lesson.completed_at)
             .where(Lesson.path_id == path_id)
             .order_by(Lesson.position_in_path)
         )
-        return list(result.scalars())
+        return [
+            LessonProgressRow(
+                id=lesson_id, position_in_path=position, completed_at=completed
+            )
+            for lesson_id, position, completed in result
+        ]
 
-    async def list_digest_for_path(self, path_id: uuid.UUID) -> list[Lesson]:
+    async def list_digest_for_path(self, path_id: uuid.UUID) -> list[LessonDigestRow]:
         """Names and progress for the tutor's Path digest; no lesson content."""
         result = await self.session.execute(
-            select(Lesson)
-            .options(
-                load_only(
-                    Lesson.id,
-                    Lesson.unit_id,
-                    Lesson.title,
-                    Lesson.position_in_path,
-                    Lesson.completed_at,
-                    raiseload=True,
-                )
+            select(
+                Lesson.id,
+                Lesson.unit_id,
+                Lesson.title,
+                Lesson.position_in_path,
+                Lesson.completed_at,
             )
             .where(Lesson.path_id == path_id)
             .order_by(Lesson.position_in_path)
         )
-        return list(result.scalars())
+        return [
+            LessonDigestRow(
+                id=lesson_id,
+                unit_id=unit_id,
+                title=title,
+                position_in_path=position,
+                completed_at=completed,
+            )
+            for lesson_id, unit_id, title, position, completed in result
+        ]
 
     async def list_for_path_with_effective_state(
         self, path_id: uuid.UUID
-    ) -> list[tuple[Lesson, LessonGenerationState]]:
+    ) -> list[LessonOutlineRow]:
         """Outline fields paired with **effective** state, without lesson content.
 
         The §6 poll target (``GET /paths/{id}``) needs each lesson's effective
@@ -258,23 +290,37 @@ class LessonRepository:
         ``MAX_LESSONS_PER_PATH`` (200) lessons.
         """
         result = await self.session.execute(
-            select(Lesson, self._effective_state_expr().label("effective_state"))
-            .options(
-                load_only(
-                    Lesson.id,
-                    Lesson.unit_id,
-                    Lesson.title,
-                    Lesson.position_in_path,
-                    Lesson.position_in_unit,
-                    Lesson.completed_at,
-                    raiseload=True,
-                )
+            select(
+                Lesson.id,
+                Lesson.unit_id,
+                Lesson.title,
+                Lesson.position_in_path,
+                Lesson.position_in_unit,
+                Lesson.completed_at,
+                self._effective_state_expr().label("effective_state"),
             )
             .where(Lesson.path_id == path_id)
             .order_by(Lesson.position_in_path)
         )
         return [
-            (lesson, LessonGenerationState(state)) for lesson, state in result.all()
+            LessonOutlineRow(
+                id=lesson_id,
+                unit_id=unit_id,
+                title=title,
+                position_in_path=position,
+                position_in_unit=unit_position,
+                completed_at=completed,
+                effective_state=LessonGenerationState(state),
+            )
+            for (
+                lesson_id,
+                unit_id,
+                title,
+                position,
+                unit_position,
+                completed,
+                state,
+            ) in result
         ]
 
     async def list_for_path_with_engagement(

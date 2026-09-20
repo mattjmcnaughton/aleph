@@ -30,6 +30,9 @@ from aleph.repositories.flashcards import (
 )
 from aleph.repositories.lessons import (
     CompletionDay,
+    LessonDigestRow,
+    LessonOutlineRow,
+    LessonProgressRow,
     LessonRepository,
     NextLesson,
     PathGenerationProgress,
@@ -53,6 +56,9 @@ __all__ = [
     "FlashcardRecord",
     "FlashcardRepository",
     "LessonAnswer",
+    "LessonDigestRow",
+    "LessonOutlineRow",
+    "LessonProgressRow",
     "LessonRepository",
     "LocatedMessage",
     "NewSource",
