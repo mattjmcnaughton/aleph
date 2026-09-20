@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo_root"
+download="$(mktemp -d)"
+trap 'rm -rf "$download"' EXIT
+
+# Orbs provide curl, tar, xz, npm and uv. Install a private Node rather than
+# relying on the base image's (potentially incompatible) version.
+node_version="$(cat .nvmrc)"
+node_home="$HOME/.local/share/aleph-node/$node_version"
+export PATH="$node_home/bin:$HOME/.local/bin:$PATH"
+
+echo "==> Node $node_version"
+if [[ ! -x "$node_home/bin/node" ]]; then
+    case "$(uname -m)" in
+        x86_64) arch=x64 ;;
+        aarch64) arch=arm64 ;;
+        *) echo "Unsupported Node architecture: $(uname -m)" >&2; exit 1 ;;
+    esac
+    archive="node-v$node_version-linux-$arch.tar.xz"
+    curl -fsSL "https://nodejs.org/dist/v$node_version/$archive" -o "$download/$archive"
+    curl -fsSL "https://nodejs.org/dist/v$node_version/SHASUMS256.txt" -o "$download/SHASUMS256.txt"
+    (cd "$download" && grep "  $archive\$" SHASUMS256.txt | sha256sum --check -)
+    tar -xJf "$download/$archive" -C "$download"
+    mkdir -p "$(dirname "$node_home")"
+    mv "$download/node-v$node_version-linux-$arch" "$node_home"
+fi
+
+echo "==> pnpm 10.33.0 (matches CI and Docker)"
+if [[ ! -x "$node_home/bin/pnpm" ]] || [[ "$("$node_home/bin/pnpm" --version)" != 10.33.0 ]]; then
+    npm install --global --prefix "$node_home" pnpm@10.33.0
+fi
+
+# Setup's exports do not reach later Amp commands or supervised services.
+# Read the pin on every login so a rerun after a version change needs no new hook.
+marker="# Aleph orb toolchain"
+if ! grep -Fqx "$marker" "$HOME/.bash_profile" 2>/dev/null; then
+    cat >> "$HOME/.bash_profile" <<EOF
+
+$marker
+case "\$PWD/" in
+    '$repo_root/'*)
+        export PATH="\$HOME/.local/share/aleph-node/\$(cat '$repo_root/.nvmrc')/bin:\$HOME/.local/bin:\$PATH"
+        ;;
+esac
+EOF
+fi
+
+just_version=1.58.0
+echo "==> just $just_version (official release binary)"
+if [[ ! -x "$HOME/.local/bin/just" ]] || [[ "$("$HOME/.local/bin/just" --version)" != "just $just_version" ]]; then
+    case "$(uname -m)" in
+        x86_64)
+            arch=x86_64
+            checksum=4a5cc2f53e6f0f8c59092a6cc38291eb729d46a7dd95d3ae582008881b84931d
+            ;;
+        aarch64)
+            arch=aarch64
+            checksum=748237128c4c40cbdabc65e841d05ceba13cc23a91eaba395495894c1d9764df
+            ;;
+        *) echo "Unsupported just architecture: $(uname -m)" >&2; exit 1 ;;
+    esac
+    archive="just-$just_version-$arch-unknown-linux-musl.tar.gz"
+    curl -fsSL "https://github.com/casey/just/releases/download/$just_version/$archive" -o "$download/$archive"
+    (cd "$download" && printf '%s  %s\n' "$checksum" "$archive" | sha256sum --check -)
+    tar -xzf "$download/$archive" -C "$download" just
+    mkdir -p "$HOME/.local/bin"
+    install -m 755 "$download/just" "$HOME/.local/bin/just"
+fi
+
+echo "==> Python 3.12 and locked backend dependencies"
+time uv python install 3.12
+time uv sync --python 3.12 --dev --frozen
+
+echo "==> Locked release and frontend dependencies"
+time pnpm install --frozen-lockfile
+time pnpm --dir src/aleph/web/frontend install --frozen-lockfile
+
+echo "==> Setup complete (backing services are started separately)"
+node --version
+pnpm --version
+uv run --frozen python --version
+just --version
