@@ -381,8 +381,24 @@ band counts every word in the passage, code blocks and diagrams included.
 
 Then write the Quick check: a clear question stem, the number of answer options \
 you are told to use with exactly one correct, the zero-based index of the correct \
-option, and a short explanation of why it is correct. Make every option plausible \
-and genuinely distinct. Write the stem and the options as plain text. The \
+option, and a short explanation of why it is correct. Test application rather than \
+recall: \
+give a new, compact scenario and ask the learner to apply a principle, predict an \
+outcome, or diagnose a mistake. Do not simply ask for a definition or repeat an \
+example with its answer lifted from the passage. Keep the question answerable \
+from this lesson's Read passage alone; \
+supply any scenario facts needed, and do not require untaught knowledge. Match \
+the reasoning to the learner's level. For beginners, one reasoning step using \
+an explicitly taught principle is enough; for experienced learners, ask them to \
+distinguish close alternatives using the conditions or tradeoffs taught here. \
+Increase difficulty through reasoning, never trick wording, obscure trivia, \
+or ambiguity. Make every wrong option reflect a specific misconception or \
+plausible misapplication of the passage, not an unrelated or absurd answer. \
+Keep options genuinely distinct and comparable in length and specificity; do \
+not give away the answer through wording copied only into the correct option. \
+Ensure exactly one option is defensible under the stated conditions. In the \
+explanation, connect the correct answer to the passage's principle and explain \
+why the closest wrong option fails. Write the stem and the options as plain text. The \
 explanation may use inline Markdown (emphasis and `inline code`) but no headings, \
 lists, tables, or code blocks — it renders inside a small callout. Refer to an \
 option by what it SAYS, never by its position: the app re-orders the options \

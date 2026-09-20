@@ -212,7 +212,7 @@ An artifact passes only when **every applicable item passes**.
 | 2 | `level_appropriate` | Matches the learner's stated level — a beginner path defines its terms, an advanced one skips the introductory material |
 | 3 | `in_scope` | On-topic for the path/unit/lesson, and the right size for one sitting |
 | 4 | `continuous` | Builds on lessons 1…N: does not re-teach or contradict earlier lessons, and only assumes concepts already introduced. **Judged with prior-lesson content in the judge's context** |
-| 5 | `check_validity` | The Quick check is answerable from its own Read passage, has exactly one correct option, and the keyed `correct_index` is actually correct |
+| 5 | `check_validity` | The Quick check requires level-appropriate application to a new scenario, not definition recall; is answerable from its own Read passage; has exactly one correct option with a correct `correct_index`; uses misconception-based wrong options without giveaways; and explains the principle and why the closest wrong option fails. Untaught knowledge, trick wording, and ambiguity fail; one reasoning step is enough for beginners. |
 | 6 | `safe` | Inside PRD §10's boundary |
 
 **Applicability is per artifact, and it is not a loophole.** A **lesson** is

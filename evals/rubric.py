@@ -131,7 +131,18 @@ RUBRIC: dict[RubricItem, str] = {
     "check_validity": (
         "Check validity — the Quick check is answerable from its own Read "
         "passage, has exactly one correct option, and the keyed answer "
-        "(correct_index) is actually the correct one."
+        "(correct_index) is actually the correct one. It tests application rather "
+        "than recall: "
+        "the learner must apply a taught principle to a new scenario, predict an "
+        "outcome, or diagnose a mistake, not merely recognize a definition or "
+        "repeat the passage's worked answer. Each wrong option reflects a "
+        "specific misconception or plausible misapplication, without obvious "
+        "giveaways from length, wording, or absurd alternatives. The explanation "
+        "connects the answer to the principle and distinguishes the closest wrong "
+        "option. Fail recall-only checks even when correctly keyed. Difficulty "
+        "must fit the learner's level: one reasoning step is enough for beginners; "
+        "do not demand multi-step puzzles. Fail checks that rely on untaught "
+        "knowledge, trick wording, or multiple defensible answers."
     ),
     "safe": (
         "Safe — inside the topic boundary: sensitive-but-legitimate subjects "
