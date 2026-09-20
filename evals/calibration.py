@@ -141,15 +141,21 @@ CALIBRATION_EXAMPLES: tuple[CalibrationExample, ...] = (
             "checker reads your code without running it, the next step is to tell "
             "it what you mean. An annotation is a colon and a type after a name: "
             "`let count: number = 0`. Function parameters and return types take "
-            "the same form... TypeScript will often infer the type for you, so "
+            "the same form. The type after the parameter list constrains the "
+            "returned value independently of parameter types; returning a value "
+            "of a different type is a checker error... TypeScript will often "
+            "infer the type for you, so "
             "annotate where it clarifies intent rather than everywhere...\n"
-            "QUICK CHECK: 'Given `function area(w: number, h: number): number`, "
-            "what does the final `number` describe?'\n"
-            "  0. The type of the parameter `w`\n"
-            "  1. The type of the value the function returns\n"
-            "  2. The number of parameters the function takes\n"
-            "correct_index=1; explanation: the type after the parameter list is "
-            "the return type."
+            "QUICK CHECK: 'A function is declared as "
+            "`function label(n: number): string` but its body is `return n;`. "
+            "Why does the checker reject the body?'\n"
+            "  0. The parameter must be a string to match the declared return type\n"
+            "  1. The returned value is a number instead of the declared string\n"
+            "  2. The return annotation converts n to a string, conflicting "
+            "with its parameter type\n"
+            "correct_index=1; explanation: returning n supplies a number where "
+            "a string was promised. The parameter need not match the return "
+            "type; the function could produce a string from a numeric input."
         ),
         verdicts={
             "accurate": (True, "The syntax and the inference claim are both right."),
@@ -164,8 +170,53 @@ CALIBRATION_EXAMPLES: tuple[CalibrationExample, ...] = (
             ),
             "check_validity": (
                 True,
-                "Answerable from the passage, one correct option, and index 1 is "
-                "that option.",
+                "One beginner-level application step diagnoses a new function's "
+                "return mismatch using the passage. Index 1 is uniquely correct; "
+                "the alternatives confuse parameter and return types or mistake "
+                "an annotation for conversion. The explanation rules out the "
+                "closest misconception about matching parameter types.",
+            ),
+            "safe": (True, "Nothing sensitive."),
+        },
+    ),
+    CalibrationExample(
+        name="lesson-with-a-recall-only-quick-check",
+        kind="lesson",
+        context=(
+            "topic='Study strategies', level=beginner, position_in_path=1, "
+            "lesson='Spacing your practice'"
+        ),
+        artifact=(
+            "READ PASSAGE (abridged): Spaced practice distributes study across "
+            "multiple sessions rather than concentrating it in one session. "
+            "With the same total study time, spacing generally supports longer "
+            "retention than massing practice. Retrieval practice means trying "
+            "to recall without looking; interleaving means mixing problem types. "
+            "These are separate choices: you can use retrieval in either a "
+            "single session or spaced sessions...\n"
+            "QUICK CHECK: 'Which term means distributing study across multiple "
+            "sessions?'\n"
+            "  0. Retrieval practice\n"
+            "  1. Spaced practice\n"
+            "  2. Interleaved practice\n"
+            "correct_index=1; explanation: spaced practice distributes study "
+            "across sessions; retrieval describes recalling without looking, "
+            "not the timing of sessions."
+        ),
+        verdicts={
+            "accurate": (
+                True,
+                "The distinctions and qualified retention claim are correct.",
+            ),
+            "level_appropriate": (True, "Introduces the terms without prerequisites."),
+            "in_scope": (True, "Focused on spacing study sessions."),
+            "continuous": (True, "First lesson; assumes no earlier teaching."),
+            "check_validity": (
+                False,
+                "Correctly keyed and answerable, but only asks the learner to "
+                "recognize a definition copied from the passage. There is no "
+                "application step. A beginner can instead choose a study "
+                "schedule for a stated retention goal and equal study time.",
             ),
             "safe": (True, "Nothing sensitive."),
         },
