@@ -14,6 +14,7 @@ from sqlalchemy import (
     select,
     update,
 )
+from sqlalchemy.orm import load_only
 
 from aleph.config import settings
 from aleph.models import Attempt, Lesson, LessonGenerationState, Path, QuickCheck, Unit
@@ -176,6 +177,19 @@ class LessonRepository:
     async def get(self, lesson_id: uuid.UUID) -> Lesson | None:
         return await self.session.get(Lesson, lesson_id)
 
+    async def get_for_path(
+        self, *, lesson_id: uuid.UUID, path_id: uuid.UUID
+    ) -> Lesson | None:
+        """Load one lesson's content, restricted to an already-owned path.
+
+        An explicit SELECT also fills deferred fields if a summary of this
+        lesson is already in the session's identity map.
+        """
+        result = await self.session.execute(
+            select(Lesson).where(Lesson.id == lesson_id, Lesson.path_id == path_id)
+        )
+        return result.scalar_one_or_none()
+
     async def get_for_user(
         self, *, lesson_id: uuid.UUID, user_id: uuid.UUID
     ) -> Lesson | None:
@@ -196,10 +210,46 @@ class LessonRepository:
         )
         return list(result.scalars())
 
+    async def list_progress_for_path(self, path_id: uuid.UUID) -> list[Lesson]:
+        """Only IDs, positions, and completion timestamps for unlock derivation."""
+        result = await self.session.execute(
+            select(Lesson)
+            .options(
+                load_only(
+                    Lesson.id,
+                    Lesson.position_in_path,
+                    Lesson.completed_at,
+                    raiseload=True,
+                )
+            )
+            .where(Lesson.path_id == path_id)
+            .order_by(Lesson.position_in_path)
+        )
+        return list(result.scalars())
+
+    async def list_digest_for_path(self, path_id: uuid.UUID) -> list[Lesson]:
+        """Names and progress for the tutor's Path digest; no lesson content."""
+        result = await self.session.execute(
+            select(Lesson)
+            .options(
+                load_only(
+                    Lesson.id,
+                    Lesson.unit_id,
+                    Lesson.title,
+                    Lesson.position_in_path,
+                    Lesson.completed_at,
+                    raiseload=True,
+                )
+            )
+            .where(Lesson.path_id == path_id)
+            .order_by(Lesson.position_in_path)
+        )
+        return list(result.scalars())
+
     async def list_for_path_with_effective_state(
         self, path_id: uuid.UUID
     ) -> list[tuple[Lesson, LessonGenerationState]]:
-        """A path's lessons paired with their **effective** state, in one query.
+        """Outline fields paired with **effective** state, without lesson content.
 
         The §6 poll target (``GET /paths/{id}``) needs each lesson's effective
         generation state (stale ``generating`` → failed). Computing that in SQL
@@ -209,6 +259,17 @@ class LessonRepository:
         """
         result = await self.session.execute(
             select(Lesson, self._effective_state_expr().label("effective_state"))
+            .options(
+                load_only(
+                    Lesson.id,
+                    Lesson.unit_id,
+                    Lesson.title,
+                    Lesson.position_in_path,
+                    Lesson.position_in_unit,
+                    Lesson.completed_at,
+                    raiseload=True,
+                )
+            )
             .where(Lesson.path_id == path_id)
             .order_by(Lesson.position_in_path)
         )

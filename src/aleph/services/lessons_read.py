@@ -91,7 +91,7 @@ async def lesson_unlock_state(
     among the path's lessons (a raced delete). The attempt/complete routes use
     this to enforce the available-only rule (locked → 403, AL-012 / TDD §6).
     """
-    lessons = await LessonRepository(session).list_for_path(path_id)
+    lessons = await LessonRepository(session).list_progress_for_path(path_id)
     states = derive_unlock_states(
         [
             LessonProgress(

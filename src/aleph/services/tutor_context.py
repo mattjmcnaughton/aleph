@@ -8,7 +8,7 @@ Two functions, pure reads:
 It loads the lesson row (Read passage + Quick check + the caller's Attempt if
 any), builds the path digest, and turns the stored conversation into pydantic-ai
 ``message_history``. Everything ``services/tutor.py`` (AL-220) needs to run a
-reply, and nothing else: no model, no prompt text, no I/O beyond the five reads
+reply, and nothing else: no model, no prompt text, no I/O beyond the six reads
 below.
 
 **Why a digest built here rather than ``load_path_detail``.** The Phase 1 read
@@ -329,7 +329,7 @@ def _tutor_text(message: Message) -> str:
 async def assemble_lesson_context(
     session: AsyncSession, *, path: Path, lesson_id: uuid.UUID
 ) -> AssembledContext[TutorDeps]:
-    """Everything one in-lesson tutor reply runs on, from five reads.
+    """Everything one in-lesson tutor reply runs on, from six reads.
 
     ``path`` is the owned :class:`~aleph.models.Path` row the router already
     resolved (``OwnedPath``): it carries the ``topic``/``level`` the reply is
@@ -342,8 +342,13 @@ async def assemble_lesson_context(
 
     Pure reads throughout: nothing is written, nothing is triggered.
     """
-    lessons = await LessonRepository(session).list_for_path(path.id)
-    lesson = _require_lesson(lessons, lesson_id=lesson_id, path_id=path.id)
+    repository = LessonRepository(session)
+    lesson = await repository.get_for_path(lesson_id=lesson_id, path_id=path.id)
+    if lesson is None:
+        raise LessonContextUnavailableError(
+            f"lesson {lesson_id} is not on path {path.id}"
+        )
+    lessons = await repository.list_digest_for_path(path.id)
 
     unit_titles = {
         unit.id: unit.title
@@ -407,16 +412,6 @@ def _attempt_view(attempt: Attempt | None, *, correct_index: int) -> AttemptView
             correct_index=correct_index,
         ),
     )
-
-
-def _require_lesson(
-    lessons: Sequence[Lesson], *, lesson_id: uuid.UUID, path_id: uuid.UUID
-) -> Lesson:
-    """The path's lesson with ``lesson_id`` — picked from the list already read."""
-    for lesson in lessons:
-        if lesson.id == lesson_id:
-            return lesson
-    raise LessonContextUnavailableError(f"lesson {lesson_id} is not on path {path_id}")
 
 
 def _build_digest(
