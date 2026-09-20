@@ -1,3 +1,10 @@
+## [1.42.3](https://github.com/mattjmcnaughton/aleph/compare/v1.42.2...v1.42.3) (2026-09-20)
+
+
+### Bug Fixes
+
+* **lessons:** require application in quick checks ([35ab82a](https://github.com/mattjmcnaughton/aleph/commit/35ab82ac7e4ff22792ba4541400c325289fe3e6b))
+
 ## [1.42.2](https://github.com/mattjmcnaughton/aleph/compare/v1.42.1...v1.42.2) (2026-09-20)
 
 
