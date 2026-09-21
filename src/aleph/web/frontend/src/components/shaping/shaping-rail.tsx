@@ -54,7 +54,7 @@ export function ShapingMark({ shaping }: { shaping: ShapingRailState }) {
       type="button"
       data-testid="shaping-rail-mark"
       onClick={shaping.openRail}
-      className="fixed bottom-5 right-5 z-30 inline-flex items-center gap-2 rounded-full border border-iris/60 bg-surface px-4 py-3 text-sm font-semibold text-porcelain shadow-glow-iris transition-colors hover:border-iris hover:bg-elevated"
+      className="fixed bottom-[max(1.25rem,env(safe-area-inset-bottom))] right-5 z-30 inline-flex items-center gap-2 rounded-full border border-iris/60 bg-surface px-4 py-3 text-sm font-semibold text-porcelain shadow-glow-iris transition-colors hover:border-iris hover:bg-elevated"
     >
       <ShapingGlyph size="2xs" />
       Shape your path
@@ -391,7 +391,10 @@ function Composer({ shaping }: { shaping: ShapingRailState }) {
   const streaming = shaping.status === "streaming";
 
   return (
-    <div className="border-t border-divider px-4 py-3">
+    // `pb-[max(...)]`: with `viewport-fit=cover` (index.html) the sheet ends at
+    // the physical bottom of a phone, so pad by the home-indicator inset where
+    // there is one, and by the ordinary 12px where there isn't.
+    <div className="border-t border-divider px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
       {/* Suggestions sit with the composer so they are offered in the empty
           state and again after a reply settles (PRD §5.3) — never mid-stream,
           when tapping one could only queue a send the server would reject. */}

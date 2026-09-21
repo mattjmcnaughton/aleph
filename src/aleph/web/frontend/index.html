@@ -3,7 +3,11 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- viewport-fit=cover: the tutor and shaping sheets end at the physical bottom of
+         a phone, so their composers and the floating marks pad by env(safe-area-inset-bottom),
+         which is 0 without this. Portrait-first: in landscape the notch overlaps the
+         sheets' side gutters, which the app does not lay out for. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>aleph</title>
   </head>
   <body>

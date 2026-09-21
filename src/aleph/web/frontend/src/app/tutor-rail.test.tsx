@@ -227,6 +227,18 @@ describe("Tutor rail — one tree, two CSS presentations (D12)", () => {
     expect(screen.getByTestId("lesson-view").className).not.toMatch(/pb-\[75vh\]/);
   });
 
+  it("the sheet's grab handle closes the rail like the × does", async () => {
+    useSession(flagOnSession);
+    seedReadyLesson();
+    await gotoLesson();
+    await openRail();
+
+    fireEvent.click(screen.getByTestId("tutor-rail-handle"));
+
+    await waitFor(() => expect(screen.queryByTestId("tutor-rail")).toBeNull());
+    expect(screen.getByTestId("tutor-rail-mark")).toBeTruthy();
+  });
+
   it("[AL-230] collapse closes the rail and restores the mark (shared open state)", async () => {
     useSession(flagOnSession);
     seedReadyLesson();
