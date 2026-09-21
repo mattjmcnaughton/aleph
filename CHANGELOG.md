@@ -1,3 +1,10 @@
+## [1.42.5](https://github.com/mattjmcnaughton/aleph/compare/v1.42.4...v1.42.5) (2026-09-21)
+
+
+### Bug Fixes
+
+* **tutor:** compact the rail's header and composer on phones ([f8e2543](https://github.com/mattjmcnaughton/aleph/commit/f8e2543b959c3fd984834164914fb6745a6af5c7))
+
 ## [1.42.4](https://github.com/mattjmcnaughton/aleph/compare/v1.42.3...v1.42.4) (2026-09-21)
 
 
