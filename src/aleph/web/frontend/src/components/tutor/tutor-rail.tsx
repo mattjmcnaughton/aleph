@@ -47,7 +47,7 @@ export function TutorMark({ tutor }: { tutor: TutorRailState }) {
       type="button"
       data-testid="tutor-rail-mark"
       onClick={tutor.openRail}
-      className="fixed bottom-5 right-5 z-30 inline-flex items-center gap-2 rounded-full border border-iris/60 bg-surface px-4 py-3 text-sm font-semibold text-porcelain shadow-glow-iris transition-colors hover:border-iris hover:bg-elevated"
+      className="fixed bottom-[max(1.25rem,env(safe-area-inset-bottom))] right-5 z-30 inline-flex items-center gap-2 rounded-full border border-iris/60 bg-surface px-4 py-3 text-sm font-semibold text-porcelain shadow-glow-iris transition-colors hover:border-iris hover:bg-elevated"
     >
       <TutorGlyph size="2xs" />
       Tutor
@@ -154,70 +154,118 @@ export function TutorRail({ tutor }: { tutor: TutorRailState }) {
   );
 }
 
-// --- Header: new conversation, collapse, and the admin picker ----------------
+// --- Header: handle, title + scope, new conversation, close, admin picker ----
 
 function RailHeader({ tutor }: { tutor: TutorRailState }) {
   return (
-    <div
-      data-testid="tutor-rail-header"
-      className="flex flex-wrap items-center gap-2 border-b border-divider px-4 py-3"
-    >
-      <TutorGlyph />
-      <span className="mr-auto text-sm font-semibold text-porcelain">Tutor</span>
-
-      <TutorModelPicker
-        isAdmin={tutor.isAdmin}
-        allowlist={tutor.modelAllowlist}
-        value={tutor.model}
-        onChange={tutor.setModel}
-      />
-
-      {tutor.confirmingNew ? (
-        // Confirm in place, like the switcher's delete: clearing a thread is
-        // destructive and not undoable, and it must never sit under one tap.
-        <span className="flex items-center gap-2">
-          <span className="text-xs text-mist">Clear this conversation?</span>
-          <button
-            type="button"
-            data-testid="tutor-rail-new-conversation-confirm"
-            onClick={tutor.confirmNewConversation}
-            className="rounded-md border border-danger-border/60 bg-danger-bg px-2.5 py-1.5 text-xs font-semibold text-danger transition-colors hover:border-danger"
-          >
-            Clear
-          </button>
-          <button
-            type="button"
-            data-testid="tutor-rail-new-conversation-cancel"
-            onClick={tutor.cancelNewConversation}
-            className="rounded-md border border-divider px-2.5 py-1.5 text-xs text-mist transition-colors hover:text-porcelain"
-          >
-            Keep
-          </button>
-        </span>
-      ) : (
-        <button
-          type="button"
-          data-testid="tutor-rail-new-conversation"
-          onClick={tutor.askNewConversation}
-          title="New conversation"
-          className="rounded-md border border-divider px-2.5 py-1.5 text-xs text-mist transition-colors hover:border-iris/50 hover:text-porcelain"
-        >
-          New conversation
-        </button>
-      )}
-
+    <div data-testid="tutor-rail-header" className="border-b border-divider px-4 pb-3 pt-1 lg:pt-3">
+      {/* The sheet's grab handle (phone only): the visual cue that this is a
+          sheet over the lesson, and a tap on it dismisses. The pill is 4px
+          tall, so the button around it is the tap target, not the pill.
+          Hidden from AT and skipped by the tab order on purpose — the × below
+          is the accessible close, and this is a second way to reach the same
+          action, not a second control to announce. */}
       <button
         type="button"
-        data-testid="tutor-rail-collapse"
+        data-testid="tutor-rail-handle"
+        aria-hidden="true"
+        tabIndex={-1}
         onClick={tutor.closeRail}
-        aria-label="Close the tutor"
-        title="Close the tutor"
-        className="grid h-7 w-7 place-items-center rounded-md border border-divider text-mist transition-colors hover:border-iris/50 hover:text-porcelain"
+        className="mx-auto mb-1 block px-6 py-2 lg:hidden"
       >
-        <span aria-hidden="true" className="text-sm leading-none">
-          ×
-        </span>
+        <span className="block h-1 w-9 rounded-full bg-divider" />
       </button>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <TutorGlyph />
+        <span className="mr-auto min-w-0 flex-1">
+          <span className="block text-sm font-semibold leading-5 text-porcelain">Tutor</span>
+          {/* The scope statement, told once, as the surface's subtitle: what the
+              tutor can see is the lesson, and the lesson is named where the
+              surface is named. */}
+          <span
+            data-testid="tutor-rail-context-chip"
+            title={tutor.lessonTitle}
+            className="flex items-start gap-1.5 text-xs leading-4 text-mist"
+          >
+            <span
+              aria-hidden="true"
+              className="mt-[5px] h-1.5 w-1.5 shrink-0 rounded-full bg-iris"
+            />
+            {/* Two lines before clipping: the scope statement is the point of
+                the line (PRD §5.2), and one line clipped the PRD's own example
+                title. `title` carries the whole thing for a hover. */}
+            <span className="line-clamp-2">
+              Reading · <span className="text-porcelain">{tutor.lessonTitle}</span>
+            </span>
+          </span>
+        </span>
+
+        {tutor.confirmingNew ? null : (
+          <button
+            type="button"
+            data-testid="tutor-rail-new-conversation"
+            onClick={tutor.askNewConversation}
+            title="New conversation"
+            className="shrink-0 rounded-md border border-divider px-2.5 py-1.5 text-xs text-mist transition-colors hover:border-iris/50 hover:text-porcelain"
+          >
+            New conversation
+          </button>
+        )}
+
+        <button
+          type="button"
+          data-testid="tutor-rail-collapse"
+          onClick={tutor.closeRail}
+          aria-label="Close the tutor"
+          title="Close the tutor"
+          className="grid h-7 w-7 shrink-0 place-items-center rounded-md border border-divider text-mist transition-colors hover:border-iris/50 hover:text-porcelain"
+        >
+          <span aria-hidden="true" className="text-sm leading-none">
+            ×
+          </span>
+        </button>
+
+        {tutor.confirmingNew ? (
+          // Confirm in place, like the switcher's delete: clearing a thread is
+          // destructive and not undoable, and it must never sit under one tap.
+          // It takes its own row (`basis-full`) under the title row, so the ×
+          // keeps its corner and the tab order runs top to bottom.
+          <span className="flex basis-full items-center justify-end gap-2">
+            <span className="text-xs text-mist">Clear this conversation?</span>
+            <button
+              type="button"
+              data-testid="tutor-rail-new-conversation-confirm"
+              onClick={tutor.confirmNewConversation}
+              className="rounded-md border border-danger-border/60 bg-danger-bg px-2.5 py-1.5 text-xs font-semibold text-danger transition-colors hover:border-danger"
+            >
+              Clear
+            </button>
+            <button
+              type="button"
+              data-testid="tutor-rail-new-conversation-cancel"
+              onClick={tutor.cancelNewConversation}
+              className="rounded-md border border-divider px-2.5 py-1.5 text-xs text-mist transition-colors hover:text-porcelain"
+            >
+              Keep
+            </button>
+          </span>
+        ) : null}
+
+        {/* The admin picker gets a row of its own rather than a share of the
+            title row: on a phone it is the widest thing in the header, and
+            letting it wrap the row is what pushed the × out of its corner.
+            `empty:hidden` because the picker renders nothing for a non-admin,
+            and an empty wrapper would still cost the row gap. */}
+        <span className="basis-full empty:hidden">
+          <TutorModelPicker
+            isAdmin={tutor.isAdmin}
+            allowlist={tutor.modelAllowlist}
+            value={tutor.model}
+            onChange={tutor.setModel}
+          />
+        </span>
+      </div>
     </div>
   );
 }
@@ -333,25 +381,31 @@ function EmptyState({ lessonTitle }: { lessonTitle: string }) {
   );
 }
 
-// --- Composer: chip, suggestions, textarea, send/stop -------------------------
+// --- Composer: suggestions, textarea, send/stop -------------------------------
 
 function Composer({ tutor }: { tutor: TutorRailState }) {
   const streaming = tutor.status === "streaming";
 
   return (
-    <div className="border-t border-divider px-4 py-3">
+    // `pb-[max(...)]`: the sheet ends at the physical bottom of a phone, so the
+    // composer pads by the home-indicator inset where there is one (and by its
+    // ordinary 12px where there isn't). Needs `viewport-fit=cover` in index.html.
+    <div className="border-t border-divider px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
       {/* Suggestions sit with the composer so they are offered in the empty
           state and again after a reply settles (PRD §5.3) — never mid-stream,
-          when tapping one could only queue a send the server would 409. */}
+          when tapping one could only queue a send the server would 409. One
+          row that scrolls sideways, not a wrap: on a phone two rows of chips
+          were a quarter of the sheet, on every reply. The docked column has
+          vertical room and a mouse instead of a thumb, so there it wraps. */}
       {streaming ? null : (
-        <div className="mb-3 flex flex-wrap gap-2">
+        <div className="-mx-4 mb-3 flex gap-2 overflow-x-auto px-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden lg:flex-wrap lg:overflow-visible">
           {TUTOR_SUGGESTIONS.map((suggestion) => (
             <button
               key={suggestion}
               type="button"
               data-testid="tutor-rail-suggestion"
               onClick={() => tutor.send(suggestion, "suggestion")}
-              className="rounded-full border border-divider px-3 py-1.5 text-xs text-mist transition-colors hover:border-iris/50 hover:text-porcelain"
+              className="shrink-0 whitespace-nowrap rounded-full border border-divider px-3 py-1.5 text-xs text-mist transition-colors hover:border-iris/50 hover:text-porcelain"
             >
               {suggestion}
             </button>
@@ -359,16 +413,8 @@ function Composer({ tutor }: { tutor: TutorRailState }) {
         </div>
       )}
 
-      {/* The scope statement, told once, where the question is typed. */}
-      <p
-        data-testid="tutor-rail-context-chip"
-        className="mb-2 inline-flex items-center gap-2 rounded-full border border-divider px-3 py-1 text-xs text-mist"
-      >
-        <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-iris" />
-        Reading · <span className="text-porcelain">{tutor.lessonTitle}</span>
-      </p>
-
       <form
+        className="flex items-stretch gap-2"
         onSubmit={(event) => {
           event.preventDefault();
           tutor.send(tutor.draft, "typed");
@@ -383,34 +429,37 @@ function Composer({ tutor }: { tutor: TutorRailState }) {
             handleComposerKeyDown(event, () => tutor.send(tutor.draft, "typed"))
           }
           disabled={streaming}
-          rows={2}
+          rows={1}
           maxLength={TUTOR_MESSAGE_MAX_LENGTH}
           placeholder="Ask about this lesson…"
-          className="w-full resize-none rounded-md border border-divider bg-surface px-3 py-2 text-sm text-porcelain placeholder:text-slate focus:border-iris focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+          // One row until the question needs more: `field-sizing: content`
+          // grows the box with its text (to `max-h-40`, then it scrolls), so
+          // the multi-line question Shift+Enter exists for (`composer-keys.ts`)
+          // is not edited through a one-line window. Browsers without it keep
+          // the one row and scroll inside it.
+          className="min-w-0 flex-1 resize-none [field-sizing:content] max-h-40 rounded-md border border-divider bg-surface px-3 py-2 text-sm leading-6 text-porcelain placeholder:text-slate focus:border-iris focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
         />
-        <div className="mt-2 flex justify-end">
-          {streaming ? (
-            // Stop is the *only* control in flight: it aborts the request, and
-            // the question comes back to the composer for editing (TDD §5.6).
-            <button
-              type="button"
-              data-testid="tutor-rail-stop"
-              onClick={tutor.stop}
-              className="inline-flex items-center justify-center rounded-md border border-divider px-4 py-2 text-sm font-semibold text-porcelain transition-colors hover:border-iris/50"
-            >
-              Stop
-            </button>
-          ) : (
-            <button
-              type="submit"
-              data-testid="tutor-rail-send"
-              disabled={tutor.draft.trim() === ""}
-              className="inline-flex items-center justify-center rounded-md bg-iris px-4 py-2 text-sm font-semibold text-night transition-colors hover:bg-iris-400 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              Ask
-            </button>
-          )}
-        </div>
+        {streaming ? (
+          // Stop is the *only* control in flight: it aborts the request, and
+          // the question comes back to the composer for editing (TDD §5.6).
+          <button
+            type="button"
+            data-testid="tutor-rail-stop"
+            onClick={tutor.stop}
+            className="inline-flex shrink-0 items-center justify-center rounded-md border border-divider px-4 text-sm font-semibold text-porcelain transition-colors hover:border-iris/50"
+          >
+            Stop
+          </button>
+        ) : (
+          <button
+            type="submit"
+            data-testid="tutor-rail-send"
+            disabled={tutor.draft.trim() === ""}
+            className="inline-flex shrink-0 items-center justify-center rounded-md bg-iris px-4 text-sm font-semibold text-night transition-colors hover:bg-iris-400 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Ask
+          </button>
+        )}
       </form>
     </div>
   );
