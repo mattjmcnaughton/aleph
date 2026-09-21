@@ -18,9 +18,9 @@ Auth is the real cookie flow with a stubbed OIDC code exchange (mirroring
 ``test_auth_api`` / ``test_paths_api``), so the admin gate is genuine — admin
 status is derived from the email domain (``authz.is_admin``), never stored.
 
-**Five of the six registered flags are launched and default on** — ``tutor``
-(AL-270), ``shaping`` (AL-370), Phase 5's ``streaks`` (D7), Phase 3's
-``flashcards`` (D10), and Phase 6's ``analyst`` (D12); the sixth, ``flow``
+**Four of the five registered flags are launched and default on** — ``tutor``
+(AL-270), ``shaping`` (AL-370), Phase 5's ``streaks`` (D7),
+and Phase 6's ``analyst`` (D12); the fifth, ``flow``
 (flow TDD D10), is registered but still dark — which would make most
 of the resolution machinery below untestable — a flag that is on for everyone
 cannot demonstrate an admin baseline, an override that flips a learner *on*,
@@ -33,7 +33,7 @@ registry, ``dark_flag_defaults`` is what actually exercises the admin-baseline
 path here, standing in for the dark phase the machinery is built for rather
 than reading it off a real one.
 
-Every resolved map and every admin listing below carries all six keys (the
+Every resolved map and every admin listing below carries all five keys (the
 session/list surfaces the whole registry, not just the flags a given test is
 about), which is what proves a further flag joining the registry never widens
 what a plain learner sees.
@@ -68,9 +68,6 @@ SHAPING = "shaping"
 # Phase 5's flag (D7), registered the same way and also launched — see the
 # module docstring. Also in every resolved map below, for the same reason.
 STREAKS = "streaks"
-# Phase 3's flag (D10), registered the same way and also launched. Also in
-# every resolved map below, for the same reason.
-FLASHCARDS = "flashcards"
 # Phase 6's flag (TDD D12), registered the same way and also launched. Also
 # in every resolved map below, for the same reason.
 ANALYST = "analyst"
@@ -129,7 +126,7 @@ async def _sign_in(
 def dark_flag_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     """Force every code default back to ``False`` for this module.
 
-    See the module docstring: five of the six flags are launched and default on, but
+    See the module docstring: four of the five flags are launched and default on, but
     every test here is about the *resolution machinery*, whose whole subject
     matter is a flag that is not simply on for everyone. Patching
     ``FLAG_DEFAULTS`` (rather than the settings map) is deliberate — the settings
@@ -154,7 +151,6 @@ def _resolved(
     tutor: bool,
     shaping: bool,
     streaks: bool = False,
-    flashcards: bool = False,
     analyst: bool = False,
     flow: bool = False,
 ) -> dict[str, bool]:
@@ -163,14 +159,14 @@ def _resolved(
     Spelled as a helper so a new flag joining the registry is one edit here
     rather than one per assertion, while the assertions stay exact: an extra key
     leaking into a learner's map (a stale override row, say) still fails.
-    ``streaks``, ``flashcards`` and ``analyst`` default to ``False`` here for
+    ``streaks``, ``flow`` and ``analyst`` default to ``False`` here for
     the same reason ``tutor`` and ``shaping`` do: ``dark_flag_defaults``
-    (autouse) closes every code default in the registry, all six alike, so a
-    plain learner sees all six off — the real code default for five of them
+    (autouse) closes every code default in the registry, all five alike, so a
+    plain learner sees all five off — the real code default for four of them
     is ``True`` (``analyst`` included, now launched, TDD D12; only ``flow`` is
     genuinely dark, flow TDD D10), but this module's whole point is exercising
     the dark-flag machinery, which needs a flag that is not simply on for
-    everyone. All six still have to be passed
+    everyone. All five still have to be passed
     explicitly in the **admin** scenarios: they are members of
     ``ADMIN_DEFAULT_FLAGS``, so the admin baseline resolves them *on* even
     while every learner sees a `404` — which is the dark-launch story this
@@ -180,7 +176,6 @@ def _resolved(
         TUTOR: tutor,
         SHAPING: shaping,
         STREAKS: streaks,
-        FLASHCARDS: flashcards,
         ANALYST: analyst,
         FLOW: flow,
     }
@@ -238,7 +233,6 @@ async def test_admin_lists_every_registered_flag(
         assert response.json() == {
             "flags": [
                 _flag_row(ANALYST, enabled_default=False),
-                _flag_row(FLASHCARDS, enabled_default=False),
                 _flag_row(FLOW, enabled_default=False),
                 _flag_row(SHAPING, enabled_default=False),
                 _flag_row(STREAKS, enabled_default=False),
@@ -268,6 +262,29 @@ async def test_unknown_flag_or_user_is_404(
         assert await _override_count() == 0
 
 
+@pytest.mark.anyio
+async def test_retired_feature_is_absent_for_an_authenticated_admin(
+    app: FastAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async with _client(app) as client:
+        user_id = await _sign_in(client, monkeypatch, ADMIN)
+        session = (await client.get(SESSION_URL)).json()
+        assert session["authenticated"] is True
+        assert "settings" not in session["user"]
+        assert "flashcards" not in session["user"]["feature_flags"]
+        for path in ("/flashcards", "/reviews/queue", "/reviews/summary", "/settings"):
+            assert (await client.get(f"/api/v1{path}")).status_code == 404
+        assert (await client.post("/api/v1/reviews", json={})).status_code == 404
+        assert (
+            await client.post(f"/api/v1/lessons/{uuid.uuid4()}/flashcard-drafts")
+        ).status_code == 404
+        assert (
+            await client.put(
+                f"{FLAGS_URL}/flashcards/users/{user_id}", json={"enabled": True}
+            )
+        ).status_code == 404
+
+
 # --------------------------------------------------------------------------- #
 # Session delivery + the override round trip
 # --------------------------------------------------------------------------- #
@@ -281,7 +298,7 @@ async def test_launched_flags_reach_a_plain_learner(
 
     Opts back out of ``dark_flag_defaults`` with ``monkeypatch.undo()`` — the
     fixture and this test share one ``monkeypatch`` instance (both are
-    function-scoped), so undoing it reverts exactly the six ``setitem`` calls
+    function-scoped), so undoing it reverts exactly the five ``setitem`` calls
     the fixture made and leaves ``FLAG_DEFAULTS`` exactly as the module shipped
     it. This is the one test in the module reading the defaults the codebase
     actually ships, rather than a value the test wrote itself: a code default
@@ -300,7 +317,7 @@ async def test_launched_flags_reach_a_plain_learner(
     async with _client(app) as learner:
         await _sign_in(learner, monkeypatch, LEARNER)
         assert await _flags_on_session(learner) == _resolved(
-            tutor=True, shaping=True, streaks=True, flashcards=True, analyst=True
+            tutor=True, shaping=True, streaks=True, analyst=True
         )
 
 
@@ -325,7 +342,6 @@ async def test_dark_flags_resolve_on_for_admins(
             tutor=True,
             shaping=True,
             streaks=True,
-            flashcards=True,
             analyst=True,
             flow=True,
         )
@@ -334,7 +350,6 @@ async def test_dark_flags_resolve_on_for_admins(
         listed = (await admin.get(FLAGS_URL)).json()["flags"]
         assert listed == [
             _flag_row(ANALYST, enabled_default=False),
-            _flag_row(FLASHCARDS, enabled_default=False),
             _flag_row(FLOW, enabled_default=False),
             _flag_row(SHAPING, enabled_default=False),
             _flag_row(STREAKS, enabled_default=False),
@@ -368,7 +383,6 @@ async def test_override_flips_a_learner_on_and_clears_idempotently(
         assert await _override_count() == 1
         assert (await admin.get(FLAGS_URL)).json()["flags"] == [
             _flag_row(ANALYST, enabled_default=False),
-            _flag_row(FLASHCARDS, enabled_default=False),
             _flag_row(FLOW, enabled_default=False),
             _flag_row(SHAPING, enabled_default=False),
             _flag_row(STREAKS, enabled_default=False),
@@ -390,7 +404,6 @@ async def test_override_flips_a_learner_on_and_clears_idempotently(
             tutor=False,
             shaping=True,
             streaks=True,
-            flashcards=True,
             analyst=True,
             flow=True,
         )
@@ -404,7 +417,6 @@ async def test_override_flips_a_learner_on_and_clears_idempotently(
             tutor=True,
             shaping=True,
             streaks=True,
-            flashcards=True,
             analyst=True,
             flow=True,
         )
@@ -426,7 +438,6 @@ async def test_settings_default_flips_the_flag_without_a_deploy(
         assert await _flags_on_session(learner) == _resolved(tutor=True, shaping=False)
         assert (await admin.get(FLAGS_URL)).json()["flags"] == [
             _flag_row(ANALYST, enabled_default=False),
-            _flag_row(FLASHCARDS, enabled_default=False),
             _flag_row(FLOW, enabled_default=False),
             _flag_row(SHAPING, enabled_default=False),
             _flag_row(STREAKS, enabled_default=False),

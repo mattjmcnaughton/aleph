@@ -446,7 +446,12 @@ accepted cost of storing nothing new for this feature (PRD §4.6): there is no
 warning on delete, and the behavior is pinned by a test rather than left to be
 discovered.
 
-## Flashcards (`/api/v1`, Phase 3 TDD §5.3-§5.6/§6)
+## Retired flashcard API (removed)
+
+The former flashcard drafting, card-management, and review routes have been removed. Requests to
+those paths now use the ordinary not-found behavior. The historical contract below is retained
+temporarily as an implementation archive and must not be treated as a supported API; its source
+specs are explicitly marked retired.
 
 Session-cookie protected (`401` via the shared envelope when anonymous). Two
 halves of one router: drafting (trigger, poll, keep — CONTEXT.md: *Draft*,
@@ -607,7 +612,11 @@ before any work; or an unowned/unknown/draft/already-deleted card id) · `422
 validation_error` (a malformed `cursor`, an out-of-range `limit`, or an edit
 that is empty, over the word cap, or leaves both sides identical).
 
-## Settings (`/api/v1`)
+## Retired learner settings API (removed)
+
+The former learner Settings surface existed only to control flashcard auto-drafting. It, the
+settings routes, and `user.settings` in the session payload have been removed. The historical
+contract below is retained temporarily as an implementation archive and is not supported.
 
 Session-cookie protected (`401` via the shared envelope when anonymous). The
 learner's own per-account preferences (CONTEXT.md: *Settings*, *Auto-draft*) —
@@ -804,8 +813,7 @@ costs no extra request. The frontend reads it through `useFeatureFlag(key)`
 | `tutor` | **on** | on (redundantly — the code default already carries it) | The Phase 2 in-lesson tutor — the rail, its API, and its stream. Shipped **dark** at `off` through Phase 2's build-out (epic #82 amendment 1) while admins dogfooded it; **launched at AL-270**, which flipped this code default on. Kill it without a code deploy with `FEATURE_FLAG_DEFAULTS=tutor:off`. |
 | `shaping` | **on** | on (redundantly, as above) | Phase 2B shaping — the shaping rail, its API and its stream, and the apply/undo endpoints. Same history on its own key (epic #114, adopted convention 1): dark through 2B's build-out, **launched at AL-370**. Independent of `tutor`, so either can be killed without disturbing the other. |
 | `streaks` | **on** | on (redundantly, as above) | Phase 5 streaks — `GET /progress/summary` and everything under it (see [Progress](#progress-apiv1-phase-5-tdd-546)). Same history again on its own key (TDD D7): dark at `off` through the slice's build-out while admins dogfooded it, then **launched** by flipping this code default on, exactly as AL-270/AL-370 did. Kill it with `FEATURE_FLAG_DEFAULTS=streaks:off`. |
-| `flashcards` | **on** | on (redundantly, as above) | Phase 3 flashcards — every route under [Flashcards](#flashcards-apiv1-phase-3-tdd-53-56-6) (drafting, the daily queue, grading) and the progress summary's second streak signal (§5.5). This phase's **only** kill switch: one flag gates drafting, the queue, review and the due pill together (TDD D10), because a queue with no drafting is an empty queue and drafting with no queue is a card sink. Shipped dark at `off` through the build-out while admins dogfooded it via the admin baseline; **launched** by flipping this code default on, the fourth flag to run the `tutor`/`shaping`/`streaks` playbook. Kill it without a code deploy with `FEATURE_FLAG_DEFAULTS=flashcards:off`. |
-| `analyst` | **on** | on (redundantly, as above) | Phase 6 — every route under [Analyst](#analyst-apiv1-al-522-issue-172-phase-6-tdd-6) (Beats, Briefs). Same history again on its own key (TDD D12): shipped dark at `off` through the build-out while admins dogfooded it via the admin baseline, then **launched** by flipping this code default on, the fifth flag to run the `tutor`/`shaping`/`streaks`/`flashcards` playbook. Kill it without a code deploy with `FEATURE_FLAG_DEFAULTS=analyst:off`. |
+| `analyst` | **on** | on (redundantly, as above) | Phase 6 — every route under [Analyst](#analyst-apiv1-al-522-issue-172-phase-6-tdd-6) (Beats, Briefs). Shipped dark at `off` through build-out while admins dogfooded it, then launched by flipping its code default on. Kill it without a code deploy with `FEATURE_FLAG_DEFAULTS=analyst:off`. |
 
 **Operating it.** `FEATURE_FLAG_DEFAULTS` is a comma-separated list of
 `key:on` / `key:off` entries (`FEATURE_FLAG_DEFAULTS="tutor:on"`). Malformed and

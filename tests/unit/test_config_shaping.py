@@ -120,7 +120,7 @@ def test_e2e_backend_boots_with_the_shaper_slot_stubbed_and_the_flag_on(
     create_stub_app()
 
     assert restored_live_settings.model_shaper == STUB_MODEL_ID
-    # ``tutor``, ``streaks``, ``flashcards``, and ``analyst`` (Phase 6, ticket
+    # ``tutor``, ``streaks``, and ``analyst`` (Phase 6, ticket
     # AL-560/AL-570) have all since launched and default on in code, which
     # would make an explicit entry here redundant on its own — but this pin is
     # kept for all five rather than thinned to just ``shaping``: the suite
@@ -133,7 +133,6 @@ def test_e2e_backend_boots_with_the_shaper_slot_stubbed_and_the_flag_on(
         str(FeatureFlag.TUTOR): True,
         str(FeatureFlag.SHAPING): True,
         str(FeatureFlag.STREAKS): True,
-        str(FeatureFlag.FLASHCARDS): True,
         str(FeatureFlag.ANALYST): True,
         str(FeatureFlag.FLOW): True,
     }

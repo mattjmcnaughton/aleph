@@ -18,7 +18,7 @@ promises, and the repository behaviour ``repositories/beats.py`` /
 * **Cascades** — deleting a user tears down Beats -> Briefs -> Sources.
 * **The rail read and the two continuity reads** (§4/§5.4/§5.6).
 
-Written in the ``test_schema.py``/``test_flashcards_schema.py`` style: real
+Written in the repository schema-test style: real
 Postgres (fakes over mocks is for pure logic; constraints, partial indexes and
 row-lock claims are decided by the database).
 """
@@ -55,8 +55,7 @@ if TYPE_CHECKING:
 
 # ``brief_research_stale_after_seconds`` defaults to 420s (AL-501); tests that
 # need a stale window use an explicit smaller value on the repository
-# (matching ``FlashcardRepository.claim_draft_run``'s per-call
-# ``stale_after_seconds``, only here it is a constructor argument, the
+# (using an explicit ``stale_after_seconds``; here it is a constructor argument, the
 # ``PathRepository`` shape) so the fixture ages don't have to be minutes long.
 TEST_STALE_AFTER_SECONDS = 180.0
 STALE_AGE = timedelta(minutes=4)  # > TEST_STALE_AFTER_SECONDS
@@ -420,8 +419,7 @@ async def test_two_skipped_briefs_in_one_beat_are_both_legal() -> None:
 
 @pytest.mark.anyio
 async def test_the_brief_number_index_is_declared_on_both_model_and_migration() -> None:
-    """Mirrors ``test_the_due_on_index_is_declared_on_both_model_and_migration``
-    (``test_flashcards_schema.py``): the model's ``__table_args__`` and the
+    """The model's ``__table_args__`` and the
     migration that actually creates the index in a real database must agree,
     and the index must genuinely be partial.
     """
@@ -1251,8 +1249,8 @@ async def test_another_beats_claims_and_sources_never_leak_in() -> None:
 # beat_research_runs (migration 0013, code-review FIX 2) — index parity.
 # Second-pass code-review FIX D: this codebase deliberately keeps
 # "declared on both model and migration" index-parity tests (see
-# `test_the_brief_number_index_is_declared_on_both_model_and_migration` above
-# and `test_flashcards_schema.py`'s equivalent) because index drift between
+# `test_the_brief_number_index_is_declared_on_both_model_and_migration` above)
+# because index drift between
 # `__table_args__` and the migration is a known hazard here. 0013 declared
 # its two indexes twice with no such test — and
 # `ix_beat_research_runs_user_id_started_at` is the only thing keeping the

@@ -47,8 +47,7 @@ function submit() {
 describe("Deploy an analyst — /beats/new", () => {
   it("[FIX 3, flag off] renders a dead end, not the enabled form — no request", async () => {
     // Default fake session ships `analyst: false` (no `useAnalystSession()`
-    // override) — the D10 dead end, matching `routes/cards.tsx`/
-    // `routes/review.tsx`'s own flag-off shape. Before this fix the whole
+    // override) — the D10 dead end. Before this fix the whole
     // form rendered anyway, submit button included, and tapping "Deploy
     // analyst" silently did nothing (`onSubmit`'s own `!analystEnabled`
     // early return).

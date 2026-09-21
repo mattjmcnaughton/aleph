@@ -71,8 +71,7 @@ function DeployAnalyst() {
 
   // A direct/deep link with the flag off (D10: the whole surface is a
   // router-level gate server-side, `404` on every route) — the frontend's
-  // own dead end, matching `routes/cards.tsx`/`routes/review.tsx`'s shape
-  // (code-review FIX 3). Without this the form below renders in full, with a
+  // own dead end (code-review FIX 3). Without this the form renders in full, with a
   // live, enabled submit button — tapping "Deploy analyst" would silently do
   // nothing (`onSubmit`'s own `!analystEnabled` early return), which is worse
   // than never rendering the form at all.

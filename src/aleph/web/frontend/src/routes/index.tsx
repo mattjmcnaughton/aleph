@@ -11,7 +11,6 @@ import {
   isPathListTerminal,
   pathsListQueryOptions,
   progressSummaryQueryOptions,
-  reviewSummaryQueryOptions,
 } from "../lib/api";
 import { ActivityStrip } from "../components/activity-strip";
 import { BeatCard } from "../components/beat-card";
@@ -19,9 +18,6 @@ import { ContinueCard, pickResumeTarget } from "../components/continue-card";
 import { FlowDoor } from "../components/flow/flow-door";
 import { ListRow, type RowVariant, RowTitle, RowActions } from "../components/list-row";
 import { type NewMenuItem, NewMenu } from "../components/new-menu";
-import { CardsSection } from "../components/review/cards-section";
-import { DueTodayCard } from "../components/review/due-today-card";
-import { ReviewChip } from "../components/review/review-chip";
 import { SectionHeader } from "../components/section-header";
 import { PRIMARY_CTA_BASE, StateCard } from "../components/state-card";
 import { StreakChip } from "../components/streak-chip";
@@ -139,23 +135,6 @@ function Home() {
   const progressQuery = useQuery(progressSummaryQueryOptions(streaksEnabled));
   const pathStreaks = new Map<string, PathStreak>(
     (progressQuery.data?.paths ?? []).map((streak) => [streak.path_id, streak]),
-  );
-
-  // The retention loop's home surfaces (Phase 3 TDD §8): the *Due today* card
-  // and each row's `Review N` chip, both decoration on this route the same
-  // way the streak line is — `enabled` off means `skipToken` (no flag, no
-  // fetch), and both read `reviewSummaryQuery.data` with no `isError` branch
-  // here, so a failed `GET /reviews/summary` fails as decoration rather than
-  // taking the paths list down with it (TDD §5.6's last row).
-  const flashcardsEnabled = useFeatureFlag("flashcards");
-  const reviewSummaryQuery = useQuery(reviewSummaryQueryOptions(flashcardsEnabled));
-  // `ReviewSummaryResponse.paths` carries counts only, never titles (TDD §6) —
-  // this is what lets `DueTodayCard`'s provenance line name them anyway.
-  const pathTitles = new Map<string, string>(
-    (pathsQuery.data?.paths ?? []).map((path) => [path.id, path.title]),
-  );
-  const reviewDueByPath = new Map<string, number>(
-    (reviewSummaryQuery.data?.paths ?? []).map((path) => [path.path_id, path.due_count]),
   );
 
   // The Beats section (Phase 6 TDD §8, AL-530): a section **beside** "Your
@@ -286,16 +265,6 @@ function Home() {
               <ActivityStrip activity={progressQuery.data.activity} />
             </div>
           ) : null}
-
-          <DueTodayCard summary={reviewSummaryQuery.data} pathTitles={pathTitles} />
-
-          {/* Home's one door into `/cards` (AL-410 review finding 1) — gated
-              only on the `flashcards` flag, never on `due_count`: `DueTodayCard`
-              above hides outright at zero due (PRD §3's own restraint for that
-              card), which would otherwise leave a learner with kept cards and
-              nothing due today with no in-app route to browse them, on exactly
-              the day they would want one. */}
-          {flashcardsEnabled ? <CardsSection summary={reviewSummaryQuery.data} /> : null}
         </aside>
 
         <div className="min-w-0 lg:flex-1">
@@ -340,12 +309,7 @@ function Home() {
                 >
                   {(activePaths ?? []).map((path) => (
                     <li key={path.id}>
-                      <PathRow
-                        path={path}
-                        deletion={deletion}
-                        streak={pathStreaks.get(path.id)}
-                        reviewDue={reviewDueByPath.get(path.id)}
-                      />
+                      <PathRow path={path} deletion={deletion} streak={pathStreaks.get(path.id)} />
                     </li>
                   ))}
                 </ul>
@@ -363,7 +327,6 @@ function Home() {
                             path={path}
                             deletion={deletion}
                             streak={pathStreaks.get(path.id)}
-                            reviewDue={reviewDueByPath.get(path.id)}
                           />
                         </li>
                       ))}
@@ -477,7 +440,6 @@ function PathRow({
   path,
   deletion,
   streak,
-  reviewDue,
 }: {
   path: PathSummary;
   deletion: DeletePath;
@@ -485,9 +447,6 @@ function PathRow({
    *  zero (D5) — the caller (`Home`) already resolved the lookup, so this
    *  component never sees `path.id` and the summary side by side. */
   streak: PathStreak | undefined;
-  /** This path's share of today's global queue (Phase 3 TDD §6/§8); absent
-   *  means zero (D5), resolved by the caller the same way `streak` is. */
-  reviewDue: number | undefined;
 }) {
   // One lookup: `variant` drives the styling, and the raw (possibly undefined)
   // value is what `data-variant` exposes to tests — a neutral row carries none.
@@ -553,11 +512,6 @@ function PathRow({
       }
       status={<span data-testid="path-item-status">{statusLabel(path)}</span>}
       // A sibling of the row's own link, not nested inside it (a link inside
-      // a link is invalid HTML and would race the row's own navigation) —
-      // this one's destination is a filtered review session, Door 3 (PRD's
-      // navigation map), not the path view. `ReviewChip` owns its own
-      // visibility guard (absent/zero means no chip, D5).
-      chip={<ReviewChip pathId={path.id} dueCount={reviewDue} />}
       actions={
         confirming ? null : (
           <>

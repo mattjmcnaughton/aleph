@@ -40,13 +40,10 @@ registered the same way — a separate flag, so either could ship dark or be kil
 without disturbing the other.
 
 ``streaks`` (Phase 5, D7) was registered the same way again, and rode the same
-playbook from dark to launched. ``flashcards`` (Phase 3, TDD D10) then did too —
-the fourth flag to make the same trip. ``analyst`` (Phase 6, TDD D12) has now
-made it a fifth: registered the same way, dogfooded dark through the whole of
-Phase 6's build-out, then flipped at launch exactly as the other four were.
+playbook from dark to launched. ``analyst`` (Phase 6, TDD D12) followed the
+same rollout pattern.
 
-**All five are now launched and default on** (AL-270, AL-370, the streaks flip,
-the flashcards flip, and the analyst flip). Their entry in :data:`FLAG_DEFAULTS`
+**All launched flags default on.** Their entry in :data:`FLAG_DEFAULTS`
 is the whole of that: a clone with no ``FEATURE_FLAG_DEFAULTS`` set — a laptop, a
 CI run, a fresh deploy — resolves them on and shows the product a learner
 actually sees. Nothing about the machinery changed, and the dark posture above is
@@ -105,12 +102,6 @@ class FeatureFlag(StrEnum):
     # independent of each other — a kill switch that only kills the surface it
     # names.
     STREAKS = "streaks"
-    # Phase 3's one flag (TDD D10): drafting, the daily queue, review and the
-    # due pill — every flashcards route, gated router-level. Off -> ``404`` on
-    # every route, and the streak union (TDD §5.5) silently loses its second
-    # signal. Its own key, independent of the three above, for the same reason
-    # they are independent of each other.
-    FLASHCARDS = "flashcards"
     # Phase 6's one flag (TDD D12): the analyst — Beats, Briefs, and every
     # route under them, gated router-level so a future route cannot forget it.
     # Off -> ``404``. Its own key, independent of the four above, for the same
@@ -140,18 +131,11 @@ FLAG_DEFAULTS: dict[FeatureFlag, bool] = {
     # with zero learner exposure while admins dogfooded it — and this flip is
     # the launch itself, exactly the move AL-270/AL-370 made for the two above.
     FeatureFlag.STREAKS: True,
-    # On: Phase 3 (flashcards) is launched. It spent its whole build-out at
-    # ``False`` (TDD D10) — that dark posture is what let every flashcards
-    # ticket, drafting through AL-410's card-management surfaces, merge and
-    # deploy with zero learner exposure while admins dogfooded drafting and
-    # review. This flip is the launch itself: the AL-270/AL-370/streaks
-    # playbook, repeated a fourth time.
-    FeatureFlag.FLASHCARDS: True,
     # On: Phase 6 (the analyst) is launched. It spent its whole build-out at
     # ``False`` (D12) — that dark posture is what let every analyst ticket
     # merge and deploy with zero learner exposure while admins dogfooded Beats
     # and Briefs via ``ADMIN_DEFAULT_FLAGS`` below. This flip is the launch
-    # itself: the AL-270/AL-370/streaks/flashcards playbook a fifth time.
+    # itself, following the same earlier launch playbook.
     FeatureFlag.ANALYST: True,
     # Off: Flow (docs/tdds/flow.md) is unbuilt-to-launched, same as every
     # phase above spent its own build-out — dark here, on for admins via
@@ -169,8 +153,7 @@ FLAG_DEFAULTS: dict[FeatureFlag, bool] = {
 # ``tutor:off`` there turns the flag off for admins too (kill switch), and a
 # per-user override beats it for everyone, admins included.
 #
-# The first five members — ``TUTOR``, ``SHAPING``, ``STREAKS``, ``FLASHCARDS``,
-# ``ANALYST`` — are **currently redundant**: a flag whose code default is
+# The launched members are **currently redundant**: a flag whose code default is
 # already ``True`` is on for admins by that default alone, and after a ``:off``
 # kill the settings map outranks this baseline anyway, so membership changes no
 # answer either way for any of them. They stay listed rather than dropped
@@ -185,7 +168,6 @@ ADMIN_DEFAULT_FLAGS: frozenset[FeatureFlag] = frozenset(
         FeatureFlag.TUTOR,
         FeatureFlag.SHAPING,
         FeatureFlag.STREAKS,
-        FeatureFlag.FLASHCARDS,
         FeatureFlag.ANALYST,
         FeatureFlag.FLOW,
     }

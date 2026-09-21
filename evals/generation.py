@@ -60,18 +60,6 @@ from aleph.agents.analyst import (
     build_analyst_agent,
     build_analyst_prompt,
 )
-from aleph.agents.flashcard import (
-    FlashcardCaps,
-    FlashcardDeps,
-    FlashcardDrafts,
-    build_flashcard_agent,
-    build_flashcard_prompt,
-    count_within_band,
-    is_non_empty,
-    restates_stem,
-    sides_differ,
-    within_word_cap,
-)
 from aleph.agents.lesson import (
     LessonCaps,
     LessonContent,
@@ -118,7 +106,6 @@ if TYPE_CHECKING:
     from evals.rubric import JudgeVerdict
 
 SEED_SET_PATH = Path(__file__).resolve().parent / "seed_set.yaml"
-FLASHCARD_SEED_SET_PATH = Path(__file__).resolve().parent / "flashcard_seed_set.yaml"
 BRIEF_SEED_SET_PATH = Path(__file__).resolve().parent / "brief_seed_set.yaml"
 #: Where `just record-retrieval-fixtures` writes, and `FixtureRetriever` reads
 #: from (Phase 6 TDD §10, AL-550): `evals/fixtures/retrieval/{beat}.yaml`.
@@ -131,11 +118,10 @@ BRIEF_FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures" / "retrieval"
 # service builds from Settings today.
 OUTLINE_CAPS = OutlineCaps()
 LESSON_CAPS = LessonCaps()
-FLASHCARD_CAPS = FlashcardCaps()
 
 # The retrieval budget the brief harness evaluates against (Phase 6 TDD §5.2/
-# §13/§10) — constructed directly, exactly the §14-style discipline
-# OUTLINE_CAPS/LESSON_CAPS/FLASHCARD_CAPS already follow, so a brief run is
+# §13/§10) — constructed directly, exactly the §14-style discipline the agent
+# caps already follow, so a brief run is
 # reproducible from the repo alone rather than from a deployment's
 # environment. Pinned equal to ``Settings()``'s own defaults by
 # ``tests/unit/test_evals_harness.py`` (mirroring
@@ -674,343 +660,12 @@ smoke_model = build_stub_model
 
 
 # =================================================================================
-# Phase 3 — the `flashcard_draft` eval kind (TDD D14, §10; PRD §6)
-# =================================================================================
-#
-# A parallel, smaller harness rather than a branch inside the one above: a card
-# is drafted from a *completed lesson*, not from a bare topic, so its task has to
-# generate an outline and a probe lesson first (exactly what ``build_generation_
-# task`` above already does for the first slot) and then hand the real,
-# freshly-generated Read passage and Quick-check stem to the flashcard agent.
-# There is no refusal branch to score here: ``flashcard_seed_set.yaml`` only ever
-# carries topics that generate (TDD §10 — the passages under test are the ones
-# the lesson evals already judge), because a refused topic has no lesson to draft
-# a card from.
-
-
-class FlashcardSeedInputs(BaseModel):
-    """One flashcard seed case: the (topic, level) of the lesson to draft from.
-
-    Deliberately the same two fields as :class:`SeedInputs` minus
-    ``expected_branch``/``full_path`` — a flashcard case is always a `generate`
-    case run to depth one, so there is nothing else for it to declare.
-    """
-
-    topic: str
-    level: Level
-
-
-class FlashcardSample(BaseModel):
-    """What one flashcard case generated: the source lesson's slot plus the cards.
-
-    The Read passage and Quick-check stem travel here too — not just the
-    drafts — because both the Layer 1 non-triviality pre-filter and the Layer 2
-    judge need them and neither has any other way to reach them (the task
-    generates a fresh lesson every run; there is no fixture to read them from).
-    """
-
-    unit_title: str
-    lesson_title: str
-    read_passage: str
-    quick_check_stem: str
-    drafts: FlashcardDrafts
-
-
-# --- Layer 1: deterministic pre-filters, shared with the agent's own validator -
-
-
-@dataclass(repr=False)
-class FlashcardInvariants(Evaluator[FlashcardSeedInputs, FlashcardSample, SeedMeta]):
-    """HARD FLOOR: every card is structurally usable.
-
-    Calls the *same* predicates :func:`aleph.agents.flashcard.
-    validate_flashcard_drafts` composes for the agent's own output
-    validator — :func:`~aleph.agents.flashcard.count_within_band`,
-    :func:`~aleph.agents.flashcard.is_non_empty`,
-    :func:`~aleph.agents.flashcard.within_word_cap`,
-    :func:`~aleph.agents.flashcard.sides_differ` — imported from
-    ``aleph.agents.flashcard`` and never re-implemented here (TDD §5.2/§10:
-    "predicates shared, not duplicated"). This is the flashcard counterpart of
-    :class:`OutlineInvariants`/:class:`LessonInvariants`: "is this generation
-    structurally usable", not "is it any good" — word caps here are also what
-    pre-filters the worst violations of PRD §6's *scope* dimension before any
-    judge spend (TDD §10's table), even though scope itself is a Layer 2,
-    ``in_scope`` judgement.
-    """
-
-    def evaluate(
-        self, ctx: EvaluatorContext[FlashcardSeedInputs, FlashcardSample, SeedMeta]
-    ) -> EvaluationReason:
-        cards = ctx.output.drafts.cards
-        caps = FLASHCARD_CAPS
-        if not count_within_band(
-            len(cards), minimum=caps.count_min, maximum=caps.count_max
-        ):
-            return EvaluationReason(
-                value=False,
-                reason=(
-                    f"{len(cards)} cards drafted, outside the "
-                    f"[{caps.count_min}, {caps.count_max}] band"
-                ),
-            )
-        for index, card in enumerate(cards, start=1):
-            if not is_non_empty(card.front):
-                return EvaluationReason(
-                    value=False, reason=f"card {index}: empty front"
-                )
-            if not is_non_empty(card.back):
-                return EvaluationReason(value=False, reason=f"card {index}: empty back")
-            if not within_word_cap(card.front, maximum=caps.front_words_max):
-                return EvaluationReason(
-                    value=False,
-                    reason=f"card {index}: front over {caps.front_words_max} words",
-                )
-            if not within_word_cap(card.back, maximum=caps.back_words_max):
-                return EvaluationReason(
-                    value=False,
-                    reason=f"card {index}: back over {caps.back_words_max} words",
-                )
-            if not sides_differ(card.front, card.back):
-                return EvaluationReason(
-                    value=False, reason=f"card {index}: back just repeats the front"
-                )
-        return EvaluationReason(value=True, reason=f"{len(cards)} card(s) within caps")
-
-
-@dataclass(repr=False)
-class FlashcardNonTriviality(Evaluator[FlashcardSeedInputs, FlashcardSample, SeedMeta]):
-    """HARD FLOOR: no card restates the lesson's Quick-check stem (PRD §6).
-
-    Delegates to :func:`aleph.agents.flashcard.restates_stem` — the *same*
-    function the flashcard agent's own output validator raises
-    ``ModelRetry`` on — so there is exactly one definition of "restates the
-    stem" between production and this harness. This is the deterministic half
-    of PRD §6's *non-triviality* dimension (TDD §10's table): the only one of
-    the four dimensions honest enough to gate on without a judge.
-    """
-
-    def evaluate(
-        self, ctx: EvaluatorContext[FlashcardSeedInputs, FlashcardSample, SeedMeta]
-    ) -> EvaluationReason:
-        stem = ctx.output.quick_check_stem
-        offenders = [
-            index
-            for index, card in enumerate(ctx.output.drafts.cards, start=1)
-            if restates_stem(card.front, stem)
-        ]
-        if offenders:
-            return EvaluationReason(
-                value=False,
-                reason=(
-                    f"card(s) {offenders} restate the lesson's Quick-check stem "
-                    f"({stem!r})"
-                ),
-            )
-        return EvaluationReason(value=True, reason="no card restates the stem")
-
-
-FLASHCARD_PREFILTERS: tuple[
-    type[Evaluator[FlashcardSeedInputs, FlashcardSample, SeedMeta]], ...
-] = (FlashcardInvariants, FlashcardNonTriviality)
-
-#: Mirrors :data:`HARD_FLOOR_EVALUATORS`: every flashcard Layer 1 pre-filter
-#: gates the run.
-FLASHCARD_HARD_FLOOR_EVALUATORS = frozenset(
-    cls.__name__ for cls in FLASHCARD_PREFILTERS
-)
-
-
-def load_flashcard_seed_set() -> Dataset[
-    FlashcardSeedInputs, FlashcardSample, SeedMeta
-]:
-    """Load ``flashcard_seed_set.yaml`` with the Layer 1 pre-filters registered."""
-    return Dataset[FlashcardSeedInputs, FlashcardSample, SeedMeta].from_file(
-        FLASHCARD_SEED_SET_PATH, custom_evaluator_types=FLASHCARD_PREFILTERS
-    )
-
-
-# --- Layer 2: the binary judge --------------------------------------------------
-
-#: The two assertions :class:`FlashcardRubricJudge` emits — mirroring
-#: :data:`JUDGE_OUTLINE`/:data:`JUDGE_SAFETY` above, one card set is one case.
-JUDGE_FLASHCARDS = "JudgeFlashcards"
-JUDGE_FLASHCARD_SAFETY = "JudgeFlashcardSafety"
-
-FLASHCARD_JUDGE_ASSERTIONS = frozenset({JUDGE_FLASHCARDS, JUDGE_FLASHCARD_SAFETY})
-
-#: The hard floor among the two: PRD §9/§10's safety rule applies to a card
-#: exactly as it applies to an outline or a lesson.
-FLASHCARD_JUDGE_HARD_FLOOR = frozenset({JUDGE_FLASHCARD_SAFETY})
-
-
-@dataclass(repr=False)
-class FlashcardRubricJudge(Evaluator[FlashcardSeedInputs, FlashcardSample, SeedMeta]):
-    """Layer 2: score every drafted card against its four applicable rubric items.
-
-    One judge call per card (TDD §10: "the judge must see the passage and the
-    card"), collapsed into the same two-assertion shape :class:`RubricJudge`
-    uses for a whole case: ``JudgeFlashcards`` is the quality signal feeding the
-    ≥ 90% rate, ``JudgeFlashcardSafety`` is the hard block, split out for the
-    same reason — a safety failure must survive being one of several failed
-    items in a combined reason string.
-    """
-
-    judge: Judge
-
-    def build_serialization_arguments(self) -> dict[str, object]:
-        """Serialize as the judge's *label*, mirroring :class:`RubricJudge`."""
-        return {"judge": self.judge.label}
-
-    async def evaluate(
-        self, ctx: EvaluatorContext[FlashcardSeedInputs, FlashcardSample, SeedMeta]
-    ) -> dict[str, EvaluationReason]:
-        sample = ctx.output
-        verdicts: list[tuple[int, JudgeVerdict]] = []
-        for index, card in enumerate(sample.drafts.cards, start=1):
-            verdict = await self.judge.judge_flashcard_draft(
-                topic=ctx.inputs.topic,
-                level=ctx.inputs.level,
-                unit_title=sample.unit_title,
-                lesson_title=sample.lesson_title,
-                read_passage=sample.read_passage,
-                front=card.front,
-                back=card.back,
-            )
-            verdicts.append((index, verdict))
-
-        failed = [
-            f"card {index}: {verdict.summary()}"
-            for index, verdict in verdicts
-            if not verdict.overall
-        ]
-        cards_reason = (
-            "; ".join(failed)
-            if failed
-            else f"{len(verdicts)} card(s) passed every rubric item"
-        )
-
-        safety_offenders: list[str] = []
-        for index, verdict in verdicts:
-            entry = verdict.verdict_for(SAFETY_ITEM)
-            if entry is not None and not entry.passed:
-                safety_offenders.append(f"card {index}: {entry.reason.strip()}")
-        safety_reason = (
-            "SAFETY FAILURE (hard block) — " + "; ".join(safety_offenders)
-            if safety_offenders
-            else "no safety-item failure"
-        )
-
-        return {
-            JUDGE_FLASHCARDS: EvaluationReason(value=not failed, reason=cards_reason),
-            JUDGE_FLASHCARD_SAFETY: EvaluationReason(
-                value=not safety_offenders, reason=safety_reason
-            ),
-        }
-
-
-#: Mirrors :data:`EVALUATOR_ASSERTIONS`: which assertion names
-#: :class:`FlashcardRubricJudge` owns, for the CLI's crashed-evaluator
-#: attribution (``evals/__main__.py``).
-FLASHCARD_EVALUATOR_ASSERTIONS: dict[str, frozenset[str]] = {
-    **{cls.__name__: frozenset({cls.__name__}) for cls in FLASHCARD_PREFILTERS},
-    FlashcardRubricJudge.__name__: FLASHCARD_JUDGE_ASSERTIONS,
-}
-
-
-# --- the task under evaluation ---------------------------------------------------
-
-
-def build_flashcard_generation_task(
-    outline_model: Model,
-    lesson_model: Model,
-    flashcard_model: Model,
-) -> Callable[[FlashcardSeedInputs], Awaitable[FlashcardSample]]:
-    """Bind the real outline/lesson/flashcard agents and return the per-case task.
-
-    Runs the outline agent, then the lesson agent for the path's first slot —
-    the same probe-lesson generation :func:`build_generation_task` runs — and
-    hands that lesson's real, freshly-generated Read passage and Quick-check
-    stem to the flashcard agent (``aleph.agents.flashcard``), via its own
-    prompt builder (:func:`~aleph.agents.flashcard.build_flashcard_prompt`) so
-    the harness sends the model exactly the prompt the service would.
-
-    Every seed case in ``flashcard_seed_set.yaml`` is expected to reach the
-    `generate` branch — a topic that refuses has no lesson to draft a card
-    from, so a refusal here is reported as an errored case rather than a
-    result to score (mirrors ``build_generation_task``'s handling of a
-    non-``PathOutline`` result, but there is no ``expected_branch`` to have
-    been wrong about: every case in this file is required to generate).
-    """
-    outline_agent = build_outline_agent()
-    lesson_agent = build_lesson_agent()
-    flashcard_agent = build_flashcard_agent()
-
-    async def run_case(inputs: FlashcardSeedInputs) -> FlashcardSample:
-        outline_run = await outline_agent.run(
-            build_outline_prompt(inputs.topic),
-            deps=OutlineDeps(level=inputs.level, caps=OUTLINE_CAPS),
-            model=outline_model,
-        )
-        increment_eval_metric("model_requests", outline_run.usage.requests)
-        outline = outline_run.output
-        if isinstance(outline, Refusal):
-            raise ValueError(
-                f"flashcard seed case {inputs.topic!r} refused at the outline "
-                "step; flashcard_seed_set.yaml must only carry topics that "
-                "generate — there is no lesson to draft a card from otherwise"
-            )
-
-        position, unit_title, lesson_title = _path_order(outline)[0]
-        lesson_deps = LessonDeps(
-            topic=inputs.topic,
-            level=inputs.level,
-            outline=outline,
-            position_in_path=position,
-            unit_title=unit_title,
-            lesson_title=lesson_title,
-            prior_passages=[],
-            caps=LESSON_CAPS,
-        )
-        lesson_run = await lesson_agent.run(
-            build_lesson_prompt(lesson_deps), deps=lesson_deps, model=lesson_model
-        )
-        increment_eval_metric("model_requests", lesson_run.usage.requests)
-        lesson: LessonContent = lesson_run.output
-
-        flashcard_deps = FlashcardDeps(
-            topic=inputs.topic,
-            level=inputs.level,
-            unit_title=unit_title,
-            lesson_title=lesson_title,
-            read_passage=lesson.read_passage,
-            quick_check_stem=lesson.quick_check.stem,
-            caps=FLASHCARD_CAPS,
-        )
-        flashcard_run = await flashcard_agent.run(
-            build_flashcard_prompt(flashcard_deps),
-            deps=flashcard_deps,
-            model=flashcard_model,
-        )
-        increment_eval_metric("model_requests", flashcard_run.usage.requests)
-
-        return FlashcardSample(
-            unit_title=unit_title,
-            lesson_title=lesson_title,
-            read_passage=lesson.read_passage,
-            quick_check_stem=lesson.quick_check.stem,
-            drafts=flashcard_run.output,
-        )
-
-    return run_case
-
-
-# =================================================================================
 # Phase 6 — the `brief` eval kind (TDD §10, AL-550; PRD §6)
 # =================================================================================
 #
-# The fourth eval kind, and structurally the odd one out: the outline/lesson and
-# flashcard_draft harnesses both generate their own context (an outline, then a
-# lesson) before judging it. A Brief's context — the documents a Beat's research
+# The third eval kind, and structurally the odd one out: outline/lesson cases
+# generate their own context before judging it. A Brief's context — the
+# documents a Beat's research
 # run actually read — cannot be generated at all: it is retrieved, and PRD §4.4's
 # whole discipline ("the analyst never cites what it did not read") only means
 # anything against real, dated, third-party text. So this harness never invents
@@ -1232,7 +887,7 @@ BRIEF_PREFILTERS: tuple[
     BriefNoveltyGate,
 )
 
-#: Mirrors :data:`HARD_FLOOR_EVALUATORS`/:data:`FLASHCARD_HARD_FLOOR_EVALUATORS`:
+#: Mirrors :data:`HARD_FLOOR_EVALUATORS`:
 #: every brief Layer 1 pre-filter gates the run.
 BRIEF_HARD_FLOOR_EVALUATORS = frozenset(cls.__name__ for cls in BRIEF_PREFILTERS)
 
@@ -1284,15 +939,14 @@ def is_placeholder_fixture(
 
 # --- Layer 2: the binary judge --------------------------------------------------
 
-#: Mirrors :data:`JUDGE_FLASHCARDS`/:data:`JUDGE_FLASHCARD_SAFETY`: one case is
-#: one Brief (or one Skipped run, which is not judged — see below).
+#: One case is one Brief (or one Skipped run, which is not judged — see below).
 JUDGE_BRIEF = "JudgeBrief"
 JUDGE_BRIEF_SAFETY = "JudgeBriefSafety"
 
 BRIEF_JUDGE_ASSERTIONS = frozenset({JUDGE_BRIEF, JUDGE_BRIEF_SAFETY})
 
 #: The hard floor among the two: PRD §9/§10's safety rule applies to a Brief
-#: exactly as it applies to an outline, a lesson, or a drafted card.
+#: exactly as it applies to an outline or lesson.
 BRIEF_JUDGE_HARD_FLOOR = frozenset({JUDGE_BRIEF_SAFETY})
 
 
@@ -1367,7 +1021,7 @@ class BriefRubricJudge(Evaluator[BriefSeedInputs, BriefSample, SeedMeta]):
         }
 
 
-#: Mirrors :data:`EVALUATOR_ASSERTIONS`/:data:`FLASHCARD_EVALUATOR_ASSERTIONS`:
+#: Mirrors :data:`EVALUATOR_ASSERTIONS`:
 #: which assertion names :class:`BriefRubricJudge` owns, for the CLI's crashed-
 #: evaluator attribution (``evals/__main__.py``).
 BRIEF_EVALUATOR_ASSERTIONS: dict[str, frozenset[str]] = {
@@ -1415,10 +1069,8 @@ def build_brief_generation_task(
     live run would build, for anyone reading the report.
 
     A researcher `Refusal` is not a shape ``brief_seed_set.yaml`` should ever
-    produce — every case is a legitimate, moving subject a Beat may Beat on
-    (mirrors ``build_flashcard_generation_task``'s own "every case must
-    generate" contract) — so it is reported as an errored case rather than a
-    result to score, exactly as that function's own docstring reasons.
+    produce — every case is a legitimate, moving subject a Beat may Beat on —
+    so it is reported as an errored case rather than a result to score.
     """
     researcher_agent = build_researcher_agent()
     analyst_agent = build_analyst_agent()

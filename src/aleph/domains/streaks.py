@@ -7,12 +7,6 @@ sees a row, a session, or a timezone: by the time a set of dates reaches
 :func:`compute_streaks`, "what day is this" has already been decided, once, by
 ``services/progress_read.py`` (§5.3) — the domain only ever sees the answer.
 
-That indirection is about to pay again. **Phase 3 widens Active day** to "a day
-the learner completed a lesson *or* reviewed a flashcard" (Phase 3 PRD §4.9),
-and nothing here changes: this function takes the set, not its provenance, so
-the second signal is a union assembled one layer up. The *global* streak gains
-it; the per-path streak does not (a card belongs to the learner, not a path).
-
 **A port of habagou's ``compute_streaks``**, with the daily target collapsed to
 1 (PRD §4.5): habagou's version takes a ``Mapping[date, int]`` and compares each
 day's count to a configurable target; here the target *is* set membership, so

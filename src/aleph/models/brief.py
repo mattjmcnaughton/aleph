@@ -60,7 +60,7 @@ class Brief(Base, UUIDAuditMixin):
     Brief #4" is the highest-numbered published Brief below this one — a
     ``WHERE number < :n ORDER BY number DESC LIMIT 1`` read, not a stored edge
     that could disagree with the numbering. Carries **no**
-    ``relationship()`` attributes either, the ``models/flashcard.py``
+    ``relationship()`` attributes either, following the repository-oriented
     precedent — every read this phase needs is a repository-level ``select``
     scoped by ``beat_id`` on the row itself.
     """

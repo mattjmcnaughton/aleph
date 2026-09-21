@@ -2,6 +2,8 @@
 
 import asyncio
 
+import pytest
+
 from aleph.app import create_app
 from aleph.routers.health import healthz
 
@@ -39,3 +41,26 @@ def test_production_app_exposes_no_e2e_route() -> None:
         str(getattr(route, "path", "")).startswith("/__e2e__")
         for route in app.router.routes
     )
+
+
+@pytest.mark.anyio
+async def test_e2e_retrieval_gate_holds_only_its_topic_and_preserves_failure() -> None:
+    from aleph.services.retrieval import RetrievalUnavailableError
+    from scripts.e2e_backend import ControlledRetriever
+
+    retriever = ControlledRetriever()
+    topic = "[force-retrieval-failure] held topic"
+    retriever.hold(topic)
+    pending = asyncio.create_task(retriever.search([f"{topic} news"]))
+    try:
+        await asyncio.sleep(0)
+        assert not pending.done()
+        assert await retriever.search(["unrelated topic news"])
+        retriever.release(topic)
+        with pytest.raises(RetrievalUnavailableError):
+            await asyncio.wait_for(pending, timeout=1)
+        # Release removes the gate; later runs cannot hang behind stale state.
+        with pytest.raises(RetrievalUnavailableError):
+            await asyncio.wait_for(retriever.search([topic]), timeout=1)
+    finally:
+        pending.cancel()

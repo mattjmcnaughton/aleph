@@ -23,30 +23,7 @@ never shown that item and :func:`validate_verdict` rejects a verdict whose item
 set is not exactly the applicable one. All six items are exercised on every
 lesson, which is where the Quick check actually lives.
 
-**`flashcard_draft` is the third kind** (Phase 3 TDD D14/§10) — the first actual
-extension of this axis: ``tutor_reply`` (Phase 2 D11) and ``path_proposal``
-(Phase 2B D13) were named as future kinds but never shipped one. A drafted card
-is judged on four items — ``accurate``, ``level_appropriate``, ``in_scope``,
-``safe`` — never six: ``continuous`` is a property of a lesson's place in a
-path, which a card standing alone (PRD §4.1: owned by the learner, outliving
-its source lesson) does not have, and ``check_validity`` is a property of a
-Quick check, which a card is deliberately not (CONTEXT.md: **Flashcard** — "not
-a Quick check: no options, no explanation"). Both are **omitted, not
-auto-passed** — the same discipline ``check_validity`` gets for an outline.
-No sixth or seventh :data:`RubricItem` is added for it: the ``Literal`` is
-shared across every kind, so a new item would change what the outline and
-lesson judges are asked too, and :data:`ARTIFACT_NOTES` is exactly the
-mechanism for saying what an existing item means for a new artifact — used
-below for ``accurate`` (grounding in the Read passage) and ``in_scope`` (one
-fact per card, and a back that stands alone — PRD §6's *scope* and
-*independence*, folded into the one item that already means "the right size
-and shape for what it is"). PRD §6's *non-triviality* — a card must not restate
-the Quick check's stem — is answered entirely in Layer 1
-(:func:`aleph.agents.flashcard.restates_stem`, TDD §10): it is the one
-dimension of the four that is honestly deterministic, so it never reaches the
-judge at all.
-
-**`brief` is the fourth kind** (Phase 6 TDD §10, AL-550; ``brief_findings``
+**`brief` is the third kind** (Phase 6 TDD §10, AL-550; ``brief_findings``
 stays deferred, PRD §7.1). Judged on five items — ``accurate``,
 ``level_appropriate``, ``in_scope``, ``continuous``, ``safe`` — never six:
 ``check_validity`` is **omitted, not auto-passed**, on the outline's own
@@ -79,11 +56,10 @@ if TYPE_CHECKING:
 #: per lesson ... plus the outline at path level" — the Read passage and the
 #: Quick check are judged together as one *lesson*: items 4 and 5 are about how
 #: they relate to each other and to the lessons before them, so splitting them
-#: would score half a rubric twice. ``flashcard_draft`` is the Phase 3 addition
-#: (D14/§10, module docstring): one drafted card, judged on four of the six
-#: items. ``brief`` is the Phase 6 addition (TDD §10, AL-550): one published
+#: would score half a rubric twice. ``brief`` is the Phase 6 addition
+#: (TDD §10, AL-550): one published
 #: Brief, judged on five.
-ArtifactKind = Literal["outline", "lesson", "flashcard_draft", "brief"]
+ArtifactKind = Literal["outline", "lesson", "brief"]
 
 #: The rubric's six item ids (PRD §9, in the PRD's order).
 RubricItem = Literal[
@@ -142,8 +118,7 @@ RUBRIC: dict[RubricItem, str] = {
 }
 
 #: The items each artifact is judged on. See the module docstring for why the
-#: outline is judged on five (no Quick check to validate) and a flashcard draft
-#: on four (no path position to be continuous *in*, and no Quick check either).
+#: outline is judged on five (no Quick check to validate).
 APPLICABLE_ITEMS: dict[ArtifactKind, tuple[RubricItem, ...]] = {
     "outline": (
         "accurate",
@@ -153,12 +128,6 @@ APPLICABLE_ITEMS: dict[ArtifactKind, tuple[RubricItem, ...]] = {
         "safe",
     ),
     "lesson": ALL_ITEMS,
-    "flashcard_draft": (
-        "accurate",
-        "level_appropriate",
-        "in_scope",
-        "safe",
-    ),
     "brief": (
         "accurate",
         "level_appropriate",
@@ -189,26 +158,6 @@ ARTIFACT_NOTES: dict[ArtifactKind, dict[RubricItem, str]] = {
             "For a lesson: judge it against the Read passages of lessons "
             "1..N-1, which are given to you in full. Lesson 1 has none, so it "
             "is continuous as long as it assumes no unintroduced concept."
-        ),
-    },
-    "flashcard_draft": {
-        "accurate": (
-            "For a flashcard: judge it against the Read passage it was drafted "
-            "from, given to you in full below. Every claim on the front and the "
-            "back must be answerable from that passage alone — nothing invented "
-            "and nothing brought in from outside it (Phase 3 PRD §6: "
-            "grounding)."
-        ),
-        "in_scope": (
-            "For a flashcard, two things at once. One fact per card (PRD §6: "
-            "scope) — a front or back that joins two or three claims with "
-            "'and' fails this even if every clause is true; give each fact its "
-            "own card instead. And the back must stand on its own, read months "
-            "from now with no lesson in front of the learner (PRD §6: "
-            "independence, since §4.11 guarantees the card outlives it) — a "
-            "back that points back into the passage ('as described above', "
-            "'as mentioned in the lesson') fails this even if the front is "
-            "fine."
         ),
     },
     "brief": {

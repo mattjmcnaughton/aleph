@@ -1,5 +1,9 @@
 # TDD — Phase 5, slice 1: Streaks
 
+> **Current amendment:** The live progress reader derives Daily and Best streaks only from lesson
+> completions. The former review-day union and its stored source data were removed; no Brief-read
+> union replaces it. Path streak behavior is unchanged. Earlier amendments below are archival.
+
 **Status:** Draft · **Owner:** solo builder · **Companion to:** [Phase 5 streaks PRD](../prds/phase-5-streaks.md)
 **References:** [`roadmap.md`](../roadmap.md) · [`CONTEXT.md`](../CONTEXT.md) · [Phase 1 TDD](phase-1-path-generation.md) · [Phase 2B TDD](phase-2b-shape-your-path.md) · [`metrics.md`](../metrics.md) · prior art: habagou `domains/streaks.py`, `services/progress.py`
 

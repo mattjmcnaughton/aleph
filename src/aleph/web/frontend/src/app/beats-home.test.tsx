@@ -10,7 +10,7 @@ import { App } from "./app";
 // The home Beats section (PRD §3/§4.10, TDD §8, AL-530): a section **beside**
 // "Your paths", never merged — the same card grammar (title, a line of
 // state) with a different verb. Driven end to end through the real router,
-// TanStack Query, and MSW — `streaks.test.tsx`'s / `flashcards-home.test.tsx`'s
+// TanStack Query, and MSW — the existing home-surface test pattern
 // own seam for a home decoration behind a flag.
 
 const analystSession: AuthSession = {

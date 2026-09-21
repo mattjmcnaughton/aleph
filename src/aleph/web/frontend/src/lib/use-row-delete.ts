@@ -1,21 +1,6 @@
-// The shared delete state machine behind every "confirm → DELETE → gone" row
-// in this app — the switcher's paths (`use-delete-path.ts`) and `/cards`'
-// cards (`use-delete-card.ts`). The two used to be near-verbatim copies of
-// each other (same `confirmingId`/`failedId` fields, same `ask`/`cancel`/
-// `confirm`/`isDeleting`/`isErrored` shape, same `isNotFound` → success
-// folding) with nothing forcing their state machines to agree once one of
-// them changed — this is that one machine, factored out so there is exactly
-// one place to get "one row confirming at a time" and "a 404 on delete is a
-// success, not a failure" right.
-//
-// What differs between the two call sites — and stays with them rather than
-// moving here — is exactly what happens once the server has confirmed a row
-// is gone: an optimistic list filter plus an evicted detail query for a path
-// (there is one cached list to filter in place), a single
-// `invalidateQueries({queryKey: FLASHCARDS_QUERY_PREFIX})` for a card (there
-// is not — `/cards` reads through `useInfiniteQuery`, page count unknown to
-// any hook). That is `settle`: this hook calls it once, after a `204` or a
-// folded `404`, and never touches the query client itself.
+// Shared state machine for a "confirm → DELETE → gone" row. It owns the
+// confirmation and failure state and treats a 404 as success. The caller's
+// `settle` callback owns cache updates after deletion is confirmed.
 
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";

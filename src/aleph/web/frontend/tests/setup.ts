@@ -3,12 +3,10 @@ import { cleanup } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, vi } from "vitest";
 import { resetBeats } from "../src/mocks/beats";
 import { resetFlowCelebrations } from "../src/lib/flow-celebration";
-import { resetFlashcards } from "../src/mocks/flashcards";
 import { resetLessons } from "../src/mocks/lessons";
 import { resetPaths } from "../src/mocks/paths";
 import { resetProgress } from "../src/mocks/progress";
 import { server } from "../src/mocks/server";
-import { resetSettings } from "../src/mocks/settings";
 import { resetShaping } from "../src/mocks/shaping";
 import { resetTutor } from "../src/mocks/tutor";
 
@@ -38,9 +36,7 @@ afterEach(() => {
   resetTutor();
   resetShaping();
   resetProgress();
-  resetFlashcards();
   resetBeats();
-  resetSettings();
   // A Flow record (lib/flow.ts) lives in sessionStorage, not the MSW store —
   // nothing else here resets it, so a flow written by one test would
   // otherwise still be sitting there for the next.

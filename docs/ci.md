@@ -152,8 +152,8 @@ own matching browser, so that local branch is skipped.
 They drive the SPA the way a learner does: real sign-in, real server, real
 Postgres, stub model. The conventions below were set by Phase 1's `@w1`..`@w8`
 and hold for the tutor's (`@w9`, `@w11`..`@w16`), shaping's (`@w17`..`@w21`),
-streaks' (`@w22`, `@w23`), flashcards' (`@w24`..`@w28`), and the analyst's
-(`@w29`, `@w31` — W30/W32/W33 are integration cases instead, PRD §7.1)
+streaks' (`@w22`, `@w23`) and the analyst's (`@w29`, `@w31` — W30/W32/W33 are
+integration cases instead, PRD §7.1)
 journeys too.
 
 - **Auth is real, not injected.** `auth.setup.ts` drives `/auth/login` → the

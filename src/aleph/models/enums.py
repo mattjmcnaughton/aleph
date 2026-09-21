@@ -106,20 +106,6 @@ class LessonGenerationState(StrEnum):
     FAILED = "failed"
 
 
-class FlashcardGrade(StrEnum):
-    """A learner's response to a flashcard review (Phase 3 TDD §4).
-
-    Distinct from :class:`aleph.domains.scheduling.Grade` — that is the *pure*
-    domain's enum (stdlib only, no ORM); this is the column's stored value.
-    Two members only, the fixed ladder's whole vocabulary (Phase 3 PRD §4.6):
-    ``again`` demotes and resurfaces the card later the same day, ``got_it``
-    promotes it to its next interval (Phase 3 TDD §5.1).
-    """
-
-    AGAIN = "again"
-    GOT_IT = "got_it"
-
-
 class BeatResearchState(StrEnum):
     """A Beat's research run state (Phase 6 TDD §4/D3).
 
@@ -146,18 +132,3 @@ class BriefKind(StrEnum):
 
     PUBLISHED = "published"
     SKIPPED = "skipped"
-
-
-class FlashcardDraftRunState(StrEnum):
-    """A lesson's drafting-run state (Phase 3 TDD §4/D7).
-
-    One sparse row per *drafted* lesson: ``generating`` -> ``generated``, with
-    ``failed`` as the retryable branch (re-claimable via the ``WHERE state =
-    'failed' OR started_at < :stale_cutoff`` arm of the claim). There is no
-    ``ungenerated`` member — unlike a lesson, a row only exists once drafting
-    has actually been triggered.
-    """
-
-    GENERATING = "generating"
-    GENERATED = "generated"
-    FAILED = "failed"

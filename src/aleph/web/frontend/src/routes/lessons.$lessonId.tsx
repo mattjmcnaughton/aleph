@@ -1,9 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import {
-  FLASHCARDS_QUERY_PREFIX,
-  type FlashcardDrafts,
   type LessonAttempt,
   type LessonDetail,
   type PathDetail,
@@ -15,27 +13,20 @@ import {
   type QuickCheck,
   attemptLesson,
   completeLesson,
-  flashcardDraftsQueryKey,
-  flashcardDraftsQueryOptions,
   generateLesson,
-  isFlashcardDraftsTerminal,
   isLessonViewTerminal,
   isNotFound,
-  isRateLimited,
-  keepFlashcardDrafts,
   lessonQueryKey,
   lessonQueryOptions,
   pathQueryOptions,
   pathsListQueryOptions,
   progressSummaryQueryOptions,
-  triggerFlashcardDrafts,
 } from "../lib/api";
 import { Breadcrumbs } from "../components/breadcrumbs";
 import { FlowAdvanceCard } from "../components/flow/flow-advance-card";
 import { FlowBar } from "../components/flow/flow-bar";
 import { Markdown } from "../components/markdown";
 import { PathCompleteCard, localDaySpan } from "../components/path-complete";
-import { DraftList } from "../components/review/draft-list";
 import { Sidebar, SwitcherSection, OutlineSection } from "../components/sidebar";
 import {
   CheckIcon,
@@ -50,7 +41,6 @@ import {
 import { TutorMark, TutorRail } from "../components/tutor/tutor-rail";
 import { useTutorRail } from "../components/tutor/use-tutor-rail";
 import { Workspace } from "../components/workspace";
-import { useFeatureFlag } from "../lib/feature-flags";
 import {
   type FlowCompletion,
   type FlowRecord,
@@ -61,7 +51,6 @@ import {
 } from "../lib/flow";
 import { advanceRecord, eligiblePaths, pickNext } from "../lib/flow-order";
 import { makePollingRefetchInterval } from "../lib/polling";
-import { useSettings } from "../lib/settings";
 import { useRetryGeneration } from "../lib/use-retry-generation";
 
 export const Route = createFileRoute("/lessons/$lessonId")({
@@ -239,108 +228,6 @@ function LessonView() {
   // below has to no-op on.
   const progressSummaryKey = progressSummaryQueryOptions(true).queryKey;
 
-  // Flashcards (Phase 3 TDD §5.2/§8, AL-400): the drafts block below the
-  // completion state. Drafting now starts on lesson *open* rather than lesson
-  // *complete* (D5), so the poll and the render each need their own gate —
-  // one condition used to cover both, which conflated "is there a run to poll
-  // for" with "should the drafts block show":
-  //
-  // * poll gate: generated + unlocked. `generated` is the client's half of the
-  //   guard the trigger route enforces server-side (`409
-  //   lesson_not_generated`); `!== "locked"` is the client's alone — the route
-  //   does not check unlock state, so this gate is stricter than the server's,
-  //   not a mirror of it. Polling before that would only ever answer
-  //   `not_started`, since no run has been (or can be) claimed yet.
-  // * render gate: unchanged in effect — still `complete` only (mock screen 01:
-  //   the proposal is shown only once the learner has finished the lesson, even
-  //   though drafting itself has been running underneath since open). Written
-  //   as a narrowing of the poll gate so the two cannot drift: there is nothing
-  //   to render that the poll did not fetch.
-  const flashcardsEnabled = useFeatureFlag("flashcards");
-  // Auto-draft (CONTEXT.md: Settings): off means neither the open-time
-  // effect nor the completion re-fire below may start drafting on its own —
-  // the learner asks from the completed lesson instead (`DraftList`'s
-  // `onDraft`). The poll and the render gates are untouched by it: a lesson
-  // whose drafting the learner *did* ask for still needs both.
-  const { auto_draft_flashcards: autoDraft } = useSettings();
-  const draftsPollEnabled =
-    flashcardsEnabled &&
-    detail?.generation_state === "generated" &&
-    detail.unlock_state !== "locked";
-  const draftsEnabled = draftsPollEnabled && detail?.unlock_state === "complete";
-  const draftsQuery = useQuery({
-    ...flashcardDraftsQueryOptions(lessonId, draftsPollEnabled),
-    refetchInterval: makePollingRefetchInterval({ isTerminal: isFlashcardDraftsTerminal }),
-  });
-
-  // Idempotent (D7 — a second `POST` while generating/generated is a no-op
-  // `202`), which is what makes it safe to fire from a mount effect that may
-  // itself re-run (StrictMode's double-invoke) and from the belt-and-braces
-  // re-fire below. Also the retry affordance the drafts block offers on a
-  // `failed` run (§5.6).
-  const triggerDraftsMutation = useMutation({
-    mutationFn: () => triggerFlashcardDrafts(lessonId),
-    // The poll's first `GET` on a freshly-opened lesson reads `not_started`
-    // (no `flashcard_draft_runs` row yet), which `isFlashcardDraftsTerminal`
-    // treats as terminal — nothing to keep polling for until a run exists. A
-    // successful trigger is what creates one, so this invalidation is what
-    // kicks the poll back into motion to observe `generating` next. A
-    // `failed` run is separately terminal to the same `refetchInterval`, so a
-    // retry (the drafts block's own affordance, §5.6) needs this same nudge.
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: flashcardDraftsQueryKey(lessonId) });
-    },
-  });
-
-  // Fire the trigger once per lesson, the first time it reads generated +
-  // unlocked with the flag on (AL-400: drafting starts on open, not on
-  // completion).
-  //
-  // The ref holds the lesson id it last fired for, **not** a bare `true`:
-  // TanStack Router re-renders this route with new params rather than
-  // remounting it, so a per-instance flag would latch on the first lesson and
-  // never re-arm — every lesson reached through the prev/next footer or the
-  // sidebar outline would silently skip open-time drafting. Keying by
-  // `lessonId` keeps the StrictMode double-invoke protection (same instance,
-  // same id → one `POST`) while still re-arming across a navigation.
-  //
-  // The `reset()` is part of the same re-arm: `triggerRateLimited` /
-  // `triggerErrored` below read this one shared mutation, so without it a
-  // `429` on the previous lesson would still be rendering its notice under
-  // the next lesson's untouched `not_started`.
-  const draftsTriggeredForRef = useRef<string | null>(null);
-  const triggerDrafts = triggerDraftsMutation.mutate;
-  const resetTriggerDrafts = triggerDraftsMutation.reset;
-  useEffect(() => {
-    if (!draftsPollEnabled || !autoDraft || draftsTriggeredForRef.current === lessonId) {
-      return;
-    }
-    draftsTriggeredForRef.current = lessonId;
-    resetTriggerDrafts();
-    triggerDrafts();
-  }, [draftsPollEnabled, autoDraft, lessonId, triggerDrafts, resetTriggerDrafts]);
-
-  // TDD §5.6's two frontend-owned failure rows (ticket 3): a capped or
-  // not-yet-generated trigger never claims a run, so the poll it fired for is
-  // stuck at `not_started` with nothing else to distinguish it from silence.
-  // `DraftList` renders one line beside that state off these two booleans.
-  const triggerRateLimited =
-    triggerDraftsMutation.isError && isRateLimited(triggerDraftsMutation.error);
-  const triggerErrored = triggerDraftsMutation.isError && !triggerRateLimited;
-
-  const keepDraftsMutation = useMutation({
-    mutationFn: (keptIds: string[]) => keepFlashcardDrafts(lessonId, keptIds),
-    onSuccess: () => {
-      // Every draft is gone from the poll's own payload after a keep (D6) —
-      // kept ones moved into the schedule, the rest deleted outright — so the
-      // block disappears without waiting on a refetch.
-      queryClient.setQueryData<FlashcardDrafts>(flashcardDraftsQueryKey(lessonId), (old) =>
-        old ? { ...old, cards: [] } : old,
-      );
-      void queryClient.invalidateQueries({ queryKey: FLASHCARDS_QUERY_PREFIX });
-    },
-  });
-
   const attemptMutation = useMutation({
     mutationFn: ({ id, index }: { id: string; index: number }) => attemptLesson(id, index),
     // Fold the reveal into the cached detail so everything derives from one
@@ -408,34 +295,6 @@ function LessonView() {
         };
       });
       void queryClient.invalidateQueries({ queryKey: PROGRESS_QUERY_PREFIX });
-
-      // Flashcards (Phase 3 TDD D5/§8, AL-400): drafting is triggered off
-      // lesson *open* now (the effect above), not off this completion — by the
-      // time a learner reaches Mark complete, drafting has usually been running
-      // for as long as the lesson took to read. This is a belt-and-braces
-      // re-fire, covering a lesson opened before this shipped and an open-time
-      // trigger that never landed.
-      //
-      // Phrased as "fire unless a run demonstrably exists" rather than "fire if
-      // the poll says `not_started`": `data` is `undefined` while the drafts
-      // `GET` has never succeeded, and a blip that drops the open-time `POST`
-      // tends to drop that `GET` with it (same connection). Keying on
-      // `not_started` alone would skip the re-fire in exactly the case it
-      // exists for, and `DraftList` renders nothing on `undefined`, so the
-      // learner would get silence. Idempotent (D7), so the happy-path `POST`
-      // this occasionally duplicates costs nothing.
-      //
-      // Gated on Auto-draft too: with it off, "not yet drafted" at completion
-      // is the learner's choice, not a dropped request.
-      const draftsState = draftsQuery.data?.state;
-      if (
-        flashcardsEnabled &&
-        autoDraft &&
-        draftsState !== "generating" &&
-        draftsState !== "generated"
-      ) {
-        triggerDraftsMutation.mutate();
-      }
 
       // The advance (flow TDD §5.3, steps 1-5). Only when this completion is
       // the flow's own current lesson — a revisit-complete of an
@@ -635,30 +494,6 @@ function LessonView() {
           flowAdvance={flowAdvance}
         />
       )}
-
-      {/* Below the completion state (PRD §3, mock screen 01) — never above
-          it, so a failed draft never reads as the lesson itself having gone
-          wrong. `DraftList` returns null on every non-actionable state
-          (undefined, `generating`, `failed` with no retry yet pressed, or
-          `generated` with nothing left to keep), so this costs nothing when
-          there is nothing to show. Suppressed entirely inside a flow (D7) —
-          drafting still runs in the background (the open-time trigger above is
-          untouched), but the keep/discard moment waits for the receipt, where
-          `FlowDrafts` renders the whole flow's batch at once. */}
-      {draftsEnabled && !inFlow ? (
-        <DraftList
-          drafts={draftsQuery.data}
-          onKeep={(keptIds) => keepDraftsMutation.mutate(keptIds)}
-          keeping={keepDraftsMutation.isPending}
-          keepErrored={keepDraftsMutation.isError}
-          onRetry={() => triggerDraftsMutation.mutate()}
-          retrying={triggerDraftsMutation.isPending}
-          triggerRateLimited={triggerRateLimited}
-          triggerErrored={triggerErrored}
-          onDraft={autoDraft ? undefined : () => triggerDraftsMutation.mutate()}
-          drafting={triggerDraftsMutation.isPending}
-        />
-      ) : null}
 
       {detail && readyPathDetail ? (
         <LessonNav pathDetail={readyPathDetail} currentPosition={detail.position_in_path} />

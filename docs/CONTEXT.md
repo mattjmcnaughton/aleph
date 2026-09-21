@@ -8,11 +8,9 @@ synonym (say **path**, not "course"; **Quick check**, not "quiz question").
 > generation mechanics, model slots), **the Phase 2 PRD** (the tutor), **the Phase 2 TDD**
 > (the tutor model slot, reply transport), **the Phase 2B PRD** (shaping), **the Phase 5
 > streaks PRD** (Daily streak, Path streak, Active day, Best streak — pulled forward, see the
-> phase-boundary note below), **the Phase 3 PRD** (which widened **Active day** to count a
-> review, and owns the Retention section below), **and the Phase 6 PRD** (which owns The
-> analyst section, and widens **Active day** a second time — to count reading a Brief —
-> against a phase that is now **shipped and launched, see the phase-boundary note
-> below**). References:
+> phase-boundary note below), **and the Phase 6 PRD** (which owns The analyst section).
+> Phase 3's retired flashcard vocabulary remains in its archived PRD/TDD, not in this current
+> vocabulary. References:
 > [`README.md`](../README.md) · [`roadmap.md`](roadmap.md) ·
 > [Phase 1 PRD](prds/phase-1-path-generation.md) · [Phase 1 TDD](tdds/phase-1-path-generation.md) ·
 > [Phase 2 PRD](prds/phase-2-tutor.md) · [Phase 2 TDD](tdds/phase-2-tutor.md) ·
@@ -68,9 +66,9 @@ synonym (say **path**, not "course"; **Quick check**, not "quiz question").
 | **Progress** | The persisted record of which lessons/units are complete, per path, per account. |
 | **Switcher** | The "Your paths" UI for moving between a learner's multiple paths, each keeping its own progress. |
 | **Delete path** | Removing a path and its progress (confirmed, not undoable in MVP). Doubles as **reset**: with no regenerate, deleting and creating anew is how a learner discards an unsatisfying path. |
-| **Active day** | A calendar day, in the learner's local timezone, on which the learner did **at least one** of: completed a lesson, reviewed a flashcard, or **read a Brief**. Those are the three signals a streak counts — not a view, not an Attempt on its own, not drafting or keeping a card, and never a Brief merely *arriving* (Phase 6 PRD §4.9: a streak that advanced because a background task ran would measure our uptime, not the learner). Membership in the set of Active days *is* the daily target, so there is no separate goal concept. **Widened twice**: by the Phase 3 PRD (§4.9) to count a review — lesson completion alone through Phase 5, live with Phase 3's launch — and by the Phase 6 PRD (§4.9) to count a Brief read. **The third signal is decided and the Brief-reading machinery is now built, but the streak union itself stays deferred** (Phase 6 TDD D11: `services/progress_read.py` is untouched by design). Reading a Brief stamps `briefs.read_at` and fires a `brief_read` product event, but nothing feeds either into a streak computation yet, so a Brief read still moves no live streak — re-entry cost is one `UNION` arm in Phase 5 §5.2's query. |
-| **Daily streak** | The learner's **global** streak: the count of consecutive Active days, across every path, ending today — or ending yesterday if today is still empty, so it does not break at midnight (Phase 5 PRD §4.4). *The* streak: the one with the flame and the celebration. Derived, never stored (Phase 5 TDD D1) — from `lessons.completed_at`, **union**ed with reviews now that Phase 3 has shipped, and to be unioned with Brief reads once the streak union is wired (deferred, Phase 6 TDD D11 — the analyst itself is built). |
-| **Path streak** | The same run-of-consecutive-Active-days count, scoped to one path's **lesson completions** instead of every path's. Deliberately narrower than the Daily streak: neither reviews nor Brief reads count toward it — a flashcard belongs to the learner rather than to a path (Phase 3 PRD §4.1) and an orphaned card has no path to credit, and a **Beat** is not a path at all (Phase 6 PRD §4.9), so neither has a path to credit. A quieter stat, shown on the home list and deliberately not celebrated — with multiple paths a learner naturally alternates, which is the **Breadth** metric working, and a per-path streak breaks every time they do (Phase 5 PRD §4.3). |
+| **Active day** | A calendar day, in the learner's local timezone, on which the learner completed at least one lesson. A view or an Attempt on its own does not count. Reading a **Brief** does not count. Membership in the set of Active days *is* the daily target, so there is no separate goal concept. |
+| **Daily streak** | The learner's **global** streak: the count of consecutive Active days, across every path, ending today — or ending yesterday if today is still empty, so it does not break at midnight (Phase 5 PRD §4.4). *The* streak: the one with the flame and the celebration. Derived, never stored, from lesson completion dates. Historical review-only activity was intentionally discarded when flashcards were retired, so a learner's historical value may be lower than it was before that removal. |
+| **Path streak** | The same run-of-consecutive-Active-days count, scoped to one path's lesson completions. Its semantics are unchanged: a quieter stat, shown on the home list and deliberately not celebrated — with multiple paths a learner naturally alternates, which is the **Breadth** metric working, and a per-path streak breaks every time they do (Phase 5 PRD §4.3). |
 | **Best streak** | The longest run of consecutive Active days ever recorded — global or per path, matching whichever streak it sits beside — including a run that is not the current one. Renders only when it exceeds the current streak (Phase 5 TDD §14 R5). |
 
 ## The tutor
@@ -116,28 +114,11 @@ Phase 2B vocabulary — the tutor that changes the path, on instruction only. Sp
 | **Change history** | The read-only, plain-language record of every Change on a path, visible from the shaping rail. |
 | **Declined edit** | The tutor's graceful reply to an out-of-vocabulary ask (remove, reorder, revise engaged work, touch progress): names what shaping can do. Distinct wording from both failure and safety refusal. |
 
-## Retention (Phase 3)
-
-Phase 3 vocabulary — the loop that turns a read lesson into something remembered: draft, keep,
-schedule, review. Built and launched, behind the `flashcards` flag; see the phase-boundary note at
-the foot of this document. Spec: [Phase 3 PRD](prds/phase-3-flashcards.md) ·
-[Phase 3 TDD](tdds/phase-3-flashcards.md).
-
-| Term | Meaning |
-| --- | --- |
-| **Flashcard** | A front/back pair generated from a lesson's Read passage. Owned by the learner, not the lesson that produced it (Phase 3 PRD §4.1) — the source lesson is kept only as a citation, so shaping, a Revision, or deletion never takes the card down with it. Not a Quick check: no options, no explanation, and it enters a review schedule instead of ending a lesson. |
-| **Draft** | One of 3–5 AI-proposed cards **drafted when a lesson opens, offered when it completes** (while **Auto-draft** is on — the default; off, drafting waits for the learner to ask from the completed lesson — see Settings below) — front and back, kept by default with a per-card discard toggle (`Aleph drafted 4 cards`). The split is deliberate: drafting takes seconds and reading takes minutes, so starting at open means the cards are already waiting at the completion rather than behind a spinner (Phase 3 TDD D5). A row in `flashcards` with `kept_at IS NULL` (Phase 3 TDD D6); unsaved until kept — a discarded Draft is deleted outright, never archived (Phase 3 PRD §3, §4.2). |
-| **Kept card** | A Draft the learner explicitly kept, via `Keep N cards`. Enters the spaced-repetition ladder at **rung 0**, due **tomorrow** — never today, which falls out of entering at rung 0 with no case coded to say so (Phase 3 TDD §5.1). `Got it` promotes it a rung; `Again` demotes it (see **Lapse**); the top rung is a fixed point, so a mature card settles at a wide interval rather than growing without bound. |
-| **Due** | A Kept card whose `due_on` has arrived: on or before the end of the learner's local day. The candidate pool the Daily queue draws from — being Due is necessary to be reviewed today, not sufficient, since the cap can leave it waiting. |
-| **Daily queue** | The learner's capped set of cards to review today, spanning every path — a path is a filter on it, never a second queue (Phase 3 PRD §4.3). All Due cards when there are 10 or fewer; otherwise the **7 most overdue plus 3 drawn at random** from the rest — anti-starvation, not top-up, since a not-yet-due card is never pulled forward (Phase 3 PRD §4.4). Derived, never stored: decided once, on the first request of the learner's local day, and stable for the rest of it — grading and reloading never re-roll it (Phase 3 PRD §4.5, TDD D3). Home and the app bar show only its size; the true backlog is never displayed (Phase 3 PRD §4.8). |
-| **Review** | The learner grading a Kept card in the review session: front, reveal, then one of two grades — **Again** or **Got it** — the fixed ladder this phase ships instead of the four-way Again/Hard/Good/Easy grading the roadmap once promised (Phase 3 PRD §4.6). Not an **Attempt** — that term stays a Quick check's. **Streak union:** a Review counts toward the **Daily streak**, the global one, and never toward the **Path streak** (Phase 3 PRD §4.9 — see both above). |
-| **Lapse** | An **Again** grade: demotes the card one rung (floor 0) and sets `due_on` to **today**, so the card re-shows later the **same day** rather than tomorrow. Never costs the Daily queue a slot — the cap counts distinct cards, and a re-shown Lapse is not a new one (Phase 3 PRD §4.7, TDD D8). |
-
 ## The analyst (Phase 6)
 
 Phase 6 vocabulary — the second pillar, beside paths: a subject that is still moving, reported
 on as it moves. **Built and launched, behind the `analyst` flag**, which now defaults **on**
-having run the same dark-then-flip playbook as `tutor`/`shaping`/`streaks`/`flashcards`;
+having run the same dark-then-flip playbook as earlier flagged phases;
 `FEATURE_FLAG_DEFAULTS=analyst:off` remains the kill switch, outranking the code default with
 no deploy and reaching admins too; see the phase-boundary note at the foot of this document.
 Spec: [Phase 6 PRD](prds/phase-6-analyst.md), [Phase 6 TDD](tdds/phase-6-analyst.md).
@@ -178,19 +159,6 @@ of this document. Spec: [Flow TDD](tdds/flow.md), mock: [Flow mode](mocks/aleph-
 | **Session** | A run of learner activity with no gap longer than 30 minutes. Used in metrics. |
 | **Day** | A calendar day in the learner's local timezone. Used in metrics ("second distinct day"). |
 
-## Settings
-
-The learner's own controls over their experience — distinct from feature flags, which are the
-operator's (defined in code, overridden per learner only by an admin, a kill switch mid-incident).
-A setting is the learner's to change, always honoured, and never resolved through an admin
-baseline. Defined in code (`services/user_settings.py`), stored only once changed, read from the
-session probe and changed at `/settings`.
-
-| Term | Meaning |
-| --- | --- |
-| **Settings** | A learner's per-account preferences that shape how launched surfaces behave for them — the `/settings` page behind the app header's gear, and the `user_settings` row (one per account, created on their first change; absent means every default). Each setting is a single independent value that saves as it is flipped. Not a **Feature flag**: a flag decides whether a surface *exists* for a learner; a setting decides how an existing surface *behaves* for them. |
-| **Auto-draft** | The first setting: whether Aleph drafts flashcards on its own as a lesson opens (Phase 3 TDD D5) — **on by default**, the launched Phase 3 behaviour — or only when the learner asks. Off, the completed lesson offers `Draft flashcards` in place of `Aleph drafted N cards`, and tapping it fires the same trigger the open would have; the Daily queue, review and every kept card are untouched. Wire name `auto_draft_flashcards`; independent of the `flashcards` flag, which still decides whether drafting exists at all. |
-
 ## Design
 
 | Term | Meaning |
@@ -225,28 +193,13 @@ phase:
 - **Summarized carried context** — Phase 2 carries a bounded window of the most recent turns and
   **drops** what falls out of it; summarizing older turns instead is a later upgrade behind the same
   context seam (Phase 2 TDD D6).
-- **Flashcard** / **Draft** / **Kept card** / **Due** / **Daily queue** / **Review** / **Lapse** —
-  the retention loop (**Phase 3**), defined in the Retention section above: **shipped and
-  launched** ([PRD](prds/phase-3-flashcards.md) · [TDD](tdds/phase-3-flashcards.md) · mock:
-  [phase-3 flashcards](mocks/aleph-phase-3-flashcards.html)). All ten tickets of the TDD's
-  delivery plan (§16) have shipped, plus AL-410's card-management surface (`/cards`), gated by
-  `FeatureFlag.FLASHCARDS`, which now defaults **on** — the fourth flag to run the
-  `tutor`/`shaping`/`streaks` dark-then-flip playbook, and it stays registered as a kill switch.
-  Grading ships as **two outcomes on a fixed ladder** — *Again* / *Got it* — not the
-  Again/Hard/Good/Easy this list used to promise; that needs ease factors and is deferred to a
-  follow-on slice (Phase 3 PRD §4.6). **Active day above is already widened to count a review**
-  (§4.9): the definition changed the day it was decided rather than the day it ships, because the
-  vocabulary is authoritative. The union is now built (TDD D11) **and live**: the review reader
-  runs for every learner, so a review can carry the current day and the streak the same way a
-  lesson completion always has.
 - **System-proposed path edits** — Aleph proposing changes unprompted from miss data, plus the
   destructive edit shapes (remove, reorder, touching engaged work): **Phase 4**, building on 2B's
   Proposal/Apply machinery.
 - **Beat** / **Brief** / **Source** / **Cadence** / **Anchor day** / **Brief continuity** /
   **Skipped** — the analyst (**Phase 6**), defined in The analyst section above: **shipped and
   launched** ([PRD](prds/phase-6-analyst.md), [TDD](tdds/phase-6-analyst.md)), gated by
-  `FeatureFlag.ANALYST`, which now defaults **on** — the fifth flag to run the
-  `tutor`/`shaping`/`streaks`/`flashcards` dark-then-flip playbook
+  `FeatureFlag.ANALYST`, which now defaults **on** after the dark-then-flip playbook
   ([deploy.md](deploy.md#launching-a-flagged-phase-al-270--al-370)).
   `FEATURE_FLAG_DEFAULTS=analyst:off` is the kill switch — it outranks the code default with no
   deploy and reaches admins too. No dedicated Nocturne mock, on the Phase 5 precedent (TDD §8) —
@@ -254,11 +207,8 @@ phase:
   *since the last Brief* rather than a calendar slot,
   and **Skipped** genuinely is a first-class outcome (a `briefs` row with `kind = 'skipped'`,
   never a laundry slot for infrastructural failure) — both running, not merely decided.
-  **Active day above is already widened to count reading a Brief** (PRD §4.9), on exactly the
-  Phase 3 precedent, and the read-tracking machinery behind it is now built (`briefs.read_at`,
-  the `brief_read` event, TDD D11) — but the **streak union stays deferred**
-  (`services/progress_read.py` is untouched by design), so a Brief read still moves no live
-  streak. Nothing reads that third signal into a streak yet.
+  Reading a Brief is tracked (`briefs.read_at` and the `brief_read` event) but deliberately does
+  not make an **Active day** or move a streak.
 - **Brief prefetch** — making a Beat claimable a little before its Anchor day opens: **deferred**
   (PRD §7.1, Phase 6 TDD, "Not built"), unlike the rest of the analyst vocabulary above. Every
   first-slice Beat is researched while the learner waits; see **Cadence** and **Brief prefetch**
@@ -276,6 +226,4 @@ phase:
   in the client by `useFeatureFlag("flow")` rather than a router `404` — so the
   dark-then-flip playbook still applies (`FLAG_DEFAULTS[FeatureFlag.FLOW]`
   starts `False`) but the flip is the only backend deploy this phase ever
-  needs. Drafting is **deferred to the flow's end** by design (TDD D7): every
-  lesson inside a flow still drafts as it opens, but the per-lesson keep/discard
-  moment waits for the receipt, rendered as one batch.
+  needs.

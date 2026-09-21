@@ -41,9 +41,6 @@ tag (§12), plus the ids that apply. The record's own timestamp is the event tim
 | `proposal_shown` | `services/shaping.py` — `propose_path_edit` observed mid-stream | `path_id`, `n_add_lessons`, `n_revisions`, `new_unit` | W17 / W18 |
 | `change_applied` | `services/shaping.py` `apply_change` — after the commit | `path_id`, `change_id`, `n_add_lessons`, `n_revisions`, `new_unit`, `lesson_ids` | W17 / W18 |
 | `change_undone` | `services/shaping.py` `undo_change` — after the commit | `path_id`, `change_id`, `minutes_since_apply` | W19 |
-| `flashcards_drafted` | `services/flashcard_drafting.py` — every drafting run resolution *except* a missing-context run and a crashed worker (see below) | `path_id`, `lesson_id`, `position_in_path`, `drafted_count`, `outcome` (generated/failed), `success`, `duration_ms`, `prompt_tokens`, `completion_tokens`, `total_tokens` | W24 / W8 |
-| `flashcards_kept` | `services/flashcard_drafting.py` `keep_flashcard_drafts` — the keep request | `path_id`, `lesson_id`, `drafted_count`, `kept_count` | W24 |
-| `review_graded` | `services/reviews.py` `grade_card` — every grade | `card_id`, `path_id`, `grade`, `rung_before`, `queue_size`, `queue_remaining` | W25 / W26 |
 | `beat_deployed` | `routers/v1/beats.py` `deploy_beat` — after the Beat is created, committed, and the arrival drain has claimed and spawned its first run | `beat_id`, `beat_level`, `anchor_weekday`, `has_guidance` | W29 |
 | `brief_research_completed` | `services/briefing.py` `BriefingService` — every fenced-win resolution of a claimed research run | `beat_id`, `outcome` (published/skipped/failed/refused), `duration_ms`, `queries`, `documents_retrieved`, `documents_after_filters`, `findings`, `survivors`, `prompt_tokens`, `completion_tokens`, `total_tokens` | W29 / W31 / W8 / W7 |
 | `brief_read` | `routers/v1/beats.py` `read_brief` — the real, first-write-wins transition only | `beat_id`, `brief_id`, `marker` (opened/sources), `age_days` | W29 |
@@ -77,6 +74,9 @@ revises — the same dominance rule the `path_changes.kind` column uses, so one
 Apply carrying both shapes is tagged the same way in the events and in the row.
 W20 (a declined edit) deliberately tags nothing: a decline is an ordinary
 successful reply, and W21 tags the guardrail *queries* rather than any record.
+
+> **Retired archive:** The following Phase 3 event notes describe removed events and are retained
+> only with the retired metric design below.
 
 Phase 3's three (flashcards & spaced repetition, TDD §9) have **no session
 events**: `review_session_started` / `_completed` are each derivable from
@@ -266,7 +266,10 @@ If Return does not move for the "after" cohort, this slice is decoration and
 the rest of Phase 5's scope should be re-argued rather than built — the one
 sentence in the TDD that could stop the phase.
 
-### Phase 3 — flashcards & spaced repetition (PRD §5, TDD §9)
+### Retired archive: Phase 3 flashcard metrics
+
+These events and saved queries were removed with flashcards. The material in this section records
+the former measurement design only and is not part of the active telemetry contract.
 
 Phase 3 gets no north star of its own either: the one question worth asking
 (PRD §5) is the same shape as Phase 5's — does the retention loop move the

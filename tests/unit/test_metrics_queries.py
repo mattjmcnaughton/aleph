@@ -70,11 +70,6 @@ _REQUIRED_QUERIES = {
     "depth_to_proposal.sql",
     "shaped_path_completion_guardrail.sql",
     "shaping_reply_failure_latency.sql",
-    # Phase 3 — flashcards & spaced repetition (Phase 3 PRD §5 / TDD §9).
-    "flashcard_keep_rate.sql",
-    "review_queue_completion.sql",
-    "review_recall_by_rung.sql",
-    "flashcard_return.sql",
     # Phase 6 — the analyst (AL-540, Phase 6 PRD §7 / TDD §9/§15).
     "brief_return.sql",
     "brief_read_rate.sql",

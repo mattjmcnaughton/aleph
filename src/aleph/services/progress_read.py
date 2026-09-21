@@ -43,33 +43,9 @@ own logic — the two folds, "today", ``completed_today`` — testable with zero
 database, while the public function callers actually import stays a one-line
 call.
 
-**Phase 3 widens the seam (TDD D11/§5.5): a second reader, unioned into the
-global fold only.** :class:`ReviewDaysReader` is the ``FlashcardRepository``
-capability this service needs — kept to the one method the service calls, the
-same discipline as :class:`CompletionDaysReader`. ``load_progress_summary``
-takes a plain, **required, keyword-only** ``flashcards_enabled: bool`` rather
-than importing ``services.feature_flags`` itself: the flag is resolved once,
-in the router (``routers/v1/progress.py``, which already resolves ``streaks``
-the same way), and handed down as a boolean so this module stays decoupled
-from flag resolution and keeps its existing fake-repository testability.
-Deliberately **no default** — a defaulted ``False`` here is a forgotten caller
-away from silently shipping the union off with no test failing to say so
-(exactly what happened once already: see the call sites this module's own
-test suite had to make explicit). When the flag is off, no
-:class:`FlashcardRepository` is even constructed — ``review_days_for_user`` is
-provably never called, which is what makes TDD D10's kill switch honest: with
-``flashcards`` off, the streak is bit-identical to Phase 5's own output.
-
-**The union lands in exactly one place.** ``global_streaks`` folds
-``completion_days | review_days`` (D11) — the **per-path** fold
-(``rows_by_path`` / ``_path_streak_view``) never sees a review, because a
-flashcard belongs to the learner, not a path (PRD §4.9, CONTEXT.md's **Path
-streak** row). ``completed_today`` also never sees a review: it is rendered by
-the frontend as "N lessons today", and a review is not a lesson completion, so
-it stays ``counts_by_day.get(today, 0)`` over lesson rows alone. The activity
-strip is the one exception in the *other* direction — see
-:func:`_summarize`'s inline comment for why a review-only day still has to
-paint a non-empty cell.
+The global streak, per-path streaks, completion count, and activity strip all
+derive from lesson-completion rows. The global fold uses the union of completion
+days across paths; each per-path fold sees only that path's rows.
 """
 
 from __future__ import annotations
@@ -81,7 +57,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from aleph.config import settings
 from aleph.domains.streaks import activity_window, compute_streaks
-from aleph.repositories import FlashcardRepository, LessonRepository
+from aleph.repositories import LessonRepository
 
 if TYPE_CHECKING:
     import uuid
@@ -107,20 +83,6 @@ class CompletionDaysReader(Protocol):
     ) -> list[CompletionDay]: ...
 
 
-class ReviewDaysReader(Protocol):
-    """The one ``FlashcardRepository`` capability the streak union needs (D11).
-
-    ``FlashcardRepository`` satisfies this structurally; a unit test
-    substitutes a few lines of in-memory fake, the same shape as
-    :class:`CompletionDaysReader`'s. Kept to exactly the one method the
-    service calls, for the same reason that Protocol is.
-    """
-
-    async def review_days_for_user(
-        self, *, user_id: uuid.UUID, tz_offset_minutes: int
-    ) -> list[date]: ...
-
-
 @dataclass(frozen=True)
 class PathStreakView:
     """One path's streak (CONTEXT.md: **Path streak**), independent of the rest."""
@@ -136,15 +98,12 @@ class ProgressSummaryView:
     """The composed snapshot ``routers/v1/progress.py`` translates to the DTO.
 
     ``current_streak``/``best_streak`` are the **global** Daily streak — the
-    union of Active days across every path, **and, when the ``flashcards`` flag
-    is on, every review day too** (TDD D11/§5.5). ``completed_today`` stays
-    lesson completions only — it is the frontend's "N lessons today", not an
-    Active-day count, so a review never moves it. ``activity`` is always
+    union of lesson-completion days across every path. ``completed_today`` is
+    the frontend's "N lessons today" count. ``activity`` is always
     exactly ``settings.streak_activity_window_days`` cells (§13), oldest first,
-    ending at ``today``; a review-only day still renders a non-empty cell (see
-    ``_summarize``) so the strip cannot contradict the streak beside it.
+    ending at ``today``.
     ``paths`` — the **Path streak** breakdown — omits any path with no
-    completions (D5), never counts a review (PRD §4.9), and is sorted by
+    completions (D5) and is sorted by
     ``path_id`` for a stable wire order — the query's own row order is not
     itself a contract worth exposing.
     """
@@ -162,7 +121,6 @@ async def load_progress_summary(
     *,
     user_id: uuid.UUID,
     tz_offset_minutes: int,
-    flashcards_enabled: bool,
     now: datetime | None = None,
 ) -> ProgressSummaryView:
     """Compose the Progress API's whole payload for one learner (§5.3/§6).
@@ -171,23 +129,11 @@ async def load_progress_summary(
     delegates every actual decision to :func:`_summarize`, which is what the
     unit tests call directly against fakes.
 
-    ``flashcards_enabled`` is the caller-resolved ``flashcards`` flag decision
-    (D10) — the router resolves it once via ``FeatureFlagService``, the same
-    way it already resolves ``streaks``, and hands down a plain boolean rather
-    than this module importing the flag service itself (module docstring).
-    **Required and keyword-only, with no default**: a forgotten caller must
-    fail loudly (``TypeError``) rather than silently fold the streak union off
-    with every existing test still green — the trap a defaulted ``False``
-    quietly is. A :class:`~aleph.repositories.FlashcardRepository` is
-    constructed **only** when the flag is on; when it is off, ``_summarize``
-    receives no reader at all, so ``review_days_for_user`` is never called —
-    the kill switch is honest by construction, not by a branch inside the
-    query.
+    The repository returns lesson completions already grouped by local day;
+    this service performs the global and per-path folds.
     """
-    reviews = FlashcardRepository(session) if flashcards_enabled else None
     return await _summarize(
         LessonRepository(session),
-        reviews,
         user_id=user_id,
         tz_offset_minutes=tz_offset_minutes,
         now=now,
@@ -196,56 +142,37 @@ async def load_progress_summary(
 
 async def _summarize(
     repository: CompletionDaysReader,
-    reviews: ReviewDaysReader | None = None,
     *,
     user_id: uuid.UUID,
     tz_offset_minutes: int,
     now: datetime | None = None,
 ) -> ProgressSummaryView:
-    """The service's real logic, seamed on a :class:`CompletionDaysReader`
-    and an optional :class:`ReviewDaysReader` (D11).
+    """The service's real logic, seamed on a :class:`CompletionDaysReader`.
 
     Separated from :func:`load_progress_summary` purely for testability — see
     the module docstring's "fake-repository seam" section. Every semantic
     decision the TDD assigns to the service (owning "today", the two folds,
-    ``completed_today``, path absence, the streak union) happens here.
-
-    ``reviews`` defaults to ``None`` (flag off, or no second signal to fold
-    in) — every existing call site that only knows about lesson completions
-    keeps working unchanged.
+    ``completed_today``, path absence, and the global fold) happens here.
     """
     rows = await repository.completion_days_for_user(
         user_id=user_id, tz_offset_minutes=tz_offset_minutes
     )
-    review_days: set[date] = set()
-    if reviews is not None:
-        review_days = set(
-            await reviews.review_days_for_user(
-                user_id=user_id, tz_offset_minutes=tz_offset_minutes
-            )
-        )
-
     resolved_now = now if now is not None else datetime.now(UTC)
     today = (resolved_now - timedelta(minutes=tz_offset_minutes)).date()
 
     # One pass over the rows builds both folds at once: a per-day count summed
     # across every path (the activity strip and the global ``completed_today``
     # both want this) and a per-path grouping (each path's own streak).
-    # ``counts_by_day`` is lesson completions only — reviews never enter it —
-    # because it is also the source of ``completed_today`` and the per-path
-    # fold, and neither may see a review (D11: "completed_today stays lesson
-    # completions only"; PRD §4.9: reviews never count toward the Path streak).
+    # ``counts_by_day`` supplies ``completed_today`` and the global activity
+    # strip; ``rows_by_path`` supplies each path's independent streak.
     counts_by_day: dict[date, int] = defaultdict(int)
     rows_by_path: dict[uuid.UUID, list[CompletionDay]] = defaultdict(list)
     for row in rows:
         counts_by_day[row.day] += row.count
         rows_by_path[row.path_id].append(row)
 
-    # The streak union (D11/§5.5): the *global* fold takes lesson-completion
-    # days unioned with review days. The per-path fold below is built from
-    # ``rows_by_path`` alone and never sees ``review_days`` — a flashcard
-    # belongs to the learner, not a path (PRD §4.9).
-    global_streaks = compute_streaks(set(counts_by_day) | review_days, today=today)
+    # The global fold takes the union of lesson-completion days across paths.
+    global_streaks = compute_streaks(set(counts_by_day), today=today)
 
     paths = [
         _path_streak_view(path_id, path_rows, today=today)
@@ -254,26 +181,13 @@ async def _summarize(
         )
     ]
 
-    # The activity strip must not contradict the streak it sits beside: a day
-    # that is Active in the global fold (because of a review alone) has to
-    # render as a non-empty cell, or the strip would show a gap on a day the
-    # streak counts. Reviews are days with no count (``review_days_for_user``
-    # returns distinct days, not per-day tallies), so folding one in can only
-    # ever *raise* a day to "at least one unit of activity" — never invent a
-    # count higher than what a real tally would show, and never touch
-    # ``counts_by_day`` itself (``completed_today`` and the per-path fold read
-    # that dict directly, above, before this copy is made).
-    activity_counts = dict(counts_by_day)
-    for day in review_days:
-        activity_counts[day] = max(activity_counts.get(day, 0), 1)
-
     return ProgressSummaryView(
         today=today,
         current_streak=global_streaks.current,
         best_streak=global_streaks.best,
         completed_today=counts_by_day.get(today, 0),
         activity=activity_window(
-            activity_counts, today=today, days=settings.streak_activity_window_days
+            counts_by_day, today=today, days=settings.streak_activity_window_days
         ),
         paths=paths,
     )

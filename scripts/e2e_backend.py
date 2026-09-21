@@ -22,10 +22,11 @@ two Playwright projects sharing one backend never trip a cap.
 
 from __future__ import annotations
 
+import asyncio
 import uuid  # noqa: TC003 - pydantic resolves the Shift*Request classes' annotations at class-definition time.
 from typing import TYPE_CHECKING, Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 from sqlalchemy import func, update
 from sqlalchemy.ext.asyncio import (  # noqa: TC002 - FastAPI resolves annotations.
@@ -34,18 +35,50 @@ from sqlalchemy.ext.asyncio import (  # noqa: TC002 - FastAPI resolves annotatio
 
 from aleph.config import MODEL_SLOTS, STUB_MODEL_ID, settings
 from aleph.db import get_session
-from aleph.models import Flashcard, Lesson
+from aleph.models import Lesson
 from aleph.services.briefing import briefing_service
 from aleph.services.retrieval import StubRetriever
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+    from datetime import date
+
     from fastapi import FastAPI
+
+    from aleph.agents.researcher import RetrievedDocument
 
 # Same alias every ``routers/v1/`` module spells out — a plain FastAPI
 # dependency, not the manual generator-draining a raw call to ``get_session()``
 # would need. This router is test-only, but it is still real FastAPI wiring
 # (``@e2e_router.post``), so it gets the real dependency machinery.
 Session = Annotated[AsyncSession, Depends(get_session)]
+
+
+class ControlledRetriever(StubRetriever):
+    """Hold selected e2e topics until the browser has observed a pending poll."""
+
+    def __init__(self) -> None:
+        self._held: dict[str, asyncio.Event] = {}
+
+    def hold(self, topic: str) -> None:
+        self._held[topic] = asyncio.Event()
+
+    def release(self, topic: str) -> None:
+        event = self._held.pop(topic, None)
+        if event is not None:
+            event.set()
+
+    async def search(
+        self, queries: Sequence[str], *, since: date | None = None
+    ) -> list[RetrievedDocument]:
+        for topic, event in list(self._held.items()):
+            if any(topic in query for query in queries):
+                await event.wait()
+        return await super().search(queries, since=since)
+
+
+class ResearchGateRequest(BaseModel):
+    topic: str
 
 
 class ShiftRequest(BaseModel):
@@ -61,21 +94,6 @@ class ShiftRequest(BaseModel):
     days: int
 
 
-class FlashcardShiftRequest(BaseModel):
-    """Body for ``POST /__e2e__/shift-flashcard-due``: which learner, how far back.
-
-    Test-only, same reasoning as :class:`ShiftRequest`. Scoped by ``user_id``
-    rather than ``path_id``: a kept card outlives its source path (Phase 3 TDD
-    D12), so there is no path to shift *through* the way completions are —
-    the shift has to name the learner directly, the same column the real
-    ``flashcards`` row is scoped by (TDD §4 item 3). No bound on ``days`` for
-    the same reason ``ShiftRequest`` has none.
-    """
-
-    user_id: uuid.UUID
-    days: int
-
-
 # Phase 5 TDD D11 / §11: the e2e clock. Determinism for W23 (a streak that must
 # survive a missed *day boundary*) lives here, in the harness, never behind a
 # config guard in real code — the discipline Phase 1 D10 / Phase 2B D12 already
@@ -85,6 +103,16 @@ class FlashcardShiftRequest(BaseModel):
 # below, in ``create_stub_app`` — nothing in ``aleph.app`` imports this module,
 # so the production app builds with no reference to this router at all.
 e2e_router = APIRouter()
+
+
+@e2e_router.post("/__e2e__/hold-research")
+async def hold_research(body: ResearchGateRequest, request: Request) -> None:
+    request.app.state.retriever.hold(body.topic)
+
+
+@e2e_router.post("/__e2e__/release-research")
+async def release_research(body: ResearchGateRequest, request: Request) -> None:
+    request.app.state.retriever.release(body.topic)
 
 
 @e2e_router.post("/__e2e__/shift-completions")
@@ -118,35 +146,6 @@ async def shift_completions(body: ShiftRequest, session: Session) -> None:
     await session.commit()
 
 
-@e2e_router.post("/__e2e__/shift-flashcard-due")
-async def shift_flashcard_due(body: FlashcardShiftRequest, session: Session) -> None:
-    """Backdate a learner's kept cards so a journey can observe a due queue.
-
-    Phase 3 TDD D15, its own paragraph beside D11 above: a **shift**, not a
-    seeder. It fabricates no cards, so W24-W27 have to earn every card they
-    shift through the real drafting + keep flow (D6) — the same discipline
-    that makes ``shift-completions`` safe, applied to a table this phase adds
-    rather than one Phase 5 already owned. Moving only ``due_on`` backwards
-    cannot put the database into a state the real app could not reach on its
-    own: a learner who kept a card a few days ago and let it sit looks
-    identical on every read.
-
-    Scoped to kept cards only (``kept_at IS NOT NULL``, TDD D6) — a draft has
-    no ``due_on`` to shift, and shifting one into existence would be exactly
-    the seeded state this primitive exists to refuse.
-
-    No ownership check and no auth dependency, same as ``shift-completions``:
-    unreachable in production (never mounted by ``create_app``), and the
-    harness's one learner account is the only caller that will ever exist.
-    """
-    await session.execute(
-        update(Flashcard)
-        .where(Flashcard.user_id == body.user_id, Flashcard.kept_at.isnot(None))
-        .values(due_on=Flashcard.due_on - func.make_interval(0, 0, 0, body.days))
-    )
-    await session.commit()
-
-
 def create_stub_app() -> FastAPI:
     """Assemble the real app with the stub model wired into every slot.
 
@@ -172,11 +171,8 @@ def create_stub_app() -> FastAPI:
     settings.rate_limit_shaping_messages_per_day = 0
     # Phase 6 (ticket AL-560): the arrival drain's own daily cap (D14) — same
     # "0 disables it" convention as every rate limit above. **The reason is
-    # not "two Playwright projects sharing one backend + `DEV_USER`"**
-    # (code-review, ticket AL-560 follow-up corrected this sentence: W29/W31
-    # run only in the `mobile-390x844` project, on `DEV_STORAGE_STATE`, and
-    # the flashcards project below shares no user or cap concern with them at
-    # all). The real reason: W29/W31 spend three research runs per suite run
+    # not concurrent projects sharing a user**. W29/W31 run in the
+    # `mobile-390x844` project and spend three research runs per suite run
     # (one per test in `w29.spec.ts`, plus `w31.spec.ts`'s own) against
     # `RATE_LIMIT_BRIEF_RESEARCH_PER_DAY`'s default of 5 — fine for a single
     # CI run, but `reuseExistingServer: !CI` keeps `aleph_e2e` warm across
@@ -204,35 +200,9 @@ def create_stub_app() -> FastAPI:
     # free to fan out into an unbounded drain the next time someone visits
     # home.
     settings.max_beats_per_learner = 30
-    # `flashcards` (Phase 3 TDD D13) drafts on *every* completion once the flag
-    # is on (`feature_flag_defaults` below) — W1-W23's ~30 lessons per run,
-    # plus W24-W27's own, all trigger a drafting run and would otherwise
-    # exhaust `FLASHCARD_DRAFTS_PER_DAY`'s default of 50 on a same-day local
-    # re-run (`reuseExistingServer: !CI` keeps `aleph_e2e` warm across runs).
-    # A 429 there leaves the poll at `not_started` forever and the keep
-    # helper's `waitForSurface("draft-list")` times out — the same failure
-    # mode the four caps above exist to prevent, just one cap late.
-    settings.flashcard_drafts_per_day = 0
-    # ``tutor`` (AL-203/AL-270), ``shaping`` (AL-301/AL-370), ``streaks``
-    # (Phase 5 D7), ``flashcards`` (Phase 3 TDD D10), and ``analyst`` (Phase 6
-    # TDD D12, ticket AL-560) are all launched and default on in
-    # ``services/feature_flags.py``, so the browser suite's plain learner —
-    # ``DEV_USER``, who is not an admin and gets none of
-    # ``ADMIN_DEFAULT_FLAGS``' baseline — meets every rail, the streak line,
-    # the flashcards surfaces and the Beats surfaces with nothing set here.
-    # This line is kept as an explicit *pin* rather than deleted as redundant:
-    # the suite asserts against surfaces that must exist, and "every tutor
-    # spec failed on an absent rail" is a confusing way to discover someone
-    # flipped a code default — the same reasoning that already applied to
-    # ``tutor``/``shaping``/``streaks``/``flashcards`` now covers ``analyst``
-    # too, since its own launch flip removed the one thing that used to make
-    # it different (the admin-only default this comment used to describe).
-    # ``flow`` (flow TDD D10) joins the list on the same terms: dark by code
-    # default, so W32 needs the same explicit pin the five flags above already
-    # required before their own launch flips.
-    settings.feature_flag_defaults = (
-        "tutor:on,shaping:on,streaks:on,flashcards:on,analyst:on,flow:on"
-    )
+    # Pin all surfaces exercised by the browser suite, including dark Flow,
+    # so code-default changes cannot turn a journey into a flag-gate test.
+    settings.feature_flag_defaults = "tutor:on,shaping:on,streaks:on,analyst:on,flow:on"
 
     # Phase 6's retrieval seam (ticket AL-560; `services/retrieval.py`,
     # `services/briefing.py`). ``briefing_service`` is a module-level
@@ -268,12 +238,14 @@ def create_stub_app() -> FastAPI:
     # gate on the API key), it would silently overwrite this `StubRetriever`
     # after startup and send the e2e suite at a live provider. Re-verify this
     # interaction before touching either side of it.
-    briefing_service._retriever = StubRetriever()  # noqa: SLF001
+    retriever = ControlledRetriever()
+    briefing_service._retriever = retriever  # noqa: SLF001
 
     # Imported lazily so mutating settings above lands before app assembly.
     from aleph.app import create_app
 
     app = create_app()
+    app.state.retriever = retriever
     # Mounted **only here** — never by ``create_app`` (D11, TDD §11): the
     # production factory has no reference to this module at all, which is the
     # whole guarantee ``tests/unit/test_smoke.py`` pins.

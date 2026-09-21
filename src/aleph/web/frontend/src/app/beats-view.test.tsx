@@ -17,7 +17,7 @@ import { App } from "./app";
 // standing orders one-liner, the researching/failed/refused states
 // (`state-card.tsx`, reused), and the Beat rail. Driven end to end through
 // the real router, TanStack Query's real polling, and MSW — `path-view`'s
-// own seam, and `flashcards-drafts.test.tsx`'s fake-timer idiom for the
+// own seam, and the shared fake-timer idiom for the
 // polling-stops proofs below (real `findBy*`/`waitFor` do not mix safely
 // with `vi.useFakeTimers()`, so those tests drive time explicitly and read
 // the DOM synchronously in between).

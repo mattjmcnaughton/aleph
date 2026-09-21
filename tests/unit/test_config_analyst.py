@@ -1,7 +1,7 @@
 """Unit tests for the AL-501 Phase 6 analyst config block (TDD §13, D6/D7/D14/D14a).
 
 New file (AL-501) so it never collides with other tickets editing ``test_config``,
-the ``test_config_flashcards.py`` / ``test_config_shaping.py`` precedent. This
+the ``test_config_shaping.py`` precedent. This
 ticket is config-only — no retrieval code, no models, no service, no router — so
 the tests here stay narrow: §13's defaults, the §13 env-var names, the stale >
 timeout invariant (mirroring ``_check_generation_timings``), the two new slots'
@@ -37,7 +37,7 @@ _ANALYST_ENV_VARS = (
 def default_settings(monkeypatch: pytest.MonkeyPatch) -> Settings:
     """``Settings`` from code defaults only — no ambient ``.env`` or env vars.
 
-    Same isolation as ``test_config_tutor``/``test_config_flashcards``:
+    Same isolation as ``test_config_tutor``:
     ``_env_file=None`` skips the dotenv read, and the analyst vars are deleted
     from the process environment.
     """

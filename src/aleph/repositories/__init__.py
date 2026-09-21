@@ -23,11 +23,6 @@ from aleph.repositories.conversations import (
     ThreadMessage,
 )
 from aleph.repositories.feature_flags import FeatureFlagRepository
-from aleph.repositories.flashcards import (
-    DueCandidate,
-    FlashcardRecord,
-    FlashcardRepository,
-)
 from aleph.repositories.lessons import (
     CompletionDay,
     LessonRepository,
@@ -38,7 +33,6 @@ from aleph.repositories.paths import PathRepository
 from aleph.repositories.quick_checks import QuickCheckRepository
 from aleph.repositories.units import UnitRepository
 from aleph.repositories.usage import UsageRepository
-from aleph.repositories.user_settings import UserSettingsRepository
 from aleph.repositories.users import UserRepository
 
 __all__ = [
@@ -48,10 +42,7 @@ __all__ = [
     "ChangeRepository",
     "CompletionDay",
     "ConversationRepository",
-    "DueCandidate",
     "FeatureFlagRepository",
-    "FlashcardRecord",
-    "FlashcardRepository",
     "LessonAnswer",
     "LessonRepository",
     "LocatedMessage",
@@ -66,5 +57,4 @@ __all__ = [
     "UnitRepository",
     "UsageRepository",
     "UserRepository",
-    "UserSettingsRepository",
 ]

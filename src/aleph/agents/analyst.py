@@ -46,8 +46,7 @@ follows, verbatim. `tests/unit/test_agents_layering.py` auto-discovers every
 module under `aleph.agents` and asserts this by running a fresh-interpreter
 import probe, so no test file needed editing to cover it.
 
-Layout follows `agents/outline.py` / `agents/flashcard.py` /
-`agents/researcher.py` exactly: schemas, run-time `Deps`, the system prompt,
+Layout follows the other generation agents: schemas, run-time `Deps`, the system prompt,
 the user prompt builder, the layer-2 output validator, then assembly.
 """
 
@@ -202,7 +201,7 @@ class AnalystDeps:
 
         The ``level`` check delegates to :func:`require_valid_level` (shared
         across every agent that carries a `Level`, mirrors ``OutlineDeps``,
-        ``FlashcardDeps``) so that failure is one explicit, actionable
+        other agent dependency records) so that failure is one explicit, actionable
         ``ValueError`` at the construction site rather than a bare
         ``KeyError`` deep inside the dynamic system prompt.
 
@@ -238,9 +237,9 @@ class AnalystDeps:
 
 # --- system prompt (static role + boundary; level appended dynamically) --------
 
-# Per-level prose guidance, mirroring `agents/outline.py` / `agents/flashcard.py`
+# Per-level prose guidance, mirroring the other generation agents
 # rather than importing either dict: this agent pitches a different artifact
-# (a short cited report on what changed) than an outline or a flashcard, so
+# (a short cited report on what changed) than an outline, so
 # each agent's own wording stays local and does not drift for the others.
 _LEVEL_GUIDANCE: dict[Level, str] = {
     "beginner": (
@@ -462,7 +461,7 @@ def validate_brief_result(
 # Retry budget (Agent(retries=...)): pydantic-ai applies it as an independent
 # cap on output-validation retries, so a model that keeps violating the branch
 # or the citation rule still terminates after a bounded number of round trips
-# (mirrors the outline, flashcard, and researcher agents).
+# (mirrors the outline and researcher agents).
 _ANALYST_RETRIES = 3
 
 

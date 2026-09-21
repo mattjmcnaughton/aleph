@@ -17,7 +17,7 @@ imports directly (`generation_orchestrator`'s own shape); its `_spawn` and
 
 The `analyst` flag is launched (TDD D12) and defaults on, so every test that
 exercises the live surface requests `analyst_flag_enabled` (`conftest.py`) for
-the same reason `streaks`/`flashcards` coverage still requests theirs —
+the same reason `streaks` coverage still requests its fixture —
 stating which flag a test's subject hangs off, redundantly with the code
 default. The one flag-off test requests `analyst_flag_disabled` instead: since
 launch, off is no longer any test's starting point for free, so proving the

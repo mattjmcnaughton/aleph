@@ -1,12 +1,10 @@
 import { HttpResponse, http } from "msw";
 import { API_V1_BASE, AUTH_LOGOUT_PATH, type AuthSession, type AuthUser } from "../lib/api";
 import { beatHandlers } from "./beats";
-import { flashcardHandlers } from "./flashcards";
 import { lessonsHandlers } from "./lessons";
 import { ADMIN_MODEL_ALLOWLIST } from "./models";
 import { pathsHandlers } from "./paths";
 import { progressHandlers } from "./progress";
-import { settingsHandlers } from "./settings";
 import { shapingHandlers } from "./shaping";
 import { tutorHandlers } from "./tutor";
 
@@ -27,7 +25,7 @@ export const learnerUser: AuthUser = {
   email: "learner@example.com",
   is_admin: false,
   model_allowlist: [],
-  // `tutor`, `streaks`, `flashcards`, and `analyst` all now default **on** in
+  // `tutor`, `streaks`, and `analyst` all now default **on** in
   // the real `FLAG_DEFAULTS` registry (AL-203/AL-270, Streaks TDD D7, Phase 3
   // TDD D10, Phase 6 TDD D12 — all five launched flags run the same
   // dark-then-flip playbook). The fake learner ships them off anyway: this
@@ -36,11 +34,7 @@ export const learnerUser: AuthUser = {
   // (`routers/v1/beats.py`'s own `require_analyst_enabled`, and its Phase
   // 2/5/3 twins) rather than inheriting an accident of whatever the backend
   // default happens to be this week.
-  feature_flags: { tutor: false, streaks: false, flashcards: false, analyst: false },
-  // The code defaults (`services/user_settings.py`) — what a learner who has
-  // never opened Settings is served. A test about Auto-draft *off* overrides
-  // the session, the same way it opts a flag on.
-  settings: { auto_draft_flashcards: true },
+  feature_flags: { tutor: false, streaks: false, analyst: false },
 };
 
 export const authenticatedSession: AuthSession = {
@@ -66,7 +60,6 @@ export const adminUser: AuthUser = {
   model_allowlist: [...ADMIN_MODEL_ALLOWLIST],
   // Admins dogfood the tutor before launch (ADMIN_DEFAULT_FLAGS, AL-203).
   feature_flags: { tutor: true },
-  settings: { auto_draft_flashcards: true },
 };
 
 export const adminSession: AuthSession = {
@@ -100,7 +93,5 @@ export const handlers = [
   ...tutorHandlers,
   ...shapingHandlers,
   ...progressHandlers,
-  ...flashcardHandlers,
   ...beatHandlers,
-  ...settingsHandlers,
 ];

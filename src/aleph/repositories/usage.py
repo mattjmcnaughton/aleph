@@ -16,20 +16,11 @@ learner's **live** ``messages`` rows (AL-220, §7/D8). Its own quirk — "new
 conversation" deletes those rows and so refunds quota — is recorded rather than
 fixed, because the cap ships disabled; see ``services.rate_limit``.
 
-Phase 3 adds one more, of the ``count_path_outline_generations_since`` shape
-rather than the plain created-rows shape: flashcard drafting runs, counted by
-the ``flashcard_draft_runs.started_at`` stamp a claim (re-)writes (TDD §5.2/
-D13). Like an outline retry, a drafting retry inserts no new row (D7's sparse,
-one-row-per-lesson claim) — only the stamp moves — so this counts *lessons
-with a drafting attempt today*, and a same-lesson retry loop still counts once;
-see ``services.rate_limit``.
-
 Phase 6 adds the sixth counter: Beat research RUNS, counted over
 ``beat_research_runs`` — an append-only row inserted by ``BeatRepository.
 _claim`` every time a claim WINS (both the auto and retry paths, TDD D3/D14).
-**Not** the ``count_path_outline_generations_since``/
-``count_flashcard_draft_runs_since`` shape its siblings above use (counting a
-stamp that a retry *overwrites*): code-review FIX 2 on AL-521 found that
+**Not** the ``count_path_outline_generations_since`` shape (counting a stamp
+that a retry *overwrites*): code-review FIX 2 on AL-521 found that
 shape unsound here specifically, because ``MAX_BEATS_PER_LEARNER`` bounds a
 learner's Beat count at 3, strictly below ``RATE_LIMIT_BRIEF_RESEARCH_PER_DAY``
 (5) — a same-Beat retry loop that only re-stamped one row could never drive
@@ -57,7 +48,6 @@ from aleph.models import (
     BeatResearchRun,
     Conversation,
     ConversationKind,
-    FlashcardDraftRun,
     Lesson,
     Message,
     MessageRole,
@@ -195,35 +185,6 @@ class UsageRepository:
             user_id=user_id, since=since, kind=ConversationKind.SHAPING
         )
 
-    async def count_flashcard_draft_runs_since(
-        self, *, user_id: uuid.UUID, since: datetime.datetime
-    ) -> int:
-        """Count ``user_id``'s lessons whose drafting run was (re)claimed since
-        ``since`` (Phase 3 TDD §5.2/D13).
-
-        The ``count_path_outline_generations_since`` shape, not
-        ``count_lesson_generations_since``'s: ``flashcard_draft_runs`` is a
-        sparse, one-row-per-lesson table (D7) whose ``started_at`` a claim
-        **re-stamps** on every (re-)claim, so this counts *distinct lessons
-        with a drafting attempt today* — a same-lesson ``failed`` -> retry loop
-        overwrites the one stamp and so counts once, the accepted MVP shape
-        ``services.rate_limit`` documents. Joins ``flashcard_draft_runs`` ->
-        ``lessons`` -> ``paths`` for the learner filter, since the run row
-        carries no ``user_id`` of its own (D7: it is keyed on ``lesson_id``
-        alone).
-        """
-        result = await self.session.execute(
-            select(func.count())
-            .select_from(FlashcardDraftRun)
-            .join(Lesson, FlashcardDraftRun.lesson_id == Lesson.id)
-            .join(Path, Lesson.path_id == Path.id)
-            .where(
-                Path.user_id == user_id,
-                FlashcardDraftRun.started_at >= since,
-            )
-        )
-        return result.scalar_one()
-
     async def count_brief_research_runs_since(
         self, *, user_id: uuid.UUID, since: datetime.datetime
     ) -> int:
@@ -234,10 +195,8 @@ class UsageRepository:
         (``BeatRepository._claim``, both the auto and retry paths, TDD
         D3/D14) — never ``beats`` rows. A same-Beat retry loop (a ``failed``
         run re-claimed via ``POST /retry``) inserts a NEW row each time, so
-        it counts every attempt, unlike ``count_flashcard_draft_runs_since``'s
-        sibling shape (which counts a stamp a retry *overwrites*, and is
-        sound there only because a learner's lesson count is not bounded
-        anywhere near that cap). See ``models/beat_research_run.py`` for why
+        it counts every attempt, unlike a counter based on a stamp that a retry
+        overwrites. See ``models/beat_research_run.py`` for why
         that distinction matters here specifically. No join needed: the run
         row carries its own ``user_id`` (denormalized off the Beat at claim
         time), exactly as ``Beat.user_id`` does.

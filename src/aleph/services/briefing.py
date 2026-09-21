@@ -6,8 +6,7 @@ map: "a new ``services/briefing.py`` in the same shape rather than a sixth
 concern on a 1 250-line class"), never its object: :class:`BriefingService`
 owns claim -> run -> persist -> emit (``brief_research_completed``, AL-540)
 for one Beat's research run, exactly the shape
-``GenerationOrchestrator``/``FlashcardDraftingService`` already establish
-twice.
+``GenerationOrchestrator`` already establishes.
 
 **The two entry points, and how they compose (TDD §3, §5.6) — CORRECTED by
 code-review FIX 1 on AL-521; the paragraph below describes the current,
@@ -51,8 +50,7 @@ fixed shape, not the TDD's original pseudocode ordering.**
   guarantee never needed to be a commit on the caller's own ``session``.
   Committing the caller's session was a second, unrequired effect: it broke
   the pattern every other claim in this codebase follows —
-  ``services/generation.py::_claim_and_generate`` and
-  ``services/flashcard_drafting.py`` both open a short transaction via
+  ``services/generation.py::_claim_and_generate`` opens a short transaction via
   ``self._session_factory`` precisely so a service never commits a unit of
   work it does not own — and it is a real hazard once a router sits in front
   of this (AL-522): a handler that creates a Beat and then drains it would
@@ -319,7 +317,7 @@ class _UnconfiguredRetriever:
     """The default ``Retriever`` until AL-523's ``ExaRetriever`` ships.
 
     Constructing :class:`BriefingService` must do no I/O and never fail — the
-    ``generation_orchestrator``/``flashcard_drafting_service`` precedent — so
+    ``generation_orchestrator`` precedent — so
     this is what keeps the module-level singleton importable before a live
     retrieval adapter exists. Calling it raises immediately rather than
     returning ``[]``: a silent empty result here would be indistinguishable
@@ -537,7 +535,7 @@ class BriefingService:
 
     Constructed with injectable seams — ``session_factory``, ``spawn``,
     ``resolve_model_fn``, ``retriever``, ``config`` — exactly
-    ``GenerationOrchestrator``/``FlashcardDraftingService``'s shape (TDD §2:
+    ``GenerationOrchestrator``'s shape (TDD §2:
     "reuse the pattern, not the code"), so tests swap ``_spawn`` for a
     drainable collector, ``_resolve_model`` for the deterministic stub, and
     ``_retriever`` for a ``FixtureRetriever``/``StubRetriever``/fake, the same
@@ -879,8 +877,7 @@ class BriefingService:
             # The Beat vanished (deleted) between the claim and now — a
             # referential-breakage case with no row left to mark, mirroring
             # ``services/generation.py``'s own vanished-lesson posture. No
-            # ``account_id`` survives to stamp an event with either (the
-            # ``flashcards_drafted`` vanished-lesson precedent).
+            # ``account_id`` survives to stamp an event either.
             logger.warning("brief_research_beat_vanished", beat_id=str(beat_id))
             return
         account_id = context.account_id
@@ -1399,8 +1396,8 @@ class BriefingService:
             return True
 
 
-# A module-level default instance, mirroring ``generation_orchestrator`` /
-# ``flashcard_drafting_service``: production wiring constructed once, cheaply
+# A module-level default instance, mirroring ``generation_orchestrator``:
+# production wiring constructed once, cheaply
 # (no I/O — ``build_researcher_agent``/``build_analyst_agent`` bind no model,
 # TDD D7), that ``services/lifecycle.py`` binds and the beats router imports
 # directly. Its ``retriever`` starts as the safe, import-time-inert

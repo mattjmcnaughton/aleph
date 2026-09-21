@@ -6,34 +6,14 @@
 // `beat-card.tsx`, `beat-rail.tsx`, `brief-sources.tsx`'s own comments already
 // claim these hold "by construction"; this file is what actually checks it).
 //
-// Reuses `fixtures/journey.ts`'s `waitForSurface` for the one wait that IS
-// safe to reload-rescue (`createBeat`'s wait for `standing-orders`, the
-// initial hand-off render). `waitForBeatEntry` below deliberately does NOT:
-// see its own docstring for why a reload-backed rescue on the
-// researching -> terminal transition would defeat the one thing this suite
-// exists to prove.
-//
-// **Corrected reasoning (code-review, ticket AL-560 follow-up).** An earlier
-// version of this file argued the opposite — that the reload rescue was
-// *what made* the polling path real, and that a bare, non-reloading
-// `expect(...).toBeVisible()` "would hang on exactly that bug instead of
-// catching it." That has it backwards. A bare wait that times out and fails
-// IS what catches a broken poll; a reload rescue is what HIDES one: a
-// `page.reload()` performs a completely fresh `GET`, and a Beat's research
-// run (`BriefingService.run_research`, `services/briefing.py`) is spawned as
-// an independent task at claim time and runs to completion on the server
-// regardless of whether the client is polling for it at all — so a reload
-// always eventually shows the true, server-side state whether or not
-// `refetchInterval` on `routes/beats.$beatId.tsx` is even wired up. Deleting
-// it confirmed this concretely: the seeded `202` body never updated
-// client-side, attempt 0 of the old `waitWithReload`-backed wait failed at
-// 15s exactly as expected, the next attempt's reload found the
-// already-completed run anyway, and both specs stayed green — the fourth
-// instance of "the client cannot see the run its own request started"
-// passing regardless.
+// Never reload to rescue a wait: research runs independently of the browser,
+// so a reload can show the finished result even when polling is broken.
+// Instead, hold the real stub retrieval until the browser observes Researching
+// and its initial detail GET, then require a later poll to show the result.
 
 import { type Locator, type Page, expect } from "@playwright/test";
-import { ACTION_TIMEOUT, GENERATION_TIMEOUT, type Level, waitForSurface } from "./journey";
+import { BACKEND_URL } from "../servers";
+import { ACTION_TIMEOUT, GENERATION_TIMEOUT, type Level } from "./journey";
 
 /** `/beats/{uuid}` — where `routes/beats.new.tsx` navigates on a successful deploy. */
 const BEAT_URL_RE = /\/beats\/([0-9a-f-]{36})(?:$|[?#])/;
@@ -86,25 +66,43 @@ export async function startBeat(
  * Deploy an analyst and wait for the hand-off to the Beat view. Returns the
  * new Beat's id.
  *
- * Waits plainly for the navigation (`POST /beats` is a single round trip that
- * either lands on `/beats/{id}` or leaves the form showing an error/rate-limit
- * notice — there is nothing here for a reload to rescue, `createPath`'s own
- * reasoning in `fixtures/journey.ts`), then for `standing-orders` — the one
- * thing the Beat view renders unconditionally the instant `detail` resolves,
- * whatever `research_state` the `202` response came back with (`researching`
- * in the ordinary case; TanStack Query's cache is seeded with that exact body
- * before the navigate, `routes/beats.new.tsx`'s own `onSuccess`, so this is
- * never a synthesized wait — it is the real first paint of the real response).
+ * Hold this topic's stub retrieval until the initial detail GET and pending UI
+ * have both been observed. Without the gate, research can finish before even
+ * the POST response or navigation, so observing Researching is a race. Waiting
+ * for the initial GET also means that GET cannot supply the terminal result:
+ * after release, `waitForBeatEntry` needs the application's polling to work.
+ * No response is fabricated and no page reload rescues a broken poll.
  */
 export async function createBeat(
   page: Page,
   topic: string,
   opts: { level?: Level; anchorWeekday?: number; guidance?: string } = {},
 ): Promise<string> {
-  await startBeat(page, topic, opts);
-  await page.waitForURL(BEAT_URL_RE, { timeout: GENERATION_TIMEOUT });
-  await waitForSurface(page, "standing-orders");
-  return beatIdFromUrl(page.url());
+  const held = await page.request.post(`${BACKEND_URL}/__e2e__/hold-research`, {
+    data: { topic },
+  });
+  expect(held.ok()).toBe(true);
+  try {
+    const [initialDetail] = await Promise.all([
+      page.waitForResponse(
+        (response) =>
+          response.request().method() === "GET" &&
+          /\/api\/v1\/beats\/[0-9a-f-]{36}(?:\?|$)/.test(response.url()),
+        { timeout: GENERATION_TIMEOUT },
+      ),
+      startBeat(page, topic, opts),
+    ]);
+    expect(initialDetail.ok()).toBe(true);
+    expect((await initialDetail.json()).research_state).toBe("researching");
+    await page.waitForURL(BEAT_URL_RE, { timeout: GENERATION_TIMEOUT });
+    await expect(page.getByTestId("beat-researching")).toBeVisible({ timeout: ACTION_TIMEOUT });
+    return beatIdFromUrl(page.url());
+  } finally {
+    const released = await page.request.post(`${BACKEND_URL}/__e2e__/release-research`, {
+      data: { topic },
+    });
+    expect(released.ok()).toBe(true);
+  }
 }
 
 /** The Beat id in a `/beats/{id}` URL. */
@@ -130,35 +128,14 @@ export function briefIdFromUrl(url: string): string {
  * the "researching -> terminal" transition itself. Assumes the caller is
  * already on `/beats/{id}` (i.e. `createBeat` already ran).
  *
- * Two phases, neither reload-backed (see this module's own header for why a
- * reload here would defeat the point):
- *
- * 1. **`beat-researching` is visible now.** TDD §11 says W29 should "deploy
- *    an analyst, wait through `Researching…`" — this is that wait, and it is
- *    a REAL assertion rather than a synthesized one: `createBeat`'s own
- *    docstring notes TanStack Query's cache is seeded with the `202`
- *    response's exact body (already `research_state: "researching"`, the
- *    claim already committed server-side) before the navigate, so this is
- *    the true first paint of the true first response, not a guess about
- *    timing.
- * 2. **The terminal entry (`beat-rail-published`/`-skipped`/`beat-failed`)
- *    becomes visible through the Beat view's own live poll alone** —a plain,
- *    bounded `expect(...).toBeVisible()`, generous like every other wait in
- *    this suite (`GENERATION_TIMEOUT`, tolerant of a slow CI runner or a busy
- *    developer machine) but with no `page.reload()` anywhere in it. This is
- *    the fix for the defect this module's header now records: `routes/
- *    beats.$beatId.tsx`'s `refetchInterval` is the ONLY thing that can carry
- *    this assertion to a pass, so deleting it makes this step — and W29/W31
- *    with it — genuinely time out and fail, which is what "the specs can
- *    catch a broken poll" has to mean.
+ * `createBeat` asserted Researching while retrieval was held. Now the real
+ * terminal entry must arrive through polling alone, without a reload rescue.
  */
 export async function waitForBeatEntry(
   page: Page,
   kind: "published" | "skipped" | "failed",
 ): Promise<void> {
   const testId = kind === "failed" ? "beat-failed" : `beat-rail-${kind}`;
-
-  await expect(page.getByTestId("beat-researching")).toBeVisible({ timeout: ACTION_TIMEOUT });
 
   await expect(page.getByTestId(testId)).toBeVisible({ timeout: GENERATION_TIMEOUT });
 }

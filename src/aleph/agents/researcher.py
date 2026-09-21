@@ -13,14 +13,13 @@ structural claim: "`agents/` reaches no provider." The retrieval seam
 sees documents as plain frozen dataclasses handed to it in `Deps`. So
 `RetrievedDocument` is *declared* here — it is part of the researcher agent's
 contract — and *populated* by `services/retrieval.py`, which imports it. That
-import direction (services -> agents, never back) is `agents/flashcard.py`'s
-`FlashcardCaps` precedent exactly: the shape belongs to the agent, the
-population belongs to the service.
+import direction (services -> agents, never back) keeps the shape in the agent
+and population in the service.
 
 **The output is a union, Phase 1 D12's shape, reused rather than re-declared.**
 `Refusal` is imported from `agents/outline.py` — the same graceful,
 non-error decline for any over-the-boundary learner-supplied Topic, on
-`agents/flashcard.py`'s own precedent of importing `Level` /
+the existing precedent of importing `Level` /
 `require_valid_level` from `outline.py` rather than redeclaring them. An
 over-the-boundary Topic terminates a Beat as **refused**, never **failed**
 (TDD D3) — a first-class result, exactly as it is for a path.
@@ -41,7 +40,7 @@ application layer (no `services`, `routers`, `config`, `repositories`,
 auto-discovers every module under `aleph.agents` and asserts this by running a
 fresh-interpreter import probe, so no test file needed editing to cover it.
 
-Layout follows `agents/outline.py` / `agents/flashcard.py` exactly: schemas,
+Layout follows `agents/outline.py`: schemas,
 the shared validator predicate, run-time `Deps`, the system prompt, the user
 prompt builder, the layer-2 output validator, then assembly.
 """
@@ -74,7 +73,7 @@ class RetrievedDocument:
     — the type stays `date | None` because the raw, pre-filter shape a
     `Retriever.search()` may return can legitimately lack one.
 
-    Frozen and stdlib-only (no Pydantic), matching `FlashcardCaps`'s
+    Frozen and stdlib-only (no Pydantic), matching the dependency-record
     precedent for a value that crosses the services -> agents boundary as
     plain data.
     """
@@ -324,7 +323,7 @@ def validate_research_result(
 # Retry budget (Agent(retries=...)): pydantic-ai applies it as an independent
 # cap on output-validation retries, so a model that keeps citing unread URLs
 # still terminates after a bounded number of round trips (mirrors the outline
-# and flashcard agents).
+# and outline agents).
 _RESEARCHER_RETRIES = 3
 
 

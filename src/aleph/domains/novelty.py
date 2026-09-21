@@ -95,15 +95,9 @@ def filter_new[FindingT: _Finding](
       let through on a technicality — consistent with D8's downstream rule
       that an uncited claim cannot become a published Brief regardless.
     * **Claim dedup.** ``finding.claim`` is compared against each of
-      ``prior_claims`` with :func:`_restates_claim` — the ``restates_stem``
-      technique from ``agents/flashcard.py`` (normalized *content-word*
-      overlap, scored **asymmetrically over the reference side**, never a
-      symmetric ``min``), re-implemented rather than imported because
-      `domains/` may not import `agents/`, and pointed at a different pair of
-      strings: a candidate claim and a prior Brief's claim (the reference,
-      playing ``restates_stem``'s ``stem`` role), instead of a flashcard's
-      front and its lesson's Quick-check stem. A claim restating **any**
-      prior claim in new words is dropped.
+      ``prior_claims`` with :func:`_restates_claim`: normalized content-word
+      overlap scored asymmetrically over the prior claim, never a symmetric
+      ``min``. A claim restating **any** prior claim is dropped.
 
     ``findings`` is **not** deduplicated against itself — two identical (or
     order-shuffled, or repeated) findings in the same call are each judged
@@ -141,12 +135,10 @@ def _restates_any(claim: str, prior_claims: Sequence[str]) -> bool:
     return any(_restates_claim(claim, prior) for prior in prior_claims)
 
 
-# --- the restates_stem technique, re-implemented for claim-vs-claim ------------
+# --- claim restatement ---------------------------------------------------------
 #
-# ``agents/flashcard.py``'s ``restates_stem(front, stem)`` cannot be imported
-# here (domains/ imports no application layer), so the *technique* — normalized
-# content-word overlap, function words dropped — is restated for this module's
-# own pair of strings, **including its asymmetric orientation**: the fraction
+# Normalized content-word overlap, with function words dropped, is scored
+# **asymmetrically**: the fraction
 # is taken over the *reference* side's significant words, never the shorter of
 # the two. ``restates_stem(front, stem)`` divides by ``len(stem_tokens)`` — the
 # already-published Quick-check question is the reference, and ``front`` (the
@@ -154,25 +146,16 @@ def _restates_any(claim: str, prior_claims: Sequence[str]) -> bool:
 # analogous reference is the **prior** Brief's claim (already published,
 # fixed) and the candidate is the new finding's ``claim`` — so the denominator
 # is ``len(prior_tokens)``, never ``min(len(claim_tokens), len(prior_tokens))``.
-# Taking the ``min`` is strictly more aggressive than either asymmetric form:
+# Taking the ``min`` is strictly more aggressive:
 # it lets a candidate whose content words are a strict subset of a longer
 # prior claim score a perfect 1.0 regardless of how much *more* the prior
 # claim said — which drops genuinely new findings ("Ofcom fined Meta £1.5m"
 # read against "Ofcom fined Meta £5m in an earlier ruling, one of several")
-# and inverts the false-negative bias this whole class of check is required to
-# have (`agents/flashcard.py`'s module docstring; TDD D9's "Skipped is
-# expensive to manufacture" framing). The constants below intentionally mirror
-# flashcard.py's calibration (same threshold, same minimum content-token
-# floor, same small generic stopword list) as the starting point; they are a
-# **separate** knob from flashcard.py's, free to retune independently once
-# real Brief claims are on hand, exactly because they are not the same
-# constant shared across an import. The *formula*, unlike the constants, is
-# not a free choice — it must mirror ``restates_stem``'s orientation exactly,
-# which is what this module now does.
+# and inverts the false-negative bias required by TDD D9's "Skipped is
+# expensive to manufacture" framing. The constants are independently tunable
+# once real Brief claims are available.
 
-# **Deliberate divergence from `agents/flashcard.py`'s tokenizer.** That
-# module's ``[a-z0-9']+`` is fine for Quick-check stems, which rarely turn on
-# a figure. Brief claims are frequently *about* figures — "fined €1.5m" vs
+# Brief claims are frequently *about* figures — "fined €1.5m" vs
 # "fined €5m" — and ``[a-z0-9']+`` splits a decimal or thousands-separated
 # literal into fragments ("3.5%" -> {"3", "5"}, "€2.4bn" -> {"2", "4bn"}),
 # discarding exactly the digits that distinguish one finding from another and
@@ -187,9 +170,7 @@ def _restates_any(claim: str, prior_claims: Sequence[str]) -> bool:
 _WORD_RE = re.compile(r"[0-9]+(?:[.,][0-9]+)?[a-z]*%?|[a-z][a-z']*")
 
 # Deliberately small and generic (English function words, not domain-specific
-# jargon) — see agents/flashcard.py's `_STOPWORDS` for the false-positive this
-# guards against (two different questions sharing only their grammatical
-# scaffolding).
+# jargon) to avoid matching claims that share only grammatical scaffolding.
 _STOPWORDS = frozenset(
     {
         "a", "an", "the", "is", "are", "was", "were", "be", "been", "being",
@@ -204,8 +185,7 @@ _STOPWORDS = frozenset(
 )  # fmt: skip
 
 # Below this many content words, a claim carries too little signal for
-# overlap to mean anything — see agents/flashcard.py's `_MIN_CONTENT_TOKENS`
-# for the identical reasoning, pointed at claims instead of stems.
+# overlap to mean anything.
 _MIN_CONTENT_TOKENS = 3
 
 # The fraction of the *prior* claim's content words that must also appear in
@@ -231,8 +211,7 @@ def _restates_claim(claim: str, prior: str) -> bool:
 
     Either side having fewer than :data:`_MIN_CONTENT_TOKENS` content words
     means there is not enough signal to call it a restatement, so the pair is
-    never flagged — the same "too little signal" reasoning as
-    ``agents/flashcard.py``'s ``restates_stem``.
+    never flagged.
 
     **Asymmetric, like ``restates_stem``, and for the same reason.** The
     fraction is taken over ``prior``'s content words (the reference, already

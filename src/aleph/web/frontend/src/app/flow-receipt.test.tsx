@@ -4,7 +4,6 @@ import { describe, expect, it, vi } from "vitest";
 import { API_V1_BASE, type AuthSession, type PathUnit } from "../lib/api";
 import type { FlowRecord } from "../lib/flow";
 import { readFlow, writeFlow } from "../lib/flow";
-import { flashcardKeepRequests, seedFlashcardDraftRun } from "../mocks/flashcards";
 import { learnerUser } from "../mocks/handlers";
 import { seedPath } from "../mocks/paths";
 import { server } from "../mocks/server";
@@ -209,27 +208,6 @@ describe("Flow receipt — /flow/done", () => {
     });
   });
 
-  it("the drafts batch renders one DraftList per lesson and keeps post the right body", async () => {
-    useFlowSession({ flashcards: true });
-    seedLandedPaths();
-    seedReceiptRecord();
-    seedFlashcardDraftRun("a-l1", {
-      state: "generated",
-      cards: [{ id: "c1", front: "Front one", back: "Back one" }],
-    });
-    await gotoReceipt();
-
-    const drafts = await screen.findByTestId("flow-receipt-drafts");
-    expect(drafts.textContent).toMatch(/Aleph drafted 1 card/);
-    const lessonBlock = within_(drafts, "flow-draft-lesson");
-    expect(lessonBlock.getAttribute("data-lesson-id")).toBe("a-l1");
-
-    fireEvent.click(screen.getByTestId("draft-keep-button"));
-
-    await waitFor(() => expect(flashcardKeepRequests()).toHaveLength(1));
-    expect(flashcardKeepRequests()[0]).toMatchObject({ lesson_id: "a-l1", kept_ids: ["c1"] });
-  });
-
   it("'Go again' prefills the setup sheet with this flow's own scope", async () => {
     useFlowSession();
     seedLandedPaths();
@@ -273,11 +251,3 @@ describe("Flow receipt — /flow/done", () => {
     await screen.findByTestId("flow-done-unavailable");
   });
 });
-
-/** The one descendant of `container` carrying `testid`, asserting there is
- *  exactly one (this suite only ever seeds one drafted lesson per test). */
-function within_(container: HTMLElement, testid: string): HTMLElement {
-  const matches = container.querySelectorAll(`[data-testid="${testid}"]`);
-  expect(matches).toHaveLength(1);
-  return matches[0] as HTMLElement;
-}

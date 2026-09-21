@@ -87,8 +87,7 @@ class PublishedEntryDTO(BaseModel):
     example).
 
     ``kind`` doubles as the discriminator (:data:`BriefEntryDTO`) and as the
-    literal wire tag the frontend switches on — the ``CitationDTO`` shape in
-    ``dtos/flashcards.py``, one entity over. Carries no ``skip_line`` field
+    literal wire tag the frontend switches on. Carries no ``skip_line`` field
     at all (not a nullable one): a published entry has nothing to skip.
     """
 
