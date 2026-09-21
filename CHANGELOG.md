@@ -1,3 +1,10 @@
+## [1.42.4](https://github.com/mattjmcnaughton/aleph/compare/v1.42.3...v1.42.4) (2026-09-21)
+
+
+### Bug Fixes
+
+* **db:** narrow lesson reads to reduce database transfer ([1a9b035](https://github.com/mattjmcnaughton/aleph/commit/1a9b035f987409901be615a31b81b682ac286936))
+
 ## [1.42.3](https://github.com/mattjmcnaughton/aleph/compare/v1.42.2...v1.42.3) (2026-09-20)
 
 
