@@ -67,10 +67,15 @@ class PathRepository:
         topic: str,
         level: Level,
         guidance: str | None = None,
+        teaching_style: str | None = None,
         model_outline: str | None = None,
         model_lesson: str | None = None,
     ) -> Path:
         """Insert a ``pending`` path.
+
+        ``teaching_style`` is the learner's optional Teaching style
+        (CONTEXT.md), which lesson generation reads off the row and
+        :meth:`set_teaching_style` may change later.
 
         ``guidance`` is the learner's optional free text (CONTEXT.md:
         *Guidance*), stored so the DB-driven resume/reconcile re-runs the
@@ -89,6 +94,7 @@ class PathRepository:
             topic=topic,
             level=level,
             guidance=guidance,
+            teaching_style=teaching_style,
             model_outline=model_outline,
             model_lesson=model_lesson,
         )
@@ -123,6 +129,23 @@ class PathRepository:
             update(Path)
             .where(Path.id == path_id)
             .values(title=title, updated_at=func.now())
+        )
+
+    async def set_teaching_style(
+        self, path_id: uuid.UUID, *, teaching_style: str | None
+    ) -> None:
+        """Replace (or with ``None``, clear) a path's Teaching style.
+
+        Unconditional, like :meth:`set_title`, and safe at every path status:
+        lesson generation reads the column when each lesson runs, so there is
+        no fence to respect. A lesson already generating keeps the value it
+        loaded; the next one picks up this write. ``updated_at`` is bumped
+        explicitly (Core ``UPDATE`` bypasses the ORM hook). Does not commit.
+        """
+        await self.session.execute(
+            update(Path)
+            .where(Path.id == path_id)
+            .values(teaching_style=teaching_style, updated_at=func.now())
         )
 
     async def get(self, path_id: uuid.UUID) -> Path | None:

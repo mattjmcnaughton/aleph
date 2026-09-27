@@ -50,6 +50,7 @@ from aleph.dtos.paths import (
     PathSummaryDTO,
     UnitDTO,
     UpdatePathRequest,
+    UpdateTeachingStyleRequest,
 )
 from aleph.models import (  # noqa: TC001 - FastAPI resolves annotations.
     Path,
@@ -201,7 +202,9 @@ async def create_path(
     ``topic``/``level``, passed straight through to the orchestrator, which
     persists it on the row so the outline (and any DB-driven re-run of it)
     reads it. There is no picker-style enforcement on it: unlike the model
-    overrides it is available to every learner, not admin-gated.
+    overrides it is available to every learner, not admin-gated. The optional
+    ``teaching_style`` (CONTEXT.md: *Teaching style*) is persisted the same way
+    and read by lesson generation.
 
     The daily per-account cap is then checked *before* the billed work (admins
     exempt, TDD §10); a breach raises ``429`` with the ``rate_limited`` envelope.
@@ -220,6 +223,7 @@ async def create_path(
         topic=body.topic,
         level=body.level,
         guidance=body.guidance,
+        teaching_style=body.teaching_style,
         model_outline=overrides.model_outline,
         model_lesson=overrides.model_lesson,
     )
@@ -291,6 +295,7 @@ def path_detail_response(path: Path, view: PathDetailView) -> PathDetailResponse
         topic=path.topic,
         title=path.display_title,
         guidance=path.guidance,
+        teaching_style=path.teaching_style,
         level=path.level,
         status=view.status,
         refusal_message=view.refusal_message,
@@ -376,6 +381,32 @@ async def update_path(
     (``path_detail_response``'s docstring).
     """
     await PathRepository(session).set_title(path.id, title=body.title)
+    await session.commit()
+    await session.refresh(path)
+    view = await load_path_detail(session, generation_orchestrator, path.id)
+    if view is None:
+        raise _path_not_found()
+    return path_detail_response(path, view)
+
+
+@router.put("/paths/{path_id}/teaching-style")
+async def update_teaching_style(
+    body: UpdateTeachingStyleRequest, path: OwnedPath, session: Session
+) -> PathDetailResponse:
+    """Replace or clear a path's Teaching style (CONTEXT.md: *Teaching style*).
+
+    **Forward-only.** The write is the whole effect: nothing is reset or
+    regenerated. Lesson generation reads the column when each lesson runs, so
+    lessons generated after this commit use the new style, and lessons already
+    written (including ones prefetched ahead of the learner) keep theirs.
+
+    Ownership via ``OwnedPath`` (``404`` otherwise); safe at any path status.
+    Answers with the same ``PathDetailResponse`` ``GET /paths/{id}`` does, built
+    through the same read seam, for the same reasons ``update_path`` gives.
+    """
+    await PathRepository(session).set_teaching_style(
+        path.id, teaching_style=body.teaching_style
+    )
     await session.commit()
     await session.refresh(path)
     view = await load_path_detail(session, generation_orchestrator, path.id)

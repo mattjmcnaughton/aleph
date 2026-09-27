@@ -44,6 +44,7 @@ from aleph.models import (
     QuickCheck,
     Unit,
 )
+from aleph.repositories import PathRepository
 from aleph.services.generation import GenerationOrchestrator
 from aleph.services.stub_model import (
     StubModelForcedError,
@@ -963,6 +964,54 @@ async def test_lesson_prompt_carries_prior_passages_with_real_unit_titles() -> N
     # And the prior passages themselves travel (continuity payload).
     assert "passage 1" in prompt
     assert "passage 2" in prompt
+
+
+@pytest.mark.anyio
+async def test_teaching_style_edit_reaches_the_next_lesson_only() -> None:
+    # CONTEXT.md: Teaching style is forward-only. It is read off the path row
+    # when a lesson generates, so a lesson generated after the edit carries it
+    # and a lesson already written is left exactly as it was.
+    captured: list[str] = []
+    orch, _ = make_orchestrator(
+        resolve_model_fn=capturing_resolver(captured), prefetch_n=0
+    )
+    path_id, ids = await _seed_path_with_lessons(
+        [
+            (1, LessonGenerationState.GENERATED),
+            (2, LessonGenerationState.UNGENERATED),
+        ]
+    )
+    style = "Give specific examples: real crates, not foo and bar."
+    async with db.async_session() as session:
+        await PathRepository(session).set_teaching_style(path_id, teaching_style=style)
+        await session.commit()
+
+    await orch.ensure_generated_through(path_id, 2)
+
+    assert len(captured) == 1, "only the ungenerated lesson should run"
+    prompt = captured[0]
+    assert "position_in_path=2" in prompt
+    assert f"<teaching_style>\n{style}\n</teaching_style>" in prompt
+    async with db.async_session() as session:
+        first = await session.get(Lesson, ids[1])
+        assert first is not None
+        assert first.read_passage == "passage 1"
+
+
+@pytest.mark.anyio
+async def test_a_path_without_teaching_style_sends_no_style_block() -> None:
+    captured: list[str] = []
+    orch, _ = make_orchestrator(
+        resolve_model_fn=capturing_resolver(captured), prefetch_n=0
+    )
+    path_id, _ids = await _seed_path_with_lessons(
+        [(1, LessonGenerationState.UNGENERATED)]
+    )
+
+    await orch.ensure_generated_through(path_id, 1)
+
+    assert captured
+    assert "teaching_style" not in captured[0]
 
 
 @pytest.mark.anyio

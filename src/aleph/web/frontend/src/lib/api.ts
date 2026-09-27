@@ -263,6 +263,13 @@ export interface PathDetail {
    * re-derived or edited from this surface.
    */
   guidance: string | null;
+  /**
+   * The path's Teaching style (docs/CONTEXT.md): how every lesson is taught,
+   * null when none is set. Unlike `guidance` it is editable after creation
+   * (`updateTeachingStyle`), and forward-only: lessons already written keep
+   * the style they were written in.
+   */
+  teaching_style: string | null;
   level: Level;
   status: PathStatus;
   /** Non-null **only** when `status == "refused"` (docs/api.md). */
@@ -334,6 +341,11 @@ export interface CreatePathInput {
    */
   guidance?: string;
   /**
+   * The path's Teaching style (docs/CONTEXT.md, 1-2000 chars). Optional in the
+   * absent sense, like `guidance`: a blank textarea omits the key.
+   */
+  teaching_style?: string;
+  /**
    * Admin model-picker overrides (AL-052/AL-065, §5.3/D14, docs/api.md): bare
    * OpenRouter ids drawn from the session's `user.model_allowlist`, pinning the
    * outline / lesson slot on this path. **Optional in the absent sense** — an
@@ -377,6 +389,23 @@ export function updatePathTitle(input: { pathId: string; title: string }): Promi
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ title: input.title }),
+  });
+}
+
+/**
+ * Replace (a string) or clear (`null`) a path's Teaching style (docs/api.md
+ * `PUT /paths/{id}/teaching-style`). Forward-only on the server: nothing is
+ * regenerated. Returns the full `PathDetail`, like `updatePathTitle`, so the
+ * caller writes it straight into the cached query.
+ */
+export function updateTeachingStyle(input: {
+  pathId: string;
+  teachingStyle: string | null;
+}): Promise<PathDetail> {
+  return apiFetch<PathDetail>(apiV1Path(`/paths/${input.pathId}/teaching-style`), {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ teaching_style: input.teachingStyle }),
   });
 }
 

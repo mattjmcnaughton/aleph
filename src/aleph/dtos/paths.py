@@ -51,6 +51,15 @@ GuidanceStr = Annotated[
     str, StringConstraints(strip_whitespace=True, min_length=1, max_length=4000)
 ]
 
+# The learner's standing instruction about how a path's lessons are taught
+# (CONTEXT.md: *Teaching style*). Stripped and bounded like ``GuidanceStr`` but
+# tighter (2000): it rides into **every** lesson prompt on the path, so its
+# length is paid on each generation rather than once. Shared by
+# ``CreatePathRequest`` and ``UpdateTeachingStyleRequest``.
+TeachingStyleStr = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)
+]
+
 
 class CreatePathRequest(BaseModel):
     """``POST /api/v1/paths`` body: the topic + onboarding level (W1).
@@ -70,6 +79,10 @@ class CreatePathRequest(BaseModel):
     it later, unlike ``title``). Omitted or blank collapses to "no guidance" —
     ``build_outline_prompt`` (``agents/outline.py``) then emits the bare topic,
     byte-identical to a path created before this field existed.
+
+    ``teaching_style`` is the learner's optional Teaching style (CONTEXT.md):
+    how every lesson on the path should be taught. Omitted means none. Unlike
+    ``guidance`` it can be changed later (``UpdateTeachingStyleRequest``).
     """
 
     # ``model_outline``/``model_lesson`` start with the ``model_`` prefix pydantic
@@ -81,6 +94,7 @@ class CreatePathRequest(BaseModel):
     topic: TopicStr
     level: Level
     guidance: GuidanceStr | None = None
+    teaching_style: TeachingStyleStr | None = None
     model_outline: str | None = None
     model_lesson: str | None = None
 
@@ -98,6 +112,22 @@ class UpdatePathRequest(BaseModel):
     """
 
     title: PathTitleStr
+
+
+class UpdateTeachingStyleRequest(BaseModel):
+    """``PUT /api/v1/paths/{id}/teaching-style`` body: replace or clear it.
+
+    A separate request (and route) from ``UpdatePathRequest`` on purpose: that
+    one is display-only, and keeping it to ``title`` alone is what lets it
+    promise it never touches a generation input. This one is a generation input.
+
+    ``teaching_style`` is **required** and nullable: ``null`` clears the style,
+    a string replaces it. A present-but-blank string is a ``422`` (the client
+    sends ``null`` to clear), the same rule ``guidance`` follows. The change is
+    forward-only: lessons already written keep the style they were written in.
+    """
+
+    teaching_style: TeachingStyleStr | None
 
 
 class CreatePathResponse(BaseModel):
@@ -209,7 +239,9 @@ class PathDetailResponse(BaseModel):
     fallback, as in ``PathSummaryDTO``). ``guidance`` is the learner's free text
     from creation, or ``null`` when none was given — display-only here (the
     outline already ran with it); there is no route that lets a learner change
-    it after the fact.
+    it after the fact. ``teaching_style`` is the path's current Teaching style,
+    or ``null`` when none is set; unlike ``guidance`` it is editable
+    (``PUT /paths/{id}/teaching-style``).
 
     ``PATCH /paths/{id}`` (``update_path``) returns this exact shape — the same
     body ``GET`` does — so the client can drop the response straight into the
@@ -221,6 +253,7 @@ class PathDetailResponse(BaseModel):
     topic: str
     title: str
     guidance: str | None
+    teaching_style: str | None
     level: Level
     status: PathStatus
     refusal_message: str | None

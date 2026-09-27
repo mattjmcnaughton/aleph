@@ -177,6 +177,36 @@ describe("Onboarding — /new", () => {
     expect(bodies[bodies.length - 1]?.guidance).toBe("Cover conditional types before mapped types");
   });
 
+  it("captures a teaching style and the path view shows it", async () => {
+    const topic = await gotoNewPath();
+
+    fireEvent.change(topic, { target: { value: "TypeScript generics" } });
+    pickLevel(/new to it/i);
+    fireEvent.change(screen.getByLabelText("Teaching style"), {
+      target: { value: "Compare to Java." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Specific examples" }));
+    submit();
+
+    await screen.findByTestId("path-view");
+    const bodies = createPathBodies();
+    const sent = "Compare to Java. Give specific, concrete examples.";
+    expect(bodies[bodies.length - 1]?.teaching_style).toBe(sent);
+    expect((await screen.findByTestId("teaching-style-text")).textContent).toBe(sent);
+  });
+
+  it("teaching style is optional — submitting without it omits the field", async () => {
+    const topic = await gotoNewPath();
+
+    fireEvent.change(topic, { target: { value: "TypeScript generics" } });
+    pickLevel(/new to it/i);
+    submit();
+
+    await screen.findByTestId("path-view");
+    const bodies = createPathBodies();
+    expect("teaching_style" in (bodies[bodies.length - 1] ?? {})).toBe(false);
+  });
+
   it("guidance is optional — submitting without it omits the field", async () => {
     const topic = await gotoNewPath();
 

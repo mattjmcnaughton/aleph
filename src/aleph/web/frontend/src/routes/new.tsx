@@ -16,6 +16,7 @@ import {
 import { ModelPicker } from "../components/model-picker";
 import { Breadcrumbs } from "../components/breadcrumbs";
 import { LevelFieldset } from "../components/level-fieldset";
+import { TeachingStyleField } from "../components/teaching-style-field";
 import { PRIMARY_CTA, RetryNotices, Spinner, StateCard } from "../components/state-card";
 import { sessionQueryOptions } from "../lib/auth";
 import {
@@ -66,6 +67,7 @@ function NewPath() {
   // learner pastes to shape the outline. Preserved across the failed→editing
   // round trip exactly like topic/level, below.
   const [guidance, setGuidance] = useState("");
+  const [teachingStyle, setTeachingStyle] = useState("");
   const [pathId, setPathId] = useState<string | null>(null);
   // Admin model slots (§5.3/D14). `MODEL_SLOT_DEFAULT` means "no override" —
   // `buildCreatePathInput` drops the key rather than sending an empty id.
@@ -137,7 +139,7 @@ function NewPath() {
     event.preventDefault();
     if (!canSubmitTopic(topic)) return;
     createMutation.mutate(
-      buildCreatePathInput({ topic, level, guidance, modelOutline, modelLesson }),
+      buildCreatePathInput({ topic, level, guidance, teachingStyle, modelOutline, modelLesson }),
     );
   }
 
@@ -176,9 +178,11 @@ function NewPath() {
           topic={topic}
           level={level}
           guidance={guidance}
+          teachingStyle={teachingStyle}
           onTopicChange={setTopic}
           onLevelChange={setLevel}
           onGuidanceChange={setGuidance}
+          onTeachingStyleChange={setTeachingStyle}
           onSubmit={onSubmit}
           submitting={createMutation.isPending}
           rateLimited={rateLimited}
@@ -231,9 +235,11 @@ interface FormProps {
   topic: string;
   level: Level;
   guidance: string;
+  teachingStyle: string;
   onTopicChange: (value: string) => void;
   onLevelChange: (value: Level) => void;
   onGuidanceChange: (value: string) => void;
+  onTeachingStyleChange: (value: string) => void;
   onSubmit: (event: React.FormEvent) => void;
   submitting: boolean;
   rateLimited: boolean;
@@ -249,9 +255,11 @@ function OnboardingForm({
   topic,
   level,
   guidance,
+  teachingStyle,
   onTopicChange,
   onLevelChange,
   onGuidanceChange,
+  onTeachingStyleChange,
   onSubmit,
   submitting,
   rateLimited,
@@ -315,6 +323,20 @@ function OnboardingForm({
           // `TopicStr` above — same reasoning, same cap-at-the-keyboard rule.
           maxLength={GUIDANCE_MAX_LENGTH}
           className="mt-3 w-full resize-y rounded-md border border-divider bg-surface px-4 py-3 text-base text-porcelain placeholder:text-slate focus:border-teal focus:outline-none"
+        />
+      </div>
+
+      <div className="mt-6">
+        <label htmlFor="onboarding-teaching-style" className="text-sm font-medium text-porcelain">
+          Teaching style
+        </label>
+        <p className="mt-1 text-sm leading-6 text-mist">
+          Optional. How each lesson should read. You can change this later.
+        </p>
+        <TeachingStyleField
+          id="onboarding-teaching-style"
+          value={teachingStyle}
+          onChange={onTeachingStyleChange}
         />
       </div>
 

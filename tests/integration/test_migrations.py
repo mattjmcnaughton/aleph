@@ -70,6 +70,22 @@ async def _enum_types(database_url: str) -> set[str]:
     return {row["typname"] for row in rows}
 
 
+# Columns a *later* migration adds to a table an earlier step's test tracks. The
+# "earlier tables are unchanged by step N" tests snapshot at head and downgrade
+# one step below N, so a column some step after N added to a tracked table would
+# otherwise read as "step N's downgrade dropped it". Grows with each such step.
+LATER_COLUMNS: dict[str, set[str]] = {
+    "paths": {"teaching_style"},  # 0015_path_teaching_style
+}
+
+
+def _without_later_columns(snapshot: dict[str, set[str]]) -> dict[str, set[str]]:
+    return {
+        table: columns - LATER_COLUMNS.get(table, set())
+        for table, columns in snapshot.items()
+    }
+
+
 async def _columns(database_url: str, table: str) -> set[str]:
     connection = await connect(database_url)
     try:
@@ -468,7 +484,7 @@ def test_earlier_tables_keep_their_columns_through_the_shaping_reversal(
         "conversations": {"kind"},
         "messages": {"proposal"},
         "lessons": {"revision_instruction"},
-        "paths": {"title", "guidance"},
+        "paths": {"title", "guidance", "teaching_style"},
     }
     assert {
         table: columns - added.get(table, set()) for table, columns in before.items()
@@ -852,11 +868,13 @@ def test_the_title_and_guidance_step_only_adds_two_columns(
     run_alembic(database_url, APPLIED_CHANGE_HEAD, downgrade=True)
 
     after_downgrade = asyncio.run(_columns(database_url, "paths"))
-    assert after_downgrade == at_head - {"title", "guidance"}
+    assert after_downgrade == at_head - {"title", "guidance"} - LATER_COLUMNS["paths"]
 
     run_alembic(database_url, TITLE_GUIDANCE_HEAD)
 
-    assert asyncio.run(_columns(database_url, "paths")) == at_head
+    assert (
+        asyncio.run(_columns(database_url, "paths")) == at_head - LATER_COLUMNS["paths"]
+    )
 
 
 def test_the_title_and_guidance_step_downgrades_and_reapplies_cleanly(
@@ -944,7 +962,7 @@ def test_earlier_tables_are_unchanged_by_the_streak_index_migration(
     run_alembic(database_url, TITLE_GUIDANCE_HEAD, downgrade=True)
     after = {table: asyncio.run(_columns(database_url, table)) for table in tracked}
 
-    assert before == after
+    assert _without_later_columns(before) == after
 
 
 # --------------------------------------------------------------------------- #
@@ -1081,7 +1099,7 @@ def test_earlier_tables_are_unchanged_by_the_flashcards_migration(
     run_alembic(database_url, STREAK_INDEX_HEAD, downgrade=True)
     after = {table: asyncio.run(_columns(database_url, table)) for table in tracked}
 
-    assert before == after
+    assert _without_later_columns(before) == after
 
 
 # --------------------------------------------------------------------------- #
@@ -1197,7 +1215,7 @@ def test_earlier_tables_are_unchanged_by_the_card_management_migration(
     run_alembic(database_url, FLASHCARDS_HEAD, downgrade=True)
     after = {table: asyncio.run(_columns(database_url, table)) for table in tracked}
 
-    assert before == after
+    assert _without_later_columns(before) == after
 
 
 # --------------------------------------------------------------------------- #
@@ -1343,7 +1361,7 @@ def test_earlier_tables_are_unchanged_by_the_analyst_migration(
     run_alembic(database_url, CARD_MANAGEMENT_HEAD, downgrade=True)
     after = {table: asyncio.run(_columns(database_url, table)) for table in tracked}
 
-    assert before == after
+    assert _without_later_columns(before) == after
 
 
 # --------------------------------------------------------------------------- #
@@ -1436,7 +1454,7 @@ def test_earlier_tables_are_unchanged_by_the_beat_research_runs_migration(
     run_alembic(database_url, ANALYST_HEAD, downgrade=True)
     after = {table: asyncio.run(_columns(database_url, table)) for table in tracked}
 
-    assert before == after
+    assert _without_later_columns(before) == after
 
 
 # --------------------------------------------------------------------------- #
@@ -1549,4 +1567,78 @@ def test_earlier_tables_are_unchanged_by_the_user_settings_migration(
     run_alembic(database_url, BEAT_RESEARCH_RUNS_HEAD, downgrade=True)
     after = {table: asyncio.run(_columns(database_url, table)) for table in tracked}
 
-    assert before == after
+    assert _without_later_columns(before) == after
+
+
+# --------------------------------------------------------------------------- #
+# Teaching style (migration 0015): one nullable column on ``paths``
+# --------------------------------------------------------------------------- #
+
+TEACHING_STYLE_HEAD = "0015_path_teaching_style"
+
+
+async def _set_teaching_style(database_url: str, path_id: str, value: str) -> None:
+    connection = await connect(database_url)
+    try:
+        await connection.execute(
+            "UPDATE paths SET teaching_style = $2 WHERE id = $1::uuid",
+            path_id,
+            value,
+        )
+    finally:
+        await connection.close()
+
+
+async def _teaching_style(database_url: str, path_id: str) -> str | None:
+    connection = await connect(database_url)
+    try:
+        return await connection.fetchval(
+            "SELECT teaching_style FROM paths WHERE id = $1::uuid", path_id
+        )
+    finally:
+        await connection.close()
+
+
+def test_the_teaching_style_step_only_adds_one_column(
+    isolated_database: str,
+) -> None:
+    """At ``0014`` the column is absent; at ``0015`` it exists. Nothing else moves."""
+    database_url = isolated_database
+    tracked = (
+        *PHASE_1_TABLES,
+        *PHASE_2_TABLES,
+        FLAGS_TABLE,
+        CHANGES_TABLE,
+        *FLASHCARDS_TABLES,
+        *ANALYST_TABLES,
+        BEAT_RESEARCH_RUNS_TABLE,
+        SETTINGS_TABLE,
+    )
+
+    before = {table: asyncio.run(_columns(database_url, table)) for table in tracked}
+    assert "teaching_style" in before["paths"]
+
+    run_alembic(database_url, SETTINGS_HEAD, downgrade=True)
+    after = {table: asyncio.run(_columns(database_url, table)) for table in tracked}
+
+    expected = dict(before)
+    expected["paths"] = before["paths"] - {"teaching_style"}
+    assert after == expected
+
+    run_alembic(database_url, TEACHING_STYLE_HEAD)
+    assert asyncio.run(_columns(database_url, "paths")) == before["paths"]
+
+
+def test_the_teaching_style_step_downgrades_and_reapplies_cleanly(
+    isolated_database: str,
+) -> None:
+    """The path row survives a round trip; the column comes back ``NULL``."""
+    database_url = isolated_database
+    path_id = asyncio.run(_seed_path_row(database_url))
+    asyncio.run(_set_teaching_style(database_url, path_id, "More examples."))
+
+    run_alembic(database_url, SETTINGS_HEAD, downgrade=True)
+    run_alembic(database_url, TEACHING_STYLE_HEAD)
+
+    assert asyncio.run(_teaching_style(database_url, path_id)) is None
+    assert asyncio.run(_title_and_guidance(database_url, path_id)) == (None, None)

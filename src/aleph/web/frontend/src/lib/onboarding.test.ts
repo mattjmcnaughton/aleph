@@ -130,6 +130,14 @@ describe("buildCreatePathInput", () => {
     expect(input.guidance).toBe("Cover generics before decorators");
   });
 
+  it("includes a trimmed teaching style and omits a blank one", () => {
+    expect(buildCreatePathInput({ ...base, teachingStyle: "  More examples.  " })).toMatchObject({
+      teaching_style: "More examples.",
+    });
+    expect("teaching_style" in buildCreatePathInput(base)).toBe(false);
+    expect("teaching_style" in buildCreatePathInput({ ...base, teachingStyle: "  " })).toBe(false);
+  });
+
   it("omits guidance entirely when blank or whitespace-only", () => {
     expect("guidance" in buildCreatePathInput(base)).toBe(false);
     expect("guidance" in buildCreatePathInput({ ...base, guidance: "" })).toBe(false);

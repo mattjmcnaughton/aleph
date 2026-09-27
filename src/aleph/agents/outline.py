@@ -23,12 +23,13 @@ out of scope for the agent.
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from typing import Literal, get_args
 
 from pydantic import BaseModel
 from pydantic_ai import Agent, ModelRetry, RunContext
+
+from aleph.agents._delimiters import neutralize_delimiters
 
 
 class LessonOutline(BaseModel):
@@ -172,26 +173,20 @@ class OutlineDeps:
 
 # --- user prompt (topic + optional guidance) -----------------------------------
 
-# Case-insensitive match on the literal delimiter tokens ``build_outline_prompt``
-# wraps guidance in below. Guidance is up to 4000 chars of learner free text
-# interpolated raw between ``<guidance>``/``</guidance>`` — without this, a
-# learner could write their own ``</guidance>`` followed by fabricated
-# instructions and have the model read them as *outside* the guidance block,
-# i.e. as if the system prompt itself had said them. Mirrors
-# ``agents/shaper.py``'s ``_data_value``/``_RESERVED_TOKEN_RE`` pattern for the
-# same class of problem: an untrusted value landing inside a delimited block.
-_GUIDANCE_DELIMITER_RE = re.compile(r"</?guidance>", re.IGNORECASE)
-_REDACTED = "[redacted]"
 
-
+# Guidance is up to 4000 chars of learner free text interpolated raw between
+# ``<guidance>``/``</guidance>``, so any spelling of that tag inside it is struck
+# first (``agents/_delimiters.py``, shared with the lesson agent's Teaching style
+# block). Mirrors ``agents/shaper.py``'s ``_data_value`` for the same class of
+# problem: an untrusted value landing inside a delimited block.
 def _neutralize_guidance_delimiters(guidance: str) -> str:
     """Strike any ``<guidance>``/``</guidance>`` token inside learner free text.
 
     Applied to ``guidance`` before interpolation so the learner cannot close
     the delimited block early and continue writing content the model would
-    read as no longer being guidance (see :data:`_GUIDANCE_DELIMITER_RE`).
+    read as no longer being guidance.
     """
-    return _GUIDANCE_DELIMITER_RE.sub(_REDACTED, guidance)
+    return neutralize_delimiters(guidance, "guidance")
 
 
 def build_outline_prompt(topic: str, guidance: str | None = None) -> str:

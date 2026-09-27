@@ -19,7 +19,8 @@ synonym (say **path**, not "course"; **Quick check**, not "quiz question").
 > [Phase 2B PRD](prds/phase-2b-shape-your-path.md) · [Phase 2B TDD](tdds/phase-2b-shape-your-path.md) ·
 > [Phase 5 streaks PRD](prds/phase-5-streaks.md) · [Phase 5 streaks TDD](tdds/phase-5-streaks.md) ·
 > [Phase 3 PRD](prds/phase-3-flashcards.md) · [Phase 6 PRD](prds/phase-6-analyst.md) ·
-> [Phase 6 TDD](tdds/phase-6-analyst.md).
+> [Phase 6 TDD](tdds/phase-6-analyst.md). **Teaching style** was added directly, with no PRD or
+> TDD of its own: a small, forward-only lesson-generation input (defined in the Generation table).
 
 ## Core domain
 
@@ -47,6 +48,7 @@ synonym (say **path**, not "course"; **Quick check**, not "quiz question").
 | **Generation** | The AI producing content. Two kinds: **outline generation** (path structure) and **lesson generation** (a lesson's Read + Quick check). |
 | **Outline** | The units-and-lessons skeleton of a path, generated once at path creation, before lesson content exists. |
 | **Guidance** | The learner's optional free text, captured once at path creation, steering the Outline's shape — which stages, what order, what to emphasise or skip, how big. A generation input alongside Topic and Level: read into the outline prompt, and fixed once the path exists (no route changes it after creation). |
+| **Teaching style** | The learner's optional free text about *how* a path's lessons are taught — "give more specific examples", "show code first". Set at path creation and editable at any time after. A lesson-generation input only (the outline never reads it), read off the path when each lesson generates, so an edit is **forward-only**: lessons generated after it follow the new style and every lesson already written, including prefetched ones, keeps the style it was written in. Distinct from **Guidance** (what the path covers, frozen at creation) and from a **Revision** (one lesson, re-taught once, through an applied Proposal). Where both reach one lesson, the Revision wins. |
 | **On-demand generation** | Generating a lesson's content when the learner reaches it, rather than all up front. |
 | **Prefetch (+N)** | Generating the next *N* lessons ahead of where the learner is, to hide generation latency. |
 | **Continuity** | The rule that lesson *N+1* is generated with awareness of the content of lessons *1…N*, so the path builds on itself and never re-teaches or contradicts earlier lessons. |
