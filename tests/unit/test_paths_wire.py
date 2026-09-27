@@ -1,4 +1,4 @@
-"""Unit tests for the Path title / Guidance wire contract (CONTEXT.md).
+"""Unit tests for the Path title / Guidance / Teaching style wire contract.
 
 Everything about the two new fields — ``title`` (display) and ``guidance``
 (generation input) — that can be pinned without a server or a database:
@@ -12,7 +12,11 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from aleph.dtos.paths import CreatePathRequest, UpdatePathRequest
+from aleph.dtos.paths import (
+    CreatePathRequest,
+    UpdatePathRequest,
+    UpdateTeachingStyleRequest,
+)
 from aleph.models import Level
 from aleph.models.path import Path
 
@@ -109,3 +113,45 @@ def test_display_title_falls_back_to_topic_when_unset() -> None:
 def test_display_title_prefers_the_set_title() -> None:
     path = Path(topic="Rust ownership", title="Rust, the fun parts")
     assert path.display_title == "Rust, the fun parts"
+
+
+# --------------------------------------------------------------------------- #
+# Teaching style (CONTEXT.md): optional at create, replaceable/clearable later
+# --------------------------------------------------------------------------- #
+
+
+def test_create_path_request_accepts_absent_teaching_style() -> None:
+    body = CreatePathRequest(topic="Rust ownership", level=Level.SOME_EXPERIENCE)
+    assert body.teaching_style is None
+
+
+def test_create_path_request_strips_teaching_style() -> None:
+    body = CreatePathRequest(
+        topic="Rust ownership",
+        level=Level.SOME_EXPERIENCE,
+        teaching_style="  more examples  ",
+    )
+    assert body.teaching_style == "more examples"
+
+
+def test_teaching_style_is_bounded_at_2000() -> None:
+    assert UpdateTeachingStyleRequest(teaching_style="x" * 2000).teaching_style
+    with pytest.raises(ValidationError):
+        UpdateTeachingStyleRequest(teaching_style="x" * 2001)
+
+
+def test_update_teaching_style_null_clears() -> None:
+    assert UpdateTeachingStyleRequest(teaching_style=None).teaching_style is None
+
+
+@pytest.mark.parametrize("blank", ["", "   "])
+def test_update_teaching_style_rejects_blank(blank: str) -> None:
+    # Clearing is an explicit ``null``; a blank string is a client mistake.
+    with pytest.raises(ValidationError):
+        UpdateTeachingStyleRequest(teaching_style=blank)
+
+
+def test_update_teaching_style_requires_the_key() -> None:
+    # An empty body must not silently clear the style.
+    with pytest.raises(ValidationError):
+        UpdateTeachingStyleRequest.model_validate({})

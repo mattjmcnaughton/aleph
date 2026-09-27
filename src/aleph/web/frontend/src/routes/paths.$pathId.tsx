@@ -13,6 +13,7 @@ import {
   retryPath,
   updatePathTitle,
 } from "../lib/api";
+import { TeachingStyleCard } from "../components/teaching-style-card";
 import { PRIMARY_CTA, PlayIcon, RetryNotices, Spinner, StateCard } from "../components/state-card";
 import { Breadcrumbs } from "../components/breadcrumbs";
 import { LessonMarker, UNLOCK_STATE_LABEL } from "../components/lesson-marker";
@@ -194,6 +195,8 @@ function ReadyPath({
           <span className="text-base text-mist">%</span>
         </p>
       </div>
+
+      <TeachingStyleCard key={detail.id} detail={detail} />
 
       <div className="mt-4">
         {/* Decorative bar; the text below is the accessible progress readout. */}

@@ -64,6 +64,15 @@ class Path(Base, UUIDAuditMixin):
     # (``agents/outline.py``'s ``build_outline_prompt``) — and frozen the same
     # way: no route ever writes it after create.
     guidance: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # The learner's standing instruction about *how* this path's lessons are
+    # taught (CONTEXT.md: *Teaching style*), added in 0015. A lesson-generation
+    # input, but unlike ``topic``/``guidance`` it is deliberately **mutable**:
+    # ``PUT /paths/{id}/teaching-style`` rewrites it at any time. That is safe
+    # because it is read when each lesson generates (``_load_lesson_context`` in
+    # ``services/generation.py``), never frozen into structure — an edit reaches
+    # the next lesson generated and leaves every already-written lesson as it is
+    # (forward-only). The outline agent never reads it. ``NULL`` means none.
+    teaching_style: Mapped[str | None] = mapped_column(Text, nullable=True)
     level: Mapped[Level] = mapped_column(
         Enum(
             Level,

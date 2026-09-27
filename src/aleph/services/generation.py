@@ -216,6 +216,10 @@ class _LessonContext:
     # snapshot of the passage it replaces; the *only* effect is one extra
     # section in the user prompt.
     revision: LessonRevision | None = None
+    # The path's Teaching style (CONTEXT.md), read off the row when the lesson
+    # generates rather than when the path was created, which is what makes an
+    # edit forward-only: it reaches the next lesson loaded, never a written one.
+    teaching_style: str | None = None
 
 
 @dataclass(frozen=True)
@@ -354,6 +358,7 @@ class GenerationOrchestrator:
         topic: str,
         level: Level,
         guidance: str | None = None,
+        teaching_style: str | None = None,
         model_outline: str | None = None,
         model_lesson: str | None = None,
     ) -> Path:
@@ -370,6 +375,10 @@ class GenerationOrchestrator:
         re-run the outline with it, not with a blank guidance the in-memory-only
         version would lose across a crash/restart.
 
+        ``teaching_style`` is the learner's optional Teaching style
+        (CONTEXT.md). It is stored on the row and read by lesson generation
+        only; the outline never sees it.
+
         ``model_outline``/``model_lesson`` are an admin's picker overrides
         (AL-052, §5.3): already validated (admin-only, allowlist-bound) at the
         route. They are **persisted on the row** — not carried in memory to the
@@ -383,6 +392,7 @@ class GenerationOrchestrator:
                 topic=topic,
                 level=level,
                 guidance=guidance,
+                teaching_style=teaching_style,
                 model_outline=model_outline,
                 model_lesson=model_lesson,
             )
@@ -796,6 +806,7 @@ class GenerationOrchestrator:
             prior_passages=context.prior,
             caps=self._lesson_caps,
             revision=context.revision,
+            teaching_style=context.teaching_style,
         )
         model = self._resolve_model(
             context.model_lesson
@@ -994,6 +1005,7 @@ class GenerationOrchestrator:
             prior=prior,
             model_lesson=path.model_lesson,
             revision=revision,
+            teaching_style=path.teaching_style,
         )
 
     async def _load_revision(

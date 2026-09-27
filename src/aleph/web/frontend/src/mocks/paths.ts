@@ -22,7 +22,11 @@ import {
   type PathSummary,
   type PathUnit,
 } from "../lib/api";
-import { PATH_TITLE_MAX_LENGTH, TOPIC_MAX_LENGTH } from "../lib/onboarding";
+import {
+  PATH_TITLE_MAX_LENGTH,
+  TEACHING_STYLE_MAX_LENGTH,
+  TOPIC_MAX_LENGTH,
+} from "../lib/onboarding";
 import { ADMIN_MODEL_ALLOWLIST } from "./models";
 
 // --- Reusable path-view fixtures (AL-062) -----------------------------------
@@ -197,6 +201,8 @@ interface StoredPath {
   title?: string;
   /** Free-text creation input (docs/api.md), null when none was given. */
   guidance: string | null;
+  /** The path's Teaching style (docs/CONTEXT.md), null when none is set. */
+  teachingStyle: string | null;
   level: Level;
   /** The terminal status this path resolves to once `pollsRemaining` hits 0. */
   resolution: PathStatus;
@@ -221,6 +227,8 @@ interface PathsConfig {
   deleteFails: boolean;
   /** When true, `PATCH /paths/{id}` (rename) raises a generic `500`. */
   renameFails: boolean;
+  /** When true, `PUT /paths/{id}/teaching-style` raises a generic `500`. */
+  teachingStyleFails: boolean;
   /**
    * Milliseconds `DELETE /paths/{id}` waits before responding. Gives a test a
    * real in-flight window — the only way to observe which row reads "Deleting…".
@@ -242,6 +250,7 @@ const defaultConfig: PathsConfig = {
   retryFails: false,
   deleteFails: false,
   renameFails: false,
+  teachingStyleFails: false,
   deleteDelayMs: 0,
   modelAllowlist: [...ADMIN_MODEL_ALLOWLIST],
 };
@@ -262,6 +271,8 @@ let listRequests = 0;
 /** How many times `PATCH /paths/{id}` (rename) was served — did Escape/Cancel
  *  really send nothing, as opposed to a request that merely resolved fast? */
 let renameRequests = 0;
+/** Every body `PUT /paths/{id}/teaching-style` received, raw, in call order. */
+const teachingStyleBodies: Array<Record<string, unknown>> = [];
 
 /** Reset store + config between tests (wired into tests/setup.ts). */
 export function resetPaths(): void {
@@ -273,6 +284,12 @@ export function resetPaths(): void {
   createBodies.length = 0;
   listRequests = 0;
   renameRequests = 0;
+  teachingStyleBodies.length = 0;
+}
+
+/** The raw bodies `PUT /paths/{id}/teaching-style` received, in order. */
+export function teachingStyleRequestBodies(): Array<Record<string, unknown>> {
+  return teachingStyleBodies.map((body) => ({ ...body }));
 }
 
 /**
@@ -326,6 +343,7 @@ export function seedPath(path: {
   /** Display label; omit to exercise the topic fallback (the common case). */
   title?: string;
   guidance?: string | null;
+  teachingStyle?: string | null;
   resolution?: PathStatus;
   pollsRemaining?: number;
   /** Custom outline for a `ready` path (the rail fixtures above). */
@@ -344,6 +362,7 @@ export function seedPath(path: {
     topic: path.topic,
     title: path.title,
     guidance: path.guidance ?? null,
+    teachingStyle: path.teachingStyle ?? null,
     level: path.level,
     resolution: path.resolution ?? "ready",
     pollsRemaining: path.pollsRemaining ?? 0,
@@ -555,6 +574,7 @@ function detailFor(path: StoredPath): PathDetail {
     // exactly like an untouched path fresh out of `POST /paths`.
     title: path.title ?? path.topic,
     guidance: path.guidance,
+    teaching_style: path.teachingStyle,
     level: path.level,
     status,
     refusal_message: status === "refused" ? REFUSAL_MESSAGE : null,
@@ -684,6 +704,7 @@ export const pathsHandlers = [
       topic: string;
       level: Level;
       guidance?: string;
+      teaching_style?: string;
     };
     createBodies.push({ ...body });
     // Request-body validation comes first, as Pydantic's does: an over-long
@@ -710,6 +731,7 @@ export const pathsHandlers = [
       id,
       topic: body.topic,
       guidance: body.guidance ?? null,
+      teachingStyle: body.teaching_style ?? null,
       level: body.level,
       resolution: resolutionForTopic(body.topic),
       pollsRemaining: config.pollsBeforeResolve,
@@ -807,6 +829,43 @@ export const pathsHandlers = [
     path.title = trimmed;
     // Echoes the full detail — the same shape `GET /paths/{id}` returns
     // (docs/api.md) — so the caller can write it straight into the poll cache.
+    return HttpResponse.json(detailFor(path));
+  }),
+
+  http.put(`${API_V1_BASE}/paths/:id/teaching-style`, async ({ request, params }) => {
+    const path = store.get(params.id as string);
+    if (!path) {
+      return HttpResponse.json(
+        { error: { code: "not_found", message: "Path not found." } },
+        { status: 404 },
+      );
+    }
+    const body = (await request.json()) as Record<string, unknown>;
+    teachingStyleBodies.push({ ...body });
+    if (config.teachingStyleFails) {
+      return serverErrorEnvelope();
+    }
+    // `UpdateTeachingStyleRequest` (docs/api.md): the key is required, `null`
+    // clears, a string is stripped and must be 1-2000 chars.
+    const value = body.teaching_style;
+    if (value === null) {
+      path.teachingStyle = null;
+      return HttpResponse.json(detailFor(path));
+    }
+    const trimmed = typeof value === "string" ? value.trim() : "";
+    if (!trimmed || trimmed.length > TEACHING_STYLE_MAX_LENGTH) {
+      return HttpResponse.json(
+        {
+          error: {
+            code: "validation_error",
+            message: `Teaching style must be 1-${TEACHING_STYLE_MAX_LENGTH} characters.`,
+            request_id: "test-request-id",
+          },
+        },
+        { status: 422 },
+      );
+    }
+    path.teachingStyle = trimmed;
     return HttpResponse.json(detailFor(path));
   }),
 

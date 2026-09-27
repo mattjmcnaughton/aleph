@@ -696,6 +696,94 @@ async def test_create_without_guidance_is_null_on_the_wire(
 
 
 # --------------------------------------------------------------------------- #
+# Teaching style (CONTEXT.md): set at create, replaced or cleared by PUT
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.anyio
+async def test_create_with_teaching_style_persists_it_and_it_shows_on_the_wire(
+    app: FastAPI, spawn: CollectingSpawn, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async with _client(app) as client:
+        await _sign_in(client, monkeypatch, OWNER)
+        resp = await client.post(
+            "/api/v1/paths",
+            json={
+                "topic": "Rust ownership",
+                "level": "some_experience",
+                "teaching_style": "  More examples.  ",
+            },
+        )
+        assert resp.status_code == 202, resp.text
+        path_id = resp.json()["id"]
+
+        body = await _poll(client, spawn, path_id)
+        assert body["teaching_style"] == "More examples."
+        assert (await _path_row(path_id)).teaching_style == "More examples."
+
+
+@pytest.mark.anyio
+async def test_put_teaching_style_replaces_then_clears_it(
+    app: FastAPI, spawn: CollectingSpawn, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async with _client(app) as client:
+        await _sign_in(client, monkeypatch, OWNER)
+        path_id = await _create(client, spawn, "Rust ownership", "some_experience")
+        before = await _poll(client, spawn, path_id)
+        assert before["teaching_style"] is None
+
+        url = f"/api/v1/paths/{path_id}/teaching-style"
+        resp = await client.put(url, json={"teaching_style": " Show code first. "})
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        # The response is the fresh row, not the pre-write ORM instance.
+        assert body["teaching_style"] == "Show code first."
+        # Same shape as GET, and nothing else about the path moved.
+        assert body["units"] == before["units"]
+        assert body["topic"] == "Rust ownership"
+        assert body["guidance"] is None
+
+        resp = await client.put(url, json={"teaching_style": None})
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["teaching_style"] is None
+        assert (await _path_row(path_id)).teaching_style is None
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("body", [{}, {"teaching_style": "   "}])
+async def test_put_teaching_style_rejects_missing_or_blank(
+    app: FastAPI,
+    spawn: CollectingSpawn,
+    monkeypatch: pytest.MonkeyPatch,
+    body: dict[str, object],
+) -> None:
+    async with _client(app) as client:
+        await _sign_in(client, monkeypatch, OWNER)
+        path_id = await _create(client, spawn, "Rust ownership", "some_experience")
+
+        resp = await client.put(f"/api/v1/paths/{path_id}/teaching-style", json=body)
+        assert resp.status_code == 422
+        assert resp.json()["error"]["code"] == "validation_error"
+
+
+@pytest.mark.anyio
+async def test_put_teaching_style_on_another_learners_path_is_404(
+    app: FastAPI, spawn: CollectingSpawn, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async with _client(app) as owner, _client(app) as other:
+        await _sign_in(owner, monkeypatch, OWNER)
+        path_id = await _create(owner, spawn, "Owner-only path", "some_experience")
+
+        await _sign_in(other, monkeypatch, OTHER)
+        resp = await other.put(
+            f"/api/v1/paths/{path_id}/teaching-style",
+            json={"teaching_style": "Nope"},
+        )
+        assert resp.status_code == 404
+        assert (await _path_row(path_id)).teaching_style is None
+
+
+# --------------------------------------------------------------------------- #
 # ownership: another learner's resources read as 404 (GET, retry, DELETE)
 # --------------------------------------------------------------------------- #
 

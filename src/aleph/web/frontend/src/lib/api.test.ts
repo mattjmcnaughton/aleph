@@ -54,6 +54,7 @@ function detail(
     topic: "TypeScript",
     title: "TypeScript",
     guidance: null,
+    teaching_style: null,
     level: "new_to_it",
     status,
     refusal_message: null,

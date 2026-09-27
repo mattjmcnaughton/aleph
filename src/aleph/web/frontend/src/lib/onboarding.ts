@@ -85,6 +85,9 @@ export const GUIDANCE_MAX_LENGTH = 4000;
  */
 export const PATH_TITLE_MAX_LENGTH = 200;
 
+/** Mirrors the server's `TeachingStyleStr` bound (docs/api.md). */
+export const TEACHING_STYLE_MAX_LENGTH = 2000;
+
 /**
  * The admin model picker's "use the server default" value (AL-065, §5.3/D14).
  * The empty string, because that is what an unselected `<option>` carries — the
@@ -110,6 +113,7 @@ export function buildCreatePathInput(input: {
   topic: string;
   level: Level;
   guidance?: string;
+  teachingStyle?: string;
   modelOutline?: string;
   modelLesson?: string;
 }): CreatePathInput {
@@ -120,6 +124,8 @@ export function buildCreatePathInput(input: {
   const body: CreatePathInput = { topic: input.topic.trim(), level: input.level };
   const guidance = input.guidance?.trim();
   if (guidance) body.guidance = guidance;
+  const teachingStyle = input.teachingStyle?.trim();
+  if (teachingStyle) body.teaching_style = teachingStyle;
   if (input.modelOutline) body.model_outline = input.modelOutline;
   if (input.modelLesson) body.model_lesson = input.modelLesson;
   return body;
