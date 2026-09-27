@@ -1,3 +1,10 @@
+# [1.43.0](https://github.com/mattjmcnaughton/aleph/compare/v1.42.5...v1.43.0) (2026-09-27)
+
+
+### Features
+
+* **paths:** add an editable per-path Teaching style for lesson generation ([057792b](https://github.com/mattjmcnaughton/aleph/commit/057792b223f28b34d8e27e647891c6cf2d999c28))
+
 ## [1.42.5](https://github.com/mattjmcnaughton/aleph/compare/v1.42.4...v1.42.5) (2026-09-21)
 
 
