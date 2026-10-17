@@ -112,6 +112,13 @@ appropriate retention and access policy.
 `ENV=production`, `LOG_LEVEL`, `LOG_FORMAT`, `SESSION_COOKIE_SECURE=true`,
 `OIDC_PROVIDER=auth0`.
 
+`OIDC_API_AUDIENCE` joins them when the native (iOS) app ships: it is the
+Auth0 **API Identifier** (an audience, not a secret — see "Native app (bearer
+token) configuration" below). Unset, bearer-token auth is off and every
+`Authorization: Bearer` request is `401`; the web cookie flow is unaffected
+either way. Startup rejects an `OIDC_API_AUDIENCE` equal to `OIDC_CLIENT_ID`, since
+the web client's ID tokens carry that value as their `aud`.
+
 There is deliberately no `HOST`/`PORT` here (nor in the image's `ENV`): the `CMD`
 hardcodes `--host 0.0.0.0 --port 8000` and nothing reads `Settings.host` /
 `Settings.port`, so an entry would look like a binding knob without being one.
@@ -187,6 +194,32 @@ is not optional, because derived admin (D14) classifies on the email domain.
 
 `POST /auth/logout` clears only aleph's local session; it does not redirect to
 Auth0's logout endpoint, so an Auth0 Allowed Logout URL is not required yet.
+
+### Native app (bearer token) configuration
+
+The iOS app is a separate, **public** OIDC client that runs Authorization Code +
+PKCE itself and calls `/api/v1` with `Authorization: Bearer <access token>`
+([`api.md`](api.md#authentication)). In Auth0:
+
+1. **APIs → Create API.** Pick an Identifier such as `https://api.<custom-domain>`
+   (it never needs to resolve) with signing algorithm **RS256**. Set
+   `OIDC_API_AUDIENCE` to exactly that Identifier in `fly.toml` `[env]`. It must
+   not equal the web application's client id.
+2. **Applications → Create Application → Native.** Allowed Callback URL (and
+   Allowed Logout URL) is the app's custom-scheme or universal-link redirect.
+   Grant types: Authorization Code and Refresh Token only (no Password, no
+   Implicit). It has no client secret and needs no Fly secret.
+3. The app authorizes with `audience=<API Identifier>` and
+   `scope=openid profile email` (add `offline_access` for refresh tokens). The
+   `openid` scope is load-bearing: aleph resolves the learner's profile and
+   **verified email** from Auth0's `/userinfo` with the same token (Auth0 access
+   tokens carry no email, and derived admin keys off it), and Auth0 only admits a
+   token to `/userinfo` when `openid` was requested.
+
+Nothing else is needed server-side: aleph discovers the JWKS and userinfo
+endpoint from `$OIDC_ISSUER/.well-known/openid-configuration`, and a token from
+the native app resolves to the same account as the same person's web sign-in
+(both are keyed by Auth0's `(iss, sub)`).
 
 ### 3. First manual deploy
 
@@ -558,6 +591,7 @@ something else is holding 8000 (the only port the smoke publishes).
 | `ModuleNotFoundError: No module named 'psycopg2'` during migrate | `DATABASE_URL` still uses Neon's `postgresql://…`. Rewrite to `postgresql+asyncpg://…`. |
 | `TypeError: … unexpected keyword argument 'sslmode'` / `'channel_binding'` | Neon libpq params. Use `?ssl=require` only — drop both. |
 | Startup raises "Production (ENV=production) requires real auth secrets" | One of `SESSION_SECRET_KEY` / `OIDC_ISSUER` / `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` is unset, empty, or still the dev default. |
+| iOS app gets `401` `invalid bearer token` on every call | `OIDC_API_AUDIENCE` unset or not exactly the Auth0 API Identifier, or the app did not request `audience=`/`openid`. The rejection reason is in the `bearer_auth_rejected` log event. |
 | Startup raises "The 'stub' model is not allowed in production" | A `MODEL_*` slot or `MODEL_ALLOWLIST` entry is `stub`. The deterministic CI model must never be reachable in production (D9). |
 | Release fails on migrate / `Connect call failed` | Neon cold start (the retry budget is `ALEPH_MIGRATE_ATTEMPTS`), wrong host/password, or secrets still **Staged** on a first deploy — use `--skip-release-command`, then a full deploy. |
 | `fly secrets deploy`: no machines available | Expected before the first Machine-creating deploy. See §3. |
