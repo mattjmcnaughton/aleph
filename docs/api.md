@@ -7,6 +7,57 @@
 | GET | `/healthz` | Liveness probe — returns 200 if the process is alive |
 | GET | `/readyz` | Readiness probe — returns 200 if the service is ready to accept traffic |
 
+## Authentication
+
+Every `/api/v1` route that this document calls "session-cookie protected"
+accepts **either** of two credentials, and both resolve to the same local
+account — so ownership, derived admin (`ADMIN_EMAIL_DOMAINS`), feature flags,
+the model picker and rate limits behave identically:
+
+| Client | Credential | Obtained by |
+| ------ | ---------- | ----------- |
+| Web SPA | First-party signed `session` cookie (HttpOnly, SameSite=Lax) | The server-side OIDC code flow: `GET /auth/login` → provider → `GET /auth/callback`. `POST /auth/logout` clears it. |
+| Native app (iOS) | `Authorization: Bearer <access token>` | The app itself, as a **public** OIDC client running Authorization Code + PKCE (`S256`) against the same provider (`OIDC_ISSUER`), requesting scopes `openid profile email` and the API audience. |
+
+**Bearer tokens** (`aleph/bearer.py`) are JWT access tokens, validated on every
+request: signature against the provider's JWKS (found through
+`$OIDC_ISSUER/.well-known/openid-configuration`, cached, and re-fetched — at most
+every 30 s — when a token names an unknown `kid`); `alg` from an asymmetric
+allowlist (`RS*`, `PS*`, `ES*`; never `none` or `HS*`) with the key type pinned to
+the algorithm; `iss` equal to `OIDC_ISSUER` (one trailing `/` either way);
+`aud` containing `OIDC_API_AUDIENCE`; `exp` required and `nbf`/`iat` honoured, all
+with 60 s of leeway; `sub` required. The account is then found by the
+token's `(iss, sub)` — the same key the cookie flow uses — and created on first
+sight, exactly like a first web sign-in.
+
+Identity claims (username, display name, email) come from the provider's
+**userinfo** endpoint, called with the presented token, never from the access
+token body: Auth0 access tokens carry no profile or email claims, and derived
+admin needs the provider's *verified* email (an `email_verified: false` email is
+dropped, as on the web). The userinfo `sub` must equal the token's. The resolved
+identity is cached per subject for 5 minutes, so profile/email changes (and
+admin status) reach a bearer client within that window; the token itself is
+still verified on every request.
+
+Rules that matter to a client:
+
+- **No `Authorization` header** — the session cookie decides, unchanged.
+- **An `Authorization` header is never ignored.** Anything other than exactly one
+  well-formed `Bearer <token>` (another scheme, empty token, repeated header), or a
+  token that fails any check above, is `401 unauthenticated` with
+  `WWW-Authenticate: Bearer error="invalid_token"` and the generic message
+  `invalid bearer token` — **even if a valid session cookie is also sent**. It
+  never falls back to the cookie, and `GET /api/v1/auth/session` answers `401`
+  rather than `authenticated: false`. On `401` a native client should refresh its
+  token (or sign in again).
+- **Bearer requests are cookie-free.** The session is neither read nor written,
+  so no `Set-Cookie` is ever returned and there is no CSRF surface (a browser
+  never attaches a bearer header on its own).
+- **Bearer auth is off unless `OIDC_API_AUDIENCE` is set.** Unset, every bearer
+  request is `401`.
+- `503 service_unavailable` (`identity provider unavailable`) when the provider's
+  discovery, JWKS or userinfo endpoint cannot be reached.
+
 ## Paths (`/api/v1`, AL-050, TDD §6)
 
 Session-cookie protected (`401` via the shared envelope when anonymous). All

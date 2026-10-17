@@ -192,6 +192,30 @@ class Settings(BaseSettings):
     # Normally empty; set only when a provider's discovery URL differs from
     # ``<issuer>/.well-known/openid-configuration``.
     oidc_metadata_url: str = ""
+    # Bearer-token auth for native clients (the iOS app): the audience an
+    # access token's ``aud`` must contain to be accepted on ``/api/v1``
+    # (``aleph/bearer.py``). Empty (the default) disables bearer auth — every
+    # ``Authorization: Bearer`` request is then ``401`` and only the session
+    # cookie authenticates. Auth0: the API Identifier; dev Keycloak:
+    # ``aleph-api`` (the realm's audience mapper).
+    oidc_api_audience: str = ""
+
+    @model_validator(mode="after")
+    def _check_api_audience(self) -> Self:
+        """Reject an API audience that a web-client ID token would satisfy.
+
+        An ID token's ``aud`` is the client id it was issued to, so an API
+        audience equal to ``OIDC_CLIENT_ID`` would accept the web client's ID
+        tokens as API access tokens. The audience must name the API alone.
+        """
+        audience = self.oidc_api_audience.strip()
+        if audience and audience == self.oidc_client_id.strip():
+            raise ValueError(
+                "OIDC_API_AUDIENCE must not equal OIDC_CLIENT_ID; set it to the "
+                "API's own audience (e.g. the Auth0 API Identifier)."
+            )
+        self.oidc_api_audience = audience
+        return self
 
     # Signs the first-party session cookie (random Fly secret in production).
     session_secret_key: str = DEV_SESSION_SECRET_KEY

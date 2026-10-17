@@ -12,6 +12,10 @@ src/aleph/
   config.py            # Pydantic-settings config from env vars
   logging.py           # structlog setup
   telemetry.py         # OpenTelemetry setup
+  auth.py              # OIDC provider registration + claims -> AuthIdentity
+  bearer.py            # Bearer access-token (JWT/JWKS/userinfo) auth for native
+                       # clients; Protocol seams for the key + userinfo sources
+  dependencies.py      # Current-user dependency: bearer header, else session cookie
   routers/             # HTTP endpoint definitions
     health.py          # /healthz, /readyz
   services/            # Business logic

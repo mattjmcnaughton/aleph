@@ -109,12 +109,28 @@ from `docker/keycloak/aleph-realm.json` (mounted read-only into the container's
 | Client | `aleph` (confidential, standard authorization-code flow) |
 | Client secret | `aleph-dev-secret` (well-known dev secret, not a real credential) |
 | Redirect URIs | `http://{127.0.0.1,localhost}:{8000,5173}/auth/callback` (backend + Vite dev server) |
+| Native client | `aleph-ios` (public, Authorization Code + PKCE `S256`, redirect `aleph://oauth/callback`; access tokens carry `aud: aleph-api`) |
+| API test client | `aleph-api-test` (public, **password grant**, `aud: aleph-api`) — dev/CI only, so integration tests can mint a real bearer token |
 | Test user | `dev` / `dev`, email `dev@example.com` (verified, non-admin) |
 | Admin test user | `admin-dev` / `admin-dev`, email `admin@mattjmcnaughton.com` (verified; admin via `ADMIN_EMAIL_DOMAINS`) |
 | Keycloak admin | `admin` / `admin` at `http://127.0.0.1:18080/` |
 
-The realm keeps direct access grants **disabled** (browser authorization-code
-flow only, matching production). Verify it is serving:
+The web (`aleph`) and native (`aleph-ios`) clients keep direct access grants
+**disabled** (browser authorization-code flow only, matching production). The one
+exception is `aleph-api-test`, which exists only in this dev realm so
+`tests/integration/test_bearer_keycloak.py` can exchange the published test
+users' passwords for a genuine `aleph-api` access token — never mirror it in a
+hosted provider. To call the API as a native client would, set
+`OIDC_API_AUDIENCE=aleph-api` and:
+
+```sh
+TOKEN=$(curl -fsS -d grant_type=password -d client_id=aleph-api-test \
+  -d username=dev -d password=dev -d 'scope=openid profile email' \
+  http://127.0.0.1:18080/realms/aleph/protocol/openid-connect/token | jq -r .access_token)
+curl -fsS -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8000/api/v1/auth/session
+```
+
+Verify it is serving:
 
 ```sh
 curl -fsS http://127.0.0.1:18080/realms/aleph/.well-known/openid-configuration
