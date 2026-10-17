@@ -8,6 +8,7 @@ against a real provider is ``tests/integration/test_bearer_keycloak.py``.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 import httpx
@@ -346,6 +347,60 @@ async def test_an_invalid_token_never_reaches_userinfo() -> None:
     with pytest.raises(InvalidBearerToken):
         await authenticator(userinfo).authenticate(mint(IMPOSTER_KEY))
     assert userinfo.calls == 0
+
+
+class GatedUserInfo(FakeUserInfo):
+    """Userinfo that blocks until released, so concurrent callers overlap."""
+
+    def __init__(self, claims: dict[str, Any], *, fail_first: bool = False) -> None:
+        super().__init__(claims)
+        self.release = asyncio.Event()
+        self.fail_first = fail_first
+
+    async def fetch_userinfo(self, access_token: str) -> dict[str, Any]:
+        self.calls += 1
+        call = self.calls
+        await self.release.wait()
+        if self.fail_first and call == 1:
+            raise IdentityProviderUnavailable("provider hiccup")
+        return self.claims
+
+
+@pytest.mark.anyio
+async def test_concurrent_cache_misses_for_one_subject_call_userinfo_once() -> None:
+    # An app launch fires several requests at once; the provider's per-user
+    # userinfo rate limit must see one call, not one per request.
+    userinfo = GatedUserInfo(USERINFO)
+    auth = authenticator(userinfo)
+
+    pending = asyncio.gather(*(auth.authenticate(mint(jti=str(n))) for n in range(5)))
+    await asyncio.sleep(0)
+    userinfo.release.set()
+    identities = await pending
+
+    assert userinfo.calls == 1
+    assert {identity.subject for identity in identities} == {"subject-1"}
+
+
+@pytest.mark.anyio
+async def test_a_failed_userinfo_call_does_not_fail_waiting_requests() -> None:
+    # Each request carries its own valid token: a follower retries with its own
+    # rather than inheriting the leader's failure.
+    userinfo = GatedUserInfo(USERINFO, fail_first=True)
+    auth = authenticator(userinfo)
+
+    pending = asyncio.gather(
+        auth.authenticate(mint()),
+        auth.authenticate(mint(jti="second")),
+        return_exceptions=True,
+    )
+    await asyncio.sleep(0)
+    userinfo.release.set()
+    first, second = await pending
+
+    assert isinstance(first, IdentityProviderUnavailable)
+    assert isinstance(second, AuthIdentity)
+    assert userinfo.calls == 2
 
 
 # --------------------------------------------------------------------------- #

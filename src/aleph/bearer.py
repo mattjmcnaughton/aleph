@@ -32,6 +32,7 @@ not called on each one.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import functools
 import time
 from collections import OrderedDict
@@ -48,7 +49,7 @@ from aleph.auth import AuthIdentity, fetch_identity, metadata_url_for
 from aleph.config import settings
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping, Sequence
+    from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 
 logger = structlog.get_logger()
 
@@ -239,6 +240,9 @@ class BearerAuthenticator:
         self._cache: OrderedDict[tuple[str, str], tuple[float, AuthIdentity]] = (
             OrderedDict()
         )
+        # Per-subject locks (with a waiter count, so idle entries are dropped):
+        # concurrent cache misses for one subject make one userinfo call.
+        self._locks: dict[tuple[str, str], tuple[asyncio.Lock, int]] = {}
 
     async def authenticate(self, token: str) -> AuthIdentity:
         """Verify ``token`` and return the identity it authenticates.
@@ -250,11 +254,47 @@ class BearerAuthenticator:
         verified = await self._verifier.verify(token)
         key = (verified.issuer, verified.subject)
 
-        cached = self._cache.get(key)
-        if cached is not None and cached[0] > self._clock():
+        cached = self._cached(key)
+        if cached is not None:
+            return cached
+        # Single-flight per subject: an app launch fires several requests at
+        # once, and the provider rate-limits userinfo per user. Waiters re-check
+        # the cache; if the leader failed, each retries with its own token.
+        async with self._subject_lock(key):
+            cached = self._cached(key)
+            if cached is not None:
+                return cached
+            identity = await self._fetch_identity(token, verified)
+            self._cache[key] = (self._clock() + self._ttl, identity)
             self._cache.move_to_end(key)
-            return cached[1]
+            while len(self._cache) > _IDENTITY_CACHE_SIZE:
+                self._cache.popitem(last=False)
+            return identity
 
+    def _cached(self, key: tuple[str, str]) -> AuthIdentity | None:
+        cached = self._cache.get(key)
+        if cached is None or cached[0] <= self._clock():
+            return None
+        self._cache.move_to_end(key)
+        return cached[1]
+
+    @contextlib.asynccontextmanager
+    async def _subject_lock(self, key: tuple[str, str]) -> AsyncIterator[None]:
+        lock, waiters = self._locks.get(key, (asyncio.Lock(), 0))
+        self._locks[key] = (lock, waiters + 1)
+        try:
+            async with lock:
+                yield
+        finally:
+            lock, waiters = self._locks[key]
+            if waiters == 1:
+                del self._locks[key]
+            else:
+                self._locks[key] = (lock, waiters - 1)
+
+    async def _fetch_identity(
+        self, token: str, verified: VerifiedAccessToken
+    ) -> AuthIdentity:
         info = await self._userinfo.fetch_userinfo(token)
         # OIDC Core §5.3.2: the userinfo ``sub`` MUST match the token's, or the
         # response must not be used.
@@ -264,7 +304,7 @@ class BearerAuthenticator:
             # The exact mapping the cookie flow uses (including dropping an
             # explicitly unverified email); ``iss``/``sub`` come from the
             # verified token since userinfo responses usually omit ``iss``.
-            identity = fetch_identity(
+            return fetch_identity(
                 {
                     "userinfo": {
                         **info,
@@ -275,12 +315,6 @@ class BearerAuthenticator:
             )
         except ValueError as exc:
             raise InvalidBearerToken(str(exc)) from exc
-
-        self._cache[key] = (self._clock() + self._ttl, identity)
-        self._cache.move_to_end(key)
-        while len(self._cache) > _IDENTITY_CACHE_SIZE:
-            self._cache.popitem(last=False)
-        return identity
 
 
 class OIDCProviderClient:
