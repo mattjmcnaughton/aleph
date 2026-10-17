@@ -1,3 +1,20 @@
+# [1.44.0](https://github.com/mattjmcnaughton/aleph/compare/v1.43.2...v1.44.0) (2026-10-17)
+
+
+### Bug Fixes
+
+* **auth:** make one userinfo call per subject on concurrent cache misses ([ee67fc5](https://github.com/mattjmcnaughton/aleph/commit/ee67fc565b6d5c4ea1f1db479cba61b95f1a73a9))
+
+
+### Features
+
+* **auth:** accept OIDC bearer access tokens on /api/v1 for native clients ([09953cd](https://github.com/mattjmcnaughton/aleph/commit/09953cd440592a0e2196916aba13d28346b192c3))
+
+
+### Performance Improvements
+
+* **auth:** resolve the bearer authenticator without a threadpool hop ([10b8ea4](https://github.com/mattjmcnaughton/aleph/commit/10b8ea4b895d8ccb03acab1cd15e1363f85bd4e7))
+
 ## [1.43.2](https://github.com/mattjmcnaughton/aleph/compare/v1.43.1...v1.43.2) (2026-10-17)
 
 
