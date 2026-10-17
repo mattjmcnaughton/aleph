@@ -4,6 +4,13 @@
 > Flashcard review history was removed and review-only historical credit is not preserved.
 > Path streak semantics are unchanged. Brief reads do not count toward any streak. Earlier
 > Phase 3/6 amendments below are retained as historical decision context only.
+>
+> **Push amendment (iOS app):** the "never a push" rule below is **superseded for opt-in push
+> reminders** by the [iOS app PRD](ios-app.md) (§5.13, decision D6): the iOS app may send a daily
+> learning reminder and a streak reminder, each **off until the learner turns it on**, **at most
+> once per day** in total, at a **learner-chosen local hour**, and never on a day the learner has
+> already completed a lesson. Everything else this PRD rules out stays out: no e-mail, no in-app
+> "you're about to lose your streak" warning, no freezes or repairs, no leaderboards.
 
 **Status:** Accepted — **shipped and launched** (the `streaks` flag defaults on) · **Owner:** solo builder · **Roadmap item:** [Phase 5 — Momentum](../roadmap.md#phase-5--momentum)
 **Companion to:** [Phase 5 streaks TDD](../tdds/phase-5-streaks.md)
@@ -82,7 +89,8 @@ lesson. If the completion is the second of the day, nothing happens — the stre
 not a lesson counter.
 
 **Never:** a push, an email, a "you're about to lose your streak" warning, a freeze/repair purchase,
-or a leaderboard. Restraint is the feature.
+or a leaderboard. Restraint is the feature. *(Superseded for opt-in push reminders only — see the
+push amendment at the top and the [iOS app PRD](ios-app.md) §5.13.)*
 
 **Not in v1:** a chip on the path view or in the desktop sidebar's switcher. The streak surfaces on
 the phone-first home screen and nowhere else (TDD §14, R6).
@@ -159,7 +167,8 @@ instead of arguable.
 ## 6. Explicitly out of scope
 
 Weekly goal ring · daily-minutes target · a dedicated stats/progress page · streak freezes, repairs
-or purchases · notifications or email of any kind · leaderboards or any social surface · milestone
+or purchases · notifications or email of any kind (opt-in push reminders later allowed by the
+[iOS app PRD](ios-app.md), see the push amendment) · leaderboards or any social surface · milestone
 badges (habagou has `next_milestone`; it is a nudge mechanic and this slice does not need one) ·
 per-path heatmaps · a path-view or sidebar streak chip (§3) · timezone as an account setting
 (TDD D3) · counting Attempts or lesson views as activity (§4.2).

@@ -2,7 +2,7 @@
 
 Mobile-friendly AI tutor: name a topic, get a generated learning path.
 
-Python web application using FastAPI, uvicorn, OpenTelemetry, uv, ruff, ty, and pytest. Web frontend lives in `src/aleph/web/frontend/`; the native SwiftUI iPhone app lives in `ios/`. The two are kept at feature parity (see "Two Clients" below).
+Python web application using FastAPI, uvicorn, OpenTelemetry, uv, ruff, ty, and pytest. Web frontend lives in `src/aleph/web/frontend/`; the native SwiftUI iPhone app lives in `clients/ios/`. The two are kept at feature parity (see "Two Clients" below).
 
 > **Vocabulary is authoritative: [`docs/CONTEXT.md`](docs/CONTEXT.md).** Same word,
 > same meaning, in prose, prompts, and code alike. Use the exact term — **path** not
@@ -85,13 +85,14 @@ src/aleph/web/frontend/tests/e2e/  # Playwright browser suite (E2E, phone viewpo
 ## Two Clients: Web and iOS
 
 aleph has two frontends over one API: the React web app (`src/aleph/web/frontend/`)
-and the native SwiftUI iPhone app (`ios/`, see
+and the native SwiftUI iPhone app (`clients/ios/`, see
 [`docs/prds/ios-app.md`](docs/prds/ios-app.md)). **They are kept at feature parity.**
 
 - **A user-facing change lands in both clients in the same PR.** That covers a new
   screen, a changed flow, new copy, a new state, or a new API field the UI shows. If
   one side genuinely can't follow in that PR, open a tracked issue for it and link it
-  in the PR description. Never let the two drift silently.
+  in the PR description. Never let the two drift silently. The one platform-only
+  capability is iOS push notifications (see the iOS PRD).
 - **The API is the contract, and both clients use it unchanged.** Any change under
   `/api/v1` regenerates the committed OpenAPI document and the Swift client in the
   same PR. Update `docs/api.md` as you already do. The web and iOS builds must both
@@ -109,8 +110,11 @@ and the native SwiftUI iPhone app (`ios/`, see
   OIDC (PKCE) bearer tokens. Both resolve to the same user. Don't merge the two flows.
 - **Untrusted model output.** Both clients render the Read passage with no raw HTML and
   with dangerous URL schemes stripped.
-- **Screenshots.** iOS snapshot PNGs are committed under `ios/`, so review visual
-  changes from the PR diff. Use the Playwright suite the same way on the web side.
+- **Screenshots.** iOS snapshot reference PNGs are committed under `clients/ios/`, so
+  review visual changes from the PR diff. On a PR, CI only compares against them; CI
+  records and commits new references only on `ios-dev/*` branches, which exist for
+  agents that can't build iOS locally. Use the Playwright suite the same way on the
+  web side.
 
 ## Testing Philosophy
 
@@ -146,8 +150,8 @@ If a change needs to reach production, commit it as `fix` (or `feat`) — a
 **iOS-only changes** must not deploy the backend. Until `.releaserc.json` excludes an
 `ios` scope, commit them as non-releasing types (`chore(ios):`, `ci(ios):`,
 `test(ios):`). The iOS app ships through its own workflow: a TestFlight upload on
-every merge that touches `ios/`, a monthly re-upload before the 90-day build expiry,
-and a manual dispatch.
+every merge to `main` that touches `clients/ios/`, a monthly re-upload before the
+90-day build expiry, and a manual dispatch.
 
 ## More Information
 
