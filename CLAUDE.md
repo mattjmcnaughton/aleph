@@ -2,7 +2,7 @@
 
 Mobile-friendly AI tutor: name a topic, get a generated learning path.
 
-Python web application using FastAPI, uvicorn, OpenTelemetry, uv, ruff, ty, and pytest. Frontend lives in `src/aleph/web/frontend/`.
+Python web application using FastAPI, uvicorn, OpenTelemetry, uv, ruff, ty, and pytest. Web frontend lives in `src/aleph/web/frontend/`; the native SwiftUI iPhone app lives in `ios/`. The two are kept at feature parity (see "Two Clients" below).
 
 > **Vocabulary is authoritative: [`docs/CONTEXT.md`](docs/CONTEXT.md).** Same word,
 > same meaning, in prose, prompts, and code alike. Use the exact term — **path** not
@@ -82,6 +82,36 @@ src/aleph/web/frontend/tests/e2e/  # Playwright browser suite (E2E, phone viewpo
 - All Python tool config is in `pyproject.toml`.
 - Backend: `just dev-be`. Frontend: `just dev-fe`. Both: `just dev`.
 
+## Two Clients: Web and iOS
+
+aleph has two frontends over one API: the React web app (`src/aleph/web/frontend/`)
+and the native SwiftUI iPhone app (`ios/`, see
+[`docs/prds/ios-app.md`](docs/prds/ios-app.md)). **They are kept at feature parity.**
+
+- **A user-facing change lands in both clients in the same PR.** That covers a new
+  screen, a changed flow, new copy, a new state, or a new API field the UI shows. If
+  one side genuinely can't follow in that PR, open a tracked issue for it and link it
+  in the PR description. Never let the two drift silently.
+- **The API is the contract, and both clients use it unchanged.** Any change under
+  `/api/v1` regenerates the committed OpenAPI document and the Swift client in the
+  same PR. Update `docs/api.md` as you already do. The web and iOS builds must both
+  pass.
+- **Rules that live in a client are written twice and tested twice.** For example:
+  the resume target, the polling cadence and give-up time, Day arithmetic and
+  `tz_offset_minutes`, streak copy, Markdown and Mermaid handling. When you change one
+  on the web, change and test it in Swift too, and the reverse. Prefer moving a rule to
+  the server when that's reasonable, so it exists once.
+- **Same vocabulary.** [`docs/CONTEXT.md`](docs/CONTEXT.md) applies to Swift type names
+  and UI copy exactly as it does to Python and TypeScript.
+- **Same workflow IDs.** An XCUITest that proves a workflow carries the same `W`-number
+  as its Playwright journey.
+- **Auth differs, on purpose.** The web uses the first-party session cookie. iOS uses
+  OIDC (PKCE) bearer tokens. Both resolve to the same user. Don't merge the two flows.
+- **Untrusted model output.** Both clients render the Read passage with no raw HTML and
+  with dangerous URL schemes stripped.
+- **Screenshots.** iOS snapshot PNGs are committed under `ios/`, so review visual
+  changes from the PR diff. Use the Playwright suite the same way on the web side.
+
 ## Testing Philosophy
 
 - **Red-green TDD:** write a failing test that captures the behavior, then make it pass.
@@ -112,6 +142,12 @@ major (**x**.y.z) bump.
 
 If a change needs to reach production, commit it as `fix` (or `feat`) — a
 `chore`/`docs` commit will not deploy.
+
+**iOS-only changes** must not deploy the backend. Until `.releaserc.json` excludes an
+`ios` scope, commit them as non-releasing types (`chore(ios):`, `ci(ios):`,
+`test(ios):`). The iOS app ships through its own workflow: a TestFlight upload on
+every merge that touches `ios/`, a monthly re-upload before the 90-day build expiry,
+and a manual dispatch.
 
 ## More Information
 
