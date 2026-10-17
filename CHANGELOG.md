@@ -1,3 +1,10 @@
+## [1.43.1](https://github.com/mattjmcnaughton/aleph/compare/v1.43.0...v1.43.1) (2026-10-17)
+
+
+### Bug Fixes
+
+* remove flashcards while retaining legacy schema ([d34a9a7](https://github.com/mattjmcnaughton/aleph/commit/d34a9a7a1675535a7bed8d2e900b6c7d8825d37d))
+
 # [1.43.0](https://github.com/mattjmcnaughton/aleph/compare/v1.42.5...v1.43.0) (2026-09-27)
 
 
