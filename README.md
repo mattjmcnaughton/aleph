@@ -5,8 +5,7 @@ A mobile-friendly AI tutoring app for self-directed adult learners studying anyt
 ## What it does
 
 - **Structured learning path** — a sequential path that guides you skill by skill.
-- **Spaced-repetition flashcards** — the AI auto-suggests cards from your lessons; you confirm which ones to keep.
-- **Tutor chat loop** — talk to the tutor, and those conversations reshape your future lessons.
+- **Tutor chat loop** — talk to the tutor, and apply its proposed changes to reshape future lessons.
 - **Light gamification** — streaks and progress tracking, and nothing more.
 
 ## Who it's for

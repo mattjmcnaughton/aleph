@@ -17,11 +17,9 @@ from aleph.logging import configure_logging
 from aleph.routers import auth, health
 from aleph.routers.v1 import beats as v1_beats
 from aleph.routers.v1 import feature_flags as v1_feature_flags
-from aleph.routers.v1 import flashcards as v1_flashcards
 from aleph.routers.v1 import lessons as v1_lessons
 from aleph.routers.v1 import paths as v1_paths
 from aleph.routers.v1 import progress as v1_progress
-from aleph.routers.v1 import settings as v1_settings
 from aleph.routers.v1 import shaping as v1_shaping
 from aleph.routers.v1 import tutor as v1_tutor
 from aleph.services.generation import generation_orchestrator
@@ -85,10 +83,6 @@ def create_app() -> FastAPI:
     app.include_router(v1_paths.router)
     app.include_router(v1_lessons.router)
     app.include_router(v1_feature_flags.router)
-    # Learner Settings (CONTEXT.md: Settings). Deliberately not behind a
-    # flag: it is the learner's controls over already-launched surfaces,
-    # not a surface of its own to ship dark.
-    app.include_router(v1_settings.router)
     # Every route on this one is hidden behind the ``tutor`` feature flag
     # (404 when it resolves off), so mounting it is safe in production while
     # Phase 2 is still being built (epic #82, owner amendment 1).
@@ -101,11 +95,6 @@ def create_app() -> FastAPI:
     # this slice can ship dark and be killed without disturbing either
     # already-launched surface above.
     app.include_router(v1_progress.router)
-    # Likewise behind the ``flashcards`` flag (Phase 3 TDD D10) — its own key,
-    # so this slice can ship dark (drafting, the queue, review, and the due
-    # pill all 404 by default) and be dogfooded by admins without disturbing
-    # any already-launched surface above.
-    app.include_router(v1_flashcards.router)
     # Likewise behind the ``analyst`` flag (Phase 6 TDD D12) — its own key,
     # so this slice can ship dark (deploy, list, the rail, retry, and the
     # Brief routes all 404 by default) and be dogfooded by admins without
@@ -155,8 +144,7 @@ def _install_error_handlers(app: FastAPI) -> None:
     ):
         # ``jsonable_encoder``, not ``exc.errors()`` raw (AL-410): a
         # ``model_validator`` that rejects its input with a plain
-        # ``ValueError`` (``dtos/flashcards.py``'s ``UpdateCardRequest``,
-        # the first DTO in this codebase to expose one to an HTTP body) makes
+        # ``ValueError`` makes
         # pydantic-core populate that error's ``ctx.error`` with the raw
         # exception *instance* — which ``JSONResponse``'s bare ``json.dumps``
         # cannot serialize, turning every such `422` into an unhandled `500`

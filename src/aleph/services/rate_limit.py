@@ -59,33 +59,13 @@ their own — the lessons they add are ordinary generations under
 ``RATE_LIMIT_LESSON_GENERATIONS_PER_DAY``, and ``MAX_LESSONS_PER_PATH`` bounds
 path size at proposal *and* apply time.
 
-**Flashcard drafting (``check_flashcard_draft_generation``, Phase 3 TDD §5.2/
-D13).** ``FLASHCARD_DRAFTS_PER_DAY`` counts ``user_id``'s **drafting attempts**
-today — ``UsageRepository.count_flashcard_draft_runs_since``, keyed on
-``flashcard_draft_runs.started_at``, the stamp a claim (re-)writes. This is the
-same shape as ``check_outline_generation``'s cap, not
-``count_lesson_generations_since``'s: drafting inserts no new row on a retry (a
-sparse, one-row-per-lesson claim, TDD D7), so only the *stamp* moves, and only
-the row's **latest** claim is counted — a same-lesson `failed` -> retry loop
-still consumes one quota unit, the same accepted MVP shape
-``count_path_outline_generations_since``'s docstring already names. Call before
-:meth:`~aleph.services.flashcard_drafting.FlashcardDraftingService.trigger_draft_run`
-(``routers/v1/flashcards.py``'s `POST .../flashcard-drafts`), **after** the
-ownership/`409 lesson_not_generated` checks and **before** the claim (§5.6: a
-breach must not spend a claim attempt). Ships **enabled** (default 50, not 0) —
-unlike the tutor/shaping caps, drafting is this phase's one learner-triggered
-model call (D13), so there is no "cap is 0 so this is never queried" posture
-here; the family's own off-switch (``cap <= 0``) is still honoured, per
-:class:`DailyRateLimiter`'s own docstring.
-
 **Beat research (``brief_research_capacity_available``, Phase 6 TDD D14).**
 ``RATE_LIMIT_BRIEF_RESEARCH_PER_DAY`` counts the learner's research RUNS today
 (``UsageRepository.count_brief_research_runs_since``, over the append-only
 ``beat_research_runs`` table — one row inserted per WON claim). Code-review
-FIX 2 on AL-521: this is deliberately **not**
-``check_flashcard_draft_generation``'s shape (a stamp a retry overwrites, so
-a same-entity retry loop counts once) — that shape is unsound here
-specifically, because ``MAX_BEATS_PER_LEARNER`` bounds a learner's Beat count
+FIX 2 on AL-521: this counts append-only run rows rather than a claim stamp
+that retries overwrite. The latter shape is unsound here because
+``MAX_BEATS_PER_LEARNER`` bounds a learner's Beat count
 at 3, strictly below this cap's default of 5, so a counter keyed on distinct
 Beats-with-an-attempt-today could never reach the cap at production settings.
 Counting real run rows means a same-Beat retry loop counts every attempt,
@@ -177,10 +157,6 @@ class UsageCounter(Protocol):
         self, *, user_id: uuid.UUID, since: datetime
     ) -> int: ...
 
-    async def count_flashcard_draft_runs_since(
-        self, *, user_id: uuid.UUID, since: datetime
-    ) -> int: ...
-
     async def count_brief_research_runs_since(
         self, *, user_id: uuid.UUID, since: datetime
     ) -> int: ...
@@ -213,7 +189,6 @@ class DailyRateLimiter:
         lesson_generations_per_day: int,
         tutor_messages_per_day: int,
         shaping_messages_per_day: int = 0,
-        flashcard_drafts_per_day: int = 0,
         brief_research_per_day: int = 0,
         beats_per_learner: int = 0,
         now: Callable[[], datetime] = _utc_now,
@@ -223,7 +198,6 @@ class DailyRateLimiter:
         self._lesson_generations_per_day = lesson_generations_per_day
         self._tutor_messages_per_day = tutor_messages_per_day
         self._shaping_messages_per_day = shaping_messages_per_day
-        self._flashcard_drafts_per_day = flashcard_drafts_per_day
         self._brief_research_per_day = brief_research_per_day
         self._beats_per_learner = beats_per_learner
         self._now = now
@@ -340,29 +314,6 @@ class DailyRateLimiter:
             message=(
                 f"You've reached today's limit of {self._shaping_messages_per_day} "
                 "shaping messages. Please try again tomorrow."
-            ),
-        )
-
-    async def check_flashcard_draft_generation(
-        self, *, user_id: uuid.UUID, is_admin: bool
-    ) -> None:
-        """Raise ``HTTPException(429)`` if ``user_id`` is at the daily drafting cap.
-
-        Call before triggering a drafting run (``POST
-        /lessons/{id}/flashcard-drafts``, TDD §5.2/§5.6), after the
-        ownership/generation checks and before the claim — see this module's
-        docstring for what the count actually bounds (distinct lessons with a
-        drafting attempt today, same-lesson retries counted once).
-        """
-        await self._check(
-            self._usage.count_flashcard_draft_runs_since,
-            cap=self._flashcard_drafts_per_day,
-            user_id=user_id,
-            is_admin=is_admin,
-            message=(
-                f"You've reached today's limit of "
-                f"{self._flashcard_drafts_per_day} flashcard drafting requests. "
-                "Please try again tomorrow."
             ),
         )
 
@@ -483,7 +434,6 @@ def build_daily_rate_limiter(
         lesson_generations_per_day=config.rate_limit_lesson_generations_per_day,
         tutor_messages_per_day=config.rate_limit_tutor_messages_per_day,
         shaping_messages_per_day=config.rate_limit_shaping_messages_per_day,
-        flashcard_drafts_per_day=config.flashcard_drafts_per_day,
         brief_research_per_day=config.rate_limit_brief_research_per_day,
         beats_per_learner=config.max_beats_per_learner,
     )

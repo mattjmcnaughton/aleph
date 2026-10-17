@@ -17,8 +17,6 @@ from aleph.models.enums import (
     BeatResearchState,
     BriefKind,
     ConversationKind,
-    FlashcardDraftRunState,
-    FlashcardGrade,
     LessonGenerationState,
     Level,
     MessageRole,
@@ -28,14 +26,12 @@ from aleph.models.enums import (
     PathStatus,
 )
 from aleph.models.feature_flags import UserFeatureOverride
-from aleph.models.flashcard import Flashcard, FlashcardDraftRun, FlashcardReview
 from aleph.models.lesson import Lesson
 from aleph.models.message import Message
 from aleph.models.path import Path
 from aleph.models.path_change import PathChange
 from aleph.models.quick_check import QuickCheck
 from aleph.models.unit import Unit
-from aleph.models.user_settings import UserSettings
 from aleph.models.users import User
 
 __all__ = [
@@ -48,11 +44,6 @@ __all__ = [
     "BriefSource",
     "Conversation",
     "ConversationKind",
-    "Flashcard",
-    "FlashcardDraftRun",
-    "FlashcardDraftRunState",
-    "FlashcardGrade",
-    "FlashcardReview",
     "Lesson",
     "LessonGenerationState",
     "Level",
@@ -68,5 +59,4 @@ __all__ = [
     "Unit",
     "User",
     "UserFeatureOverride",
-    "UserSettings",
 ]

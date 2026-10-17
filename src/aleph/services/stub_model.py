@@ -7,11 +7,10 @@ lesson outputs **deterministically from the topic string** — so the same topic
 always yields the same path, and Playwright can drive a real server process whose
 models happen to be the stub.
 
-It distinguishes outline, lesson, and flashcard-drafting generation by the shape
+It distinguishes outline and lesson generation by the shape
 of the agent's output tool(s): an outline agent's union (``PathOutline |
 Refusal``) registers a tool carrying ``units`` (and one carrying ``message``); a
-lesson agent registers one carrying ``read_passage``; a flashcard agent
-(Phase 3) registers one carrying ``cards``.
+lesson agent registers one carrying ``read_passage``.
 
 **Sentinel topics force branches** (making W7/W8 first-class, repeatable tests):
 
@@ -21,8 +20,6 @@ lesson agent registers one carrying ``read_passage``; a flashcard agent
   ``position_in_path == N`` (lesson N → ``failed``).
 - ``[force-lesson-error]`` — the generated passage embeds a canonical *false*
   claim and keys its Quick check to it (Phase 2, W16; see below).
-- ``[force-draft-failure]`` — the flashcard-drafting call raises (Phase 3; see
-  below).
 
 **Phase 2 — the streamed branch (TDD §11, D10).** The tutor runs the streaming
 path exclusively, so the same model also carries a ``stream_function``
@@ -106,19 +103,6 @@ appears in a lesson prompt, the regenerated passage embeds
 :data:`REVISED_PASSAGE_MARKER` — the structural link W18 asserts on (the
 instruction reached generation), with no Phase 1 orchestration change.
 
-**Phase 3 — flashcard drafting (TDD §5.2, §11).** The flashcard agent
-(``agents/flashcard.py``) registers a single output tool carrying ``cards``, so
-the dispatch below distinguishes it from the lesson/outline branches by that
-tool shape, exactly as it already distinguishes lesson from outline. Its prompt
-carries a ``flashcard_drafts=<N>`` marker — the AL-032 ``position_in_path``
-precedent, restated for drafting: **presence is mandatory** (a missing marker
-raises :class:`StubModelForcedError` rather than defaulting, since a silent
-default could not honour a caller-chosen band) and **first match wins**, so the
-marker must be unique in the request. A ``[force-draft-failure]`` *topic*
-sentinel joins ``[force-outline-failure]``/``[force-lesson-failure:N]`` as a
-third forced-failure sentinel, stripped from generated text like every other
-sentinel here.
-
 Contract with AL-032 (``position_in_path``): the lesson agent's prompt **must**
 carry ``position_in_path=<N>`` (the total-order position, TDD §4) so the stub can
 read the position it is generating. Two properties AL-032 must preserve:
@@ -189,7 +173,6 @@ from aleph.agents.analyst import (
     ANALYST_SURVIVORS_MARKER as _AGENT_ANALYST_SURVIVORS_MARKER,
 )
 from aleph.agents.analyst import BriefBody, SkippedNote
-from aleph.agents.flashcard import FlashcardDraft, FlashcardDrafts
 from aleph.agents.lesson import LessonContent, QuickCheck
 from aleph.agents.outline import LessonOutline, PathOutline, Refusal, UnitOutline
 from aleph.agents.researcher import Finding, Findings
@@ -210,9 +193,6 @@ if TYPE_CHECKING:
 FORCE_OUTLINE_FAILURE = "[force-outline-failure]"
 FORCE_REFUSAL = "[force-refusal]"
 _FORCE_LESSON_FAILURE_RE = re.compile(r"\[force-lesson-failure:(\d+)\]")
-# Phase 3 (TDD §5.2, §11) — a topic sentinel on the flashcard-drafting branch,
-# stateless and always firing, alongside the two forced-failure sentinels above.
-FORCE_DRAFT_FAILURE = "[force-draft-failure]"
 # Phase 2 (TDD §11, D10). The first three are *question*-text sentinels read by
 # the streamed branch; the fourth is a *topic* sentinel on the lesson branch
 # whose effect the streamed branch then observes in the passage.
@@ -246,8 +226,6 @@ def _marker_re(name: str, value: str) -> re.Pattern[str]:
 
 # `position_in_path=<N>` — the AL-032 contract.
 _POSITION_RE = _marker_re("position_in_path", r"\d+")
-# `flashcard_drafts=<N>` — the agents/flashcard.py contract (TDD §5.2).
-_FLASHCARD_DRAFTS_RE = _marker_re("flashcard_drafts", r"\d+")
 # The shaping prompt's statement of the engagement boundary — the AL-310/AL-311
 # contract (see the module docstring).
 _FIRST_SHAPEABLE_POSITION_RE = _marker_re("first_shapeable_position", r"\d+")
@@ -269,7 +247,6 @@ _SENTINEL_RE = re.compile(
     r"|\[force-proposal-revise\]"
     r"|\[force-shaping-decline\]"
     r"|\[force-shaping-failure\]"
-    r"|\[force-draft-failure\]"
     r"|\[force-no-findings\]"
     r"|\[force-retrieval-failure\]"
 )
@@ -412,12 +389,6 @@ def _revision_requested(prompt: str) -> bool:
 def _read_position(text: str) -> int | None:
     """The ``position_in_path`` the lesson prompt is generating, if present."""
     match = _POSITION_RE.search(text)
-    return int(match.group(1)) if match else None
-
-
-def _read_flashcard_drafts(text: str) -> int | None:
-    """The ``flashcard_drafts=<N>`` count the drafting prompt states, if present."""
-    match = _FLASHCARD_DRAFTS_RE.search(text)
     return int(match.group(1)) if match else None
 
 
@@ -666,67 +637,6 @@ def _build_lesson(
     )
 
 
-# --- flashcard drafts (Phase 3, TDD §5.2) ---------------------------------------
-
-# A card interpolates the topic once; a much smaller budget than the lesson
-# passage's (``_PASSAGE_TOPIC_MAX_WORDS``, 8) keeps a front within
-# ``FlashcardCaps``' default 25-word cap regardless of how long ``topic`` turns
-# out to be — and, for the real assembled agent, ``topic`` here is the *whole*
-# concatenated user prompt (``_stub_respond``'s ``clean_topic(text)``, same as
-# the lesson branch), not just the ``Topic: …`` line's value, so it can be long.
-_FLASHCARD_TOPIC_MAX_WORDS = 6
-
-
-def _flashcard_topic(topic: str) -> str:
-    """``topic`` truncated to the word budget a card's front can afford."""
-    words = topic.split()
-    if len(words) <= _FLASHCARD_TOPIC_MAX_WORDS:
-        return topic
-    return " ".join(words[:_FLASHCARD_TOPIC_MAX_WORDS])
-
-
-def _build_flashcard_draft(topic: str, index: int) -> FlashcardDraft:
-    """A deterministic, cap-respecting card for ``topic`` at ``index`` (0-based).
-
-    Front/back stay well under ``FlashcardCaps``' default word caps for any
-    reasonable topic, and are deliberately unlike the stub's own Quick-check
-    stem wording (``"Which statement best captures lesson N on {topic}?"``) so
-    a generated card does not spuriously trip :func:`restates_stem
-    <aleph.agents.flashcard.restates_stem>` against the stub's own lesson.
-    """
-    seed = _seed(f"{topic}|flashcard|{index}")
-    aspect = _pick(_ASPECTS, seed)
-    adjective = _pick(_ADJECTIVES, seed + 1)
-    short_topic = _flashcard_topic(topic)
-    # ``index`` makes the front globally unique for a fixed topic — the same
-    # discipline ``_build_outline``'s ``lesson_no`` uses — since the seeded
-    # word picks alone can collide within a small band (6 adjectives, up to 5
-    # cards).
-    return FlashcardDraft(
-        front=(
-            f"Name one {adjective} thing to remember about {short_topic} ({index + 1})."
-        ),
-        back=(
-            f"Its {aspect}: the passage's point a learner should still be able "
-            f"to recall long after finishing this lesson."
-        ),
-    )
-
-
-def _build_flashcard_drafts(topic: str, count: int) -> FlashcardDrafts:
-    """``count`` deterministic, schema-valid cards for ``topic``.
-
-    ``count`` is the ``flashcard_drafts=<N>`` prompt marker (:func:`
-    _read_flashcard_drafts`), read exactly as ``position_in_path`` is read for
-    the lesson branch. Each card is distinct (the index seeds it) and short
-    enough to satisfy any non-degenerate :class:`FlashcardCaps
-    <aleph.agents.flashcard.FlashcardCaps>` band.
-    """
-    return FlashcardDrafts(
-        cards=[_build_flashcard_draft(topic, index) for index in range(count)]
-    )
-
-
 # --- the analyst pipeline: researcher findings + Brief writing (Phase 6, ------
 # TDD §5.3/§5.5/§11, ticket AL-560) ---------------------------------------------
 
@@ -741,8 +651,8 @@ def _extract_topic_line(text: str) -> str:
     stripped — NOT the module-level ``topic = clean_topic(text)`` computed at
     the top of `_stub_respond`.
 
-    That shared variable is correct for the outline/lesson/flashcard
-    dispatches because their entire prompt genuinely IS the topic string. The
+    That shared variable is correct for the outline/lesson dispatches because
+    their entire prompt genuinely IS the topic string. The
     researcher's and analyst's prompts are not: they also carry a full
     document dump or a finding/citation listing, so reusing the shared
     variable here would silently interpolate that ENTIRE prompt — sources,
@@ -762,8 +672,8 @@ def _extract_topic_line(text: str) -> str:
     present identically: an opaque e2e timeout (the provenance validator
     exhausting its retries), never a loud, attributable error. Every sibling
     in this module raises instead of defaulting on a missing, mandatory
-    marker (see ``_read_position``/``_read_flashcard_drafts``'s own module
-    docstring sections); this one now does too. Multiple ``Topic: `` lines
+    marker (see ``_read_position``'s module docstring section); this one now
+    does too. Multiple ``Topic: `` lines
     remain safe: ``_TOPIC_LINE_RE.search`` takes the first, which is always
     the builder's own line at prompt offset 0 — a document's own text could
     in principle contain a line that also matches, but only *after* that
@@ -969,7 +879,6 @@ def _stub_respond(messages: Sequence[ModelMessage], info: AgentInfo) -> ModelRes
     lesson_tool = _tool_with(info.output_tools, "read_passage")
     outline_tool = _tool_with(info.output_tools, "units")
     refusal_tool = _tool_with(info.output_tools, "message")
-    flashcard_tool = _tool_with(info.output_tools, "cards")
     # Phase 6 (ticket AL-560): the researcher's `Findings` and the analyst's
     # `BriefBody`/`SkippedNote` union. `refusal_tool` (the "message" prop) is
     # ALSO present whenever `research_tool` is — `agents/researcher.py`'s own
@@ -981,29 +890,18 @@ def _stub_respond(messages: Sequence[ModelMessage], info: AgentInfo) -> ModelRes
     brief_tool = _tool_with(info.output_tools, "cited_urls")
     skipped_tool = _tool_with(info.output_tools, "detail")
 
-    # A real agent registers *either* the lesson schema, the outline union, or
-    # the flashcard-drafts schema, never more than one. If more than one appears
+    # A real agent registers either the lesson schema or the outline union,
+    # never more than one. If more than one appears
     # the dispatch below would silently prefer one branch; raise instead so a
     # schema mistake is loud, not hidden.
     if lesson_tool is not None and (
-        outline_tool is not None
-        or refusal_tool is not None
-        or flashcard_tool is not None
-    ):
-        raise StubModelForcedError(
-            "ambiguous output schema: both a lesson tool (read_passage) and an "
-            "outline/refusal/flashcard tool are present; the stub cannot choose "
-            f"a branch (tools: {[tool.name for tool in info.output_tools]})"
-        )
-    if flashcard_tool is not None and (
         outline_tool is not None or refusal_tool is not None
     ):
         raise StubModelForcedError(
-            "ambiguous output schema: both a flashcard-drafts tool (cards) and "
-            "an outline/refusal tool are present; the stub cannot choose a "
-            f"branch (tools: {[tool.name for tool in info.output_tools]})"
+            "ambiguous output schema: both a lesson tool (read_passage) and an "
+            "outline/refusal tool are present; the stub cannot choose "
+            f"a branch (tools: {[tool.name for tool in info.output_tools]})"
         )
-
     if research_tool is not None:
         # `[force-no-findings]` (TDD §11): report nothing from documents this
         # run genuinely, non-emptily retrieved — see FORCE_NO_FINDINGS's own
@@ -1048,23 +946,6 @@ def _stub_respond(messages: Sequence[ModelMessage], info: AgentInfo) -> ModelRes
         note = SkippedNote(detail=_build_skip_detail(analyst_topic))
         return ModelResponse(
             parts=[ToolCallPart(tool_name=skipped_tool.name, args=note.model_dump())]
-        )
-
-    if flashcard_tool is not None:
-        if FORCE_DRAFT_FAILURE in text:
-            raise StubModelForcedError("forced flashcard draft failure")
-        count = _read_flashcard_drafts(text)
-        if count is None:
-            raise StubModelForcedError(
-                "flashcard prompt is missing a parseable 'flashcard_drafts=<N>' "
-                "(the agents/flashcard.py contract); the stub cannot determine "
-                "how many drafts to emit"
-            )
-        drafts = _build_flashcard_drafts(topic, count)
-        return ModelResponse(
-            parts=[
-                ToolCallPart(tool_name=flashcard_tool.name, args=drafts.model_dump())
-            ]
         )
 
     if lesson_tool is not None:

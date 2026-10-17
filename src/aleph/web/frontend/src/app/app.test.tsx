@@ -19,6 +19,16 @@ describe("App shell + auth gate", () => {
     expect(screen.getByRole("button", { name: "New path" })).toBeTruthy();
   });
 
+  it("does not offer retired flashcards or Settings surfaces", async () => {
+    window.history.pushState({}, "", "/");
+
+    render(<App />);
+
+    await screen.findByRole("heading", { name: /Welcome back, Dev\./ });
+    expect(screen.queryByRole("link", { name: "Settings" })).toBeNull();
+    expect(screen.queryByText(/flashcards|cards due|review/i)).toBeNull();
+  });
+
   it("[AL-060] redirects an unauthenticated visitor to the login screen", async () => {
     server.use(http.get(`${API_V1_BASE}/auth/session`, () => HttpResponse.json(signedOutSession)));
     window.history.pushState({}, "", "/");

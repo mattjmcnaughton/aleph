@@ -68,7 +68,6 @@ evals/                        # peer of tests/, dev-only, never packaged
   __main__.py                 # CLI: uv run python -m evals  (= just evals)
   generation.py               # seed-set schemas + Layer 1 pre-filters + tasks + RubricJudges
   seed_set.yaml                    # the 20 topic × level cases (outline/lesson)
-  flashcard_seed_set.yaml          # the flashcard_draft cases
   brief_seed_set.yaml              # the brief cases (Phase 6, AL-550)
   fixtures/retrieval/*.yaml        # recorded retrieval fixtures the brief cases replay
   rubric.py                   # the PRD §9 rubric (six items, four kinds) + verdict schema
@@ -310,7 +309,10 @@ the gate, and the safety failures listed individually. The same block goes into
 the GitHub Actions job summary and, as structured figures, into the `--report`
 JSON under `gate`.
 
-### The `flashcard_draft` mode (`--flashcards`)
+### Retired archive: the former `flashcard_draft` mode
+
+This mode, its seed set, rubric kind, and CLI flag were removed with flashcards. The material in
+this section is historical design context, not a runnable eval or current operating instruction.
 
 > Phase 3 TDD D14/§10; PRD §6. The **first actual extension** of the kind
 > axis: `evals/rubric.py`'s `ArtifactKind` still reads
@@ -873,13 +875,12 @@ short version:
   check, never triggered by pushes or PRs, and never on a schedule.
 - **Only `seed-set` (outline/lesson) and `agreement` are dispatchable.**
   `.github/workflows/evals.yml`'s `mode` input has exactly those two `choice`
-  options — there is no third value that reaches `--flashcards` or `--briefs`,
+  options — there is no third value that reaches `--briefs`,
   and no separate input that does either. CLAUDE.md names workflow dispatch as
   the sanctioned way to run evals, so this is a real gap, stated here rather
-  than assumed away: **`--flashcards` (Phase 3) and `--briefs` (Phase 6) are
-  local-only** — `just evals --flashcards` and `just evals --briefs` need a
-  developer's own `OPENROUTER_API_KEY` on their own machine to run live;
-  their `--smoke` forms need no key at all, and `--briefs` never reads
+  than assumed away: **`--briefs` (Phase 6) is local-only** —
+  `just evals --briefs` needs a developer's own `OPENROUTER_API_KEY` on their
+  own machine to run live; its `--smoke` form needs no key, and `--briefs` never reads
   `EXA_API_KEY`, live or `--smoke` — retrieval is always a fixture replay.
   Neither mode has ever run in CI, dispatched or otherwise. Adding either is
   a workflow-file change (new `mode` options or new inputs), not a docs fix,

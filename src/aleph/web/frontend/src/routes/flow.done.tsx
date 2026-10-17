@@ -1,14 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import {
-  pathsListQueryOptions,
-  progressSummaryQueryOptions,
-  reviewSummaryQueryOptions,
-} from "../lib/api";
+import { pathsListQueryOptions, progressSummaryQueryOptions } from "../lib/api";
 import { Breadcrumbs } from "../components/breadcrumbs";
 import { FlowSegments, segments } from "../components/flow/flow-bar";
-import { FlowDrafts } from "../components/flow/flow-drafts";
 import { PRIMARY_CTA_BASE, SECONDARY_CTA, StateCard } from "../components/state-card";
 import { StreakLine } from "../components/streak-line";
 import { Workspace } from "../components/workspace";
@@ -16,7 +11,6 @@ import { useFeatureFlag } from "../lib/feature-flags";
 import { type FlowCompletion, type FlowRecord, useFlow } from "../lib/flow";
 import { markFlowCelebrated, shouldCelebrateFlow } from "../lib/flow-celebration";
 import { prefersReducedMotion, useCountUp } from "../lib/motion";
-import { useSettings } from "../lib/settings";
 
 export const Route = createFileRoute("/flow/done")({
   component: FlowReceipt,
@@ -71,7 +65,7 @@ const COUNT_LEAD_MS = 420;
 const COUNT_STEP_MS = 160;
 
 // The receipt (flow TDD §5.5, mock screen 04): what the learner did, where it
-// landed, the drafts they skipped past — nothing new is counted here (D6's
+// landed — nothing new is counted here (D6's
 // settled call), every stat below is a summary of records that already exist.
 //
 // A flow that reached its length lands with a celebration (§5.5, "How it
@@ -114,12 +108,9 @@ function FlowReceipt() {
     COUNT_LEAD_MS + 2 * COUNT_STEP_MS,
   );
   const streaksEnabled = useFeatureFlag("streaks");
-  const flashcardsEnabled = useFeatureFlag("flashcards");
-  const { auto_draft_flashcards: autoDraft } = useSettings();
 
   const pathsQuery = useQuery(pathsListQueryOptions);
   const progressQuery = useQuery(progressSummaryQueryOptions(streaksEnabled));
-  const reviewSummaryQuery = useQuery(reviewSummaryQueryOptions(flashcardsEnabled));
 
   // No record at all: a direct/stale visit (the flow already ended and was
   // cleared, or never existed). Redirect rather than render a receipt for
@@ -262,14 +253,6 @@ function FlowReceipt() {
         </div>
       ) : null}
 
-      <div className={rise(5 + rows.length).className} style={rise(5 + rows.length).style}>
-        <FlowDrafts
-          completed={completed}
-          flashcardsEnabled={flashcardsEnabled}
-          autoDraft={autoDraft}
-        />
-      </div>
-
       <div
         className={`mt-8 flex flex-col gap-3 ${rise(6 + rows.length).className}`}
         style={rise(6 + rows.length).style}
@@ -285,15 +268,6 @@ function FlowReceipt() {
         <Link to="/" data-testid="flow-receipt-home" className={SECONDARY_CTA}>
           Home
         </Link>
-        {reviewSummaryQuery.data !== undefined && reviewSummaryQuery.data.due_count > 0 ? (
-          <Link
-            to="/review"
-            data-testid="flow-receipt-review"
-            className="text-center text-sm text-mist transition-colors hover:text-porcelain"
-          >
-            {reviewSummaryQuery.data.due_count} cards due · Review
-          </Link>
-        ) : null}
       </div>
     </Workspace>
   );

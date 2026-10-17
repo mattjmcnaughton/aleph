@@ -1,5 +1,10 @@
 # TDD — Flow
 
+> **Current amendment:** Flashcard drafting, review links, draft batches, and learner Settings
+> were removed after this design shipped. Clauses D7 and D11 and all draft/settings/review
+> implementation notes below are retained only as historical context. Current Flow is a bounded
+> run of ordinary lessons and its receipt contains no retention surface.
+
 > **Status: plan, ready to build.** This document is the implementer's brief. It is written for an
 > engineer (or agent) starting cold: it carries every decision already taken, every codebase fact the
 > work depends on, and the ticket order. Where it says *settled*, the owner has decided; do not

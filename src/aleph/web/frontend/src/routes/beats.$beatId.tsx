@@ -53,8 +53,7 @@ function BeatView() {
 
   // A direct/deep link with the flag off (D10: the whole surface is a
   // router-level gate server-side, `404` on every route) — the frontend's
-  // own dead end, matching `routes/cards.tsx`/`routes/review.tsx`'s shape
-  // exactly (code-review FIX 3). Without this, `beatQueryOptions`'s
+  // own dead end (code-review FIX 3). Without this, `beatQueryOptions`'s
   // `skipToken` means `beatQuery.data` never resolves and `beatQuery.isError`
   // never flips true, so `LoadingState` below would render "Loading your
   // Beat…" forever instead of a real dead end.

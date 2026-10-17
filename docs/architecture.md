@@ -148,9 +148,9 @@ extension map). Three pieces are genuinely new.
   model slots (`model_research`, `model_brief`), one call each, obeying the
   same no-model/no-config purity as every other agent. `RetrievedDocument` — a
   frozen dataclass, not a provider type — is *declared* in
-  `agents/researcher.py` and populated by the service, the `agents/
-  flashcard.py`-style `FlashcardCaps` precedent for keeping a shape's
-  ownership in `agents/` while its population stays in `services/`.
+  `agents/researcher.py` and populated by the service. This keeps dependency
+  ownership in the agent while services populate it without importing
+  provider-specific types into the agent.
 - **`services/retrieval.py`** — the `Retriever` `Protocol` every provider
   implements (`search(queries, *, since=None) -> list[RetrievedDocument]`),
   a pure query planner (`build_query_plan`), and `retrieve()`, the single

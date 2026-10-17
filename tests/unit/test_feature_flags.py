@@ -148,23 +148,6 @@ def test_a_launched_flag_is_still_killable_without_a_code_deploy() -> None:
     assert feature_flags.effective_defaults(config)["shaping"] is True
 
 
-def test_flashcards_is_registered_and_launched_on_by_default() -> None:
-    """Phase 3's one flag, registered and launched the same way (TDD D10).
-
-    It spent Phase 3's whole build-out at ``False`` — that dark posture is what
-    let every flashcards ticket, drafting through AL-410's card-management
-    surfaces, merge and deploy with zero learner exposure while admins
-    dogfooded it via the admin baseline. This flip is the launch itself: the
-    fourth flag to run the ``tutor``/``shaping``/``streaks`` playbook.
-    Membership in :data:`ADMIN_DEFAULT_FLAGS` is asserted still: it is
-    redundant while the default is ``True``, but it is what the flag falls
-    back to if this is ever flipped dark again.
-    """
-    assert feature_flags.FeatureFlag.FLASHCARDS == "flashcards"
-    assert feature_flags.FLAG_DEFAULTS[feature_flags.FeatureFlag.FLASHCARDS] is True
-    assert feature_flags.FeatureFlag.FLASHCARDS in feature_flags.ADMIN_DEFAULT_FLAGS
-
-
 def test_analyst_is_registered_and_launched_on_by_default() -> None:
     """Phase 6's one flag, registered and launched the same way (TDD D12).
 
@@ -172,7 +155,7 @@ def test_analyst_is_registered_and_launched_on_by_default() -> None:
     let every analyst ticket, Beats through Briefs, merge and deploy with zero
     learner exposure while admins dogfooded it via the admin baseline. This
     flip is the launch itself: the fifth flag to run the
-    ``tutor``/``shaping``/``streaks``/``flashcards`` playbook. Membership in
+    ``tutor``/``shaping``/``streaks`` playbook. Membership in
     :data:`ADMIN_DEFAULT_FLAGS` is asserted still: it is redundant while the
     default is ``True``, but it is what the flag falls back to if this is ever
     flipped dark again.
@@ -205,12 +188,12 @@ async def test_flow_is_registered_dark_and_admin_on(
     assert (await service.resolve_for_user(_user()))["flow"] is False
 
 
-def test_the_registry_is_exactly_the_six_phase_flags() -> None:
+def test_the_registry_is_exactly_the_five_phase_flags() -> None:
     # The whole registry in one assertion: a flag added to the enum but missed by
     # ``FLAG_DEFAULTS`` does not exist as far as resolution is concerned, and
     # would silently resolve off everywhere.
     assert feature_flags.known_flag_keys() == frozenset(
-        {"tutor", "shaping", "streaks", "flashcards", "analyst", "flow"}
+        {"tutor", "shaping", "streaks", "analyst", "flow"}
     )
 
 
@@ -354,9 +337,7 @@ async def test_list_flags_sorted_with_counts(
     ]
 
 
-# ``require_flashcards_enabled`` (TDD D10, 404-never-403) has moved to
-# ``routers/v1/flashcards.py`` (Phase 3 TDD ticket 5), matching where every
-# other flag gate (``require_tutor_enabled``, ``require_shaping_enabled``,
+# Every flag gate (``require_tutor_enabled``, ``require_shaping_enabled``,
 # ``require_streaks_enabled``) already lives — its own router module, not this
 # one. Its ``404``/pass-through behaviour is covered there, and end to end by
 # ``tests/integration/test_reviews_api.py``'s flag-off/flag-on cases, the same

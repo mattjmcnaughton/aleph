@@ -49,7 +49,7 @@ class Beat(Base, UUIDAuditMixin):
     rename a Beat, the Topic is the label) and **no** ``next_claimable_at``
     (D4: derived by ``domains/cadence.py`` from the Briefs rail's
     ``max(published_on)``, never stored). Also carries **no**
-    ``relationship()`` attributes, the ``models/flashcard.py`` precedent:
+    ``relationship()`` attributes, following the repository-oriented model pattern:
     every read this phase needs is a repository-level ``select`` scoped by
     ``user_id``/``beat_id`` on the row itself, and this module does not touch
     ``User``.

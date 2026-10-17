@@ -55,7 +55,7 @@ class BeatResearchRun(Base, UUIDAuditMixin):
     """One WON research claim (auto or retry) — the daily cap's own counter.
 
     Deliberately carries **no** ``relationship()`` attributes (the
-    ``models/flashcard.py`` precedent every other model in this phase
+    the explicit table-constraint pattern every other model in this phase
     follows): the only read this table serves is a scoped ``COUNT`` in
     ``repositories/usage.py``.
     """

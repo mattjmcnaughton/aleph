@@ -5,7 +5,6 @@ import { API_V1_BASE, type AuthSession, type PathUnit } from "../lib/api";
 import type { FlowRecord } from "../lib/flow";
 import { readFlow, writeFlow } from "../lib/flow";
 import { learnerUser } from "../mocks/handlers";
-import { seedFlashcardDraftRun } from "../mocks/flashcards";
 import { lessonGetRequestCount, seedLesson } from "../mocks/lessons";
 import { seedPath } from "../mocks/paths";
 import { server } from "../mocks/server";
@@ -130,13 +129,9 @@ afterEach(() => {
 });
 
 describe("Lesson route in a flow", () => {
-  it("the bar is position-based, drafts are suppressed, and the advance card opens at 5", async () => {
-    useFlowSession({ flashcards: true });
+  it("the bar is position-based and the advance card opens at 5", async () => {
+    useFlowSession();
     seedTwoPathFlow();
-    seedFlashcardDraftRun(A[0], {
-      state: "generated",
-      cards: [{ id: "c1", front: "Front", back: "Back" }],
-    });
     writeFlow(
       baseRecord({
         paths: [PATH_A, PATH_B],
@@ -158,9 +153,6 @@ describe("Lesson route in a flow", () => {
 
     await screen.findByTestId("flow-advance");
     expect(screen.getByTestId("flow-advance-count").textContent).toBe("5");
-    // Generated for this very lesson, yet nothing renders: the batch waits
-    // for the receipt (D7) instead of interrupting the flow.
-    expect(screen.queryByTestId("draft-list")).toBeNull();
     // Still "1 of 3": the advance screen is still position 1 — position only
     // moves to "2 of 3" once the learner is actually on lesson 2.
     expect(screen.getByTestId("flow-bar").textContent).toContain("Flow · 1 of 3");

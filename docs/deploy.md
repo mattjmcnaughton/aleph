@@ -288,6 +288,34 @@ flyctl tokens create deploy -a aleph-prod-mattjmcnaughton
    - `deploy` — checks out that tag and runs `flyctl deploy --remote-only`.
 5. Fly's release machine migrates; app machines start.
 
+### Destructive flashcard-removal rollout
+
+The flashcard-removal migration is not safe to bundle into the first release that retires the
+old application code. Fly runs `release_command` **before** replacing the old app machine, and
+that old process still queries the tables the migration removes. Running the destructive
+migration at that point can make the serving release fail until the new machine takes traffic.
+
+Coordinate this transition as two production releases:
+
+1. Release the application/runtime removal **without** the destructive migration at Alembic
+   head. Verify the new machine serves retained paths, lessons, progress, tutor, shaping, Flow,
+   and analyst behavior and makes no query to the retired tables.
+2. In a later release, after every serving machine runs the retired-table-independent code, add
+   and run the destructive migration. Verify `/readyz` and the retained workflows again.
+
+Do not rely on release ordering within one Fly deploy to create that separation. If the migration
+and runtime removal are already present in one branch, split their release eligibility (for
+example, land the runtime release first and add the migration only afterward) rather than merely
+splitting commits that semantic-release will package into the same image. Production migration
+execution and any maintenance-window alternative require explicit operator approval.
+
+The migration permanently deletes cards, review history, drafting runs, learner settings, and
+the retired flashcard overrides. Its downgrade can recreate empty schema but cannot restore that
+data or review-only historical streak credit. A rollback after migration therefore restores code
+compatibility only if the rollback build also tolerates the removed schema; data recovery requires
+an independently managed pre-migration backup. This runbook documents the required coordination;
+it does not record that either release or the migration has been performed.
+
 ### Rehearsing a release without deploying
 
 Actions tab → **Release** → *Run workflow*, or:
@@ -334,13 +362,12 @@ code — it is one committed configuration change.
 > about either key, and a laptop, a CI run and production all resolve them the
 > same way with no configuration. That is the intended end state for a launched
 > phase: the env var is the *override*, not the statement of what is live.
-> **Phase 5's `streaks` launched the same way, and Phase 3's `flashcards` then
-> did too**, so four registered flags defaulted on. **Phase 6's `analyst`
+> **Phase 5's `streaks` launched the same way.** The retired Phase 3 flashcard
+> flag also followed this process while that feature existed. **Phase 6's `analyst`
 > (AL-570) has now launched the same way too** — the highest-per-run-cost
 > feature in the product spent its whole build-out behind the same posture
 > `tutor`/`shaping` did pre-launch, `ADMIN_DEFAULT_FLAGS` forcing it on for
-> admins only while every other learner saw `404` — so all five registered
-> flags now default on and the registry currently holds nothing dark.
+> admins only while every other learner saw `404`.
 >
 > This section stays the reference for the lever itself, now read mainly for
 > **turning a launched flag off** (the kill switch below) and for the next
@@ -362,8 +389,8 @@ that block. Resolution order and the full semantics are in
 (`services/feature_flags.py`) from `False` to `True`. That is the launch: it
 reaches production *and* every developer's laptop and every CI run at once, which
 is why it beats setting the env var — one statement of what is live, not two.
-`tutor`, `shaping`, `streaks`, `flashcards`, and `analyst` were all launched this
-way.
+`tutor`, `shaping`, `streaks`, and `analyst` were launched this way. The retired
+flashcard flag is no longer registered.
 
 Use the `fly.toml` env var instead only when the flip must be **reversible
 without a code deploy** — a staged rollout you expect to roll back, or an early
