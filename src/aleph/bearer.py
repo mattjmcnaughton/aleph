@@ -412,10 +412,11 @@ def _required_url(metadata: Mapping[str, Any], name: str) -> str:
     return value
 
 
-def get_bearer_authenticator() -> BearerAuthenticator | None:
+async def get_bearer_authenticator() -> BearerAuthenticator | None:
     """The process-wide authenticator, or ``None`` when bearer auth is off.
 
-    A FastAPI dependency (tests override it with a fake-backed authenticator).
+    A FastAPI dependency (tests override it with a fake-backed authenticator);
+    ``async`` so FastAPI does not hop to its threadpool on every request.
     Bearer auth is enabled only when ``OIDC_API_AUDIENCE`` is configured: with
     no audience there is nothing to bind a token to *this* API, so every bearer
     token is rejected. Built per distinct configuration and cached, so the JWKS
