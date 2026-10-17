@@ -204,7 +204,12 @@ PKCE itself and calls `/api/v1` with `Authorization: Bearer <access token>`
 1. **APIs → Create API.** Pick an Identifier such as `https://api.<custom-domain>`
    (it never needs to resolve) with signing algorithm **RS256**. Set
    `OIDC_API_AUDIENCE` to exactly that Identifier in `fly.toml` `[env]`. It must
-   not equal the web application's client id.
+   not equal the web application's client id. Lower the API's **Token
+   Expiration** from Auth0's 24-hour default to about an hour: aleph verifies
+   access tokens offline (signature and claims), so blocking or deleting a user
+   in Auth0 only cuts off a token they already hold when it expires. The app
+   renews with a refresh token (step 3; enable refresh-token rotation on the
+   Native application).
 2. **Applications → Create Application → Native.** Allowed Callback URL (and
    Allowed Logout URL) is the app's custom-scheme or universal-link redirect.
    Grant types: Authorization Code and Refresh Token only (no Password, no

@@ -36,8 +36,11 @@ token body: Auth0 access tokens carry no profile or email claims, and derived
 admin needs the provider's *verified* email (an `email_verified: false` email is
 dropped, as on the web). The userinfo `sub` must equal the token's. The resolved
 identity is cached per subject for 5 minutes, so profile/email changes (and
-admin status) reach a bearer client within that window; the token itself is
-still verified on every request.
+admin status) reach a bearer client within that window, and concurrent requests
+for one subject share a single userinfo call. The token itself is still verified
+on every request, offline: a user blocked at the provider keeps access until the
+token they hold expires, so keep the API's access-token lifetime short
+([`deploy.md`](deploy.md#native-app-bearer-token-configuration)).
 
 Rules that matter to a client:
 
