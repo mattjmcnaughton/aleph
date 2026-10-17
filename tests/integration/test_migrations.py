@@ -987,6 +987,7 @@ def test_flashcards_migration_downgrades_and_reapplies_cleanly(
 ) -> None:
     database_url = isolated_database
 
+    run_alembic(database_url, FLASHCARDS_HEAD, downgrade=True)
     at_head = asyncio.run(_tables(database_url))
     assert set(FLASHCARDS_TABLES) <= at_head
 
@@ -1125,6 +1126,7 @@ def test_the_card_management_migration_downgrades_and_reapplies_cleanly(
 ) -> None:
     database_url = isolated_database
 
+    run_alembic(database_url, CARD_MANAGEMENT_HEAD, downgrade=True)
     at_head = asyncio.run(_columns(database_url, "flashcards"))
     assert {"deleted_at", "edited_at"} <= at_head
     at_head_indexes = asyncio.run(_indexes(database_url, "flashcards"))
@@ -1185,6 +1187,7 @@ def test_the_new_kept_at_index_is_partial_and_descending(
     match `ORDER BY kept_at DESC, id DESC`."""
     database_url = isolated_database
 
+    run_alembic(database_url, CARD_MANAGEMENT_HEAD, downgrade=True)
     indexdef = asyncio.run(_indexes(database_url, "flashcards"))[KEPT_AT_INDEX]
 
     assert "user_id" in indexdef
@@ -1211,6 +1214,7 @@ def test_earlier_tables_are_unchanged_by_the_card_management_migration(
         "flashcard_draft_runs",
     )
 
+    run_alembic(database_url, CARD_MANAGEMENT_HEAD, downgrade=True)
     before = {table: asyncio.run(_columns(database_url, table)) for table in tracked}
     run_alembic(database_url, FLASHCARDS_HEAD, downgrade=True)
     after = {table: asyncio.run(_columns(database_url, table)) for table in tracked}
@@ -1241,6 +1245,7 @@ def test_analyst_migration_downgrades_and_reapplies_cleanly(
 ) -> None:
     database_url = isolated_database
 
+    run_alembic(database_url, ANALYST_HEAD, downgrade=True)
     at_head = asyncio.run(_tables(database_url))
     assert set(ANALYST_TABLES) <= at_head
 
@@ -1282,6 +1287,7 @@ def test_analyst_migration_creates_the_documented_columns(
     isolated_database: str,
 ) -> None:
     database_url = isolated_database
+    run_alembic(database_url, ANALYST_HEAD, downgrade=True)
 
     assert asyncio.run(_columns(database_url, "beats")) == {
         "id",
@@ -1333,6 +1339,7 @@ def test_analyst_migration_creates_the_partial_unique_index_on_briefs(
 ) -> None:
     """D2's storage device: sparse over published Briefs only."""
     database_url = isolated_database
+    run_alembic(database_url, ANALYST_HEAD, downgrade=True)
 
     indexes = asyncio.run(_indexes(database_url, "briefs"))
     assert BRIEF_NUMBER_INDEX in indexes
@@ -1357,6 +1364,7 @@ def test_earlier_tables_are_unchanged_by_the_analyst_migration(
         *FLASHCARDS_TABLES,
     )
 
+    run_alembic(database_url, ANALYST_HEAD, downgrade=True)
     before = {table: asyncio.run(_columns(database_url, table)) for table in tracked}
     run_alembic(database_url, CARD_MANAGEMENT_HEAD, downgrade=True)
     after = {table: asyncio.run(_columns(database_url, table)) for table in tracked}
@@ -1384,6 +1392,7 @@ def test_beat_research_runs_migration_downgrades_and_reapplies_cleanly(
 ) -> None:
     database_url = isolated_database
 
+    run_alembic(database_url, BEAT_RESEARCH_RUNS_HEAD, downgrade=True)
     at_head = asyncio.run(_tables(database_url))
     assert BEAT_RESEARCH_RUNS_TABLE in at_head
 
@@ -1416,6 +1425,7 @@ def test_beat_research_runs_migration_creates_the_documented_columns(
     isolated_database: str,
 ) -> None:
     database_url = isolated_database
+    run_alembic(database_url, BEAT_RESEARCH_RUNS_HEAD, downgrade=True)
 
     assert asyncio.run(_columns(database_url, BEAT_RESEARCH_RUNS_TABLE)) == {
         "id",
@@ -1450,6 +1460,7 @@ def test_earlier_tables_are_unchanged_by_the_beat_research_runs_migration(
         *ANALYST_TABLES,
     )
 
+    run_alembic(database_url, BEAT_RESEARCH_RUNS_HEAD, downgrade=True)
     before = {table: asyncio.run(_columns(database_url, table)) for table in tracked}
     run_alembic(database_url, ANALYST_HEAD, downgrade=True)
     after = {table: asyncio.run(_columns(database_url, table)) for table in tracked}
@@ -1496,6 +1507,7 @@ def test_user_settings_migration_downgrades_and_reapplies_cleanly(
 ) -> None:
     database_url = isolated_database
 
+    run_alembic(database_url, SETTINGS_HEAD, downgrade=True)
     at_head = asyncio.run(_tables(database_url))
     assert SETTINGS_TABLE in at_head
 
@@ -1531,6 +1543,7 @@ def test_user_settings_migration_creates_the_documented_columns(
     isolated_database: str,
 ) -> None:
     database_url = isolated_database
+    run_alembic(database_url, SETTINGS_HEAD, downgrade=True)
 
     assert asyncio.run(_columns(database_url, SETTINGS_TABLE)) == {
         "user_id",
@@ -1563,6 +1576,7 @@ def test_earlier_tables_are_unchanged_by_the_user_settings_migration(
         BEAT_RESEARCH_RUNS_TABLE,
     )
 
+    run_alembic(database_url, SETTINGS_HEAD, downgrade=True)
     before = {table: asyncio.run(_columns(database_url, table)) for table in tracked}
     run_alembic(database_url, BEAT_RESEARCH_RUNS_HEAD, downgrade=True)
     after = {table: asyncio.run(_columns(database_url, table)) for table in tracked}
@@ -1615,6 +1629,7 @@ def test_the_teaching_style_step_only_adds_one_column(
         SETTINGS_TABLE,
     )
 
+    run_alembic(database_url, TEACHING_STYLE_HEAD, downgrade=True)
     before = {table: asyncio.run(_columns(database_url, table)) for table in tracked}
     assert "teaching_style" in before["paths"]
 
@@ -1642,3 +1657,174 @@ def test_the_teaching_style_step_downgrades_and_reapplies_cleanly(
 
     assert asyncio.run(_teaching_style(database_url, path_id)) is None
     assert asyncio.run(_title_and_guidance(database_url, path_id)) == (None, None)
+
+
+# --------------------------------------------------------------------------- #
+# Flashcard removal (migration 0016): destructive feature-data retirement.
+# --------------------------------------------------------------------------- #
+
+REMOVAL_HEAD = "0016_remove_flashcards"
+
+
+async def _seed_flashcard_removal_predecessor(database_url: str) -> None:
+    connection = await connect(database_url)
+    try:
+        await connection.execute(
+            """
+            WITH u AS (
+                INSERT INTO users (id, issuer, subject, username, display_name)
+                VALUES (gen_random_uuid(), 'iss', 'remove-sub', 'removal-user', 'R')
+                RETURNING id
+            ), p AS (
+                INSERT INTO paths (id, user_id, topic, level, status, teaching_style)
+                SELECT gen_random_uuid(), id, 'Retained path',
+                       'some_experience', 'ready', 'More examples.'
+                FROM u RETURNING id, user_id
+            ), un AS (
+                INSERT INTO units (id, path_id, position, title, summary)
+                SELECT gen_random_uuid(), id, 1, 'Unit', 'Summary' FROM p
+                RETURNING id, path_id
+            ), l AS (
+                INSERT INTO lessons (
+                    id, unit_id, path_id, position_in_path, position_in_unit,
+                    title, generation_state, completed_at
+                )
+                SELECT gen_random_uuid(), id, path_id, 1, 1, 'Lesson',
+                       'generated', now()
+                FROM un RETURNING id, path_id
+            ), q AS (
+                INSERT INTO quick_checks (
+                    id, lesson_id, stem, options, correct_index, explanation
+                )
+                SELECT gen_random_uuid(), id, 'Check?', '["yes", "no"]'::jsonb, 0, 'Yes'
+                FROM l RETURNING id
+            ), a AS (
+                INSERT INTO attempts (
+                    id, quick_check_id, user_id, selected_index, is_correct
+                )
+                SELECT gen_random_uuid(), q.id, u.id, 0, true FROM q, u RETURNING id
+            ), c AS (
+                INSERT INTO flashcards (
+                    id, user_id, front, back, kept_at, rung, due_on,
+                    source_lesson_id, source_path_id, source_lesson_title,
+                    source_path_title, source_generated_at
+                )
+                SELECT gen_random_uuid(), u.id, 'Front', 'Back', now(), 1, current_date,
+                       l.id, l.path_id, 'Lesson', 'Retained path', now()
+                FROM u, l RETURNING id, user_id
+            ), r AS (
+                INSERT INTO flashcard_reviews (
+                    id, card_id, user_id, grade, reviewed_at, local_day,
+                    rung_before, rung_after, due_on_before, due_on_after
+                )
+                SELECT gen_random_uuid(), id, user_id, 'got_it', now(), current_date,
+                       0, 1, current_date, current_date + 1
+                FROM c RETURNING id
+            ), d AS (
+                INSERT INTO flashcard_draft_runs (lesson_id, state, started_at)
+                SELECT id, 'generated', now() FROM l RETURNING lesson_id
+            ), s AS (
+                INSERT INTO user_settings (user_id, auto_draft_flashcards)
+                SELECT id, false FROM u RETURNING user_id
+            ), o AS (
+                INSERT INTO user_feature_overrides (user_id, flag_key, enabled)
+                SELECT id, 'flashcards', true FROM u
+                UNION ALL SELECT id, 'tutor', false FROM u RETURNING user_id
+            )
+            INSERT INTO beats (
+                id, user_id, topic, level, anchor_weekday, research_state
+            )
+            SELECT gen_random_uuid(), id, 'Retained beat', 'some_experience', 0, 'idle'
+            FROM u
+            """
+        )
+    finally:
+        await connection.close()
+
+
+async def _override_keys(database_url: str) -> set[str]:
+    connection = await connect(database_url)
+    try:
+        rows = await connection.fetch("SELECT flag_key FROM user_feature_overrides")
+    finally:
+        await connection.close()
+    return {row["flag_key"] for row in rows}
+
+
+async def _retained_removal_rows(database_url: str) -> dict[str, list[str]]:
+    """Compare values as well as counts: a reset must not pass as preservation."""
+    connection = await connect(database_url)
+    try:
+        result = {}
+        for table in (
+            "users",
+            "paths",
+            "units",
+            "lessons",
+            "quick_checks",
+            "attempts",
+            "beats",
+        ):
+            result[table] = await connection.fetchval(
+                f"SELECT array_agg(row_to_json(t)::text ORDER BY id) FROM {table} t"
+            )
+        result["overrides"] = await connection.fetchval(
+            "SELECT array_agg(row_to_json(t)::text ORDER BY user_id, flag_key) "
+            "FROM user_feature_overrides t WHERE flag_key <> 'flashcards'"
+        )
+        return result
+    finally:
+        await connection.close()
+
+
+def test_removal_migration_deletes_only_retired_data_and_schema(
+    isolated_database: str,
+) -> None:
+    database_url = isolated_database
+    run_alembic(database_url, TEACHING_STYLE_HEAD, downgrade=True)
+    asyncio.run(_seed_flashcard_removal_predecessor(database_url))
+    before = asyncio.run(_retained_removal_rows(database_url))
+    assert all(len(rows) == 1 for rows in before.values())
+
+    run_alembic(database_url, "head")
+
+    tables = asyncio.run(_tables(database_url))
+    assert not (set(FLASHCARDS_TABLES) | {SETTINGS_TABLE}) & tables
+    assert not set(FLASHCARDS_ENUM_TYPES) & asyncio.run(_enum_types(database_url))
+    for table in ("users", "paths", "lessons", "attempts", "beats"):
+        assert asyncio.run(_count(database_url, table)) == 1
+    assert asyncio.run(_override_keys(database_url)) == {"tutor"}
+    assert asyncio.run(_retained_removal_rows(database_url)) == before
+
+    run_alembic(database_url, TEACHING_STYLE_HEAD, downgrade=True)
+    for table in (*FLASHCARDS_TABLES, SETTINGS_TABLE):
+        assert asyncio.run(_count(database_url, table)) == 0
+    assert asyncio.run(_retained_removal_rows(database_url)) == before
+    assert asyncio.run(_override_keys(database_url)) == {"tutor"}
+
+
+def test_removal_migration_fresh_head_and_schema_only_round_trip(
+    isolated_database: str,
+) -> None:
+    database_url = isolated_database
+    assert not (set(FLASHCARDS_TABLES) | {SETTINGS_TABLE}) & asyncio.run(
+        _tables(database_url)
+    )
+
+    run_alembic(database_url, TEACHING_STYLE_HEAD, downgrade=True)
+
+    assert set(FLASHCARDS_TABLES) | {SETTINGS_TABLE} <= asyncio.run(
+        _tables(database_url)
+    )
+    assert set(FLASHCARDS_ENUM_TYPES) <= asyncio.run(_enum_types(database_url))
+    assert {"deleted_at", "edited_at"} <= asyncio.run(
+        _columns(database_url, "flashcards")
+    )
+    indexes = asyncio.run(_indexes(database_url, "flashcards"))
+    assert {DUE_ON_INDEX, KEPT_AT_INDEX} <= indexes.keys()
+
+    run_alembic(database_url, REMOVAL_HEAD)
+
+    assert not (set(FLASHCARDS_TABLES) | {SETTINGS_TABLE}) & asyncio.run(
+        _tables(database_url)
+    )
