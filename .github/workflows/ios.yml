@@ -1,0 +1,113 @@
+name: iOS
+
+# Proof of concept: an agent writes Swift on Linux, this macOS job builds and
+# tests it on a simulator, and the screenshots come back as an artifact and (on
+# the PoC branch) as a commit under ios/screenshots/. See ios/README.md.
+on:
+  push:
+    branches: [main, claude/ios-homescreen-poc]
+    paths:
+      - "ios/**"
+      - ".github/workflows/ios.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "ios/**"
+      - ".github/workflows/ios.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  build-test:
+    runs-on: macos-15
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: ios
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Show toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+          xcrun simctl list runtimes
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate project
+        run: xcodegen generate
+
+      - name: Pick simulator
+        id: sim
+        run: echo "udid=$(./scripts/pick-simulator.sh)" >> "$GITHUB_OUTPUT"
+
+      - name: Build and test
+        env:
+          # TEST_RUNNER_-prefixed vars reach the test process with the prefix stripped.
+          TEST_RUNNER_SNAPSHOT_DIR: ${{ github.workspace }}/ios/screenshots
+          TEST_RUNNER_SCREENSHOT_DIR: ${{ github.workspace }}/ios/screenshots
+          TEST_RUNNER_SNAPSHOT_RECORD: "1"
+        run: |
+          set -o pipefail
+          rm -f screenshots/*.png
+          mkdir -p build
+          xcodebuild test \
+            -project Aleph.xcodeproj \
+            -scheme Aleph \
+            -destination "id=${{ steps.sim.outputs.udid }}" \
+            -resultBundlePath build/Aleph.xcresult \
+            -skipPackagePluginValidation \
+            CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee build/xcodebuild.log
+
+      - name: Export xcresult attachments
+        if: always()
+        run: |
+          mkdir -p build/attachments
+          if [ -d build/Aleph.xcresult ]; then
+            xcrun xcresulttool export attachments \
+              --path build/Aleph.xcresult --output-path build/attachments || true
+          fi
+          ls -la screenshots build/attachments || true
+
+      - name: Upload screenshots and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-screenshots
+          path: |
+            ios/screenshots/*.png
+            ios/build/attachments
+            ios/build/xcodebuild.log
+          if-no-files-found: warn
+
+      - name: Commit screenshots back to the PoC branch
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/claude/ios-homescreen-poc'
+        working-directory: .
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ios/screenshots/*.png
+          if git diff --cached --quiet; then
+            echo "Screenshots unchanged; nothing to commit."
+            exit 0
+          fi
+          git commit -m "chore(ios): update simulator screenshots [skip ci]"
+          for i in 1 2 3; do
+            git pull --rebase origin claude/ios-homescreen-poc && git push origin HEAD:claude/ios-homescreen-poc && exit 0
+            sleep $((i * 5))
+          done
+          exit 1
