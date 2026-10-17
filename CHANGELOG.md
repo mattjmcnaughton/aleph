@@ -1,3 +1,10 @@
+## [1.43.2](https://github.com/mattjmcnaughton/aleph/compare/v1.43.1...v1.43.2) (2026-10-17)
+
+
+### Bug Fixes
+
+* **db:** drop retired flashcard and learner settings schema ([e477bbd](https://github.com/mattjmcnaughton/aleph/commit/e477bbddba79ecbade0725c3c4a4518a4c3b1b32))
+
 ## [1.43.1](https://github.com/mattjmcnaughton/aleph/compare/v1.43.0...v1.43.1) (2026-10-17)
 
 
