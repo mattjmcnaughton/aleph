@@ -196,6 +196,26 @@ async def test_rejects_a_key_of_the_wrong_family_for_the_alg() -> None:
 
 
 @pytest.mark.anyio
+async def test_rejects_a_token_alg_that_differs_from_the_keys_declared_alg() -> None:
+    # Same RSA family, so only the JWK's own ``alg`` pins RS256 over PS256.
+    source = FakeKeySource()
+    source.served.append({**public(RSA_KEY), "alg": "RS256"})
+
+    with pytest.raises(InvalidBearerToken):
+        await verifier(source).verify(mint(RSA_KEY, alg="PS256"))
+
+
+@pytest.mark.anyio
+async def test_rejects_a_kid_shared_by_two_published_keys() -> None:
+    # Ambiguous key set: the genuine key is first, so "take the first match"
+    # would accept; refusing is the only safe reading.
+    source = FakeKeySource(RSA_KEY, IMPOSTER_KEY)
+
+    with pytest.raises(InvalidBearerToken):
+        await verifier(source).verify(mint(RSA_KEY))
+
+
+@pytest.mark.anyio
 async def test_unknown_kid_refreshes_the_key_set_once() -> None:
     # Key rotation: the cached JWKS predates ``rsa-2``; a refresh publishes it.
     source = FakeKeySource(RSA_KEY, published=[RSA_KEY, ROTATED_KEY])
