@@ -3,7 +3,7 @@ name: Aleph
 options:
   bundleIdPrefix: com.mattjmcnaughton.aleph
   deploymentTarget:
-    iOS: "17.0"
+    iOS: "26.0"
   createIntermediateGroups: true
 
 settings:

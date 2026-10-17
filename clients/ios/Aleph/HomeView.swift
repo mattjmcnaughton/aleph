@@ -40,14 +40,23 @@ struct HomeView: View {
 
 struct PathRow: View {
     let path: SamplePath
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
+        // At accessibility text sizes the title and count stack instead of
+        // squeezing side by side.
+        let header = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+            : AnyLayout(HStackLayout(alignment: .firstTextBaseline))
         VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline) {
+            header {
                 Text(path.title)
                     .font(.headline)
                     .foregroundStyle(.primary)
-                Spacer(minLength: 8)
+                    .fixedSize(horizontal: false, vertical: true)
+                if !dynamicTypeSize.isAccessibilitySize {
+                    Spacer(minLength: 8)
+                }
                 Text("\(path.lessonsComplete)/\(path.lessonCount)")
                     .font(.subheadline.monospacedDigit())
                     .foregroundStyle(.secondary)
@@ -69,5 +78,9 @@ struct PathRow: View {
     }
 }
 
-#Preview("Light") { HomeView() }
 #Preview("Dark") { HomeView().preferredColorScheme(.dark) }
+#Preview("Dark, AX3 text") {
+    HomeView()
+        .preferredColorScheme(.dark)
+        .dynamicTypeSize(.accessibility3)
+}

@@ -2,6 +2,10 @@ import XCTest
 
 /// Launches the real app on the simulator and captures the home screen.
 ///
+/// The screenshot is never compared (it includes the live status bar; CI
+/// overrides the clock to 9:41 to keep commits stable, but treats the image as
+/// a review aid only).
+///
 /// Each screenshot is kept as an XCTest attachment (exportable from the
 /// .xcresult) and, when `SCREENSHOT_DIR` is set (CI passes
 /// `TEST_RUNNER_SCREENSHOT_DIR`), also written there as a PNG.
@@ -10,12 +14,8 @@ final class HomeScreenUITests: XCTestCase {
         continueAfterFailure = false
     }
 
-    func testHomeScreenLight() { capture(scheme: "light") }
-    func testHomeScreenDark() { capture(scheme: "dark") }
-
-    private func capture(scheme: String) {
+    func testHomeScreen() {
         let app = XCUIApplication()
-        app.launchEnvironment["ALEPH_COLOR_SCHEME"] = scheme
         app.launch()
 
         XCTAssertTrue(app.staticTexts["your-paths-heading"].waitForExistence(timeout: 15))
@@ -23,7 +23,7 @@ final class HomeScreenUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["aleph"].exists)
 
         let screenshot = XCUIScreen.main.screenshot()
-        let name = "uitest-home-\(scheme)"
+        let name = "uitest-home-dark"
         let attachment = XCTAttachment(screenshot: screenshot)
         attachment.name = name
         attachment.lifetime = .keepAlways

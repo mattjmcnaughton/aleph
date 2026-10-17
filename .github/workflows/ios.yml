@@ -1,35 +1,105 @@
 name: iOS
 
-# Proof of concept: an agent writes Swift on Linux, this macOS job builds and
-# tests it on a simulator, and the screenshots come back as an artifact and (on
-# the PoC branch) as a commit under ios/screenshots/. See ios/README.md.
+# Builds and tests the SwiftUI client in clients/ios/ on a macOS simulator.
+# See clients/ios/README.md for the iteration model.
+#
+# - push to ios-dev/**: RECORD mode. Snapshot references and UI-test
+#   screenshots are regenerated and committed back to that branch [skip ci].
+#   Agents (which cannot build iOS on Linux) push here to build and look.
+# - pull_request to main, workflow_dispatch: COMPARE mode. Snapshot tests run
+#   against the committed references and fail on any mismatch; the diffs are
+#   uploaded as an artifact. UI-test screenshots are never compared.
+#
+# No trigger-level `paths:` filter: a workflow that never starts leaves a
+# required check pending forever. Instead the `changes` job computes the diff
+# itself, and `ios-gate` is skipped (which satisfies a required check) when
+# nothing iOS-relevant changed. Keep job names stable; branch protection
+# refers to them.
 on:
-  push:
-    branches: [main, claude/ios-homescreen-poc]
-    paths:
-      - "ios/**"
-      - ".github/workflows/ios.yml"
   pull_request:
     branches: [main]
-    paths:
-      - "ios/**"
-      - ".github/workflows/ios.yml"
+  push:
+    branches: ["ios-dev/**"]
   workflow_dispatch:
+    inputs:
+      base:
+        description: >-
+          Optional commit to diff against for the path filter (to exercise it).
+          Empty runs everything.
+        required: false
+        default: ""
 
 concurrency:
   group: ios-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  build-test:
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      ios: ${{ steps.filter.outputs.ios }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect iOS-relevant changes
+        id: filter
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          DISPATCH_BASE: ${{ inputs.base }}
+        run: |
+          set -euo pipefail
+          case "$EVENT" in
+            pull_request) base="$PR_BASE" ;;
+            push) base="$PUSH_BEFORE" ;;            # all zeros on a new branch
+            *) base="${DISPATCH_BASE:-}" ;;         # workflow_dispatch
+          esac
+
+          if [ -z "$base" ] || [[ "$base" =~ ^0+$ ]] \
+              || ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            echo "No usable base (event=$EVENT base='${base}'); running everything."
+            echo "ios=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Changed files ($base..HEAD):"
+          git diff --name-only "$base" HEAD | tee changed.txt
+
+          # Paths that can affect the iOS client. The OpenAPI document is not
+          # committed yet; ^docs/openapi\.json$ is a placeholder for it (the
+          # generated Swift client will be built from it).
+          if grep -Eq \
+              -e '^clients/ios/' \
+              -e '^\.github/workflows/ios\.yml$' \
+              -e '^scripts/e2e_backend\.py$' \
+              -e '^docs/openapi\.json$' \
+              changed.txt; then
+            echo "ios=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ios=false" >> "$GITHUB_OUTPUT"
+          fi
+          cat "$GITHUB_OUTPUT"
+
+  ios-gate:
+    needs: changes
+    if: needs.changes.outputs.ios == 'true'
     runs-on: macos-15
     timeout-minutes: 45
+    permissions:
+      contents: write
+    env:
+      MODE: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/heads/ios-dev/') && 'record' || 'compare' }}
+      SNAPSHOTS: clients/ios/AlephSnapshotTests/__Snapshots__
     defaults:
       run:
-        working-directory: ios
+        working-directory: clients/ios
     steps:
       - uses: actions/checkout@v4
 
@@ -40,6 +110,7 @@ jobs:
 
       - name: Show toolchain
         run: |
+          echo "Snapshot mode: $MODE"
           sw_vers
           xcodebuild -version
           xcrun simctl list runtimes
@@ -50,20 +121,36 @@ jobs:
       - name: Generate project
         run: xcodegen generate
 
-      - name: Pick simulator
+      - name: Pick and boot simulator
         id: sim
-        run: echo "udid=$(./scripts/pick-simulator.sh)" >> "$GITHUB_OUTPUT"
+        env:
+          MIN_IOS: "26.0"
+        run: |
+          udid="$(./scripts/pick-simulator.sh)"
+          echo "udid=$udid" >> "$GITHUB_OUTPUT"
+          xcrun simctl boot "$udid" || true
+          xcrun simctl bootstatus "$udid" -b
+          # Freeze the status bar so the UI-test screenshot is stable between
+          # runs (it is still never compared).
+          xcrun simctl status_bar "$udid" override \
+            --time 9:41 --dataNetwork wifi --wifiMode active --wifiBars 3 \
+            --cellularMode active --cellularBars 4 \
+            --batteryState charged --batteryLevel 100 || true
 
-      - name: Build and test
+      - name: Build and test (${{ env.MODE }})
         env:
           # TEST_RUNNER_-prefixed vars reach the test process with the prefix stripped.
-          TEST_RUNNER_SNAPSHOT_DIR: ${{ github.workspace }}/ios/screenshots
-          TEST_RUNNER_SCREENSHOT_DIR: ${{ github.workspace }}/ios/screenshots
-          TEST_RUNNER_SNAPSHOT_RECORD: "1"
+          TEST_RUNNER_SNAPSHOT_RECORD: ${{ env.MODE == 'record' && '1' || '0' }}
+          TEST_RUNNER_SNAPSHOT_ARTIFACTS: ${{ github.workspace }}/clients/ios/build/snapshot-failures
+          TEST_RUNNER_SCREENSHOT_DIR: ${{ github.workspace }}/clients/ios/screenshots
         run: |
           set -o pipefail
           rm -f screenshots/*.png
-          mkdir -p build
+          if [ "$MODE" = record ]; then
+            # Drop stale references so renamed/removed tests don't leave orphans.
+            rm -f AlephSnapshotTests/__Snapshots__/*.png
+          fi
+          mkdir -p build/snapshot-failures
           xcodebuild test \
             -project Aleph.xcodeproj \
             -scheme Aleph \
@@ -81,33 +168,37 @@ jobs:
             xcrun xcresulttool export attachments \
               --path build/Aleph.xcresult --output-path build/attachments || true
           fi
-          ls -la screenshots build/attachments || true
+          ls -la AlephSnapshotTests/__Snapshots__ screenshots build/snapshot-failures build/attachments || true
 
-      - name: Upload screenshots and logs
+      - name: Upload screenshots, snapshot diffs, and logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ios-screenshots
+          name: ios-gate-${{ env.MODE }}
           path: |
-            ios/screenshots/*.png
-            ios/build/attachments
-            ios/build/xcodebuild.log
+            clients/ios/AlephSnapshotTests/__Snapshots__/*.png
+            clients/ios/screenshots/*.png
+            clients/ios/build/snapshot-failures
+            clients/ios/build/attachments
+            clients/ios/build/xcodebuild.log
           if-no-files-found: warn
 
-      - name: Commit screenshots back to the PoC branch
-        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/claude/ios-homescreen-poc'
+      - name: Commit references and screenshots back to the ios-dev branch
+        if: success() && env.MODE == 'record'
         working-directory: .
+        env:
+          BRANCH: ${{ github.ref_name }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add ios/screenshots/*.png
+          git add -A "$SNAPSHOTS" clients/ios/screenshots
           if git diff --cached --quiet; then
-            echo "Screenshots unchanged; nothing to commit."
+            echo "References and screenshots unchanged; nothing to commit."
             exit 0
           fi
-          git commit -m "chore(ios): update simulator screenshots [skip ci]"
+          git commit -m "chore(ios): record snapshot references and screenshots [skip ci]"
           for i in 1 2 3; do
-            git pull --rebase origin claude/ios-homescreen-poc && git push origin HEAD:claude/ios-homescreen-poc && exit 0
+            git pull --rebase origin "$BRANCH" && git push origin "HEAD:$BRANCH" && exit 0
             sleep $((i * 5))
           done
           exit 1
