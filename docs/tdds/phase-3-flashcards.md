@@ -1,5 +1,10 @@
 # TDD — Phase 3: Flashcards and spaced repetition
 
+> **Retired archive:** The implementation described here, including its APIs, models, settings,
+> scheduling, evals, and metrics, was removed. This document is retained as historical design
+> context only; see [`CONTEXT.md`](../CONTEXT.md), [`api.md`](../api.md), and
+> [`architecture.md`](../architecture.md) for the current system.
+
 **Status:** Draft · **Owner:** solo builder · **Companion to:** [Phase 3 PRD](../prds/phase-3-flashcards.md)
 **References:** [`roadmap.md`](../roadmap.md) · [`CONTEXT.md`](../CONTEXT.md) · [Phase 1 TDD](phase-1-path-generation.md) · [Phase 2 TDD](phase-2-tutor.md) · [Phase 2B TDD](phase-2b-shape-your-path.md) · [Phase 5 streaks TDD](phase-5-streaks.md) · [`metrics.md`](../metrics.md) · [`evals.md`](../evals.md) · mock: [phase-3 flashcards](../mocks/aleph-phase-3-flashcards.html) · prior art: habagou `domains/scheduling.py`, [ADR 0008](https://github.com/mattjmcnaughton/habagou/blob/main/docs/adrs/0008-review-state-as-rebuildable-projection.md)
 

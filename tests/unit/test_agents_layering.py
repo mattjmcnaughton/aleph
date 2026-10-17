@@ -32,7 +32,6 @@ import subprocess
 import sys
 
 from aleph.agents.analyst import AnalystDeps, build_analyst_agent
-from aleph.agents.flashcard import FlashcardDeps
 from aleph.agents.lesson import LessonDeps
 from aleph.agents.outline import OutlineDeps
 from aleph.agents.researcher import ResearcherDeps, build_researcher_agent
@@ -165,7 +164,7 @@ def test_researcher_and_analyst_define_no_tool() -> None:
 # title — leaking into a generation-layer input. Lives here (not
 # ``test_outline_agent.py``) because it is a whole-package invariant, not one
 # agent's: it inspects every ``*Deps`` dataclass across outline/lesson/tutor/
-# shaper/flashcard/researcher/analyst in one place, the same "guard the whole
+# shaper/researcher/analyst in one place, the same "guard the whole
 # package" role the import probe above plays for imports.
 
 # Fields that legitimately carry "title" in their name: real per-lesson/unit
@@ -198,7 +197,6 @@ def test_no_agent_deps_carries_a_path_title_field() -> None:
         LessonDeps,
         TutorDeps,
         ShaperDeps,
-        FlashcardDeps,
         ResearcherDeps,
         AnalystDeps,
     ):

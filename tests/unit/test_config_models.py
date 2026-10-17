@@ -20,7 +20,6 @@ def test_model_slots_default_to_luna() -> None:
         "model_judge": "openai/gpt-5.6-luna",
         "model_tutor": "openai/gpt-5.6-luna",
         "model_shaper": "openai/gpt-5.6-luna",
-        "model_flashcard": "openai/gpt-5.6-luna",
         "model_research": "openai/gpt-5.6-luna",
         "model_brief": "openai/gpt-5.6-luna",
     }

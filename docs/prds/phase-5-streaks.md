@@ -1,5 +1,10 @@
 # PRD — Phase 5, slice 1: Streaks
 
+> **Current amendment:** Daily and Best streaks now derive only from lesson completions.
+> Flashcard review history was removed and review-only historical credit is not preserved.
+> Path streak semantics are unchanged. Brief reads do not count toward any streak. Earlier
+> Phase 3/6 amendments below are retained as historical decision context only.
+
 **Status:** Accepted — **shipped and launched** (the `streaks` flag defaults on) · **Owner:** solo builder · **Roadmap item:** [Phase 5 — Momentum](../roadmap.md#phase-5--momentum)
 **Companion to:** [Phase 5 streaks TDD](../tdds/phase-5-streaks.md)
 **References:** [`README.md`](../../README.md) · [`roadmap.md`](../roadmap.md) · [`CONTEXT.md`](../CONTEXT.md) (ubiquitous language) · [Phase 1 PRD](phase-1-path-generation.md) · [`metrics.md`](../metrics.md) · prior art: habagou `domains/streaks.py`, `services/progress.py`

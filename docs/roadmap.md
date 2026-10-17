@@ -30,7 +30,7 @@ afterthought.
 | **1 — The generated path (MVP)** | ✅ Shipped & launched | [PRD](prds/phase-1-path-generation.md) · [TDD](tdds/phase-1-path-generation.md) |
 | **2 — The tutor** (2A, in-lesson) | ✅ Shipped & launched (`tutor` flag on, AL-270) | [PRD](prds/phase-2-tutor.md) · [TDD](tdds/phase-2-tutor.md) |
 | **2B — Shape your path** (learner-initiated) | ✅ Shipped & launched (`shaping` flag on, AL-370) | [PRD](prds/phase-2b-shape-your-path.md) · [TDD](tdds/phase-2b-shape-your-path.md) |
-| **3 — Flashcards and spaced repetition** | ✅ Shipped & launched (`flashcards` flag on) — all ten TDD tickets plus AL-410's card-management surface | [PRD](prds/phase-3-flashcards.md) · [TDD](tdds/phase-3-flashcards.md) · [mock](mocks/aleph-phase-3-flashcards.html) |
+| **3 — Flashcards and spaced repetition** | ⛔ Retired and removed; specifications retained as archives | [retired PRD](prds/phase-3-flashcards.md) · [retired TDD](tdds/phase-3-flashcards.md) · [retired mock](mocks/aleph-phase-3-flashcards.html) |
 | **4 — Adaptive paths** | ⬜ Not started — **no PRD yet** (2B pre-built the proposal/apply machinery) | — |
 | **5 — Momentum** | 🟡 In progress — streaks shipped **and launched**; goal ring and daily minutes unbuilt | streaks: [PRD](prds/phase-5-streaks.md) · [TDD](tdds/phase-5-streaks.md) |
 | **6 — The analyst** | ✅ Shipped & launched (`analyst` flag on) — a second pillar beside paths, not a deepening of one | [PRD](prds/phase-6-analyst.md) · [TDD](tdds/phase-6-analyst.md) |
@@ -106,7 +106,7 @@ sits outside your lesson progress entirely — and it can reference what you've
 already covered ("you're on Generics, with Utility Types still ahead") from a thin
 digest of lesson names and progress, without reading another lesson's content. This
 phase is chat and comprehension only; it reads your path and speaks about it, but it
-does not change your path or your flashcards.
+does not change your path.
 
 The phase ships the **in-lesson** tutor first, on its own (2A, shipped). The
 follow-on slice — **2B** — is not the whole-path Q&A tutor originally sketched
@@ -128,7 +128,12 @@ are re-deferred to a later slice, sequenced against real usage.
 
 ## Phase 3 — Flashcards and spaced repetition
 
-> ✅ **Status:** shipped and launched — the `flashcards` flag defaults on. Both specs
+> ⛔ **Retired archive:** Flashcards, reviews, scheduling, learner Settings, APIs, evals, and
+> metrics were removed. Stored cards and review history are deleted by the removal migration;
+> review-only historical streak credit is intentionally not preserved. The remainder of this
+> section records the former roadmap and does not describe current product behavior.
+>
+> Former status: shipped and launched. Both specs
 > are accepted — the product boundary ([PRD](prds/phase-3-flashcards.md), drawn in the
 > [mock](mocks/aleph-phase-3-flashcards.html)) and the technical design
 > ([TDD](tdds/phase-3-flashcards.md)) — and all ten tickets of the TDD's delivery plan (§16)
@@ -179,20 +184,20 @@ flag and launched alongside everything else behind it.
 > Phase 2B already built and launched the proposal card, ghost-row preview,
 > apply-with-undo and change history this phase would have had to invent
 > ([Phase 2B TDD](tdds/phase-2b-shape-your-path.md)). What remains is genuinely
-> Phase 4's own: the *system* proposing edits unprompted, which needs Phase 3's miss
-> signal first, and the destructive edit shapes 2B declined.
+> Phase 4's own: the *system* proposing edits unprompted and the destructive edit
+> shapes 2B declined. Its signal design needs reconsideration after retiring Phase 3.
 > 📄 **Full spec:** none yet.
 
 This is where "dynamically generated" earns its name. Until now the path is
 generated once and then fixed; here it starts bending around the individual. Using
-the miss data from Quick-checks and the flashcard schedule — plus what surfaces in
+the miss data from Quick checks — plus what surfaces in
 tutor conversation — Aleph proposes concrete, targeted edits to your path through
 the "Shape your path" flow: slot a five-minute Narrowing refresher before Unit 4
-because you missed it twice and never reviewed, or add a short detour on a concept
+because you missed it twice, or add a short detour on a concept
 you keep confusing. Every change is a suggestion you accept or decline, never a
 silent rewrite, and each is small and legible ("one short lesson, then straight
-into Utility Types"). This phase depends on both the tutor and the quiz/flashcard
-signal already existing, which is why it comes fourth rather than first.
+into Utility Types"). This phase builds on the tutor and Quick-check signals;
+it no longer depends on a flashcard schedule.
 
 Much of this machinery now ships earlier: **Phase 2B builds the learner-initiated
 flow** — the proposal card, ghost-row preview, apply-with-undo, and change history
@@ -291,11 +296,11 @@ the TDD. And the phase adds a constraint the eval harness has never faced: live
 retrieval makes an eval non-deterministic by construction, so the seed set has to
 pin recorded retrieval fixtures or it measures the news rather than the agent.
 
-The convergence with paths — flashcards drafted from a Brief, the tutor rail on a
+The convergence with paths — the tutor rail on a
 Brief, "teach me the fundamentals of what I keep reading about", a Brief feeding a
 Phase 4 proposal — is named in the PRD and built in none of it. That sequencing is
 the point of building the sibling rather than forcing Briefs into `lessons` on day
-one.
+one. The PRD's historical suggestion of drafting flashcards from Briefs is retired.
 
 ## Flow
 

@@ -1,7 +1,7 @@
 """Unit tests for the stub model's researcher/analyst dispatch (Phase 6 TDD
 §5.3/§5.4/§5.5/§11, ticket AL-560 code review FIX 2).
 
-Mirrors `test_stub_model_flashcards.py`'s shape: a throwaway
+Uses the established stub-model test shape: a throwaway
 `Agent[None, ResearchResult]`/`Agent[None, BriefResult]` bound to the stub
 drives the real dispatch in `services/stub_model.py`, built off the real
 prompt builders (`agents/researcher.py::build_researcher_prompt`,
@@ -10,8 +10,8 @@ strings, so these tests exercise the actual contract between the two prompt
 builders and the stub's own marker/URL scanning.
 
 Before this file, the researcher/analyst branch — unlike every other stub
-branch (`test_stub_model.py`'s outline/lesson, `test_stub_model_flashcards
-.py`, `test_stub_model_shaping.py`, `test_stub_model_stream.py`) — had no
+branch (`test_stub_model.py`'s outline/lesson, `test_stub_model_shaping.py`,
+`test_stub_model_stream.py`) — had no
 unit coverage at all: only e2e (`w29.spec.ts`/`w31.spec.ts`) exercised it,
 which turns a stub regression into an opaque 90s Playwright timeout instead
 of a fast, attributable failure.

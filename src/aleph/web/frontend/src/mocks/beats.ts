@@ -122,7 +122,7 @@ const createBodies: Array<Record<string, unknown>> = [];
  *  (never) or stop (always) firing. */
 let listRequests = 0;
 /** `GET /beats/{id}` requests served, per Beat id — the stalled-poll
- *  regression shape `flashcardDraftsPollRequestCount` already proves: a
+ *  polling regression shape already proves: a
  *  terminal state must hold this steady no matter how far fake time runs
  *  past it. */
 const detailPollRequests = new Map<string, number>();

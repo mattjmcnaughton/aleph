@@ -389,9 +389,8 @@ async def test_the_timezone_case_matches_under_a_non_utc_session_guc() -> None:
     assert [row.day.isoformat() for row in under_chicago] == ["2026-01-01"]
 
     # And via the full service seam too, with a fixed ``now`` so the assertion
-    # does not depend on when the suite happens to run. ``flashcards_enabled``
-    # is now required, keyword-only (ticket 5, finding 5) — passed explicitly
-    # as ``False`` here: this test is about the day-boundary sign convention,
+    # does not depend on when the suite happens to run. This test is about the
+    # day-boundary sign convention,
     # not the streak union, so the choice is made explicit rather than
     # inherited from a default that used to run these timezone assertions
     # with the union silently off.
@@ -401,7 +400,6 @@ async def test_the_timezone_case_matches_under_a_non_utc_session_guc() -> None:
             session,
             user_id=user_id,
             tz_offset_minutes=0,
-            flashcards_enabled=False,
             now=fixed_now,
         )
     async with db.async_session() as session:
@@ -410,7 +408,6 @@ async def test_the_timezone_case_matches_under_a_non_utc_session_guc() -> None:
             session,
             user_id=user_id,
             tz_offset_minutes=0,
-            flashcards_enabled=False,
             now=fixed_now,
         )
 

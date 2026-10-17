@@ -9,7 +9,7 @@ once by the shared ``OwnedBeat``/``OwnedBrief`` dependencies, the
 **The flag gate.** Every route here hangs off ``require_analyst_enabled``,
 mounted **router-level** (TDD D12) so a future route added to this file
 inherits the gate by construction — the same posture ``tutor``/``shaping``/
-``streaks``/``flashcards`` all took. Off -> ``404`` for every route, before
+``streaks`` took. Off -> ``404`` for every route, before
 any work: ``get_current_user`` runs first (an anonymous request is ``401``
 before the flag is ever consulted), and the flag check itself does no I/O
 beyond resolving the caller's flags — no repository read, no drain, no spawn.
@@ -159,7 +159,7 @@ async def require_analyst_enabled(user: CurrentUser, session: Session) -> None:
     Mounted as a **router-level** dependency (see the module docstring), so
     every route in this file — present and future — inherits the gate by
     construction (TDD D12's whole point). ``analyst`` followed the identical
-    ``tutor``/``shaping``/``streaks``/``flashcards`` playbook and is now
+    ``tutor``/``shaping``/``streaks`` playbook and is now
     launched too, which makes this gate a kill switch rather than a curtain:
     off -> ``404`` for every route, before any work — ``get_current_user`` runs
     first, so an anonymous request is already ``401`` before the flag is ever

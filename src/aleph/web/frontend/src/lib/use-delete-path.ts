@@ -1,16 +1,11 @@
 // The delete orchestration behind the "Your paths" switcher (§5.5/W5): the
-// route renders rows, this owns the DELETE and the cache surgery that keeps
-// the list correct afterwards. The confirm/DELETE/one-row-at-a-time state
-// machine itself lives in `use-row-delete.ts` — shared with `/cards`' own
-// `use-delete-card.ts`, since the two used to duplicate it exactly. What is
-// left here is what is genuinely path-specific: `forget`, below, is this call
-// site's `settle` (`use-row-delete.ts`'s own term).
+// route renders rows; this owns confirmation, DELETE, and cache updates.
 //
 // Two invariants live in `forget`, together, because they only make sense
 // together:
 //
 //  1. Non-optimistic until the server has actually said the path is gone: the
-//     shared hook only ever calls `forget` after a real `204` or a `404`
+//     hook only ever calls `forget` after a real `204` or a `404`
 //     folded into the same success path, never before.
 //  2. Cancel-before-filter: an in-flight `GET /paths` that started before the
 //     DELETE would resurrect the row when it resolves, so it is cancelled
@@ -18,13 +13,24 @@
 //     reason. Only then is the list invalidated, so the server's ordering
 //     stays authoritative.
 
-import { useQueryClient } from "@tanstack/react-query";
-import { PATHS_LIST_QUERY_KEY, type PathList, deletePath, pathQueryKey } from "./api";
-import { type RowDelete, useRowDelete } from "./use-row-delete";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
+import { PATHS_LIST_QUERY_KEY, type PathList, deletePath, isNotFound, pathQueryKey } from "./api";
 
-/** Re-exported under its own name — every call site names its delete result
- *  after what it deletes, not after the shared machine behind it. */
-export type DeletePath = RowDelete;
+export interface DeletePath {
+  /** The row currently mid-confirm, if any — one at a time. */
+  confirmingId: string | null;
+  /** Arm the confirm step for one row, closing any other row's. */
+  ask: (id: string) => void;
+  /** Abandon the confirm step without deleting anything. */
+  cancel: () => void;
+  /** Fire the DELETE for one row (only ever from the confirm step). */
+  confirm: (id: string) => void;
+  /** True while THIS row's DELETE is in flight — never a sibling's. */
+  isDeleting: (id: string) => boolean;
+  /** True once THIS row's DELETE failed in a way the learner can retry. */
+  isErrored: (id: string) => boolean;
+}
 
 export interface UseDeletePathOptions {
   /**
@@ -41,9 +47,14 @@ export interface UseDeletePathOptions {
 
 export function useDeletePath({ onDeleted, onCancelled }: UseDeletePathOptions = {}): DeletePath {
   const queryClient = useQueryClient();
+  const [confirmingId, setConfirmingId] = useState<string | null>(null);
+  // Keep errors per row and attempt without resetting an in-flight mutation.
+  const [failedId, setFailedId] = useState<string | null>(null);
 
   /** Drop a path the server no longer has (see the invariants above). */
   async function forget(id: string): Promise<void> {
+    setConfirmingId(null);
+    setFailedId(null);
     await queryClient.cancelQueries({ queryKey: PATHS_LIST_QUERY_KEY });
     queryClient.setQueryData<PathList>(PATHS_LIST_QUERY_KEY, (old) =>
       old ? { paths: old.paths.filter((path) => path.id !== id) } : old,
@@ -56,5 +67,34 @@ export function useDeletePath({ onDeleted, onCancelled }: UseDeletePathOptions =
     await queryClient.invalidateQueries({ queryKey: PATHS_LIST_QUERY_KEY });
   }
 
-  return useRowDelete({ mutationFn: deletePath, settle: forget, onCancelled });
+  const mutation = useMutation({
+    mutationFn: deletePath,
+    onSuccess: (_result, id) => forget(id),
+    onError: async (error, id) => {
+      if (isNotFound(error)) {
+        await forget(id);
+        return;
+      }
+      setFailedId(id);
+    },
+  });
+
+  return {
+    confirmingId,
+    ask: (id) => {
+      setConfirmingId(id);
+      setFailedId(null);
+    },
+    cancel: () => {
+      setConfirmingId(null);
+      setFailedId(null);
+      if (confirmingId) onCancelled?.(confirmingId);
+    },
+    confirm: (id) => {
+      setFailedId(null);
+      mutation.mutate(id);
+    },
+    isDeleting: (id) => mutation.isPending && mutation.variables === id,
+    isErrored: (id) => failedId === id,
+  };
 }

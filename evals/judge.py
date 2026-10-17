@@ -73,8 +73,7 @@ if TYPE_CHECKING:
 SYSTEM_PROMPT = """\
 You are the quality gate for a self-directed adult learning app. You are given \
 one generated artifact — a path OUTLINE, a single LESSON (a Read passage plus a \
-Quick check), a single drafted FLASHCARD (a front and a back, drafted from one \
-lesson's Read passage), or a published BRIEF (a short cited report from a \
+Quick check), or a published BRIEF (a short cited report from a \
 standing research assignment, shown together with the prior Brief it follows) \
 — together with the context it was generated in, and you score it against a \
 fixed rubric.
@@ -146,8 +145,7 @@ def build_judge_agent() -> Agent[JudgeDeps, JudgeVerdict]:
             f"these ids: {list(items)}\n"
             f"{rubric_block(kind)}"
         )
-        # No calibration examples exist yet for every kind (``flashcard_draft``
-        # has none, TDD §16's `for-human` follow-up) — the "worked examples
+        # No calibration examples exist yet for every kind, so the "worked examples
         # follow" line must not appear when there are none to show.
         examples = calibration_block(kind)
         if examples:
@@ -171,7 +169,7 @@ def build_judge_agent() -> Agent[JudgeDeps, JudgeVerdict]:
 # emit. First line, exactly once, ahead of any free text.
 _ARTIFACT_TOKEN = "artifact"
 _ARTIFACT_RE = re.compile(
-    rf"{_ARTIFACT_TOKEN}\s*=\s*(outline|lesson|flashcard_draft|brief)", re.IGNORECASE
+    rf"{_ARTIFACT_TOKEN}\s*=\s*(outline|lesson|brief)", re.IGNORECASE
 )
 
 
@@ -269,43 +267,6 @@ def build_lesson_judge_prompt(
     return "\n\n".join(sections)
 
 
-def build_flashcard_judge_prompt(
-    *,
-    topic: str,
-    level: Level,
-    unit_title: str,
-    lesson_title: str,
-    read_passage: str,
-    front: str,
-    back: str,
-) -> str:
-    """The judge's user prompt for one drafted flashcard (Phase 3 TDD §10).
-
-    Carries the source lesson's Read passage **verbatim** — PRD §6's *grounding*
-    dimension (the ``accurate`` item's flashcard reading, ``rubric.py``) is
-    unfalsifiable without it, exactly as the lesson prompt's prior passages are
-    what makes *continuous* falsifiable. No Quick check and no prior lessons: a
-    card is judged against its one source passage alone, never against a path
-    position it does not have (``rubric.py``'s module docstring explains why
-    ``continuous``/``check_validity`` are not in its item set at all).
-    """
-    return "\n\n".join(
-        [
-            f"{_ARTIFACT_TOKEN}=flashcard_draft",
-            f"Topic the learner asked for: {topic}",
-            f"Learner level: {level}",
-            f"Drafted from unit {unit_title!r}, lesson {lesson_title!r}.",
-            "Read passage the card was drafted from (verbatim — this is the "
-            "evidence for the accurate/grounding item; nothing on the card may "
-            "go beyond it):",
-            read_passage,
-            "FLASHCARD UNDER REVIEW:",
-            f"Front: {front}",
-            f"Back: {back}",
-        ]
-    )
-
-
 def _serialize_sources(sources: Sequence[RetrievedDocument]) -> str:
     """The cited Sources as prompt text — one block per document, in order,
     each carrying its **full retrieved text** (mirrors ``_serialize_lesson``'s
@@ -358,13 +319,10 @@ def build_brief_judge_prompt(
     explicitly promises the cited Sources are "given to you below", and
     without them the judge can only score from its own world knowledge or
     pass by default — PRD §6's Grounded dimension was not being measured at
-    all. This is exactly ``build_flashcard_judge_prompt``'s own reasoning
-    ("grounding is unfalsifiable without [the Read passage]"), applied to the
-    item this function had dropped it for. ``sources`` is the set of
+    all. ``sources`` is the set of
     ``RetrievedDocument``s backing ``cited_urls`` — never the full retrieved
     batch — so the judge sees exactly the evidence the Brief claims to draw
-    on, mirroring the flashcard prompt's one-source-passage shape rather than
-    handing over documents the Brief never cited.
+    on rather than handing over documents the Brief never cited.
     """
     sections = [
         f"{_ARTIFACT_TOKEN}=brief",
@@ -465,33 +423,6 @@ class Judge:
         )
         return run.output
 
-    async def judge_flashcard_draft(
-        self,
-        *,
-        topic: str,
-        level: Level,
-        unit_title: str,
-        lesson_title: str,
-        read_passage: str,
-        front: str,
-        back: str,
-    ) -> JudgeVerdict:
-        """Score one drafted flashcard against its four applicable rubric items."""
-        run = await self.agent.run(
-            build_flashcard_judge_prompt(
-                topic=topic,
-                level=level,
-                unit_title=unit_title,
-                lesson_title=lesson_title,
-                read_passage=read_passage,
-                front=front,
-                back=back,
-            ),
-            deps=JudgeDeps(artifact="flashcard_draft"),
-            model=self.model,
-        )
-        return run.output
-
     async def judge_brief(
         self,
         *,
@@ -585,7 +516,7 @@ def _stub_judge_respond(
     if match is None:
         raise StubJudgeError(
             "judge prompt is missing its "
-            "'artifact=<outline|lesson|flashcard_draft|brief>' token, so the "
+            "'artifact=<outline|lesson|brief>' token, so the "
             "stub judge cannot tell which rubric item set to score"
         )
     kind: ArtifactKind = cast("ArtifactKind", match.group(1).lower())
