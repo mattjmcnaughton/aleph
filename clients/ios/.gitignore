@@ -1,0 +1,3 @@
+# SwiftPM build and checkout state (Package.resolved is committed).
+.build/
+.swiftpm/

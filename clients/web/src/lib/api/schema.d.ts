@@ -15,7 +15,7 @@ export interface paths {
          * List Feature Flags
          * @description Every registered flag with its effective default and override count.
          */
-        get: operations["list_feature_flags_api_v1_admin_feature_flags_get"];
+        get: operations["list_feature_flags"];
         put?: never;
         post?: never;
         delete?: never;
@@ -36,13 +36,13 @@ export interface paths {
          * Set Feature Flag Override
          * @description Force one flag on or off for one learner (upsert; a repeat updates).
          */
-        put: operations["set_feature_flag_override_api_v1_admin_feature_flags__flag_key__users__user_id__put"];
+        put: operations["set_feature_flag_override"];
         post?: never;
         /**
          * Clear Feature Flag Override
          * @description Drop one learner's override so the flag's default applies again.
          */
-        delete: operations["clear_feature_flag_override_api_v1_admin_feature_flags__flag_key__users__user_id__delete"];
+        delete: operations["clear_feature_flag_override"];
         options?: never;
         head?: never;
         patch?: never;
@@ -71,7 +71,7 @@ export interface paths {
          *     A native client calls it with its bearer token: the same payload for the
          *     same account, and an invalid token is ``401`` (it never reads as signed out).
          */
-        get: operations["get_auth_session_api_v1_auth_session_get"];
+        get: operations["get_auth_session"];
         put?: never;
         post?: never;
         delete?: never;
@@ -98,7 +98,7 @@ export interface paths {
          *     ``research_state: "researching"`` in this very response, not a stale
          *     ``idle`` a first poll would treat as terminal.
          */
-        get: operations["list_beats_api_v1_beats_get"];
+        get: operations["list_beats"];
         put?: never;
         /**
          * Deploy Beat
@@ -129,7 +129,7 @@ export interface paths {
          *     §5.6's FIX C), not this request's session, so without it the response
          *     would echo the stale, pre-claim ``research_state`` straight back.
          */
-        post: operations["deploy_beat_api_v1_beats_post"];
+        post: operations["deploy_beat"];
         delete?: never;
         options?: never;
         head?: never;
@@ -157,7 +157,7 @@ export interface paths {
          *     Without it this route would keep echoing the stale, pre-drain
          *     ``research_state`` regardless of what the drain just committed.
          */
-        get: operations["get_beat_api_v1_beats__beat_id__get"];
+        get: operations["get_beat"];
         put?: never;
         post?: never;
         /**
@@ -169,7 +169,7 @@ export interface paths {
          *     §4.11). Not undoable (the UI confirms). No drain: deleting is not a read
          *     the learner is waiting on an answer from.
          */
-        delete: operations["delete_beat_api_v1_beats__beat_id__delete"];
+        delete: operations["delete_beat"];
         options?: never;
         head?: never;
         patch?: never;
@@ -227,7 +227,7 @@ export interface paths {
          *     either way (this is an explicit, single-Beat action, not an arrival
          *     read).
          */
-        post: operations["retry_beat_api_v1_beats__beat_id__retry_post"];
+        post: operations["retry_beat"];
         delete?: never;
         options?: never;
         head?: never;
@@ -254,7 +254,7 @@ export interface paths {
          *     ``sources`` is ``[]`` for a Skipped entry (no ``brief_sources`` rows
          *     exist for one, D2).
          */
-        get: operations["get_brief_api_v1_briefs__brief_id__get"];
+        get: operations["get_brief"];
         put?: never;
         post?: never;
         delete?: never;
@@ -326,7 +326,7 @@ export interface paths {
          *     depends on that holding at the row level, not just at the one client this
          *     ticket shipped.
          */
-        post: operations["read_brief_api_v1_briefs__brief_id__read_post"];
+        post: operations["read_brief"];
         delete?: never;
         options?: never;
         head?: never;
@@ -358,7 +358,7 @@ export interface paths {
          *     which is a read-only record, and the rail refetches the outline it already
          *     polls. Apply returns a path because it has ghosts to swap; undo has none.
          */
-        post: operations["undo_change_api_v1_changes__change_id__undo_post"];
+        post: operations["undo_change"];
         delete?: never;
         options?: never;
         head?: never;
@@ -384,7 +384,7 @@ export interface paths {
          *     deleted between the ownership read and the poll (a raced path delete) →
          *     ``404``.
          */
-        get: operations["get_lesson_api_v1_lessons__lesson_id__get"];
+        get: operations["get_lesson"];
         put?: never;
         post?: never;
         delete?: never;
@@ -423,7 +423,7 @@ export interface paths {
          *     response reveals the keyed ``correct_index`` + ``explanation`` — this endpoint
          *     is the reveal boundary, mirroring the ``attempt`` object on ``GET``.
          */
-        post: operations["attempt_lesson_api_v1_lessons__lesson_id__attempt_post"];
+        post: operations["attempt_lesson"];
         delete?: never;
         options?: never;
         head?: never;
@@ -465,7 +465,7 @@ export interface paths {
          *     the repository (under the path lock), so ``path_completed`` fires exactly once
          *     — never a double-emit if two lessons on a path resolve concurrently.
          */
-        post: operations["complete_lesson_api_v1_lessons__lesson_id__complete_post"];
+        post: operations["complete_lesson"];
         delete?: never;
         options?: never;
         head?: never;
@@ -498,7 +498,7 @@ export interface paths {
          *     is a no-op for that lesson (only the window is advanced) — never an error to
          *     model in the route.
          */
-        post: operations["generate_lesson_api_v1_lessons__lesson_id__generate_post"];
+        post: operations["generate_lesson"];
         delete?: never;
         options?: never;
         head?: never;
@@ -544,7 +544,7 @@ export interface paths {
          *     §5.6's "so new work starts without waiting for a poll". One round trip,
          *     no new orchestration (D7).
          */
-        post: operations["apply_proposal_api_v1_messages__message_id__apply_proposal_post"];
+        post: operations["apply_proposal"];
         delete?: never;
         options?: never;
         head?: never;
@@ -601,7 +601,7 @@ export interface paths {
          *     not the Quick check's grading path: a Tutor check is non-scoring, so nothing
          *     is graded, recorded as an Attempt, or first-wins about it.
          */
-        post: operations["answer_tutor_check_api_v1_messages__message_id__tutor_check_answer_post"];
+        post: operations["answer_tutor_check"];
         delete?: never;
         options?: never;
         head?: never;
@@ -631,7 +631,7 @@ export interface paths {
          *     roll-up that produced the sort key, so the list and the field it is sorted
          *     by cannot drift apart.
          */
-        get: operations["list_paths_api_v1_paths_get"];
+        get: operations["list_paths"];
         put?: never;
         /**
          * Create Path
@@ -659,7 +659,7 @@ export interface paths {
          *     and returns immediately — the client polls ``GET /paths/{id}`` for the
          *     outcome.
          */
-        post: operations["create_path_api_v1_paths_post"];
+        post: operations["create_path"];
         delete?: never;
         options?: never;
         head?: never;
@@ -685,7 +685,7 @@ export interface paths {
          *     view means the path was deleted between the ownership read and the poll (a
          *     raced delete) → ``404``.
          */
-        get: operations["get_path_api_v1_paths__path_id__get"];
+        get: operations["get_path"];
         put?: never;
         post?: never;
         /**
@@ -696,7 +696,7 @@ export interface paths {
          *     units, lessons, quick checks, and attempts (ON DELETE CASCADE); other paths
          *     are untouched. Not undoable (the UI confirms); doubles as reset (CONTEXT.md).
          */
-        delete: operations["delete_path_api_v1_paths__path_id__delete"];
+        delete: operations["delete_path"];
         options?: never;
         head?: never;
         /**
@@ -736,7 +736,7 @@ export interface paths {
          *     already polls, exactly as Phase 2B's Apply does
          *     (``path_detail_response``'s docstring).
          */
-        patch: operations["update_path_api_v1_paths__path_id__patch"];
+        patch: operations["update_path"];
         trace?: never;
     };
     "/api/v1/paths/{path_id}/changes": {
@@ -763,7 +763,7 @@ export interface paths {
          *     non-``ready`` path, for the conversation read's reason: the ``ready`` rule
          *     bounds sending, not reading.
          */
-        get: operations["get_change_history_api_v1_paths__path_id__changes_get"];
+        get: operations["get_change_history"];
         put?: never;
         post?: never;
         delete?: never;
@@ -793,7 +793,7 @@ export interface paths {
          *     the thread join rather than looking it up per message. Unpaginated this
          *     phase (an accepted risk, TDD §14).
          */
-        get: operations["get_conversation_api_v1_paths__path_id__conversation_get"];
+        get: operations["get_conversation"];
         put?: never;
         post?: never;
         /**
@@ -811,7 +811,7 @@ export interface paths {
          *     the cap were enabled is the recorded precondition for enabling it, not work
          *     to do here.
          */
-        delete: operations["delete_conversation_api_v1_paths__path_id__conversation_delete"];
+        delete: operations["delete_conversation"];
         options?: never;
         head?: never;
         patch?: never;
@@ -861,7 +861,7 @@ export interface paths {
          *     stream, and the payload shapes that ride in it are the ``dtos/tutor.py``
          *     stream DTOs rather than one envelope OpenAPI could describe.
          */
-        post: operations["send_message_api_v1_paths__path_id__conversation_messages_post"];
+        post: operations["send_message"];
         delete?: never;
         options?: never;
         head?: never;
@@ -899,7 +899,7 @@ export interface paths {
          *     topic, §5.5), so a stray retry still returns ``202`` but changes nothing,
          *     rather than being an error to model in the route.
          */
-        post: operations["retry_path_api_v1_paths__path_id__retry_post"];
+        post: operations["retry_path"];
         delete?: never;
         options?: never;
         head?: never;
@@ -938,7 +938,7 @@ export interface paths {
          *     a question nobody asked; the empty mapping is exactly what the derivation
          *     returns for such a thread anyway.
          */
-        get: operations["get_shaping_conversation_api_v1_paths__path_id__shaping_conversation_get"];
+        get: operations["get_shaping_conversation"];
         put?: never;
         post?: never;
         /**
@@ -961,7 +961,7 @@ export interface paths {
          *     It never refunds quota, for 2A's reason: the shaping cap is disabled at its
          *     default of 0, so no usage rows exist to refund.
          */
-        delete: operations["delete_shaping_conversation_api_v1_paths__path_id__shaping_conversation_delete"];
+        delete: operations["delete_shaping_conversation"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1011,7 +1011,7 @@ export interface paths {
          *     stream, and the payload shapes that ride in it are the stream DTOs rather
          *     than one envelope OpenAPI could describe.
          */
-        post: operations["send_shaping_message_api_v1_paths__path_id__shaping_conversation_messages_post"];
+        post: operations["send_shaping_message"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1039,7 +1039,7 @@ export interface paths {
          *     Answers with the same ``PathDetailResponse`` ``GET /paths/{id}`` does, built
          *     through the same read seam, for the same reasons ``update_path`` gives.
          */
-        put: operations["update_teaching_style_api_v1_paths__path_id__teaching_style_put"];
+        put: operations["update_teaching_style"];
         post?: never;
         delete?: never;
         options?: never;
@@ -1070,7 +1070,7 @@ export interface paths {
          *     The router-level ``streaks`` dependency hides this whole route when the
          *     feature is disabled.
          */
-        get: operations["get_progress_summary_api_v1_progress_summary_get"];
+        get: operations["get_progress_summary"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2505,7 +2505,7 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
-    list_feature_flags_api_v1_admin_feature_flags_get: {
+    list_feature_flags: {
         parameters: {
             query?: never;
             header?: never;
@@ -2534,7 +2534,7 @@ export interface operations {
             };
         };
     };
-    set_feature_flag_override_api_v1_admin_feature_flags__flag_key__users__user_id__put: {
+    set_feature_flag_override: {
         parameters: {
             query?: never;
             header?: never;
@@ -2577,7 +2577,7 @@ export interface operations {
             };
         };
     };
-    clear_feature_flag_override_api_v1_admin_feature_flags__flag_key__users__user_id__delete: {
+    clear_feature_flag_override: {
         parameters: {
             query?: never;
             header?: never;
@@ -2614,7 +2614,7 @@ export interface operations {
             };
         };
     };
-    get_auth_session_api_v1_auth_session_get: {
+    get_auth_session: {
         parameters: {
             query?: never;
             header?: never;
@@ -2643,7 +2643,7 @@ export interface operations {
             };
         };
     };
-    list_beats_api_v1_beats_get: {
+    list_beats: {
         parameters: {
             query?: {
                 tz_offset_minutes?: number;
@@ -2674,7 +2674,7 @@ export interface operations {
             };
         };
     };
-    deploy_beat_api_v1_beats_post: {
+    deploy_beat: {
         parameters: {
             query?: {
                 tz_offset_minutes?: number;
@@ -2709,7 +2709,7 @@ export interface operations {
             };
         };
     };
-    get_beat_api_v1_beats__beat_id__get: {
+    get_beat: {
         parameters: {
             query?: {
                 tz_offset_minutes?: number;
@@ -2742,7 +2742,7 @@ export interface operations {
             };
         };
     };
-    delete_beat_api_v1_beats__beat_id__delete: {
+    delete_beat: {
         parameters: {
             query?: never;
             header?: never;
@@ -2771,7 +2771,7 @@ export interface operations {
             };
         };
     };
-    retry_beat_api_v1_beats__beat_id__retry_post: {
+    retry_beat: {
         parameters: {
             query?: {
                 tz_offset_minutes?: number;
@@ -2804,7 +2804,7 @@ export interface operations {
             };
         };
     };
-    get_brief_api_v1_briefs__brief_id__get: {
+    get_brief: {
         parameters: {
             query?: never;
             header?: never;
@@ -2835,7 +2835,7 @@ export interface operations {
             };
         };
     };
-    read_brief_api_v1_briefs__brief_id__read_post: {
+    read_brief: {
         parameters: {
             query?: {
                 tz_offset_minutes?: number;
@@ -2870,7 +2870,7 @@ export interface operations {
             };
         };
     };
-    undo_change_api_v1_changes__change_id__undo_post: {
+    undo_change: {
         parameters: {
             query?: never;
             header?: never;
@@ -2899,7 +2899,7 @@ export interface operations {
             };
         };
     };
-    get_lesson_api_v1_lessons__lesson_id__get: {
+    get_lesson: {
         parameters: {
             query?: never;
             header?: never;
@@ -2930,7 +2930,7 @@ export interface operations {
             };
         };
     };
-    attempt_lesson_api_v1_lessons__lesson_id__attempt_post: {
+    attempt_lesson: {
         parameters: {
             query?: never;
             header?: never;
@@ -2965,7 +2965,7 @@ export interface operations {
             };
         };
     };
-    complete_lesson_api_v1_lessons__lesson_id__complete_post: {
+    complete_lesson: {
         parameters: {
             query?: never;
             header?: never;
@@ -2996,7 +2996,7 @@ export interface operations {
             };
         };
     };
-    generate_lesson_api_v1_lessons__lesson_id__generate_post: {
+    generate_lesson: {
         parameters: {
             query?: never;
             header?: never;
@@ -3027,7 +3027,7 @@ export interface operations {
             };
         };
     };
-    apply_proposal_api_v1_messages__message_id__apply_proposal_post: {
+    apply_proposal: {
         parameters: {
             query?: never;
             header?: never;
@@ -3058,7 +3058,7 @@ export interface operations {
             };
         };
     };
-    answer_tutor_check_api_v1_messages__message_id__tutor_check_answer_post: {
+    answer_tutor_check: {
         parameters: {
             query?: never;
             header?: never;
@@ -3091,7 +3091,7 @@ export interface operations {
             };
         };
     };
-    list_paths_api_v1_paths_get: {
+    list_paths: {
         parameters: {
             query?: never;
             header?: never;
@@ -3120,7 +3120,7 @@ export interface operations {
             };
         };
     };
-    create_path_api_v1_paths_post: {
+    create_path: {
         parameters: {
             query?: never;
             header?: never;
@@ -3153,7 +3153,7 @@ export interface operations {
             };
         };
     };
-    get_path_api_v1_paths__path_id__get: {
+    get_path: {
         parameters: {
             query?: never;
             header?: never;
@@ -3184,7 +3184,7 @@ export interface operations {
             };
         };
     };
-    delete_path_api_v1_paths__path_id__delete: {
+    delete_path: {
         parameters: {
             query?: never;
             header?: never;
@@ -3213,7 +3213,7 @@ export interface operations {
             };
         };
     };
-    update_path_api_v1_paths__path_id__patch: {
+    update_path: {
         parameters: {
             query?: never;
             header?: never;
@@ -3248,7 +3248,7 @@ export interface operations {
             };
         };
     };
-    get_change_history_api_v1_paths__path_id__changes_get: {
+    get_change_history: {
         parameters: {
             query?: never;
             header?: never;
@@ -3279,7 +3279,7 @@ export interface operations {
             };
         };
     };
-    get_conversation_api_v1_paths__path_id__conversation_get: {
+    get_conversation: {
         parameters: {
             query?: never;
             header?: never;
@@ -3310,7 +3310,7 @@ export interface operations {
             };
         };
     };
-    delete_conversation_api_v1_paths__path_id__conversation_delete: {
+    delete_conversation: {
         parameters: {
             query?: never;
             header?: never;
@@ -3339,7 +3339,7 @@ export interface operations {
             };
         };
     };
-    send_message_api_v1_paths__path_id__conversation_messages_post: {
+    send_message: {
         parameters: {
             query?: never;
             header?: never;
@@ -3374,7 +3374,7 @@ export interface operations {
             };
         };
     };
-    retry_path_api_v1_paths__path_id__retry_post: {
+    retry_path: {
         parameters: {
             query?: never;
             header?: never;
@@ -3405,7 +3405,7 @@ export interface operations {
             };
         };
     };
-    get_shaping_conversation_api_v1_paths__path_id__shaping_conversation_get: {
+    get_shaping_conversation: {
         parameters: {
             query?: never;
             header?: never;
@@ -3436,7 +3436,7 @@ export interface operations {
             };
         };
     };
-    delete_shaping_conversation_api_v1_paths__path_id__shaping_conversation_delete: {
+    delete_shaping_conversation: {
         parameters: {
             query?: never;
             header?: never;
@@ -3465,7 +3465,7 @@ export interface operations {
             };
         };
     };
-    send_shaping_message_api_v1_paths__path_id__shaping_conversation_messages_post: {
+    send_shaping_message: {
         parameters: {
             query?: never;
             header?: never;
@@ -3500,7 +3500,7 @@ export interface operations {
             };
         };
     };
-    update_teaching_style_api_v1_paths__path_id__teaching_style_put: {
+    update_teaching_style: {
         parameters: {
             query?: never;
             header?: never;
@@ -3535,7 +3535,7 @@ export interface operations {
             };
         };
     };
-    get_progress_summary_api_v1_progress_summary_get: {
+    get_progress_summary: {
         parameters: {
             query?: {
                 tz_offset_minutes?: number;

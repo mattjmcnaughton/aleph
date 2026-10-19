@@ -4,13 +4,21 @@
 
 The `/api/v1` routes below are also published as an OpenAPI 3.1 document,
 `clients/openapi.json`, which both clients generate their API code from: the web's
-`clients/web/src/lib/api/schema.d.ts` (openapi-typescript) and, from AL-602, the iOS
-app's Swift client (iOS TDD §4). It is exported from the app itself
-(`scripts/export_openapi.py`), holds only the `/api/v1` paths and the schemas they
-reference, and is committed. `just openapi` regenerates it; `just openapi-check`
-(in `just gate-be`) fails when it is stale, and `just openapi-ts-check` (in
-`just gate-fe`) fails when the web's generated types are stale against it. **Any
-`/api/v1` change regenerates both in the same PR** (`just openapi && just openapi-ts`).
+`clients/web/src/lib/api/schema.d.ts` (openapi-typescript) and the iOS app's Swift
+client, `clients/ios/Packages/API/Sources/API/Generated/` (swift-openapi-generator; iOS
+TDD §4). It is exported from the app itself (`scripts/export_openapi.py`), holds only
+the `/api/v1` paths and the schemas they reference, and is committed. `just openapi`
+regenerates it; `just openapi-check` (in `just gate-be`) fails when it is stale, and
+`just openapi-ts-check` (in `just gate-fe`) fails when the web's generated types are
+stale against it. `clients/ios/scripts/generate-api.sh` regenerates the Swift client
+(it needs a Swift 6.2 toolchain) and `generate-api.sh --check` fails when it is stale.
+It generates from a copy of the document with nullable fields rewritten into a form the
+Swift generator supports (`clients/ios/README.md`); the document itself is unchanged.
+Each operation's `operationId` is its endpoint function name (`list_paths`), so the
+generated Swift method is `listPaths`; endpoint names must stay unique. The Swift
+client leaves out the admin routes (`/api/v1/admin/`, tag `feature-flags`): admin
+tools stay web-only. **Any `/api/v1` change regenerates all three in the same
+PR** (`just openapi && just openapi-ts && clients/ios/scripts/generate-api.sh`).
 
 Two things the document states that FastAPI cannot infer by itself:
 

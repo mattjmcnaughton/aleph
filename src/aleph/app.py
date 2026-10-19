@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
+from fastapi.routing import APIRoute
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -50,6 +51,17 @@ async def lifespan(app: FastAPI):
         await lifecycle.stop()
 
 
+def _operation_id(route: APIRoute) -> str:
+    """The route's endpoint function name, e.g. ``list_paths``.
+
+    Generated clients name their methods from the operationId (iOS TDD §4.2):
+    the Swift client gets ``listPaths`` rather than FastAPI's default
+    ``listPathsApiV1PathsGet``. Endpoint names are unique across the app; a unit
+    test in ``tests/unit/test_openapi_contract.py`` pins that.
+    """
+    return route.name
+
+
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""
     register_provider(settings)
@@ -58,6 +70,7 @@ def create_app() -> FastAPI:
         description=DESCRIPTION,
         version="0.1.0",
         lifespan=lifespan,
+        generate_unique_id_function=_operation_id,
     )
 
     # First-party signed session cookie (TDD §7/D2): HttpOnly, SameSite=Lax,

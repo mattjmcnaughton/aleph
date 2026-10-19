@@ -256,11 +256,13 @@ just typecheck
 just test-unit
 just test-all
 
-# Regenerate the API contract and the web's generated types after an /api/v1 change
-# (clients/openapi.json, clients/web/src/lib/api/schema.d.ts; both are committed
-# and drift-checked by `just gate`)
+# Regenerate the API contract and both generated clients after an /api/v1 change
+# (clients/openapi.json, clients/web/src/lib/api/schema.d.ts and
+# clients/ios/Packages/API/Sources/API/Generated/; all committed and drift-checked:
+# the first two by `just gate`, the Swift one by `generate-api.sh --check`)
 just openapi
 just openapi-ts
+clients/ios/scripts/generate-api.sh   # needs Swift 6.2; see clients/ios/README.md
 
 # Full pre-push check
 just gate

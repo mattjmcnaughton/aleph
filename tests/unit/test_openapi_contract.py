@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
 from aleph.app import create_app
@@ -242,3 +243,36 @@ def test_export_output_is_stable_and_formatted(tmp_path: Path) -> None:
         json.loads(text), indent=2, sort_keys=True, ensure_ascii=False
     )
     assert text == reformatted + "\n"
+
+
+# --- operation ids ----------------------------------------------------------------
+
+
+def _endpoint_names() -> dict[tuple[str, str], str]:
+    """``(path, method) -> endpoint function name`` for every API route of the app."""
+    names: dict[tuple[str, str], str] = {}
+    for mounted in create_app().routes:
+        router = getattr(mounted, "original_router", None)
+        for route in getattr(router, "routes", []):
+            if isinstance(route, APIRoute):
+                for method in route.methods:
+                    names[(route.path, method.lower())] = route.endpoint.__name__
+    return names
+
+
+def test_operation_ids_are_the_endpoint_function_names(
+    contract: dict[str, Any],
+) -> None:
+    # Generated clients name their methods from these: ``list_paths`` becomes the
+    # Swift client's ``listPaths`` (iOS TDD §4.2), not ``listPathsApiV1PathsGet``.
+    names = _endpoint_names()
+    operations = [
+        ((path, method), op["operationId"])
+        for path, ops in contract["paths"].items()
+        for method, op in ops.items()
+    ]
+    assert operations
+    for key, operation_id in operations:
+        assert operation_id == names[key], key
+    ids = [operation_id for _, operation_id in operations]
+    assert len(ids) == len(set(ids))
