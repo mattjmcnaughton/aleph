@@ -12,6 +12,15 @@ const BEAT_ROW_VARIANT: Partial<Record<BeatResearchState, Exclude<RowVariant, "n
 };
 
 /**
+ * Whether a Beat has a Brief waiting: an idle Beat with unread Briefs. A
+ * researching, refused, or failed Beat shows that state instead, so it is
+ * never highlighted as news. Home uses this to promote and sort the section.
+ */
+export function hasUnreadBriefs(beat: BeatSummary): boolean {
+  return beat.research_state === "idle" && beat.unread_count > 0;
+}
+
+/**
  * The learner-facing one-liner (PRD §3's own examples): `3 new briefs` is the
  * steady state, `Researching… · started 30s ago` while a run is in flight.
  * Mirrors `routes/index.tsx`'s own `statusLabel(path)` for the "same card
@@ -58,7 +67,8 @@ function beatStatusLabel(beat: BeatSummary, now: Date): string {
  * `now` is injectable so a test can pin the elapsed-time readout.
  */
 export function BeatCard({ beat, now = new Date() }: { beat: BeatSummary; now?: Date }) {
-  const variant = BEAT_ROW_VARIANT[beat.research_state] ?? "neutral";
+  const unread = hasUnreadBriefs(beat);
+  const variant = BEAT_ROW_VARIANT[beat.research_state] ?? (unread ? "unread" : "neutral");
 
   return (
     <ListRow
@@ -67,7 +77,8 @@ export function BeatCard({ beat, now = new Date() }: { beat: BeatSummary; now?: 
       dataAttrs={{
         "data-beat-id": beat.id,
         "data-research-state": beat.research_state,
-        "data-variant": BEAT_ROW_VARIANT[beat.research_state],
+        "data-variant": variant === "neutral" ? undefined : variant,
+        "data-unread": String(unread),
       }}
       main={
         <Link
@@ -76,7 +87,18 @@ export function BeatCard({ beat, now = new Date() }: { beat: BeatSummary; now?: 
           data-testid="beat-item-open"
           className="block min-w-0 rounded-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-teal"
         >
-          <RowTitle title={beat.topic} titleTestid="beat-item-topic" />
+          <div className="flex items-center gap-2.5">
+            {unread ? (
+              // Decorative: the status line beside it already says "N new
+              // briefs" in words.
+              <span
+                aria-hidden="true"
+                data-testid="beat-unread-dot"
+                className="h-2 w-2 shrink-0 rounded-full bg-iris-400 ring-4 ring-iris/20"
+              />
+            ) : null}
+            <RowTitle title={beat.topic} titleTestid="beat-item-topic" />
+          </div>
         </Link>
       }
       meta={
