@@ -2,7 +2,7 @@
 
 **Status:** plan, ready to build · **Owner:** solo builder · **Companion to:** [iOS app PRD](../prds/ios-app.md)
 **References:** [`CLAUDE.md` — Two Clients](../../CLAUDE.md#two-clients-web-and-ios) · [`CONTEXT.md`](../CONTEXT.md) · [`api.md`](../api.md) · [`architecture.md`](../architecture.md) · [`ci.md`](../ci.md) · [`deploy.md`](../deploy.md) · [ADR 0001 — store the last-seen time zone](../adrs/0001-store-last-seen-time-zone.md) · [ADR 0002 — iOS-owned Markdown renderer](../adrs/0002-ios-owned-markdown-renderer.md) · [Flow TDD](flow.md) · [Phase 2 TDD](phase-2-tutor.md) · [Phase 6 TDD](phase-6-analyst.md)
-**Builds on:** the home-screen PoC on `claude/ios-homescreen-poc` (`clients/ios/`, `.github/workflows/ios.yml`)
+**Builds on:** the home-screen PoC on [`claude/ios-homescreen-poc`](https://github.com/mattjmcnaughton/aleph/tree/claude/ios-homescreen-poc) (kept as a reference branch, not merged; its CI runs: [record](https://github.com/mattjmcnaughton/aleph/actions/runs/39064335563), [compare](https://github.com/mattjmcnaughton/aleph/actions/runs/39065171978)) (`clients/ios/`, `.github/workflows/ios.yml`)
 
 > **This document is the implementer's brief.** It is written for an engineer (or agent) starting
 > cold. Where it says **settled**, the owner decided; do not re-open it. Where it says **decided
