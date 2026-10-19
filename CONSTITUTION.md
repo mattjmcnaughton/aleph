@@ -97,16 +97,18 @@ Add abstractions, dependencies, or services for demonstrated problems, not hypot
 flexibility. New operational burdens need an explicit rationale. A layer owns
 meaningful behavior or a real boundary, rather than merely forwarding calls.
 
-## 8. One API serves two equivalent learner experiences
+## 8. One API serves equivalent learner experiences
 
-Web and iOS use the same API contract and domain meanings. Learner-facing changes
-land together, or the missing implementation has a tracked issue linked from the PR.
-Admin tools remain web-only; push notifications remain iOS-only. Authentication
-mechanisms may differ without changing ownership or authorization rules.
+Every learner client uses the same API contract and domain meanings, and a learner
+can do the same things in each. When more than one learner client exists,
+learner-facing changes land in all of them together, or the missing implementation
+has a tracked issue linked from the PR. Admin tools remain web-only. Notifications
+reach a learner on every client able to receive them. Authentication mechanisms may
+differ without changing ownership or authorization rules.
 
 Shared rules belong on the server where practical. Rules needed independently in
-both clients are implemented and tested in both. API changes keep the committed
-schema, generated client, and documentation consistent.
+more than one client are implemented and tested in each. API changes keep the
+committed schema, any generated clients, and documentation consistent.
 
 ## 9. Generated content is untrusted; quality needs separate evidence
 
@@ -150,3 +152,8 @@ rather than silently rewriting another authoritative document.
 
 - 2026-10-19: Adopted the initial constitution, including explicit domain-driven
   design, ubiquitous language, and architectural dependency boundaries.
+- 2026-10-19: §8 no longer assumes exactly two clients or names push notifications
+  as iOS-only. Rationale: the Home Screen app proposal
+  ([PRD](docs/prds/home-screen-app.md)) makes the web app the phone client and
+  delivers Notifications through Web Push, with the native iOS app parked. The
+  parity obligation is unchanged whenever more than one learner client exists.
