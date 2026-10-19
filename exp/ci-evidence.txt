@@ -1,0 +1,193 @@
+### step: swift test (Tools/GenerateAPI)
+Fetching https://github.com/apple/swift-argument-parser
+Fetching https://github.com/apple/swift-numerics.git
+Fetching https://github.com/apple/swift-algorithms
+[1/6159] Fetching swift-algorithms
+[6160/12915] Fetching swift-algorithms, swift-numerics
+[9403/32052] Fetching swift-algorithms, swift-numerics, swift-argument-parser
+Fetched https://github.com/apple/swift-numerics.git from cache (0.48s)
+Fetched https://github.com/apple/swift-algorithms from cache (0.48s)
+Fetching https://github.com/mattpolzin/OpenAPIKit
+[15884/19137] Fetching swift-argument-parser
+Fetching https://github.com/jpsim/Yams
+[19138/31015] Fetching swift-argument-parser, yams
+Fetched https://github.com/apple/swift-argument-parser from cache (0.74s)
+Fetching https://github.com/apple/swift-openapi-generator
+[119/11878] Fetching yams
+[11879/30877] Fetching yams, swift-openapi-generator
+Fetched https://github.com/jpsim/Yams from cache (1.01s)
+Fetched https://github.com/apple/swift-openapi-generator from cache (0.83s)
+Computing version for https://github.com/apple/swift-openapi-generator
+[1/186435] Fetching openapikit
+Computed https://github.com/apple/swift-openapi-generator at 1.14.2 (2.67s)
+Fetched https://github.com/mattpolzin/OpenAPIKit from cache (7.08s)
+Computing version for https://github.com/apple/swift-argument-parser
+Computed https://github.com/apple/swift-argument-parser at 1.8.2 (5.06s)
+Computing version for https://github.com/jpsim/Yams
+Computed https://github.com/jpsim/Yams at 6.2.2 (0.23s)
+Computing version for https://github.com/mattpolzin/OpenAPIKit
+Computed https://github.com/mattpolzin/OpenAPIKit at 6.4.0 (0.23s)
+Computing version for https://github.com/apple/swift-algorithms
+Computed https://github.com/apple/swift-algorithms at 1.2.1 (0.96s)
+Computing version for https://github.com/apple/swift-numerics.git
+Computed https://github.com/apple/swift-numerics.git at 1.1.1 (0.16s)
+Creating working copy for https://github.com/apple/swift-argument-parser
+Working copy of https://github.com/apple/swift-argument-parser resolved at 1.8.2
+Creating working copy for https://github.com/apple/swift-algorithms
+Working copy of https://github.com/apple/swift-algorithms resolved at 1.2.1
+Creating working copy for https://github.com/apple/swift-numerics.git
+Working copy of https://github.com/apple/swift-numerics.git resolved at 1.1.1
+Creating working copy for https://github.com/apple/swift-openapi-generator
+Working copy of https://github.com/apple/swift-openapi-generator resolved at 1.14.2
+Creating working copy for https://github.com/mattpolzin/OpenAPIKit
+Working copy of https://github.com/mattpolzin/OpenAPIKit resolved at 6.4.0
+Creating working copy for https://github.com/jpsim/Yams
+Working copy of https://github.com/jpsim/Yams resolved at 6.2.2
+[1/1] Compiling plugin OpenAPIGeneratorCommand
+[2/2] Compiling plugin OpenAPIGenerator
+[3/3] Compiling plugin GenerateManual
+[4/4] Compiling plugin GenerateDoccReference
+Building for debugging...
+[4/21] Write sources
+[7/21] Write swift-version-24593BA9C3E375BF.txt
+[9/23] Emitting module ContractRewrite
+[10/23] Compiling ContractRewrite ContractRewrite.swift
+[11/26] Wrapping AST for ContractRewrite for debugging
+[13/28] Emitting module PrepareContract
+[14/28] Compiling PrepareContract main.swift
+[15/29] Wrapping AST for PrepareContract for debugging
+[16/29] Write Objects.LinkFileList
+[17/29] Linking prepare-contract
+[19/29] Emitting module ContractRewriteTests
+[20/29] Compiling ContractRewriteTests ContractRewriteTests.swift
+[21/30] /__w/aleph/aleph/clients/ios/Tools/GenerateAPI/.build/x86_64-unknown-linux-gnu/debug/GenerateAPIPackageDiscoveredTests.derived/all-discovered-tests.swift
+[22/30] Write sources
+[23/30] Wrapping AST for ContractRewriteTests for debugging
+[25/33] Compiling GenerateAPIPackageDiscoveredTests ContractRewriteTests.swift
+[26/33] Emitting module GenerateAPIPackageDiscoveredTests
+[27/33] Compiling GenerateAPIPackageDiscoveredTests all-discovered-tests.swift
+[28/34] /__w/aleph/aleph/clients/ios/Tools/GenerateAPI/.build/x86_64-unknown-linux-gnu/debug/GenerateAPIPackageTests.derived/runner.swift
+[29/34] Write sources
+[30/34] Wrapping AST for GenerateAPIPackageDiscoveredTests for debugging
+[32/36] Emitting module GenerateAPIPackageTests
+[33/36] Compiling GenerateAPIPackageTests runner.swift
+[34/37] Wrapping AST for GenerateAPIPackageTests for debugging
+[35/37] Write Objects.LinkFileList
+[36/37] Linking GenerateAPIPackageTests.xctest
+Build complete! (21.59s)
+Test Suite 'All tests' started at 2026-10-19 20:15:29.628
+Test Suite 'debug.xctest' started at 2026-10-19 20:15:29.629
+Test Suite 'debug.xctest' passed at 2026-10-19 20:15:29.629
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.0 (0.0) seconds
+Test Suite 'All tests' passed at 2026-10-19 20:15:29.629
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.0 (0.0) seconds
+◇ Test run started.
+↳ Testing Library Version: 6.2.4 (5ee435b15ad40ec)
+↳ Target Platform: x86_64-unknown-linux-gnu
+◇ Suite ContractRewriteTests started.
+◇ Test alwaysNullPropertyIsDropped() started.
+◇ Test nullableReferenceBecomesAnOptionalReference() started.
+◇ Test nullablePrimitiveKeepsItsMetadataInEitherOrder() started.
+◇ Test anyOtherNullFormFailsLoudly(property:) started.
+◇ Test schemasWithoutNullAreUntouched() started.
+◇ Test case passing 1 argument property → "{"anyOf": [{"type": "string"}, {"type": "integer"}, {"type": "null"}]}" to anyOtherNullFormFailsLoudly(property:) started.
+◇ Test case passing 1 argument property → "{"type": ["string", "null"]}" to anyOtherNullFormFailsLoudly(property:) started.
+◇ Test case passing 1 argument property → "{"type": "array", "items": {"anyOf": [{"type": "string"}, {"type": "null"}]}}" to anyOtherNullFormFailsLoudly(property:) started.
+✔ Test nullablePrimitiveKeepsItsMetadataInEitherOrder() passed after 0.001 seconds.
+✔ Test alwaysNullPropertyIsDropped() passed after 0.001 seconds.
+✔ Test nullableReferenceBecomesAnOptionalReference() passed after 0.002 seconds.
+✔ Test anyOtherNullFormFailsLoudly(property:) with 3 test cases passed after 0.002 seconds.
+✔ Test schemasWithoutNullAreUntouched() passed after 0.002 seconds.
+✔ Suite ContractRewriteTests passed after 0.002 seconds.
+✔ Test run with 5 tests in 1 suite passed after 0.002 seconds.
+### step: Evidence 1b: drift check fails on a hand-edited copy and on a deleted file
+--- /__w/aleph/aleph/clients/ios/Packages/API/Sources/API/Generated/Types.swift	2026-10-19 20:16:08.149282767 +0000
++++ /tmp/tmp.CMGYB2tCOZ/generated/Types.swift	2026-10-19 20:16:10.807189474 +0000
+@@ -1769,4 +1769,3 @@
+ 
+ /// Server URLs defined in the OpenAPI document.
+ package enum Servers {}
+-// hand edit
+clients/ios/Packages/API/Sources/API/Generated/ is stale: run clients/ios/scripts/generate-api.sh and commit the result
+EVIDENCE OK: --check exited non-zero on hand-edited clients/ios/Packages/API/Sources/API/Generated/Types.swift
+Only in /tmp/tmp.iahrSvdCEG/generated: Client.swift
+clients/ios/Packages/API/Sources/API/Generated/ is stale: run clients/ios/scripts/generate-api.sh and commit the result
+EVIDENCE OK: --check exited non-zero with Client.swift deleted
+Generated Swift client is up to date.
+EVIDENCE OK: --check passes again on the restored output
+### step: Evidence 2/3: generated client contents, and the filter.tags mutation
+operations in contract: 33
+operations generated:   30
+admin paths in Generated: 0
+423:    func listPaths(_ input: Operations.ListPaths.Input) async throws -> Operations.ListPaths.Output
+611:    func sendMessage(_ input: Operations.SendMessage.Input) async throws -> Operations.SendMessage.Output
+725:    func sendShapingMessage(_ input: Operations.SendShapingMessage.Input) async throws -> Operations.SendShapingMessage.Output
+4635:                case "text/event-stream":
+5428:                case "text/event-stream":
+918:        package struct ErrorEnvelope: Codable, Hashable, Sendable {
+2321:        package struct StreamDelta: Codable, Hashable, Sendable {
+2338:        package struct StreamDone: Codable, Hashable, Sendable {
+2363:        package struct StreamError: Codable, Hashable, Sendable {
+2388:        package struct StreamProposal: Codable, Hashable, Sendable {
+2460:        package struct StreamTutorCheck: Codable, Hashable, Sendable {
+EVIDENCE OK: without '- tutor' in filter.tags, sendMessage is not generated (26 ops)
+### step: Evidence guard: generation without the rewrite fails loudly
+1
+mode '': 41 unsupported-schema lines; swift-openapi-generator skipped an unsupported schema (above); the Swift client would silently miss it
+EVIDENCE OK: generation without the rewrite exits non-zero (mode '')
+mode '--check': 41 unsupported-schema lines; swift-openapi-generator skipped an unsupported schema (above); the Swift client would silently miss it
+EVIDENCE OK: generation without the rewrite exits non-zero (mode '--check')
+?? exp/
+Building for debugging...
+[0/2] Write swift-version-24593BA9C3E375BF.txt
+Build of product 'prepare-contract' complete! (0.11s)
+Generated Swift client is up to date.
+### step: swift test (Packages/API)
+[0/1] Planning build
+Building for debugging...
+[0/17] Write sources
+[1/18] Write swift-version-24593BA9C3E375BF.txt
+[2/18] Wrapping AST for DequeModule for debugging
+[3/18] Wrapping AST for OpenAPIURLSession for debugging
+[4/18] Wrapping AST for API for debugging
+[5/20] Wrapping AST for InternalCollectionsUtilities for debugging
+[6/20] Wrapping AST for OpenAPIRuntime for debugging
+[7/20] Wrapping AST for SpanPreview for debugging
+[8/20] Wrapping AST for HTTPTypes for debugging
+[10/20] Emitting module APITests
+[11/20] Compiling APITests GeneratedClientTests.swift
+[12/21] /__w/aleph/aleph/clients/ios/Packages/API/.build/x86_64-unknown-linux-gnu/debug/APIPackageDiscoveredTests.derived/all-discovered-tests.swift
+[13/21] Write sources
+[14/21] Wrapping AST for APITests for debugging
+[16/24] Emitting module APIPackageDiscoveredTests
+[17/24] Compiling APIPackageDiscoveredTests all-discovered-tests.swift
+[18/24] Compiling APIPackageDiscoveredTests APITests.swift
+[19/25] /__w/aleph/aleph/clients/ios/Packages/API/.build/x86_64-unknown-linux-gnu/debug/APIPackageTests.derived/runner.swift
+[20/25] Write sources
+[21/25] Wrapping AST for APIPackageDiscoveredTests for debugging
+[23/27] Emitting module APIPackageTests
+[24/27] Compiling APIPackageTests runner.swift
+[25/28] Wrapping AST for APIPackageTests for debugging
+[26/28] Write Objects.LinkFileList
+[27/28] Linking APIPackageTests.xctest
+Build complete! (4.42s)
+Test Suite 'All tests' started at 2026-10-19 20:16:46.825
+Test Suite 'debug.xctest' started at 2026-10-19 20:16:46.826
+Test Suite 'debug.xctest' passed at 2026-10-19 20:16:46.826
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.0 (0.0) seconds
+Test Suite 'All tests' passed at 2026-10-19 20:16:46.826
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.0 (0.0) seconds
+◇ Test run started.
+↳ Testing Library Version: 6.2.4 (5ee435b15ad40ec)
+↳ Target Platform: x86_64-unknown-linux-gnu
+◇ Suite GeneratedClientTests started.
+◇ Test clientBuildsOverTheURLSessionTransport() started.
+◇ Test nullableFieldsDecodeAsOptionals() started.
+◇ Test errorEnvelopeDecodes() started.
+◇ Test streamDeltaFrameDecodes() started.
+✔ Test errorEnvelopeDecodes() passed after 0.001 seconds.
+✔ Test streamDeltaFrameDecodes() passed after 0.001 seconds.
+✔ Test nullableFieldsDecodeAsOptionals() passed after 0.001 seconds.
+✔ Test clientBuildsOverTheURLSessionTransport() passed after 0.002 seconds.
+✔ Suite GeneratedClientTests passed after 0.002 seconds.
+✔ Test run with 4 tests in 1 suite passed after 0.002 seconds.
