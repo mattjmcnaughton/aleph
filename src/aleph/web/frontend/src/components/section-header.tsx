@@ -77,12 +77,20 @@ export interface SectionCollapse {
  */
 export function SectionHeader({
   kicker,
+  badge,
   summary,
   action,
   collapse,
   spacing = "mt-10",
 }: {
   kicker: string;
+  /**
+   * A short count beside the kicker that asks for attention (e.g. "1 new" on
+   * Beats with an unread Brief). Text and testid only, for the same reason
+   * `action` is not a slot. It sits outside the collapse toggle, so it stays
+   * visible when the section is shut.
+   */
+  badge?: { label: string; testid: string };
   /** e.g. "10 due today" — the section's state, in the row grammar's voice. */
   summary?: ReactNode;
   action?: { to: string; label: string; testid: string };
@@ -93,25 +101,35 @@ export function SectionHeader({
   return (
     <div className={`${spacing} flex items-center justify-between gap-4`}>
       <div className="min-w-0">
-        {collapse ? (
-          // The kicker *is* the toggle rather than growing a separate control
-          // beside it: the whole label is the hit area (a 11px chevron alone is
-          // not a touch target), and the section keeps exactly one affordance
-          // on its left, which is the rule this file exists to hold.
-          <button
-            type="button"
-            data-testid={collapse.testid}
-            aria-expanded={collapse.open}
-            aria-controls={collapse.controls}
-            onClick={collapse.onToggle}
-            className="kicker inline-flex min-h-[44px] items-center gap-1.5 rounded-md pr-2 transition-colors hover:text-porcelain focus-visible:outline focus-visible:outline-2 focus-visible:outline-teal"
-          >
-            <ChevronIcon open={collapse.open} />
-            {kicker}
-          </button>
-        ) : (
-          <p className="kicker">{kicker}</p>
-        )}
+        <div className="flex items-center gap-1">
+          {collapse ? (
+            // The kicker *is* the toggle rather than growing a separate control
+            // beside it: the whole label is the hit area (a 11px chevron alone is
+            // not a touch target), and the section keeps exactly one affordance
+            // on its left, which is the rule this file exists to hold.
+            <button
+              type="button"
+              data-testid={collapse.testid}
+              aria-expanded={collapse.open}
+              aria-controls={collapse.controls}
+              onClick={collapse.onToggle}
+              className="kicker inline-flex min-h-[44px] items-center gap-1.5 rounded-md pr-2 transition-colors hover:text-porcelain focus-visible:outline focus-visible:outline-2 focus-visible:outline-teal"
+            >
+              <ChevronIcon open={collapse.open} />
+              {kicker}
+            </button>
+          ) : (
+            <p className="kicker">{kicker}</p>
+          )}
+          {badge ? (
+            <span
+              data-testid={badge.testid}
+              className="inline-flex shrink-0 items-center rounded-full bg-iris-400 px-2 py-0.5 text-xs font-semibold text-night"
+            >
+              {badge.label}
+            </span>
+          ) : null}
+        </div>
         {summary ? <p className="mt-1 text-sm text-mist">{summary}</p> : null}
       </div>
       {action ? (

@@ -130,13 +130,18 @@ def _install_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(StarletteHTTPException)
     async def http_exception_handler(request: Request, exc: StarletteHTTPException):
         message, details = _detail_parts(exc.detail)
-        return error_response(
+        response = error_response(
             request,
             status_code=exc.status_code,
             code=_http_error_code(exc.status_code),
             message=message,
             details=details,
         )
+        # Carry the exception's own headers (e.g. a bearer ``401``'s
+        # ``WWW-Authenticate``, RFC 6750) onto the enveloped response.
+        if exc.headers:
+            response.headers.update(exc.headers)
+        return response
 
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(

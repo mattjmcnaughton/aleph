@@ -36,6 +36,11 @@ dependencies = [
     # as configured (the same fragility `_load_fixture`'s pyyaml note in that
     # module records and deliberately avoids by importing pyyaml locally).
     "httpx>=0.28",
+    # Direct dependency for bearer-token auth (`aleph/bearer.py`): JWT/JWKS
+    # verification of native-client access tokens. It already resolved
+    # transitively via authlib, whose own `authlib.jose` is deprecated in favour
+    # of joserfc (same maintainer), so this adds no new package to the lock.
+    "joserfc>=1.7.4",
 ]
 
 [project.urls]

@@ -45,6 +45,23 @@ class AuthService:
         await self.session.commit()
         return user
 
+    async def resolve(self, identity: AuthIdentity) -> User:
+        """The account :meth:`sign_in` maps ``identity`` to, writing only on change.
+
+        The per-request path for bearer-token clients (``dependencies.py``):
+        the same provision-or-reuse mapping and claim refresh as the cookie
+        flow's sign-in, but an unchanged identity costs one ``SELECT`` and no
+        write or commit, since it runs on every authenticated API request.
+        """
+        user = await self.users.get_by_identity(identity.issuer, identity.subject)
+        if (
+            user is not None
+            and user.display_name == identity.display_name
+            and user.email == identity.email
+        ):
+            return user
+        return await self.sign_in(identity)
+
     async def _provision(self, identity: AuthIdentity) -> User:
         """Insert the account, tolerating a concurrent racing first-login.
 

@@ -13,7 +13,7 @@ import {
   progressSummaryQueryOptions,
 } from "../lib/api";
 import { ActivityStrip } from "../components/activity-strip";
-import { BeatCard } from "../components/beat-card";
+import { BeatCard, hasUnreadBriefs } from "../components/beat-card";
 import { ContinueCard, pickResumeTarget } from "../components/continue-card";
 import { FlowDoor } from "../components/flow/flow-door";
 import { ListRow, type RowVariant, RowTitle, RowActions } from "../components/list-row";
@@ -212,6 +212,72 @@ function Home() {
   const finishedPaths = paths?.filter(isFinished) ?? [];
   const resumeTarget = pickResumeTarget(paths);
 
+  // A Brief waiting is news, so it moves up (mock E): when any Beat has
+  // unread Briefs the section renders under the Continue card and Flow door,
+  // above the day's state and outside the two-column split, so it is in the
+  // first screen on a phone and full width at `lg`. Same markup either way,
+  // rendered once in one of two slots. Beats with news sort first; the rest
+  // keep the API's newest-first order (`sort` is stable).
+  const unreadTotal = (beats ?? [])
+    .filter(hasUnreadBriefs)
+    .reduce((total, beat) => total + beat.unread_count, 0);
+  const beatsPromoted = analystEnabled && unreadTotal > 0;
+  const sortedBeats = [...(beats ?? [])].sort(
+    (a, b) => Number(hasUnreadBriefs(b)) - Number(hasUnreadBriefs(a)),
+  );
+
+  // Beats live in a section beside "Your paths", not mixed into it — the same
+  // row grammar (title, a line of state) with a different verb (PRD §3/§4.10),
+  // now literally the same `ListRow`. `analystEnabled` guards the whole
+  // section, not just the query: flag off means no rendered surface at all,
+  // not an empty one.
+  const beatsSection = analystEnabled ? (
+    <section data-testid="beats-section" data-promoted={String(beatsPromoted)}>
+      <SectionHeader
+        kicker="Your beats"
+        spacing={beatsPromoted ? "mt-8" : undefined}
+        badge={
+          unreadTotal > 0 ? { label: `${unreadTotal} new`, testid: "beats-unread-chip" } : undefined
+        }
+        summary={!beatsOpen && beats !== undefined ? countSummary(beats.length, "Beat") : null}
+        collapse={{
+          open: beatsOpen,
+          onToggle: () => setBeatsOpen((wasOpen) => !wasOpen),
+          controls: BEATS_REGION_ID,
+          testid: "beats-section-toggle",
+        }}
+        // No section action: the New menu above already carries
+        // "Deploy analyst", and a second copy here was a teal link
+        // stranded mid-page — most obviously with the section
+        // collapsed, where it floated beside a one-line count with no
+        // list under it to belong to.
+      />
+
+      <div id={BEATS_REGION_ID}>
+        {!beatsOpen || beats === undefined ? null : beats.length === 0 ? (
+          <p data-testid="beats-empty" className="mt-3 text-sm text-mist">
+            {/* Names the one door there is now, rather than carrying a
+                second copy of it: an inline link here would be a sub-44px
+                touch target, and a full CTA block would make the emptier
+                section the louder one. */}
+            No Beats yet. Deploy one from New above, to keep watch on a topic that's still moving.
+          </p>
+        ) : (
+          <ul
+            data-testid="beats-list"
+            className="mt-3 space-y-3 lg:space-y-0 lg:border-t lg:border-divider"
+          >
+            {sortedBeats.map((beat) => (
+              <li key={beat.id}>
+                <BeatCard beat={beat} />
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </section>
+  ) : null;
+
   return (
     <Workspace testid="paths-switcher" width="switcher">
       <div className="lg:flex lg:items-end lg:justify-between lg:gap-8">
@@ -244,6 +310,7 @@ function Home() {
           width rather than sliding into a rail. */}
       <ContinueCard path={resumeTarget} />
       {flowEnabled ? <FlowDoor paths={paths} /> : null}
+      {beatsPromoted ? beatsSection : null}
 
       <div className="mt-2 flex flex-col lg:mt-6 lg:flex-row lg:items-start lg:gap-8">
         {/* The day's state. `order-first`/`lg:order-last` is the whole of the
@@ -337,56 +404,7 @@ function Home() {
             )}
           </div>
 
-          {/* Beats live in a section beside "Your paths", not mixed into it —
-              the same row grammar (title, a line of state) with a different
-              verb (PRD §3/§4.10), now literally the same `ListRow`.
-              `analystEnabled` guards the whole section, not just the query:
-              flag off means no rendered surface at all, not an empty one. */}
-          {analystEnabled ? (
-            <section data-testid="beats-section">
-              <SectionHeader
-                kicker="Your beats"
-                summary={
-                  !beatsOpen && beats !== undefined ? countSummary(beats.length, "Beat") : null
-                }
-                collapse={{
-                  open: beatsOpen,
-                  onToggle: () => setBeatsOpen((wasOpen) => !wasOpen),
-                  controls: BEATS_REGION_ID,
-                  testid: "beats-section-toggle",
-                }}
-                // No section action: the New menu above already carries
-                // "Deploy analyst", and a second copy here was a teal link
-                // stranded mid-page — most obviously with the section
-                // collapsed, where it floated beside a one-line count with no
-                // list under it to belong to.
-              />
-
-              <div id={BEATS_REGION_ID}>
-                {!beatsOpen || beats === undefined ? null : beats.length === 0 ? (
-                  <p data-testid="beats-empty" className="mt-3 text-sm text-mist">
-                    {/* Names the one door there is now, rather than carrying a
-                        second copy of it: an inline link here would be a
-                        sub-44px touch target, and a full CTA block would make
-                        the emptier section the louder one. */}
-                    No Beats yet. Deploy one from New above, to keep watch on a topic that's still
-                    moving.
-                  </p>
-                ) : (
-                  <ul
-                    data-testid="beats-list"
-                    className="mt-3 space-y-3 lg:space-y-0 lg:border-t lg:border-divider"
-                  >
-                    {beats.map((beat) => (
-                      <li key={beat.id}>
-                        <BeatCard beat={beat} />
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            </section>
-          ) : null}
+          {beatsPromoted ? null : beatsSection}
         </div>
       </div>
     </Workspace>

@@ -23,6 +23,7 @@ from aleph.config import settings
 from aleph.db import get_session
 from aleph.dependencies import get_optional_current_user
 from aleph.dtos.auth import SessionDTO, UserDTO
+from aleph.models import User  # noqa: TC001 - FastAPI resolves annotations.
 from aleph.services.auth import AuthService
 from aleph.services.feature_flags import FeatureFlagService
 
@@ -71,8 +72,8 @@ async def logout(request: Request) -> Response:
 
 @router.get("/api/v1/auth/session", response_model=SessionDTO)
 async def get_auth_session(
-    request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
+    user: Annotated[User | None, Depends(get_optional_current_user)],
 ) -> SessionDTO:
     """Current session for the SPA root ``beforeLoad`` (TDD §6/§7/D14).
 
@@ -84,8 +85,10 @@ async def get_auth_session(
     learner's resolved map rides the payload the SPA already fetches on every
     load, so ``useFeatureFlag`` can gate a surface with no second request and
     regular learners never touch the admin flag routes.
+
+    A native client calls it with its bearer token: the same payload for the
+    same account, and an invalid token is ``401`` (it never reads as signed out).
     """
-    user = await get_optional_current_user(request, session)
     if user is None:
         return SessionDTO(authenticated=False, provider=settings.oidc_provider)
 

@@ -34,14 +34,18 @@ class AuthIdentity:
     email: str | None = None
 
 
-def register_provider(settings: Settings) -> None:
-    """Register the configured OIDC provider through discovery metadata."""
-    metadata_url = settings.oidc_metadata_url or (
+def metadata_url_for(settings: Settings) -> str:
+    """The provider's OIDC discovery URL (shared with bearer-token auth)."""
+    return settings.oidc_metadata_url or (
         f"{settings.oidc_issuer.rstrip('/')}/.well-known/openid-configuration"
     )
+
+
+def register_provider(settings: Settings) -> None:
+    """Register the configured OIDC provider through discovery metadata."""
     oauth.register(
         name=settings.oidc_provider,
-        server_metadata_url=metadata_url,
+        server_metadata_url=metadata_url_for(settings),
         client_id=settings.oidc_client_id,
         client_secret=settings.oidc_client_secret,
         client_kwargs={"scope": settings.oidc_scopes},
