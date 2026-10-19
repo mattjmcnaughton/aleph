@@ -515,10 +515,10 @@ def analyst_flag_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
 def flow_flag_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
     """Turn the ``flow`` flag on globally for one test (flow TDD D10).
 
-    Flow ships dark: ``flow`` resolves off for a plain learner, so an
-    integration test exercising anything gated by ``useFeatureFlag("flow")``
-    would otherwise be testing the flag rather than Flow. Flow is 100%
-    client-side, so this fixture exists for symmetry with
+    Redundant since the launch flip (iOS TDD D19): the code default is
+    ``True``. Kept, like ``tutor_flag_enabled`` after AL-270, so a test can
+    name the flag it depends on and still pass if the default is ever flipped
+    dark again. Flow is 100% client-side, so this fixture exists for symmetry with
     ``tutor_flag_enabled``/``analyst_flag_enabled`` rather than for a route any
     integration test currently drives — there is no backend endpoint to gate.
     """
@@ -529,11 +529,11 @@ def flow_flag_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
 def flow_flag_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
     """Turn the ``flow`` flag off globally for one test.
 
-    The mirror of ``flow_flag_enabled``. Redundant while Flow's code default
-    is ``False``, exactly like ``streaks_flag_disabled``/``analyst_flag_disabled``
-    were redundant before their own launch flips — kept for the same reason:
-    it is what a test asserting the flag off would need if the default ever
-    changed underneath it, and it names which flag the assertion is about.
+    The mirror of ``flow_flag_enabled``, and now the one that does the work:
+    since the launch flip (iOS TDD D19) the code default is ``True``, so a test
+    that wants the flag off has to *close* it rather than assume it — the same
+    move ``streaks_flag_disabled``/``analyst_flag_disabled`` make, through the
+    same documented kill switch.
     """
     _disable_flag_globally(monkeypatch, "flow")
 

@@ -141,8 +141,9 @@ Spec: [Phase 6 PRD](prds/phase-6-analyst.md), [Phase 6 TDD](tdds/phase-6-analyst
 ## Flow
 
 Flow vocabulary. A bounded run of lessons, scoped once at the door instead of choosing after every
-one — **built behind the `flow` flag, dark** (default off); see the phase-boundary note at the foot
-of this document. Spec: [Flow TDD](tdds/flow.md), mock: [Flow mode](mocks/aleph-flow-mode.html).
+one — **built and launched**: the `flow` flag defaults on and stays registered as a kill switch;
+see the phase-boundary note at the foot of this document. Spec: [Flow TDD](tdds/flow.md), mock:
+[Flow mode](mocks/aleph-flow-mode.html).
 
 | Term | Meaning |
 | --- | --- |
@@ -228,10 +229,11 @@ phase:
   are built and **launched** — the `streaks` flag defaults on, having run the
   same dark-then-flip playbook as `tutor`/`shaping`, and stays registered as a
   kill switch.
-- **Flow** / **Flow length** / **Flow scope** — the Flow section above: **built,
-  behind the `flow` flag, dark** ([TDD](tdds/flow.md)). Unlike every flag above,
-  Flow is **100% client-side** — no table, no route, no migration, gated purely
-  in the client by `useFeatureFlag("flow")` rather than a router `404` — so the
-  dark-then-flip playbook still applies (`FLAG_DEFAULTS[FeatureFlag.FLOW]`
-  starts `False`) but the flip is the only backend deploy this phase ever
-  needs.
+- **Flow** / **Flow length** / **Flow scope** — the Flow section above: **built
+  and launched** ([TDD](tdds/flow.md)) — the `flow` flag defaults on, having run
+  the same dark-then-flip playbook as the flags above, and stays registered as a
+  kill switch. Unlike every flag above, Flow is **100% client-side** — no table,
+  no route, no migration, gated purely in each client (`useFeatureFlag("flow")`
+  on the web) rather than a router `404` — so the flip of
+  `FLAG_DEFAULTS[FeatureFlag.FLOW]` to `True` (iOS TDD D19) was the only backend
+  deploy this phase needed.
