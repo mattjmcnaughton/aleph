@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>AlephAPIBaseURL</key>
+	<string>$(ALEPH_API_BASE_URL)</string>
+	<key>AlephOIDCIssuer</key>
+	<string>$(ALEPH_OIDC_ISSUER)</string>
+	<key>AlephOIDCClientID</key>
+	<string>$(ALEPH_OIDC_CLIENT_ID)</string>
+	<key>AlephOIDCAudience</key>
+	<string>$(ALEPH_OIDC_AUDIENCE)</string>
+	<key>UILaunchScreen</key>
+	<dict>
+		<key>UIColorName</key>
+		<string>LaunchBackground</string>
+	</dict>
+</dict>
+</plist>

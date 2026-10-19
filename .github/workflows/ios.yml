@@ -15,10 +15,7 @@ name: iOS
 # itself, and the other jobs are skipped (which satisfies a required check) when
 # nothing iOS-relevant changed. Keep job names stable; branch protection refers
 # to them: changes, swift-linux, ios-gate, ios-e2e.
-#
-# Until clients/ios/project.yml exists (AL-603), ios-gate and ios-e2e check the
-# pinned toolchain and simulator, then skip every Xcode-project step with a
-# "no Xcode project yet" notice.
+
 on:
   pull_request:
     branches: [main, claude/ios]
@@ -137,19 +134,13 @@ jobs:
       - name: Generated Swift client is up to date (generate-api.sh --check)
         run: clients/ios/scripts/generate-api.sh --check
 
-      # The Linux-capable packages (TDD §3.3). Core and Markdown arrive with
-      # AL-603; until then a missing package is a warning, not a failure.
-      # TODO(AL-603): drop the tolerance once Core and Markdown exist.
+      # The Linux-capable packages (TDD §3.3). A missing one is a failure.
       - name: Test the Linux-capable packages
         shell: bash
         run: |
           set -euo pipefail
-          for pkg in Core Markdown API; do
+          for pkg in Core CoreTestSupport Markdown API; do
             dir="clients/ios/Packages/$pkg"
-            if [ ! -f "$dir/Package.swift" ]; then
-              echo "::warning title=swift-linux::$dir does not exist yet (it arrives with AL-603); skipping its tests."
-              continue
-            fi
             echo "::group::swift test $dir"
             swift test --package-path "$dir"
             echo "::endgroup::"
@@ -196,20 +187,7 @@ jobs:
         id: sim
         run: echo "udid=$(./scripts/create-simulator.sh)" >> "$GITHUB_OUTPUT"
 
-      - name: Check for the Xcode project
-        id: project
-        run: |
-          if [ -f project.yml ]; then
-            echo "present=true" >> "$GITHUB_OUTPUT"
-          else
-            msg="No Xcode project yet (clients/ios/project.yml arrives with AL-603): skipping the build, unit, snapshot and Release-binary steps."
-            echo "::notice title=ios-gate::$msg"
-            echo "$msg" >> "$GITHUB_STEP_SUMMARY"
-            echo "present=false" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Boot simulator
-        if: steps.project.outputs.present == 'true'
         env:
           UDID: ${{ steps.sim.outputs.udid }}
         run: |
@@ -221,7 +199,6 @@ jobs:
             --batteryState charged --batteryLevel 100 || true
 
       - name: Cache SwiftPM checkouts
-        if: steps.project.outputs.present == 'true'
         uses: actions/cache@v4
         with:
           path: clients/ios/build/SourcePackages
@@ -229,13 +206,11 @@ jobs:
           restore-keys: spm-macos-
 
       - name: Generate project
-        if: steps.project.outputs.present == 'true'
         run: xcodegen generate
 
       # Warnings are errors for the app's own Swift; the committed generated
       # client (which warns under Swift 6.2) and third-party packages are exempt.
       - name: Build for testing (warnings are errors)
-        if: steps.project.outputs.present == 'true'
         env:
           UDID: ${{ steps.sim.outputs.udid }}
         run: |
@@ -255,7 +230,6 @@ jobs:
       # The Aleph scheme's test action holds the iOS-only packages' unit tests and
       # AlephSnapshotTests; the UI tests run in ios-e2e.
       - name: Unit and snapshot tests (${{ env.MODE }})
-        if: steps.project.outputs.present == 'true'
         env:
           UDID: ${{ steps.sim.outputs.udid }}
           # TEST_RUNNER_-prefixed vars reach the test process with the prefix stripped.
@@ -281,7 +255,6 @@ jobs:
 
       # The UI-test token hook must never ship (TDD §5.5).
       - name: Release binary has no test hook
-        if: steps.project.outputs.present == 'true'
         run: |
           set -o pipefail
           xcodebuild build \
@@ -300,14 +273,17 @@ jobs:
             exit 1
           fi
           exe="$app/$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Info.plist")"
-          if strings "$exe" | grep -q AlephTestTokens; then
+          # Not `strings | grep -q` under pipefail: grep -q exits on the first match,
+          # strings dies of SIGPIPE, and the failed pipeline reads as "no hook".
+          strings "$exe" > build/release-strings.txt
+          if grep -q AlephTestTokens build/release-strings.txt; then
             echo "::error::the Release binary $exe contains AlephTestTokens"
             exit 1
           fi
           echo "$exe has no AlephTestTokens."
 
       - name: Export xcresult attachments
-        if: always() && steps.project.outputs.present == 'true'
+        if: always()
         run: |
           mkdir -p build/attachments
           if [ -d build/AlephTests.xcresult ]; then
@@ -316,7 +292,7 @@ jobs:
           fi
 
       - name: Upload snapshots, diffs and logs
-        if: always() && steps.project.outputs.present == 'true'
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: ios-gate-${{ env.MODE }}
@@ -329,7 +305,7 @@ jobs:
           if-no-files-found: warn
 
       - name: Commit references back to the ios-dev branch
-        if: success() && env.MODE == 'record' && steps.project.outputs.present == 'true'
+        if: success() && env.MODE == 'record'
         working-directory: .
         run: clients/ios/scripts/commit-back.sh "$GITHUB_REF_NAME" "$SNAPSHOTS"
 
@@ -394,8 +370,9 @@ jobs:
         working-directory: .
         run: uv run alembic upgrade head
 
-      # Fake-issuer mode (TDD D22) and E2E_SIMCTL_UDID (simctl push, §13.4) are
-      # read by the e2e backend once AL-603 / AL-614 add them.
+      # Fake-issuer mode (TDD D22, scripts/e2e_fake_issuer.py) serves the OIDC
+      # issuer the UI tests' pre-signed tokens name; it is refused unless ENV=test.
+      # E2E_SIMCTL_UDID (simctl push, §13.4) is read once AL-614 adds it.
       - name: Start the stub backend
         working-directory: .
         env:
@@ -417,20 +394,7 @@ jobs:
           cat "$BACKEND_LOG"
           exit 1
 
-      - name: Check for the Xcode project
-        id: project
-        run: |
-          if [ -f project.yml ]; then
-            echo "present=true" >> "$GITHUB_OUTPUT"
-          else
-            msg="No Xcode project yet (clients/ios/project.yml arrives with AL-603): skipping the UI tests."
-            echo "::notice title=ios-e2e::$msg"
-            echo "$msg" >> "$GITHUB_STEP_SUMMARY"
-            echo "present=false" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Install XcodeGen ${{ env.XCODEGEN_VERSION }}
-        if: steps.project.outputs.present == 'true'
         run: |
           curl -fsSL -o "$RUNNER_TEMP/xcodegen.zip" \
             "https://github.com/yonaskolb/XcodeGen/releases/download/$XCODEGEN_VERSION/xcodegen.zip"
@@ -438,7 +402,6 @@ jobs:
           echo "$RUNNER_TEMP/xcodegen/bin" >> "$GITHUB_PATH"
 
       - name: Boot simulator
-        if: steps.project.outputs.present == 'true'
         env:
           UDID: ${{ steps.sim.outputs.udid }}
         run: |
@@ -452,7 +415,6 @@ jobs:
             --batteryState charged --batteryLevel 100 || true
 
       - name: Cache SwiftPM checkouts
-        if: steps.project.outputs.present == 'true'
         uses: actions/cache@v4
         with:
           path: clients/ios/build/SourcePackages
@@ -460,11 +422,9 @@ jobs:
           restore-keys: spm-macos-
 
       - name: Generate project
-        if: steps.project.outputs.present == 'true'
         run: xcodegen generate
 
       - name: UI tests (UITest configuration)
-        if: steps.project.outputs.present == 'true'
         env:
           UDID: ${{ steps.sim.outputs.udid }}
           TEST_RUNNER_SCREENSHOT_DIR: ${{ github.workspace }}/clients/ios/screenshots
@@ -476,7 +436,7 @@ jobs:
           fi
           xcodebuild test \
             -project Aleph.xcodeproj \
-            -scheme Aleph \
+            -scheme AlephUITests \
             -configuration UITest \
             -destination "id=$UDID" \
             -derivedDataPath build/DerivedData \
@@ -503,6 +463,6 @@ jobs:
           if-no-files-found: warn
 
       - name: Commit screenshots back to the ios-dev branch
-        if: success() && env.MODE == 'record' && steps.project.outputs.present == 'true'
+        if: success() && env.MODE == 'record'
         working-directory: .
         run: clients/ios/scripts/commit-back.sh "$GITHUB_REF_NAME" "$SCREENSHOTS"
