@@ -1,14 +1,12 @@
 """Static file serving for the frontend in production."""
 
-from pathlib import Path
-
 from fastapi import FastAPI
 from starlette.exceptions import HTTPException
 from starlette.responses import Response
 from starlette.staticfiles import StaticFiles
 from starlette.types import Scope
 
-FRONTEND_DIST = Path(__file__).parent / "frontend" / "dist"
+from aleph.config import settings
 
 # Path prefixes the backend owns. A request under one of these must never fall
 # back to the SPA shell: a typo'd or retired API path has to answer with the
@@ -59,12 +57,14 @@ def _is_spa_navigation(path: str, scope: Scope) -> bool:
 def mount_frontend(app: FastAPI) -> None:
     """Mount the frontend static files if the dist directory exists.
 
-    In production, the frontend is built to `web/frontend/dist/` and served
-    as static files. In development, the frontend dev server runs separately.
+    In production, the web app (``clients/web/``) is built to
+    ``settings.frontend_dist_dir`` (``FRONTEND_DIST_DIR``) and served as static
+    files. In development, the frontend dev server runs separately.
     """
-    if FRONTEND_DIST.is_dir():
+    dist = settings.frontend_dist_dir
+    if dist.is_dir():
         app.mount(
             "/",
-            SPAStaticFiles(directory=str(FRONTEND_DIST), html=True),
+            SPAStaticFiles(directory=str(dist), html=True),
             name="frontend",
         )

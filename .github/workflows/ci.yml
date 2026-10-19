@@ -40,10 +40,10 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-          cache-dependency-path: src/aleph/web/frontend/pnpm-lock.yaml
+          cache-dependency-path: clients/web/pnpm-lock.yaml
 
       - name: Install frontend dependencies
-        working-directory: src/aleph/web/frontend
+        working-directory: clients/web
         run: pnpm install --frozen-lockfile
 
       - name: Install just
@@ -162,14 +162,14 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-          cache-dependency-path: src/aleph/web/frontend/pnpm-lock.yaml
+          cache-dependency-path: clients/web/pnpm-lock.yaml
 
       - name: Install frontend dependencies
-        working-directory: src/aleph/web/frontend
+        working-directory: clients/web
         run: pnpm install --frozen-lockfile
 
       - name: Install Playwright browsers
-        working-directory: src/aleph/web/frontend
+        working-directory: clients/web
         run: pnpm exec playwright install --with-deps chromium
 
       - name: Install just
@@ -188,7 +188,7 @@ jobs:
           name: test-results-e2e
           path: |
             .artifacts/test-results/playwright.json
-            src/aleph/web/frontend/test-results/
+            clients/web/test-results/
           if-no-files-found: error
 
   # The deploy artifact itself (AL-100, TDD §13/D3): build the production image

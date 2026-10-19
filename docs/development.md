@@ -22,7 +22,7 @@ uv sync --dev
 cp .env.example .env
 
 # Install frontend dependencies
-cd src/aleph/web/frontend && pnpm install
+cd clients/web && pnpm install
 ```
 
 ### Amp orbs
@@ -51,8 +51,8 @@ This repo was scaffolded from the
 [`mattjmcnaughton/templates`](https://github.com/mattjmcnaughton/templates)
 monorepo with [Copier](https://copier.readthedocs.io/): the `python-web`
 template at the repo root and the `frontend-react` template composed into
-`src/aleph/web/frontend/`. The recorded answers live in `.copier-answers.yml`
-(backend) and `src/aleph/web/frontend/.copier-answers.yml` (frontend), and are
+`clients/web/`. The recorded answers live in `.copier-answers.yml`
+(backend) and `clients/web/.copier-answers.yml` (frontend), and are
 already committed — you do **not** re-run `copier copy`.
 
 To pull later upstream template changes, clone the `templates` repo as a
@@ -64,7 +64,7 @@ directory:
 # backend (python-web) template
 copier update --trust
 # composed frontend (frontend-react) template
-copier update --trust src/aleph/web/frontend
+copier update --trust clients/web
 ```
 
 ## Backing services (Postgres + Keycloak)
@@ -269,7 +269,7 @@ Tests are organized by type (see [`ci.md`](ci.md) for the CI job that runs each)
 
 - `tests/unit/` — fast, isolated tests (backend `just test-unit-be`, frontend `just test-unit-fe`)
 - `tests/integration/` — tests against real Postgres + Keycloak (`just test-integration`)
-- `src/aleph/web/frontend/tests/e2e/` — the Playwright browser suite at the phone
+- `clients/web/tests/e2e/` — the Playwright browser suite at the phone
   viewport (`just test-e2e`); it boots the stub-model backend (`scripts/e2e_backend.py`)
   plus the dev frontend. Locally it creates an `aleph_e2e` database and uses the
   machine's preinstalled chromium via `PW_CHROMIUM_PATH`. **Needs compose

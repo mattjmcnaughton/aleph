@@ -1,4 +1,4 @@
-fe_dir := "src/aleph/web/frontend"
+fe_dir := "clients/web"
 
 # Check formatting (backend + frontend)
 fmt: fmt-be fmt-fe

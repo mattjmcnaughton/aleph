@@ -34,7 +34,7 @@ uv sync --dev
 cp .env.example .env
 
 # Frontend
-cd src/aleph/web/frontend && pnpm install
+cd clients/web && pnpm install
 ```
 
 ### Database
@@ -104,7 +104,7 @@ docker run -p 8000:8000 aleph
 
 ## Frontend
 
-The frontend lives in `src/aleph/web/frontend/`, composed from the `frontend-react` Copier template. See [docs/development.md](docs/development.md) for setup and the template-update procedure.
+The frontend lives in `clients/web/`, composed from the `frontend-react` Copier template. See [docs/development.md](docs/development.md) for setup and the template-update procedure.
 
 ## Architecture
 

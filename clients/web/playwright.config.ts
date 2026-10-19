@@ -29,7 +29,7 @@ const databaseUrl =
   process.env.E2E_DATABASE_URL ?? "postgresql+asyncpg://postgres:postgres@localhost:5432/aleph_e2e";
 
 const backendCommand = [
-  "cd ../../../..",
+  "cd ../..",
   `DATABASE_URL='${databaseUrl}' uv run alembic upgrade head`,
   `ENV=test DATABASE_URL='${databaseUrl}' uv run uvicorn scripts.e2e_backend:create_stub_app` +
     ` --factory --host 127.0.0.1 --port ${backendPort}`,
@@ -57,10 +57,7 @@ export default defineConfig({
   // flakes; only a real hang should ever reach these.
   timeout: 180_000,
   expect: { timeout: 15_000 },
-  reporter: [
-    ["list"],
-    ["json", { outputFile: "../../../../.artifacts/test-results/playwright.json" }],
-  ],
+  reporter: [["list"], ["json", { outputFile: "../../.artifacts/test-results/playwright.json" }]],
   use: {
     baseURL,
     trace: "retain-on-failure",

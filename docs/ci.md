@@ -78,7 +78,7 @@ the wheel.
 
 ## Test layers and markers (TDD §12)
 
-- **Unit** (`tests/unit/`, `src/aleph/web/frontend/src/**/*.test.tsx`) — domains,
+- **Unit** (`tests/unit/`, `clients/web/src/**/*.test.tsx`) — domains,
   validators, DTO mapping, the stub model, frontend components. No I/O.
 - **Integration** (`tests/integration/`) — API against a real Postgres (the
   per-test template-database clone pattern in `conftest.py`) plus real Keycloak
@@ -108,7 +108,7 @@ Two pytest markers are registered in `pyproject.toml`:
 ## E2E harness
 
 The Playwright config lives at
-[`src/aleph/web/frontend/playwright.config.ts`](../src/aleph/web/frontend/playwright.config.ts)
+[`clients/web/playwright.config.ts`](../clients/web/playwright.config.ts)
 with three projects:
 
 | Project | Runs | Why |
