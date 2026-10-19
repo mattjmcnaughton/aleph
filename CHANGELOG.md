@@ -1,3 +1,10 @@
+# [1.45.0](https://github.com/mattjmcnaughton/aleph/compare/v1.44.0...v1.45.0) (2026-10-19)
+
+
+### Features
+
+* **home:** highlight Beats with a new Brief on the homepage ([#219](https://github.com/mattjmcnaughton/aleph/issues/219)) ([66113c2](https://github.com/mattjmcnaughton/aleph/commit/66113c262ca0a699fc4f2077f0c7862310b8050f))
+
 # [1.44.0](https://github.com/mattjmcnaughton/aleph/compare/v1.43.2...v1.44.0) (2026-10-17)
 
 
