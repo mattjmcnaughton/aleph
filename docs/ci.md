@@ -48,14 +48,23 @@ Builds and tests the SwiftUI client in `clients/ios/` (iOS TDD §17.1). Its own
 | Job | Runner | Runs when | Does |
 | --- | ------ | --------- | ---- |
 | **changes** | ubuntu | always | The path filter (below). Outputs `ios=true` or `ios=false`. |
-| **swift-linux** | ubuntu, container `swift:6.2` | `ios == 'true'` | `swift format lint --strict` on every tracked `.swift` file under `clients/ios/` except the generated client (`Packages/API/Sources/API/Generated/`), using `clients/ios/.swift-format`; `swift test` in `Tools/GenerateAPI` (the contract rewrite); `generate-api.sh --check` (the generated-Swift drift check); `swift test` in the Linux-capable packages `Packages/Core`, `Packages/Markdown` and `Packages/API`. Until AL-603 adds `Core` and `Markdown`, a missing package is a warning annotation, not a failure. |
+| **swift-linux** | ubuntu, container `swift:6.2` | `ios == 'true'` | `swift format lint --strict` on every tracked `.swift` file under `clients/ios/` except the generated client (`Packages/API/Sources/API/Generated/`), using `clients/ios/.swift-format`; `swift test` in `Tools/GenerateAPI` (the contract rewrite); `generate-api.sh --check` (the generated-Swift drift check); `swift test` in the Linux-capable packages `Packages/Core`, `Packages/CoreTestSupport`, `Packages/Markdown` and `Packages/API` (a missing one fails). |
 | **ios-gate** | `macos-26` | `ios == 'true'` | Selects `/Applications/Xcode_26.6.app` (`sudo xcode-select -s`), installs XcodeGen 2.46.0, creates the pinned *iPhone 17 / iOS 26.5* simulator, runs `xcodegen generate`, builds with warnings as errors, runs the `Aleph` scheme's unit and snapshot tests, and checks that the Release binary has no `AlephTestTokens` hook. |
-| **ios-e2e** | `macos-26` | `ios == 'true'` | Same Xcode and simulator; `brew install postgresql@16`, `uv sync`, `alembic upgrade head`, boots the stub backend (`scripts/e2e_backend.py`) with `E2E_FAKE_ISSUER=1` and `E2E_SIMCTL_UDID`, then runs `AlephUITests` in the `UITest` configuration. Uploads the `.xcresult` and the backend log. |
+| **ios-e2e** | `macos-26` | `ios == 'true'` | Same Xcode and simulator; `brew install postgresql@16`, `uv sync`, `alembic upgrade head`, boots the stub backend (`scripts/e2e_backend.py`) with `E2E_FAKE_ISSUER=1` and `E2E_SIMCTL_UDID`, then runs the `AlephUITests` scheme in the `UITest` configuration. Uploads the `.xcresult` and the backend log. |
 
-Until `clients/ios/project.yml` exists (it arrives with AL-603), `ios-gate` and
-`ios-e2e` still select Xcode, create the simulator and (in `ios-e2e`) boot the
-backend, then skip every Xcode-project step with a "No Xcode project yet" notice. So
-the jobs are green and already prove the runner image has the pinned toolchain.
+**Fake-issuer mode (`ios-e2e`).** The macOS runner has no Docker, so no Keycloak.
+With `E2E_FAKE_ISSUER=1` (and only with `ENV=test`), `scripts/e2e_backend.py` serves a
+minimal OIDC issuer at `http://127.0.0.1:8000/__e2e__/oidc` (discovery, JWKS and
+userinfo, `scripts/e2e_fake_issuer.py`) and points bearer auth at it with
+`OIDC_API_AUDIENCE=aleph-api` (iOS TDD D22, §16.3). Its RS256 signing key is committed
+and **test-only** (`tests/fixtures/e2e_oidc/signing_key.jwk`); the UI tests launch the
+`UITest` build with pre-signed tokens from `clients/ios/AlephUITests/Fixtures/tokens.json`
+(learner, admin, expired learner), which `uv run python scripts/mint_e2e_tokens.py`
+re-mints and `tests/unit/test_e2e_fake_issuer.py` drift-checks. The real
+`BearerAuthenticator` validates every request against that JWKS. Production can never
+trust it: the module is never imported by `create_app`, `scripts/` and `tests/` are not
+in the image, and `ENV=production` rejects an `/__e2e__/` OIDC issuer or metadata URL.
+Real Keycloak bearer coverage stays in `tests/integration/test_bearer_keycloak.py`.
 
 **The path filter.** There is no trigger-level `paths:` filter, because a workflow
 that never starts leaves a required check pending forever. Instead `changes` diffs
@@ -68,6 +77,8 @@ matches one of these (`clients/ios/scripts/ios-relevant.sh`, unit-tested in
 - `^clients/ios/`
 - `^clients/openapi\.json$`
 - `^scripts/e2e_backend\.py$`
+- `^scripts/e2e_fake_issuer\.py$`
+- `^tests/fixtures/e2e_oidc/`
 - `^\.github/workflows/ios\.yml$`
 
 Otherwise they're skipped by their `if:`, and a skipped job counts as passing for a

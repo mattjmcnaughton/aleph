@@ -38,6 +38,9 @@ MODEL_SLOTS: tuple[str, ...] = (
 # against a truthy default). Shared as a constant so the field default and the
 # guard cannot drift apart.
 DEV_SESSION_SECRET_KEY = "dev-session-secret-change-me"
+# The path prefix of every e2e-harness-only route (``scripts/e2e_backend.py``),
+# including the fake OIDC issuer production must never trust.
+E2E_PATH_MARKER = "/__e2e__/"
 
 # The checkout root (``src/aleph/config.py`` -> ``src/aleph`` -> ``src`` -> root).
 # Anchors checkout-relative defaults so they do not depend on the working directory.
@@ -257,6 +260,27 @@ class Settings(BaseSettings):
     # Requires HTTPS for the session cookie; ``true`` in production only (forced
     # on in production by ``_enforce_production_auth``).
     session_cookie_secure: bool = False
+
+    @model_validator(mode="after")
+    def _forbid_e2e_issuer_in_production(self) -> Self:
+        """Reject the e2e harness's fake OIDC issuer in production.
+
+        ``scripts/e2e_fake_issuer.py`` serves an issuer under ``/__e2e__/oidc``
+        whose signing key is committed to this repository (iOS TDD D22), so any
+        token it "issues" is forgeable by anyone. The harness only mounts it with
+        ``ENV=test``; this is the matching guard on the production side, so a
+        stray ``OIDC_ISSUER``/``OIDC_METADATA_URL`` copied from the e2e setup
+        fails startup instead of trusting that key.
+        """
+        if self.is_production and any(
+            E2E_PATH_MARKER in value
+            for value in (self.oidc_issuer, self.oidc_metadata_url)
+        ):
+            raise ValueError(
+                "Production (ENV=production) must not trust the e2e fake issuer "
+                f"(an OIDC issuer or metadata URL under {E2E_PATH_MARKER})."
+            )
+        return self
 
     @model_validator(mode="after")
     def _enforce_production_auth(self) -> Self:
