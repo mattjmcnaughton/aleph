@@ -1,6 +1,6 @@
 // The tutor's non-streaming wire seam (AL-230, docs/api.md ## Tutor): the
 // conversation read + clear routes, their types, and the one query identity the
-// rail reads. Everything here goes through `apiFetch`/`apiV1Path` exactly like
+// rail reads. Everything here goes through `apiClient` exactly like
 // `lib/api.ts`'s Phase 1 calls — only the *streamed* send lives apart, in
 // `lib/tutor-stream.ts`, and only because it must read the body progressively.
 //
@@ -12,11 +12,10 @@
 // never server state the client is out of step with.
 
 import { queryOptions, skipToken } from "@tanstack/react-query";
-import { apiFetch, apiV1Path } from "./api";
-import type { TutorCheck } from "./tutor-stream";
+import { type Schemas, apiClient, unwrap } from "./api";
 
 /** Who spoke (docs/api.md). Learner and tutor messages pair into a **turn**. */
-export type TutorRole = "learner" | "tutor";
+export type TutorRole = Schemas["MessageRole"];
 
 /**
  * One message in the thread. There is **one conversation per path**, so
@@ -25,25 +24,18 @@ export type TutorRole = "learner" | "tutor";
  *
  * Note the payload carries no `position`: the array order **is** the order.
  */
-export interface ConversationMessage {
-  id: string;
-  role: TutorRole;
-  content: string;
-  lesson_id: string;
-  lesson_title: string;
-  /** Set only on a tutor message that posed a Tutor check (AL-231 renders it). */
-  tutor_check: TutorCheck | null;
-  created_at: string;
-}
+export type ConversationMessage = Schemas["MessageDTO"];
 
 /** `GET /api/v1/paths/{id}/conversation` — object-wrapped, oldest first. */
-export interface Conversation {
-  messages: ConversationMessage[];
-}
+export type Conversation = Schemas["ConversationResponse"];
 
 /** The whole thread for a path. `200 {messages: []}` when none exists yet. */
 export function getConversation(pathId: string): Promise<Conversation> {
-  return apiFetch<Conversation>(apiV1Path(`/paths/${pathId}/conversation`));
+  return unwrap(
+    apiClient.GET("/api/v1/paths/{path_id}/conversation", {
+      params: { path: { path_id: pathId } },
+    }),
+  );
 }
 
 /**
@@ -51,8 +43,12 @@ export function getConversation(pathId: string): Promise<Conversation> {
  * idempotent; cascades to its messages; touches no Phase 1 state. Destructive
  * and not undoable — the caller MUST confirm first, like `deletePath`.
  */
-export function clearConversation(pathId: string): Promise<void> {
-  return apiFetch<void>(apiV1Path(`/paths/${pathId}/conversation`), { method: "DELETE" });
+export async function clearConversation(pathId: string): Promise<void> {
+  await unwrap(
+    apiClient.DELETE("/api/v1/paths/{path_id}/conversation", {
+      params: { path: { path_id: pathId } },
+    }),
+  );
 }
 
 /**
@@ -70,12 +66,13 @@ export function clearConversation(pathId: string): Promise<void> {
  * the Quick check's first-wins Attempt, because an Attempt is graded and feeds
  * the §7 metrics, and neither is true here.
  */
-export function answerTutorCheck(messageId: string, selectedIndex: number): Promise<void> {
-  return apiFetch<void>(apiV1Path(`/messages/${messageId}/tutor-check-answer`), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ selected_index: selectedIndex }),
-  });
+export async function answerTutorCheck(messageId: string, selectedIndex: number): Promise<void> {
+  await unwrap(
+    apiClient.POST("/api/v1/messages/{message_id}/tutor-check-answer", {
+      params: { path: { message_id: messageId } },
+      body: { selected_index: selectedIndex },
+    }),
+  );
 }
 
 /**

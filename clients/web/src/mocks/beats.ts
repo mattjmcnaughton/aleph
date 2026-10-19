@@ -28,17 +28,17 @@
 // and `routes/beats.new.tsx`'s `setQueryData` seed meant the Beat view's own
 // `GET /beats/{id}` never fired at all behind it.
 
-import { HttpResponse, http } from "msw";
-import {
-  API_V1_BASE,
-  type BeatDetail,
-  type BeatResearchState,
-  type BeatSummary,
-  type BriefEntry,
-  type Level,
-  type ReadPingMarker,
-  type Source,
+import { HttpResponse } from "msw";
+import type {
+  BeatDetail,
+  BeatResearchState,
+  BeatSummary,
+  BriefEntry,
+  Level,
+  ReadPingMarker,
+  Source,
 } from "../lib/api";
+import { contract, errorEnvelope } from "./contract";
 
 /** Topic contains this (case-insensitive) → the research run refuses. */
 export const REFUSED_BEAT_TOPIC_SENTINEL = "refuse-me";
@@ -455,36 +455,15 @@ function tick(beat: StoredBeat): void {
 }
 
 function rateLimitEnvelope() {
-  return HttpResponse.json(
-    {
-      error: {
-        code: "rate_limited",
-        message: "You've reached the limit for Beats.",
-        request_id: "test-request-id",
-      },
-    },
-    { status: 429 },
-  );
+  return errorEnvelope(429, "rate_limited", "You've reached the limit for Beats.");
 }
 
 function serverErrorEnvelope() {
-  return HttpResponse.json(
-    {
-      error: {
-        code: "internal_error",
-        message: "Something went wrong.",
-        request_id: "test-request-id",
-      },
-    },
-    { status: 500 },
-  );
+  return errorEnvelope(500, "internal_error", "Something went wrong.");
 }
 
 function notFoundEnvelope() {
-  return HttpResponse.json(
-    { error: { code: "not_found", message: "Beat not found." } },
-    { status: 404 },
-  );
+  return errorEnvelope(404, "not_found", "Beat not found.");
 }
 
 /** Read `tz_offset_minutes` off a request URL and record it (code-review
@@ -497,7 +476,7 @@ function recordOffset(request: Request, sink: number[]): void {
 }
 
 export const beatHandlers = [
-  http.post(`${API_V1_BASE}/beats`, async ({ request }) => {
+  contract.post("/api/v1/beats", async ({ request }) => {
     recordOffset(request, deployReceivedOffsets);
     const body = (await request.json()) as Record<string, unknown> & {
       topic: string;
@@ -538,7 +517,7 @@ export const beatHandlers = [
 
   // Registered before `/beats/:id` for readability; MSW matches the exact
   // path regardless, so the two never collide.
-  http.get(`${API_V1_BASE}/beats`, ({ request }) => {
+  contract.get("/api/v1/beats", ({ request }) => {
     listRequests += 1;
     recordOffset(request, listReceivedOffsets);
     for (const beat of store.values()) tick(beat);
@@ -546,8 +525,8 @@ export const beatHandlers = [
     return HttpResponse.json({ beats: [...store.values()].reverse().map(summaryFor) });
   }),
 
-  http.get(`${API_V1_BASE}/beats/:id`, ({ params, request }) => {
-    const id = params.id as string;
+  contract.get("/api/v1/beats/{beat_id}", ({ params, request }) => {
+    const id = params.beat_id as string;
     detailPollRequests.set(id, (detailPollRequests.get(id) ?? 0) + 1);
     recordOffset(request, detailReceivedOffsets);
     const beat = store.get(id);
@@ -556,7 +535,7 @@ export const beatHandlers = [
     return HttpResponse.json(detailFor(beat));
   }),
 
-  http.post(`${API_V1_BASE}/beats/:id/retry`, ({ params, request }) => {
+  contract.post("/api/v1/beats/{beat_id}/retry", ({ params, request }) => {
     recordOffset(request, retryReceivedOffsets);
     if (config.retryRateLimited) {
       return rateLimitEnvelope();
@@ -564,7 +543,7 @@ export const beatHandlers = [
     if (config.retryFails) {
       return serverErrorEnvelope();
     }
-    const beat = store.get(params.id as string);
+    const beat = store.get(params.beat_id as string);
     if (!beat) return notFoundEnvelope();
     const researching = beat.pollsRemaining > 0;
     if (beat.resolution === "failed" && !researching) {
@@ -586,8 +565,8 @@ export const beatHandlers = [
     return HttpResponse.json(detailFor(beat), { status: 202 });
   }),
 
-  http.get(`${API_V1_BASE}/briefs/:id`, ({ params }) => {
-    const brief = briefStore.get(params.id as string);
+  contract.get("/api/v1/briefs/{brief_id}", ({ params }) => {
+    const brief = briefStore.get(params.brief_id as string);
     if (!brief) return notFoundEnvelope();
     return HttpResponse.json({
       id: brief.id,
@@ -607,8 +586,8 @@ export const beatHandlers = [
     });
   }),
 
-  http.post(`${API_V1_BASE}/briefs/:id/read`, async ({ params, request }) => {
-    const brief = briefStore.get(params.id as string);
+  contract.post("/api/v1/briefs/{brief_id}/read", async ({ params, request }) => {
+    const brief = briefStore.get(params.brief_id as string);
     if (!brief) return notFoundEnvelope();
     const body = (await request.json()) as { marker: ReadPingMarker };
     const raw = new URL(request.url).searchParams.get("tz_offset_minutes");

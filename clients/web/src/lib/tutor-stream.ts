@@ -1,8 +1,8 @@
 // The tutor's streaming client (AL-230, TDD §5.4 / D1): `fetch` +
 // `ReadableStream` SSE parsing for `POST /paths/{id}/conversation/messages`.
 //
-// **Why this is the one module that calls `fetch` directly.** `apiFetch` exists
-// so nothing else has to — but it awaits `res.json()`, which is exactly the
+// **Why this is the one module that calls `fetch` directly.** `apiClient` exists
+// so nothing else has to — but it awaits the parsed body, which is exactly the
 // blocking wait progressive rendering exists to avoid (PRD §5.6). So this seam
 // keeps everything else `api.ts` owns (the `/api/v1` prefix through
 // `apiV1Path`, the shared `ApiError` envelope) and departs on one point: it
@@ -32,10 +32,10 @@
 // shaping-only copy of this loop would be a second place for chunk reassembly,
 // heartbeats and the stop race to drift apart.
 
-import { ApiError, apiErrorFrom, apiV1Path } from "./api";
+import { ApiError, type Schemas, apiErrorFrom, apiV1Path } from "./api";
 
 /** How a learner message was entered — the §7 entry-mix datum (docs/api.md). */
-export type TutorMessageSource = "typed" | "suggestion";
+export type TutorMessageSource = Schemas["MessageSource"];
 
 /**
  * `TutorMessageStr` (docs/api.md) — the server bound, enforced in the composer
@@ -49,16 +49,15 @@ export const TUTOR_MESSAGE_MAX_LENGTH = 2000;
  * carries `correct_index` + `explanation` on delivery *by design* — feedback is
  * immediate and client-side, and nothing downstream grades it.
  */
-export interface TutorCheck {
-  stem: string;
-  options: string[];
-  correct_index: number;
-  explanation: string;
-  /** The learner's choice, or null until the check-answer route records one. */
-  answered_index: number | null;
-}
+export type TutorCheck = Schemas["StreamTutorCheck"];
 
 // --- The shaping wire (Phase 2B TDD §4/§5.4) --------------------------------
+//
+// Every frame and body type here is the contract's own (`clients/openapi.json`,
+// iOS TDD §4.1/§4.3): the send routes declare `200 text/event-stream` with one
+// named schema per frame (`StreamDelta`, `StreamTutorCheck`, `StreamProposal`,
+// `StreamDone`, `StreamError`). This module keeps its own `fetch` +
+// `ReadableStream` transport; only the types come from the schema.
 //
 // The **Proposal** payload, exactly as `agents/shaper.py` validates it. Two
 // operation shapes and no more (D1), and they are **untagged on purpose**: the
@@ -67,35 +66,18 @@ export interface TutorCheck {
 // wire does not carry.
 
 /** One lesson an Addition creates — a title, and Phase 1 generates the rest. */
-export interface ProposedLesson {
-  title: string;
-}
+export type ProposedLesson = Schemas["ProposedLesson"];
 
 /** The unit an Addition may group its new lessons into, or `null` for none. */
-export interface ProposedUnit {
-  title: string;
-  summary: string;
-}
+export type ProposedUnit = Schemas["ProposedUnit"];
 
 /** `add_lessons`: new lessons at a position (CONTEXT.md: *Addition*). */
-export interface AddLessonsOperation {
-  /** A `position_in_path` in the payload's snapshot; apply re-resolves it (D5). */
-  insert_at_position: number;
-  lessons: ProposedLesson[];
-  rationale: string;
-  estimated_minutes: number;
-  new_unit: ProposedUnit | null;
-}
+export type AddLessonsOperation = Schemas["AddLessonsOperation"];
 
 /** `revise_lesson`: re-teach an unengaged lesson (CONTEXT.md: *Revision*). */
-export interface ReviseLessonOperation {
-  lesson_id: string;
-  instruction: string;
-  rationale: string;
-  new_title: string | null;
-}
+export type ReviseLessonOperation = Schemas["ReviseLessonOperation"];
 
-export type ProposalOperation = AddLessonsOperation | ReviseLessonOperation;
+export type ProposalOperation = Proposal["operations"][number];
 
 /**
  * The `proposal` event's data: the full validated payload (TDD §5.4). Note what
@@ -103,20 +85,10 @@ export type ProposalOperation = AddLessonsOperation | ReviseLessonOperation;
  * construction (nothing has applied it yet); resolution is derived server-side
  * and reaches the client only on a thread read (`MessageProposal`, `shaping.ts`).
  */
-export interface Proposal {
-  operations: ProposalOperation[];
-  summary: string;
-}
+export type Proposal = Schemas["StreamProposal"];
 
 /** `POST /paths/{id}/conversation/messages` body (docs/api.md). */
-export interface SendTutorMessageInput {
-  lesson_id: string;
-  /** ≤ 2000 chars (`TutorMessageStr`) — the composer enforces it too. */
-  content: string;
-  source: TutorMessageSource;
-  /** Admin-only per-message override; omitted entirely when unset (403 else). */
-  model?: string;
-}
+export type SendTutorMessageInput = Schemas["SendMessageRequest"];
 
 /**
  * `POST /paths/{id}/shaping/conversation/messages` body (Phase 2B TDD §6).
@@ -124,19 +96,10 @@ export interface SendTutorMessageInput {
  * The 2A body minus `lesson_id`: the shaping thread is one per *path* and is
  * never asked from inside a lesson (PRD §5.8), so there is no lesson to record.
  */
-export interface SendShapingMessageInput {
-  /** ≤ 2000 chars (`TutorMessageStr`, reused) — the composer enforces it too. */
-  content: string;
-  source: TutorMessageSource;
-  /** Admin-only per-message override; omitted entirely when unset (403 else). */
-  model?: string;
-}
+export type SendShapingMessageInput = Schemas["SendShapingMessageRequest"];
 
 /** The `done` event: terminal success, the turn is persisted (TDD D2). */
-export interface TutorStreamDone {
-  learner_message_id: string;
-  tutor_message_id: string;
-}
+export type TutorStreamDone = Schemas["StreamDone"];
 
 /** A stream that started and then failed — an `error` event or a dropped socket. */
 export class TutorStreamError extends Error {
@@ -359,7 +322,7 @@ function handleFrame(frame: string, handlers: StreamHandlers): Terminal | null {
   }
   switch (event) {
     case "delta":
-      handlers.onDelta?.(String(payload.text ?? ""));
+      handlers.onDelta?.(String((payload as Partial<Schemas["StreamDelta"]>).text ?? ""));
       return null;
     case "tutor_check":
       handlers.onTutorCheck?.(payload as unknown as TutorCheck);
@@ -383,12 +346,14 @@ function handleFrame(frame: string, handlers: StreamHandlers): Terminal | null {
       return null;
     case "done":
       return { kind: "done", data: payload as unknown as TutorStreamDone };
-    case "error":
+    case "error": {
+      const frame = payload as Partial<Schemas["StreamError"]>;
       return {
         kind: "error",
-        code: String(payload.code ?? "internal_error"),
-        message: String(payload.message ?? DROPPED_MESSAGE),
+        code: String(frame.code ?? "internal_error"),
+        message: String(frame.message ?? DROPPED_MESSAGE),
       };
+    }
     default:
       return null;
   }

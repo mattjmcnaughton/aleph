@@ -3,8 +3,9 @@
 // + `resetProgress()` — but carries no store: the endpoint has no created or
 // deleted rows, only one summary a test dials in directly.
 
-import { HttpResponse, http } from "msw";
-import { API_V1_BASE, type ActivityCell, type ProgressSummary } from "../lib/api";
+import { HttpResponse } from "msw";
+import type { ActivityCell, ProgressSummary } from "../lib/api";
+import { contract, errorEnvelope } from "./contract";
 
 /** 49 zero-filled entries ending at `today` — the "no completions" shape
  *  (§5.4), and the shipped `STREAK_ACTIVITY_WINDOW_DAYS` window. */
@@ -100,20 +101,11 @@ export function releaseProgress(): void {
 }
 
 function serverErrorEnvelope() {
-  return HttpResponse.json(
-    {
-      error: {
-        code: "internal_error",
-        message: "Something went wrong.",
-        request_id: "test-request-id",
-      },
-    },
-    { status: 500 },
-  );
+  return errorEnvelope(500, "internal_error", "Something went wrong.");
 }
 
 export const progressHandlers = [
-  http.get(`${API_V1_BASE}/progress/summary`, async ({ request }) => {
+  contract.get("/api/v1/progress/summary", async ({ request }) => {
     requests += 1;
     const offsetParam = new URL(request.url).searchParams.get("tz_offset_minutes");
     if (offsetParam !== null) receivedOffsets.push(Number(offsetParam));

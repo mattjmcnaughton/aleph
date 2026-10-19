@@ -19,7 +19,7 @@ shape (gate / integration / e2e / compose-smoke).
 
 | Job | Command | Services | Purpose |
 | --- | ------- | -------- | ------- |
-| **gate** | `just gate` | none | Formatting (ruff/biome), linting, typecheck (ty/tsc), backend + frontend unit tests. |
+| **gate** | `just gate` | none | Formatting (ruff/biome), linting, typecheck (ty/tsc), backend + frontend unit tests, and the contract drift checks: `just openapi-check` (`clients/openapi.json` against the app; fix with `just openapi`) and `just openapi-ts-check` (the web's `schema.d.ts` against `clients/openapi.json`; fix with `just openapi-ts`). |
 | **integration** | `just test-integration` | Postgres 16 + Keycloak | API against a real per-test Postgres database and the real OIDC code flow. |
 | **e2e** | `just test-e2e` | Postgres 16 + Keycloak | Playwright browser suite (phone viewport) against the stub-model backend + dev frontend. |
 | **compose-smoke** | `just compose-smoke` | Compose Postgres | Builds the **production image** and proves it serves: `/healthz`, `/readyz` against a migrated database, the SPA shell, and the auth boundary in both directions. |

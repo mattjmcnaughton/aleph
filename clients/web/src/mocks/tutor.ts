@@ -11,10 +11,11 @@
 // One conversation **per path** (not per lesson), created lazily: a path with no
 // completed turn still answers `200 {messages: []}`, never `404`.
 
-import { HttpResponse, http } from "msw";
-import { API_V1_BASE } from "../lib/api";
+import { HttpResponse } from "msw";
+import type { Schemas } from "../lib/api";
 import type { ConversationMessage } from "../lib/tutor";
 import type { SendTutorMessageInput, TutorCheck } from "../lib/tutor-stream";
+import { contract, errorEnvelope, sseFrame } from "./contract";
 
 interface TutorConfig {
   /** One `delta` event per item — the reply text, streamed in fragments. */
@@ -22,7 +23,7 @@ interface TutorConfig {
   /** Emitted as a `tutor_check` event before the deltas when set. */
   check: TutorCheck | null;
   /** When set, the stream ends in an `error` event instead of `done`. */
-  failWith: { code: string; message: string } | null;
+  failWith: Schemas["StreamError"] | null;
   /**
    * When true the stream stalls after its deltas instead of closing, so the only
    * ways out are the client aborting (stop / new conversation / unmount) or a
@@ -156,13 +157,12 @@ export function seedConversation(pathId: string, messages: SeedMessageInput[]): 
 const encoder = new TextEncoder();
 
 /**
- * One SSE frame on this wire (docs/api.md): a named event and a single-line JSON
- * `data`. Exported so the parser's own tests build frames the same way the fake
- * serves them — two spellings of the wire format is one too many.
+ * One SSE frame on this wire (docs/api.md), untyped. Re-exported so the parser's
+ * own tests build frames the same way the fake serves them (including frames the
+ * contract forbids, to prove the parser rejects them); the handlers below use the
+ * contract-typed `sseFrame`, which spells the frame through this same function.
  */
-export function frame(event: string, data: unknown): string {
-  return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
-}
+export { frame } from "./contract";
 
 function persistTurn(
   pathId: string,
@@ -195,15 +195,15 @@ function persistTurn(
 }
 
 export const tutorHandlers = [
-  http.get(`${API_V1_BASE}/paths/:pathId/conversation`, ({ params }) => {
+  contract.get("/api/v1/paths/{path_id}/conversation", ({ params }) => {
     readCount += 1;
     // Lazily created: an absent row is an empty thread, never a 404.
-    return HttpResponse.json({ messages: store.get(params.pathId as string) ?? [] });
+    return HttpResponse.json({ messages: store.get(params.path_id as string) ?? [] });
   }),
 
-  http.delete(`${API_V1_BASE}/paths/:pathId/conversation`, ({ params }) => {
+  contract.delete("/api/v1/paths/{path_id}/conversation", ({ params }) => {
     clearCount += 1;
-    store.delete(params.pathId as string);
+    store.delete(params.path_id as string);
     return new HttpResponse(null, { status: 204 });
   }),
 
@@ -212,39 +212,36 @@ export const tutorHandlers = [
   // check. Re-answering overwrites (last-wins, deliberately unlike the Quick
   // check's first-wins Attempt), and nothing is graded here — the payload the
   // card already holds carries `correct_index`, so this route only records.
-  http.post(
-    `${API_V1_BASE}/messages/:messageId/tutor-check-answer`,
-    async ({ params, request }) => {
-      const messageId = params.messageId as string;
-      const body = (await request.json()) as { selected_index: number };
-      answerRequests.push({ message_id: messageId, selected_index: body.selected_index });
+  contract.post("/api/v1/messages/{message_id}/tutor-check-answer", async ({ params, request }) => {
+    const messageId = params.message_id as string;
+    const body = (await request.json()) as { selected_index: number };
+    answerRequests.push({ message_id: messageId, selected_index: body.selected_index });
 
-      if (config.answerError) {
-        const { status, code, message } = config.answerError;
-        return HttpResponse.json({ error: { code, message } }, { status });
-      }
+    if (config.answerError) {
+      const { status, code, message } = config.answerError;
+      return errorEnvelope(status, code, message);
+    }
 
-      // The route's out-of-range 422 is not faked: the card derives the index
-      // by mapping `options`, so an out-of-range request is unreachable from it.
-      for (const thread of store.values()) {
-        for (const message of thread) {
-          if (message.id === messageId && message.tutor_check) {
-            message.tutor_check = { ...message.tutor_check, answered_index: body.selected_index };
-          }
+    // The route's out-of-range 422 is not faked: the card derives the index
+    // by mapping `options`, so an out-of-range request is unreachable from it.
+    for (const thread of store.values()) {
+      for (const message of thread) {
+        if (message.id === messageId && message.tutor_check) {
+          message.tutor_check = { ...message.tutor_check, answered_index: body.selected_index };
         }
       }
-      return new HttpResponse(null, { status: 204 });
-    },
-  ),
+    }
+    return new HttpResponse(null, { status: 204 });
+  }),
 
-  http.post(`${API_V1_BASE}/paths/:pathId/conversation/messages`, async ({ params, request }) => {
-    const pathId = params.pathId as string;
+  contract.post("/api/v1/paths/{path_id}/conversation/messages", async ({ params, request }) => {
+    const pathId = params.path_id as string;
     const body = (await request.json()) as SendTutorMessageInput;
     sentBodies.push(body);
 
     if (config.preStreamError) {
       const { status, code, message } = config.preStreamError;
-      return HttpResponse.json({ error: { code, message } }, { status });
+      return errorEnvelope(status, code, message);
     }
 
     const turnIds = {
@@ -269,12 +266,12 @@ export const tutorHandlers = [
           if (hungUp) return;
           if (config.failWith) {
             // Terminal failure persists nothing — the store is untouched (D2).
-            controller.enqueue(encoder.encode(frame("error", config.failWith)));
+            controller.enqueue(encoder.encode(sseFrame("error", config.failWith)));
           } else {
             persistTurn(pathId, body, turnIds);
             controller.enqueue(
               encoder.encode(
-                frame("done", {
+                sseFrame("done", {
                   learner_message_id: turnIds.learner,
                   tutor_message_id: turnIds.tutor,
                 }),
@@ -284,9 +281,9 @@ export const tutorHandlers = [
           controller.close();
         };
 
-        if (config.check) controller.enqueue(encoder.encode(frame("tutor_check", config.check)));
+        if (config.check) controller.enqueue(encoder.encode(sseFrame("tutor_check", config.check)));
         for (const text of config.replyDeltas) {
-          controller.enqueue(encoder.encode(frame("delta", { text })));
+          controller.enqueue(encoder.encode(sseFrame("delta", { text })));
         }
         // A hung stream is parked deliberately: the ways out are the client
         // aborting (exactly what stop does, TDD §5.6) or `finishTutorStream()`.

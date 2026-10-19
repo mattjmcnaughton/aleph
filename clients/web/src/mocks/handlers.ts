@@ -1,6 +1,7 @@
 import { HttpResponse, http } from "msw";
-import { API_V1_BASE, AUTH_LOGOUT_PATH, type AuthSession, type AuthUser } from "../lib/api";
+import { AUTH_LOGOUT_PATH, type AuthSession, type AuthUser } from "../lib/api";
 import { beatHandlers } from "./beats";
+import { contract } from "./contract";
 import { lessonsHandlers } from "./lessons";
 import { ADMIN_MODEL_ALLOWLIST } from "./models";
 import { pathsHandlers } from "./paths";
@@ -86,7 +87,7 @@ export const signedOutSession: AuthSession = {
 };
 
 export const handlers = [
-  http.get(`${API_V1_BASE}/auth/session`, () => HttpResponse.json(authenticatedSession)),
+  contract.get("/api/v1/auth/session", () => HttpResponse.json(authenticatedSession)),
   http.post(AUTH_LOGOUT_PATH, () => new HttpResponse(null, { status: 204 })),
   ...pathsHandlers,
   ...lessonsHandlers,

@@ -10,14 +10,14 @@
 // Attempt is recorded (they live inside `attempt`). The fake enforces this by
 // keeping the key separate from what `detailFor` serializes pre-Attempt.
 
-import { HttpResponse, http } from "msw";
-import {
-  API_V1_BASE,
-  type LessonAttempt,
-  type LessonDetail,
-  type LessonGenerationState,
-  type LessonUnlockState,
+import { HttpResponse } from "msw";
+import type {
+  LessonAttempt,
+  LessonDetail,
+  LessonGenerationState,
+  LessonUnlockState,
 } from "../lib/api";
+import { contract, errorEnvelope } from "./contract";
 
 /** Generic, learner-safe failure message (never raw provider text, §6). */
 const GENERIC_GENERATION_ERROR = "We couldn't generate this lesson.";
@@ -186,41 +186,24 @@ function detailFor(lesson: StoredLesson): LessonDetail {
 }
 
 function notFoundEnvelope() {
-  return HttpResponse.json(
-    { error: { code: "not_found", message: "Lesson not found." } },
-    { status: 404 },
-  );
+  return errorEnvelope(404, "not_found", "Lesson not found.");
 }
 
 function serverErrorEnvelope() {
-  return HttpResponse.json(
-    {
-      error: {
-        code: "internal_error",
-        message: "Something went wrong.",
-        request_id: "test-request-id",
-      },
-    },
-    { status: 500 },
-  );
+  return errorEnvelope(500, "internal_error", "Something went wrong.");
 }
 
 function rateLimitEnvelope() {
-  return HttpResponse.json(
-    {
-      error: {
-        code: "rate_limited",
-        message: "You've reached today's limit for lesson generation. Try again tomorrow.",
-        request_id: "test-request-id",
-      },
-    },
-    { status: 429 },
+  return errorEnvelope(
+    429,
+    "rate_limited",
+    "You've reached today's limit for lesson generation. Try again tomorrow.",
   );
 }
 
 export const lessonsHandlers = [
-  http.get(`${API_V1_BASE}/lessons/:id`, ({ params }) => {
-    const id = params.id as string;
+  contract.get("/api/v1/lessons/{lesson_id}", ({ params }) => {
+    const id = params.lesson_id as string;
     getRequests.set(id, (getRequests.get(id) ?? 0) + 1);
     const lesson = store.get(id);
     if (!lesson) {
@@ -234,11 +217,11 @@ export const lessonsHandlers = [
     return HttpResponse.json(detail);
   }),
 
-  http.post(`${API_V1_BASE}/lessons/:id/generate`, ({ params }) => {
+  contract.post("/api/v1/lessons/{lesson_id}/generate", ({ params }) => {
     if (config.generateRateLimited) {
       return rateLimitEnvelope();
     }
-    const lesson = store.get(params.id as string);
+    const lesson = store.get(params.lesson_id as string);
     if (!lesson) {
       return notFoundEnvelope();
     }
@@ -250,27 +233,21 @@ export const lessonsHandlers = [
     return HttpResponse.json({ id: lesson.id }, { status: 202 });
   }),
 
-  http.post(`${API_V1_BASE}/lessons/:id/attempt`, async ({ params, request }) => {
+  contract.post("/api/v1/lessons/{lesson_id}/attempt", async ({ params, request }) => {
     if (config.attemptFails) {
       return serverErrorEnvelope();
     }
-    const lesson = store.get(params.id as string);
+    const lesson = store.get(params.lesson_id as string);
     if (!lesson) {
       return notFoundEnvelope();
     }
     // Locked → 403; a complete lesson stays attemptable (§6).
     if (lesson.unlock_state === "locked") {
-      return HttpResponse.json(
-        { error: { code: "forbidden", message: "This lesson is locked." } },
-        { status: 403 },
-      );
+      return errorEnvelope(403, "forbidden", "This lesson is locked.");
     }
     // No Quick check yet (still generating / not generated) → 409.
     if (lesson.resolution !== "generated" || lesson.pollsRemaining > 0) {
-      return HttpResponse.json(
-        { error: { code: "conflict", message: "This lesson has no Quick check yet." } },
-        { status: 409 },
-      );
+      return errorEnvelope(409, "conflict", "This lesson has no Quick check yet.");
     }
     const body = (await request.json()) as { selected_index: number };
     // First-wins: a re-submit returns the first Attempt, never overwrites it.
@@ -280,20 +257,17 @@ export const lessonsHandlers = [
     return HttpResponse.json(lesson.attempt);
   }),
 
-  http.post(`${API_V1_BASE}/lessons/:id/complete`, ({ params }) => {
+  contract.post("/api/v1/lessons/{lesson_id}/complete", ({ params }) => {
     if (config.completeFails) {
       return serverErrorEnvelope();
     }
-    const lesson = store.get(params.id as string);
+    const lesson = store.get(params.lesson_id as string);
     if (!lesson) {
       return notFoundEnvelope();
     }
     // Locked → 403; complete is idempotent (§6).
     if (lesson.unlock_state === "locked") {
-      return HttpResponse.json(
-        { error: { code: "forbidden", message: "This lesson is locked." } },
-        { status: 403 },
-      );
+      return errorEnvelope(403, "forbidden", "This lesson is locked.");
     }
     lesson.unlock_state = "complete";
     lesson.completedAt ??= nowIso();
