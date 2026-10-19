@@ -91,8 +91,11 @@ and the native SwiftUI iPhone app (`clients/ios/`, see
 - **A user-facing change lands in both clients in the same PR.** That covers a new
   screen, a changed flow, new copy, a new state, or a new API field the UI shows. If
   one side genuinely can't follow in that PR, open a tracked issue for it and link it
-  in the PR description. Never let the two drift silently. The one platform-only
-  capability is iOS push notifications (see the iOS PRD).
+  in the PR description. Never let the two drift silently.
+- **Two named exceptions, and only two.** **Admin tools stay web-only**: the model
+  pickers, the tutor's per-message model override and feature-flag management.
+  **Push notifications are iOS-only** (the iOS PRD and TDD). Anything else a learner
+  can do on one client, they can do on the other.
 - **The API is the contract, and both clients use it unchanged.** Any change under
   `/api/v1` regenerates the committed OpenAPI document and the Swift client in the
   same PR. Update `docs/api.md` as you already do. The web and iOS builds must both
@@ -147,11 +150,16 @@ major (**x**.y.z) bump.
 If a change needs to reach production, commit it as `fix` (or `feat`) — a
 `chore`/`docs` commit will not deploy.
 
-**iOS-only changes** must not deploy the backend. Until `.releaserc.json` excludes an
-`ios` scope, commit them as non-releasing types (`chore(ios):`, `ci(ios):`,
-`test(ios):`). The iOS app ships through its own workflow: a TestFlight upload on
-every merge to `main` that touches `clients/ios/`, a monthly re-upload before the
-90-day build expiry, and a manual dispatch.
+**iOS-only changes** must not deploy the backend. Give them the **`ios` scope**
+(`feat(ios):`, `fix(ios):`, `test(ios):`): `.releaserc.json` tells semantic-release
+to ignore every `(ios)`-scoped commit, whatever its type, so it cuts no release and
+no deploy. **A commit that touches the backend or the web app must not use the `ios`
+scope**, or that change will never ship. Split a mixed change into one commit per
+side (for example `feat(push): …` and `feat(ios): …`). Until the `.releaserc.json`
+rule lands (iOS TDD ticket 3), use non-releasing types for iOS-only work
+(`chore(ios):`, `ci(ios):`). The iOS app ships through its own workflow: a TestFlight
+upload on every merge to `main` that touches `clients/ios/`, a monthly re-upload
+before the 90-day build expiry, and a manual dispatch.
 
 ## More Information
 
