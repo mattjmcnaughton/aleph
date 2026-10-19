@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, claude/ios]
   pull_request:
-    branches: [main]
+    branches: [main, claude/ios]
 
 # Cancel superseded runs on the same ref so a rapid push sequence does not queue
 # redundant CI.
