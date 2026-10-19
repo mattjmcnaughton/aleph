@@ -1,0 +1,152 @@
+name: ios-dev generate (temporary, AL-602)
+
+# TEMPORARY: lives only on ios-dev/al-602-* branches, never in a PR. Runs the Swift
+# client generation on Linux (no local toolchain for the agent), proves the drift
+# check, builds and tests Packages/API, and commits the output back [skip ci].
+on:
+  push:
+    branches: ["ios-dev/al-602-**"]
+
+concurrency:
+  group: ios-dev-generate-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    container: swift:6.2
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          swift --version
+
+      - name: Tool tests (Tools/GenerateAPI)
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p exp && rm -f exp/ci-evidence.txt
+          echo "### step: swift test (Tools/GenerateAPI)" >> exp/ci-evidence.txt
+          swift test --package-path clients/ios/Tools/GenerateAPI 2>&1 | tee -a exp/ci-evidence.txt | tail -n 30
+
+      - name: Generate
+        run: clients/ios/scripts/generate-api.sh
+
+      - name: Drift check passes on fresh output
+        run: clients/ios/scripts/generate-api.sh --check
+
+      - name: "Evidence 1b: drift check fails on a hand-edited copy and on a deleted file"
+        shell: bash
+        run: |
+          exec > >(tee -a exp/ci-evidence.txt) 2>&1
+          echo "### step: Evidence 1b: drift check fails on a hand-edited copy and on a deleted file"
+          set -u
+          gen=clients/ios/Packages/API/Sources/API/Generated
+          backup="$(mktemp -d)"
+          cp -R "$gen/." "$backup/"
+          restore() { rm -rf "$gen" && mkdir -p "$gen" && cp -R "$backup/." "$gen/"; }
+
+          file="$gen/Types.swift"
+          echo "// hand edit" >> "$file"
+          if clients/ios/scripts/generate-api.sh --check > /tmp/edit.log 2>&1; then
+            echo "EVIDENCE FAIL: --check passed on a hand-edited copy" >&2; exit 1
+          fi
+          tail -n 8 /tmp/edit.log
+          echo "EVIDENCE OK: --check exited non-zero on hand-edited $file"
+          restore
+
+          rm "$gen/Client.swift"
+          if clients/ios/scripts/generate-api.sh --check > /tmp/delete.log 2>&1; then
+            echo "EVIDENCE FAIL: --check passed with Client.swift deleted" >&2; exit 1
+          fi
+          grep -E "Only in|is stale" /tmp/delete.log
+          echo "EVIDENCE OK: --check exited non-zero with Client.swift deleted"
+          restore
+
+          clients/ios/scripts/generate-api.sh --check > /tmp/restored.log 2>&1
+          tail -n 1 /tmp/restored.log
+          echo "EVIDENCE OK: --check passes again on the restored output"
+
+      - name: "Evidence 2/3: generated client contents, and the filter.tags mutation"
+        shell: bash
+        run: |
+          exec > >(tee -a exp/ci-evidence.txt) 2>&1
+          echo "### step: Evidence 2/3: generated client contents, and the filter.tags mutation"
+          set -u
+          gen=clients/ios/Packages/API/Sources/API/Generated
+          echo "operations in contract: $(grep -c '"operationId"' clients/openapi.json)"
+          echo "operations generated:   $(grep -cE '^    func [a-zA-Z]+\(_ input: Operations\.' "$gen/Types.swift")"
+          echo "admin paths in Generated: $(grep -c '/api/v1/admin' "$gen"/*.swift | awk -F: '{s+=$2} END {print s}')"
+          grep -nE '^    func (listPaths|sendMessage|sendShapingMessage)\(' "$gen/Types.swift"
+          grep -n 'case "text/event-stream"' "$gen/Types+Operations.swift"
+          grep -nE 'package struct (Stream[A-Za-z]+|ErrorEnvelope):' "$gen/Types+Components+Schemas.swift"
+          cfg="$(mktemp -d)"
+          grep -v -- '    - tutor' clients/ios/Packages/API/openapi-generator-config.yaml > "$cfg/config.yaml"
+          out="$(mktemp -d)"
+          swift run --package-path clients/ios/Tools/GenerateAPI swift-openapi-generator generate \
+            clients/openapi.json --config "$cfg/config.yaml" --output-directory "$out" > /dev/null 2>&1
+          if grep -qE '^    func sendMessage\(' "$out/Types.swift"; then
+            echo "EVIDENCE FAIL: sendMessage generated without the tutor tag in the filter" >&2; exit 1
+          fi
+          echo "EVIDENCE OK: without '- tutor' in filter.tags, sendMessage is not generated ($(grep -cE '^    func [a-zA-Z]+\(_ input: Operations\.' "$out/Types.swift") ops)"
+
+      - name: "Evidence guard: generation without the rewrite fails loudly"
+        shell: bash
+        run: |
+          exec > >(tee -a exp/ci-evidence.txt) 2>&1
+          echo "### step: Evidence guard: generation without the rewrite fails loudly"
+          backup="$(mktemp -d)" && cp -R clients/ios/Packages/API/Sources/API/Generated/. "$backup/"
+          sed 's|swift run --package-path "$tool_pkg" prepare-contract "$contract" "$work/openapi.json"|cp "$contract" "$work/openapi.json"|' \
+            clients/ios/scripts/generate-api.sh > clients/ios/scripts/generate-api-norewrite.sh
+          chmod +x clients/ios/scripts/generate-api-norewrite.sh
+          grep -c 'cp "$contract"' clients/ios/scripts/generate-api-norewrite.sh
+          for mode in "" --check; do
+            if clients/ios/scripts/generate-api-norewrite.sh $mode > /tmp/norewrite.log 2>&1; then
+              echo "EVIDENCE FAIL: generation without the rewrite passed (mode '$mode')" >&2; exit 1
+            fi
+            echo "mode '$mode': $(grep -c 'not supported' /tmp/norewrite.log) unsupported-schema lines; $(tail -n 1 /tmp/norewrite.log)"
+            echo "EVIDENCE OK: generation without the rewrite exits non-zero (mode '$mode')"
+          done
+          rm clients/ios/scripts/generate-api-norewrite.sh
+          rm -rf clients/ios/Packages/API/Sources/API/Generated && mkdir -p clients/ios/Packages/API/Sources/API/Generated
+          cp -R "$backup/." clients/ios/Packages/API/Sources/API/Generated/
+          git status --short
+          clients/ios/scripts/generate-api.sh --check | tail -n 1
+
+      - name: Build and test Packages/API
+        working-directory: clients/ios/Packages/API
+        shell: bash
+        run: |
+          set -o pipefail
+          swift build 2>&1 | tail -n 3
+          echo "### step: swift test (Packages/API)" >> ../../../../exp/ci-evidence.txt
+          swift test 2>&1 | tee -a ../../../../exp/ci-evidence.txt | tail -n 20
+
+      - name: Generated file listing
+        run: ls -la clients/ios/Packages/API/Sources/API/Generated && wc -l clients/ios/Packages/API/Sources/API/Generated/*
+
+      - name: Commit generated output back
+        env:
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A exp/ci-evidence.txt clients/ios/Packages/API/Sources/API/Generated \
+            clients/ios/Packages/API/Package.resolved \
+            clients/ios/Tools/GenerateAPI/Package.resolved
+          if git diff --cached --quiet; then
+            echo "Nothing to commit."
+            exit 0
+          fi
+          git commit -m "build(api): generate the Swift client [skip ci]"
+          for i in 1 2 3; do
+            git pull --rebase origin "$BRANCH" && git push origin "HEAD:$BRANCH" && exit 0
+            sleep $((i * 5))
+          done
+          exit 1
