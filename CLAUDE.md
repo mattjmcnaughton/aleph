@@ -155,11 +155,9 @@ If a change needs to reach production, commit it as `fix` (or `feat`) — a
 to ignore every `(ios)`-scoped commit, whatever its type, so it cuts no release and
 no deploy. **A commit that touches the backend or the web app must not use the `ios`
 scope**, or that change will never ship. Split a mixed change into one commit per
-side (for example `feat(push): …` and `feat(ios): …`). Until the `.releaserc.json`
-rule lands (iOS TDD ticket 3), use non-releasing types for iOS-only work
-(`chore(ios):`, `ci(ios):`). The iOS app ships through its own workflow: a TestFlight
-upload on every merge to `main` that touches `clients/ios/`, a monthly re-upload
-before the 90-day build expiry, and a manual dispatch.
+side (for example `feat(push): …` and `feat(ios): …`). The iOS app ships through its
+own workflow: a TestFlight upload on every merge to `main` that touches `clients/ios/`,
+a monthly re-upload before the 90-day build expiry, and a manual dispatch.
 
 ## More Information
 

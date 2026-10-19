@@ -318,7 +318,9 @@ flyctl tokens create deploy -a aleph-prod-mattjmcnaughton
 1. Merge to `main` with a [conventional commit](https://www.conventionalcommits.org/).
    `fix` / `feat` / `perf` cut a release and therefore deploy; `docs`, `chore`,
    `refactor`, `test`, `style`, `ci`, `build` do not. **If a change needs to reach
-   production, it must be committed as `fix` or `feat`.**
+   production, it must be committed as `fix` or `feat`.** An `(ios)`-scoped commit
+   never releases, whatever its type (`.releaserc.json`'s `releaseRules`); iOS ships
+   through its own TestFlight workflow (see CLAUDE.md's Commit Conventions).
 2. CI (`gate`, `integration`, `e2e`, `compose-smoke`) goes green.
 3. `release.yml` runs semantic-release: version bump, tag, changelog, GitHub release.
 4. In parallel:
