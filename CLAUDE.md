@@ -96,10 +96,12 @@ and the native SwiftUI iPhone app (`clients/ios/`, see
   screen, a changed flow, new copy, a new state, or a new API field the UI shows. If
   one side genuinely can't follow in that PR, open a tracked issue for it and link it
   in the PR description. Never let the two drift silently.
-- **Two named exceptions, and only two.** **Admin tools stay web-only**: the model
+- **One named exception, and only one.** **Admin tools stay web-only**: the model
   pickers, the tutor's per-message model override and feature-flag management.
-  **Push notifications are iOS-only** (the iOS PRD and TDD). Anything else a learner
-  can do on one client, they can do on the other.
+  **Notifications** are not an exception: they reach a learner on every client able
+  to receive them (Web Push on the web, per the [Home Screen app PRD](docs/prds/home-screen-app.md)
+  and CONSTITUTION.md §8). Anything else a learner can do on one client, they can do
+  on the other.
 - **The API is the contract, and both clients use it unchanged.** Any change under
   `/api/v1` regenerates the committed OpenAPI document and the Swift client in the
   same PR. Update `docs/api.md` as you already do. The web and iOS builds must both
