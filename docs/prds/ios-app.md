@@ -7,7 +7,7 @@
 > Those decisions (§6, and the Decisions record in §13) are recorded here because they shape scope
 > and phasing; their mechanics — module layout, the generated client's configuration, the SSE
 > parser, the polling scheduler, the Keychain schema, the fastlane lanes, the push sender, the
-> scheduled job — belong to a companion **iOS TDD** (`docs/tdds/ios-app.md`, not yet written).
+> scheduled job — belong to the companion **[iOS TDD](../tdds/ios-app.md)**.
 > Where this PRD names a mechanism it is because the product rule is unintelligible without it.
 >
 > **The TDD opens with an iOS best-practices brainstorm** — for the code (project and module
@@ -22,6 +22,16 @@
 > as documented in [`api.md`](../api.md#authentication) and
 > [`deploy.md`](../deploy.md#native-app-bearer-token-configuration). The **home-screen PoC** that
 > proves the CI build-and-screenshot loop (Slice 0, §12) is still on another branch.
+>
+> **Amended by the [iOS TDD](../tdds/ios-app.md)** (2026-10-19), which wins where the two differ.
+> The changes made here in place: the Markdown renderer is Apple's swift-markdown plus an
+> app-owned allowlist renderer (ADR 0002, §5.4.1); the SSE decoder is a spike before a hand parser
+> (§6); there is **one Reminder** a day, not two reminder kinds (§5.13, CONTEXT.md); notification
+> permission is provisional first (§5.13); the Learner time zone travels on every request from both
+> clients (ADR 0001, §5.13); UI tests authenticate with a fake issuer and pre-signed tokens rather
+> than Keycloak on macOS (§9.3); the Flow journey is renumbered W32 → W34, so the iOS-only workflows
+> are W35–W40 (§8); the build number is `<commit count>.<run number>` (§10.2); and the §13.3 open
+> items are resolved there, except code signing, which stays deferred.
 
 ## 1. Summary
 
@@ -115,9 +125,8 @@ this PRD includes:
 - **[`CONTEXT.md`](../CONTEXT.md)** — the app itself introduces **no new domain terms**: every
   screen here is named with an existing term. One clarifying line under *Design*: **Nocturne** also
   governs the iOS app, and the **Rail** on a phone is a SwiftUI sheet (one surface, now three
-  presentations). **Push does add terms** — the daily learning reminder, the streak reminder and
-  whatever the TDD names the reminder preference — and they go into CONTEXT.md before any code
-  uses them. The scheduled job also changes two existing entries: **Anchor day** ("no stored
+  presentations). **Push does add terms** — **Reminder**, **Notification** and **Device** (with
+  **Learner time zone** from ADR 0001) — and they are in CONTEXT.md before any code uses them. The scheduled job also changes two existing entries: **Anchor day** ("no stored
   timezone", "a day, never a time", arrival as the trigger) and **Brief prefetch** (deferred
   because "the app sleeps between visits") both stop being true once the job researches Beats
   (§5.14).
@@ -191,7 +200,7 @@ they have an iPhone and would rather tap an icon than find a tab. The first user
 - **Beats & Briefs** (the analyst): deploy an analyst, a Beat's page, the Brief reader — §5.10,
   §5.11.
 - **Flow**: the door, setup, the flow bar and advance, the receipt — §5.12.
-- **Push notifications**: "your path is ready", opt-in daily learning and streak reminders, "Brief
+- **Push notifications**: "your path is ready", the opt-in daily **Reminder**, "Brief
   published" — §5.13 — and the **scheduled job** that sends reminders and runs Beat research —
   §5.14.
 - Unit, snapshot and full-stack UI tests; a macOS CI workflow; TestFlight distribution — §9, §10.
@@ -402,8 +411,8 @@ The Read passage is GitHub-Flavored Markdown written by a model, served as sourc
 the iOS equivalent of `components/markdown.tsx` — the **single** place the app turns generated
 prose into views, and its security boundary.
 
-- Rendered with **swift-markdown-ui** (or an equivalent native renderer chosen in the TDD) over the
-  documented subset: `##`/`###` headings, lists, emphasis, inline code, fenced code blocks
+- Parsed with Apple's **swift-markdown** and drawn by an **app-owned allowlist renderer**
+  ([ADR 0002](../adrs/0002-ios-owned-markdown-renderer.md)) covering only the documented subset: `##`/`###` headings, lists, emphasis, inline code, fenced code blocks
   (horizontally scrollable, monospaced), GFM tables, blockquotes.
 - **No raw HTML is ever interpreted.** HTML in the source renders as literal text or is dropped,
   never as markup, and nothing is handed to a web view.
@@ -503,7 +512,7 @@ complete.
 - On the day's first completion, a brief, non-blocking *Day N 🔥*; nothing on later completions.
   The count bumps optimistically from `completed_today`, as the web does.
 - **In the app, never** a streak warning banner, an in-app nudge, a freeze or a leaderboard. The
-  one exception to the streaks PRD's "never a push" is the **opt-in streak reminder** of §5.13
+  one exception to the streaks PRD's "never a push" is the **opt-in Reminder** of §5.13 (worded for the streak when one is at stake)
   (Slice 8, D6), which the learner turns on themselves; the streaks PRD records the supersession.
 - A failed summary read renders nothing, not an error: the streak is decoration, never a blocker.
 
@@ -571,7 +580,8 @@ The web's `/briefs/{id}`: one `GET /api/v1/briefs/{id}`.
 
 ### 5.12 Flow (Slice 7)
 
-The web's Flow, behind the same `flow` flag (dark by default on the server today, on for admins),
+The web's Flow, behind the same `flow` flag (launched in production; the iOS TDD flips its code
+default on to match),
 re-implemented in Swift because Flow is **100% client-side** — no route, nothing stored on the
 server. The [Flow TDD](../tdds/flow.md) governs behaviour; its pure transitions (the
 `lib/flow-order.ts` rules: eligible paths, Interleave / Random / one-path-at-a-time, *next
@@ -592,9 +602,9 @@ available lesson* within a path) are a **rule written twice and tested twice** (
   the `streaks` flag is on — the day's streak. A celebration plays once per flow, never on a
   revisit. *Start another flow* returns to setup.
 - **State lives in memory for the app's process only** — the iOS analogue of the web's
-  `sessionStorage` choice: a flow never resumes itself after the app is terminated. Whether a flow
-  survives a short backgrounding (the app returning without being terminated) is the TDD's call,
-  stated against the Flow TDD's D5.
+  `sessionStorage` choice: a flow never resumes itself after the app is terminated. A flow **survives
+  backgrounding** while the process lives (backgrounding is not navigation, so the Flow TDD's D5
+  does not end it) and ends when the app is terminated (iOS TDD D19).
 - Nothing about a flow is sent to the server beyond the ordinary lesson reads, Attempts and Mark
   completes.
 
@@ -609,14 +619,12 @@ The preferences live on the server, so the web can show them later without new A
   failed — each with its own plain wording), **event-driven from the backend** at the moment the
   outline settles; no scheduler involved. Tapping opens the path view. Not sent for lesson
   generation (the poll covers a learner who is looking).
-- **(B) Reminders — opt-in, at most once per day, at a learner-chosen local hour.**
-  - a **daily learning reminder** ("Pick up <path title> where you left off"), and
-  - a **streak reminder** ("Keep your 5-day streak going"), only when the learner has a Daily
-    streak to keep.
-  Both are **off until the learner turns them on**; the learner picks one local hour for them. At
-  most **one** reminder notification per learner per local day, whichever kinds are on — when both
-  apply, the streak wording wins. **No reminder is sent on a day the learner has already completed
-  a lesson** (an Active day). Tapping opens the resume target (or Your paths). This **supersedes**
+- **(B) The Reminder — opt-in, at most once per day, at a learner-chosen local hour.** One
+  **Reminder** (CONTEXT.md), **off until the learner turns it on**, at one local hour they pick. Its
+  wording nudges them to continue ("Pick up where you left off"), and when a **Daily streak** is at
+  stake it says so instead ("Keep your 5-day streak going"). At most **one** per learner per local
+  day. **No Reminder is sent on a day the learner has already completed a lesson** (an Active
+  day). Tapping opens the resume target (or Your paths). This **supersedes**
   the streaks PRD's "never a push" for opt-in reminders only; e-mail, freezes, leaderboards and
   in-app warnings stay out ([Phase 5 streaks PRD](phase-5-streaks.md)).
 - **(C) "Brief published."** Sent when a Beat publishes a Brief — normally from the scheduled job
@@ -624,15 +632,17 @@ The preferences live on the server, so the web can show them later without new A
 
 **Client requirements**
 
-- **The permission prompt is asked in context, never at launch:** when the learner first starts a
-  path generating (for A), turns on a reminder (for B), or deploys an analyst (for C), with a
-  one-line pre-prompt saying what will be sent. A declined prompt is respected: the app shows the
+- **Never prompt at launch; provisional first.** After sign-in the app requests **provisional**
+  authorization, which shows no prompt and delivers quietly to Notification Center. The **full
+  system prompt is asked once, in context**: when the learner turns on the Reminder, or after their
+  first path creation, behind a one-line pre-prompt saying what will be sent (iOS TDD §13.6). A declined prompt is respected: the app shows the
   state in settings with a link to the system Settings, and never re-prompts.
-- **Notification settings** in the account menu: the two reminder toggles, the reminder hour, and
-  per-kind toggles for (A) and (C). Changes are written to the server.
+- **Notification settings** in the account menu: the Reminder toggle and its hour, and per-kind
+  toggles for (A) and (C). Changes are written to the server.
 - The app registers its APNs device token after permission is granted, re-registers when the token
-  changes, and **unregisters on sign-out**; the learner's IANA **time zone** is sent with the
-  reminder preference and refreshed on foreground when it changes.
+  changes, and **unregisters on sign-out**. The learner's IANA time zone (the **Learner time
+  zone**, ADR 0001) is reported by **both clients on every request** (iOS TDD §11), not with the
+  preference.
 - A notification carries an **id to open, not a URL**; the app routes it through the same screens
   and the same API reads, so another learner's id simply `404`s. Payload text is plain (no
   Markdown) and carries no Read passage, Brief body or tutor content.
@@ -643,9 +653,9 @@ The preferences live on the server, so the web can show them later without new A
 1. **Device registration** — routes to register and remove an APNs device token for the
    authenticated Account (bearer only; one Account may have several devices). Tokens APNs reports
    as invalid are pruned.
-2. **Reminder and notification preferences** — read and write the per-kind toggles, the reminder
-   local hour and the learner's IANA time zone. This is the first **stored time zone** in the
-   product (the streaks TDD's D3 kept it out); the TDD records the change.
+2. **Reminder and notification preferences** — read and write the per-kind toggles and the
+   Reminder's local hour. The Learner time zone is stored separately, from every request (ADR 0001);
+   it is the first **stored time zone** in the product (the streaks TDD's D3 kept it out).
 3. **An APNs sender** behind a `Protocol` with an in-memory fake (fakes over mocks), using an APNs
    auth key (`.p8`) stored as a Fly secret. A send failure is logged and never fails the request
    or job that triggered it.
@@ -717,9 +727,10 @@ best-practices brainstorm described at the top of this document).
   The generated code sits behind small **protocols** the screens depend on (`PathsAPI`,
   `LessonsAPI`, `BeatsAPI`, `TutorStream`, …), which is what makes the in-memory fakes of §9.1
   cheap.
-- **The SSE stream is hand-parsed.** FastAPI's OpenAPI describes a `text/event-stream` response
-  only loosely, so the two send routes are called through `URLSession.bytes(for:)` and a small,
-  fully unit-tested frame parser over the documented events plus the `: ping` comment.
+- **The SSE stream: spike, then decide.** The two send routes are declared `text/event-stream` in
+  the OpenAPI document and decoded with swift-openapi-runtime's SSE decoder if a spike shows it
+  works; otherwise through `URLSession.bytes(for:)` and a small, fully unit-tested frame parser over
+  the documented events plus the `: ping` comment (iOS TDD §8).
 - **Polling is structured concurrency.** Each poll loop is a `.task` on its screen: cancellation on
   disappear is the language's, not a timer the app must remember to invalidate.
 - **An `AuthSession` protocol** owns sign-in and tokens (D15): the real one wraps **AppAuth-iOS**
@@ -796,30 +807,30 @@ backend** (§9.3). Which slice brings each:
 | 4 | **W17**–**W21** — shaping |
 | 5 | **W22**, **W23** — streaks |
 | 6 | **W29** deploy an analyst, get a cited Brief · **W31** a quiet period is Skipped, not padded (the two analyst workflows the web proves as Playwright journeys; W30, W32 and W33 stay backend integration tests) |
-| 7 | The Flow journey — tagged **W32** in the Flow TDD and its Playwright spec. That number collides with the analyst's W32 integration test (`tests/integration/test_briefing.py`); the TDD resolves the collision (renumbering one of them) before the iOS test is tagged. |
+| 7 | The Flow journey, **W34** — renumbered from W32, which collided with the analyst's W32 integration test (`tests/integration/test_briefing.py`); the iOS TDD (D20) moves Flow's Playwright spec to W34 before the iOS test is tagged. |
 | 8 | Push workflows (below). |
 
-**New, iOS-only workflows.** W34 is the next free number at the time of writing (W1–W33 are taken;
-confirm against `tests/` when the TDD lands, the Phase 6 TDD D16 precedent).
+**New, iOS-only workflows: W35–W40** (W1–W33 are taken and W34 is Flow's; confirmed against
+`tests/` and the Playwright journeys when the TDD landed, the Phase 6 TDD D16 precedent).
 
-- **W34 — Sign in on a phone and see the web's paths.** With a path created through the API for an
+- **W35 — Sign in on a phone and see the web's paths.** With a path created through the API for an
   identity, sign in to the app as that identity → the path is on Your paths with its progress →
   relaunch → still signed in, no prompt.
-- **W35 — An expired token recovers without losing the learner's place.** With the access token
+- **W36 — An expired token recovers without losing the learner's place.** With the access token
   expired, open a lesson → the app refreshes once and renders the lesson; with the refresh token
   also revoked → the app returns to the launch screen cleanly, and after signing in again the same
   lesson state is there.
-- **W36 — A hostile Read passage renders inert.** A lesson whose passage (from the stub model)
+- **W37 — A hostile Read passage renders inert.** A lesson whose passage (from the stub model)
   contains raw HTML, a `javascript:` link and an image reference → the HTML shows as text or not at
   all, the link is not tappable, no image is fetched, and the Quick check still works.
-- **W37 — "Your path is ready" brings the learner back.** Start a path, leave the app → the
+- **W38 — "Your path is ready" brings the learner back.** Start a path, leave the app → the
   backend's fake APNs sender records one push for that path → delivering it to the simulator
   (`xcrun simctl push`) and tapping it opens that path's view.
-- **W38 — A reminder is opt-in and arrives once.** Turn on the daily reminder at a chosen hour →
+- **W39 — A reminder is opt-in and arrives once.** Turn on the daily reminder at a chosen hour →
   the preference is stored with the device's time zone → a job run at that local hour records one
   reminder; a second run the same day records none; a day with a completion records none. (The
   scheduling half is a backend integration test; the iOS half proves the settings and tap-through.)
-- **W39 — A published Brief is pushed and opens.** A Beat's Brief published by a job run → one
+- **W40 — A published Brief is pushed and opens.** A Beat's Brief published by a job run → one
   push recorded, none for a Skipped period → tapping it opens the Brief reader.
 
 ## 9. Testing & CI
@@ -857,16 +868,19 @@ changes as image diffs in the PR. **How references change (D11):**
 ### 9.3 UI tests — against the full backend
 
 **XCUITest** runs the §8 workflows **against the full stack** on every qualifying PR (D10): the
-stub-model app (`scripts/e2e_backend.py`), **Postgres** and **Keycloak**, installed **natively on
-the macOS runner** because GitHub's macOS runners have no Docker. Fixtures create paths and Beats
-through the API using a token minted from the dev realm's `aleph-api-test` client. Fakes are for
+stub-model app (`scripts/e2e_backend.py`) and **Postgres**, installed **natively on the macOS
+runner** because GitHub's macOS runners have no Docker. **Auth uses a fake issuer** (discovery,
+JWKS, userinfo) served by the stub backend in e2e mode, a committed test-only signing key and
+pre-signed long-lived learner and admin tokens, injected by a launch argument compiled only into
+test builds — no Keycloak on macOS (iOS TDD D22). Fixtures create paths and Beats through the API
+with the same tokens. Real Keycloak bearer coverage stays in the Linux integration suite. Fakes are for
 unit and snapshot tests only; there is no hermetic UI-test layer, because a UI test that passes
 against fakes proves nothing about the contract the app actually depends on.
 
-W34's interactive sign-in drives the system `ASWebAuthenticationSession` sheet, which is the
-flakiest thing to automate; if it cannot be made reliable it becomes a scripted manual check in
-the TestFlight checklist (§10.2) and the token-handling half is covered by unit tests. Push
-delivery in W37–W39 is simulated with `xcrun simctl push` from what the fake APNs sender recorded;
+W35's interactive sign-in through the system `ASWebAuthenticationSession` sheet is therefore a
+scripted manual check in the TestFlight checklist (§10.2); the token-handling half is covered by
+unit tests and by the token-launched UI tests. Push
+delivery in W38–W40 is simulated with `xcrun simctl push` from what the fake APNs sender recorded;
 real APNs delivery is a TestFlight checklist item.
 
 ### 9.4 CI
@@ -921,11 +935,12 @@ is ready it goes to review as an ordinary PR, where snapshots only compare.
 - **Uploads (D7).** A TestFlight upload runs **automatically on every merge to `main` that touches
   iOS** (the same path filter as §9.4), on a **monthly schedule** so a current build always exists
   before the **90-day build expiry**, and by **manual `workflow_dispatch`**. The **build number is
-  the CI run number**; the marketing version is set in the project and bumped by hand (TDD).
+  the commit count** (`<commit count>.<run number>`, so the monthly re-upload of an unchanged
+  `main` still increases it); the marketing version `0.N` is set in the project and bumped by hand
+  (iOS TDD D21).
 - **iOS-only commits never cut a backend release.** semantic-release versions and deploys the
-  backend from commit types, so until `.releaserc.json` excludes an `ios` scope, iOS-only work is
-  committed with non-releasing types (`chore(ios):`, `ci(ios):`, `test(ios):`, `docs(ios):`) as
-  CLAUDE.md states.
+  backend from commit types, so `.releaserc.json` ignores every `(ios)`-scoped commit (iOS TDD
+  ticket 3), and a commit that touches the backend never uses that scope, as CLAUDE.md states.
 - A release checklist covers what automation cannot: a real-device sign-in against Auth0, a real
   APNs push of each kind, and a pass through the Slice's workflows.
 
@@ -968,7 +983,7 @@ they are **not v1 requirements**.
   day, never on a day already studied.
 - **Kill switches reach the app.** Flags are re-read on foreground (§5.9); a flagged route's `404`
   degrades the surface quietly.
-- **No new data leaves the device** beyond the push token and the reminder time zone. No analytics
+- **No new data leaves the device** beyond the push token and the Learner time zone. No analytics
   SDK, no crash SDK beyond Apple's own.
 - **The refusal boundary is unchanged.** The app adds no new generation input; it sends exactly the
   fields the web sends.
@@ -981,14 +996,14 @@ Slices are numbered on their own to avoid colliding with the roadmap's phases. E
 | Slice | Contents | Exit |
 | --- | --- | --- |
 | **0 — PoC** *(another branch)* | A trivial home screen in `clients/ios/`, built on a macOS runner, with one committed snapshot PNG an agent can read (the `ios-dev/*` loop, §9.5). | The CI build + screenshot loop works end to end. Nothing user-facing. |
-| **1 — Read and check (MVP)** | Bearer auth (✅ PR #218) configured for Auth0's Native app; the generated client and drift check; the path-filtered `ios` workflow with native Postgres + Keycloak; §5.1 sign-in/out; §5.2 Your paths (read-only, Continue); §5.3 path view (read-only); §5.4 lesson view with every state; the snapshot and full-stack UI suites; TestFlight **internal** with automatic uploads; the `client` event dimension (D5). | The owner does a day's lessons in the app; W2, W3, W4, W6, W8 (lesson), W34, W35, W36 pass. |
+| **1 — Read and check (MVP)** | Bearer auth (✅ PR #218) configured for Auth0's Native app; the generated client and drift check; the path-filtered `ios` workflow with native Postgres and a fake issuer; §5.1 sign-in/out; §5.2 Your paths (read-only, Continue); §5.3 path view (read-only); §5.4 lesson view with every state; the snapshot and full-stack UI suites; TestFlight **internal** with automatic uploads; the `client` event dimension (D5). | The owner does a day's lessons in the app; W2, W3, W4, W6, W8 (lesson), W35, W36, W37 pass. |
 | **2 — Make paths** | §5.5 New path; delete, rename, Teaching style. TestFlight **external** public link opens. | W1, W5, W7, W8 (outline) pass; a friend makes and starts a path unaided. |
 | **3 — The tutor** | §5.6, including D8 backgrounding. | W9, W11–W16 pass. |
 | **4 — Shape your path** | §5.7. | W17–W21 pass. |
 | **5 — Streaks** | §5.8. Small — one read and three views — and could move earlier without disturbing anything. | W22, W23 pass. |
 | **6 — Beats & Briefs** | §5.10, §5.11; the path-complete *Follow it as a Beat* door. | W29, W31 pass. |
 | **7 — Flow** | §5.12, behind the `flow` flag exactly as the web is. | The Flow journey (W32 or its renumbering, §8) passes. |
-| **8 — Push & the scheduled job** | Backend: device registration, preferences, the APNs sender, the hourly job and its deploy lifecycle, Brief generation moved into the job (§5.13, §5.14). App: permission prompts, notification settings, routing. Shipped in order **A → B → C**. | W37, W38, W39 pass; the job's idempotency tests pass; one real push of each kind on a TestFlight device. |
+| **8 — Push & the scheduled job** | Backend: device registration, preferences, the APNs sender, the hourly job and its deploy lifecycle, Brief generation moved into the job (§5.13, §5.14). App: permission prompts, notification settings, routing. Shipped in order **A → B → C**. | W38, W39, W40 pass; the job's idempotency tests pass; one real push of each kind on a TestFlight device. |
 | **Later** | Sandboxed Mermaid; Universal Links; App Store submission (§10.3). | Sequenced against usage. |
 
 ## 13. Decisions, risks and remaining open items
@@ -1006,11 +1021,11 @@ listed in §10.3, not in requirements.
 | **D3** | Ephemeral or shared browser session? | **Ephemeral** (`prefersEphemeralWebBrowserSession`). | No system prompt, no Safari cookie, and sign-out needs no provider logout. |
 | **D4** | Account deletion? | **Deferred to App Store time** (standing rule), specified for both clients at once. | Required by App Review, not by TestFlight. |
 | **D5** | A `client` dimension on product events? | **Yes, server-derived:** cookie → `web`; bearer → keyed on the token's client id (`azp`/`client_id`), iOS client id → `ios`. Small backend follow-up after #218. | Without it the primary metric (§7) cannot be computed; deriving it server-side means a client cannot misreport it. |
-| **D6** | What is push for? | **In v1, its own slice (8):** (A) "your path is ready" when outline generation finishes, event-driven; (B) daily learning reminders **and** streak reminders, opt-in, at most once per day, at a learner-chosen local hour; (C) "Brief published". (B) supersedes the streaks PRD's "never push about streaks" for opt-in reminders. | These are the returns a phone app can create that a tab cannot; opt-in and once-a-day keep the streaks PRD's restraint in spirit. |
-| **D7** | How is the iOS app versioned and released? | **Automatic TestFlight upload on every merge to `main` touching iOS**, plus a **monthly scheduled re-upload** (beats the 90-day expiry) and **manual `workflow_dispatch`**; **build number = CI run number**; iOS-only commits use non-releasing types until `.releaserc.json` excludes an `ios` scope. | A current build always exists, and the backend's semantic-release never deploys because of an iOS change. |
+| **D6** | What is push for? | **In v1, its own slice (8):** (A) "your path is ready" when outline generation finishes, event-driven; (B) one opt-in **Reminder** a day at a learner-chosen local hour, worded for the streak when a Daily streak is at stake (amended from two reminder kinds, iOS TDD D12); (C) "Brief published". (B) supersedes the streaks PRD's "never push about streaks" for opt-in reminders. | These are the returns a phone app can create that a tab cannot; opt-in and once-a-day keep the streaks PRD's restraint in spirit. |
+| **D7** | How is the iOS app versioned and released? | **Automatic TestFlight upload on every merge to `main` touching iOS**, plus a **monthly scheduled re-upload** (beats the 90-day expiry) and **manual `workflow_dispatch`**; **build number = commit count** (amended from the CI run number; `<commit count>.<run number>`, iOS TDD D21); `.releaserc.json` ignores `(ios)`-scoped commits. | A current build always exists, and the backend's semantic-release never deploys because of an iOS change. |
 | **D8** | Should a streaming reply survive backgrounding? | Request **`beginBackgroundTask`** time; if the stream is still lost, keep the message **in the composer for one-tap resend**. | Most replies finish in the granted time; when one doesn't, nothing is lost but a tap. |
 | **D9** | Should Your paths acknowledge Beats? | **Dropped — moot.** Beats are in v1 (§5.10). | — |
-| **D10** | Where does the full-stack XCUITest stack run? | **On PRs, as required checks, against the full backend** (`scripts/e2e_backend.py` + Postgres + Keycloak installed natively on the macOS runner); gated by a **home-written path filter** (`clients/ios/**`, the OpenAPI document, `scripts/e2e_backend.py`, the iOS workflow); skipped jobs count as passing; **no nightly** on `main` for now. Fakes for unit and snapshot tests only. `ios-dev/*` branches for agents without Xcode. | Contract bugs are caught before merge, macOS minutes are spent only when iOS can be affected, and no third-party action is trusted with CI gating. |
+| **D10** | Where does the full-stack XCUITest stack run? | **On PRs, as required checks, against the full backend** (`scripts/e2e_backend.py` + Postgres installed natively on the macOS runner, with a fake issuer and pre-signed tokens instead of Keycloak — amended by iOS TDD D22); gated by a **home-written path filter** (`clients/ios/**`, the OpenAPI document, `scripts/e2e_backend.py`, the iOS workflow); skipped jobs count as passing; **no nightly** on `main` for now. Fakes for unit and snapshot tests only. `ios-dev/*` branches for agents without Xcode. | Contract bugs are caught before merge, macOS minutes are spent only when iOS can be affected, and no third-party action is trusted with CI gating. |
 | **D11** | How do recorded snapshots get back to the branch? | **CI commits recorded references only on `ios-dev/*`**; on PRs, snapshots compare against the committed references. | Agents get their PNGs without a Mac; PR branches are never rewritten by a bot. |
 | **D12** | Code signing: `match` or cloud-managed? | **Deferred** — decided during TestFlight setup. | It is a setup detail with no product consequence; deciding with the Apple account in hand is cheaper. |
 | **D13** | Is light mode real? | **Dark only for v1**, matching the web; **no light snapshots**; Dynamic Type (large-text) variants kept. | Nocturne is a dark system; a light theme is design work v1 does not need. |
@@ -1024,7 +1039,7 @@ listed in §10.3, not in requirements.
 
 ### 13.2 Risks
 
-- **Full-stack UI tests on macOS** depend on native Postgres and Keycloak installs on a runner
+- **Full-stack UI tests on macOS** depend on a native Postgres install on a runner
   image Apple and GitHub update often; a broken install blocks iOS PRs. Mitigation: pin versions,
   cache the installs, and keep the path filter tight so backend-only PRs are never blocked.
 - **macOS CI cost** (§9.4). Mitigation: the path filter, cancellation, and no nightly run.
@@ -1056,25 +1071,30 @@ listed in §10.3, not in requirements.
 
 ### 13.3 Remaining open items (for the TDD)
 
-1. **Code signing** (D12) — `match` versus cloud-managed signing, at TestFlight setup.
-2. **The idle-Beat test** (§5.14) — the PRD suggests "latest published Brief still unread"; the
-   TDD confirms or replaces it, and states how a learner with no stored time zone is treated.
-3. **Flow and backgrounding** (§5.12) — whether a flow survives a short backgrounding.
-4. **The Flow W32 collision** (§8) — renumber before tagging.
-5. **Required-check mechanics** for path-filtered jobs (§9.4).
+Items 2–5 are resolved in the [iOS TDD](../tdds/ios-app.md); item 1 stays open.
+
+1. **Code signing** (D12) — `match` versus cloud-managed signing, at TestFlight setup. *Still
+   open* (iOS TDD §20.1).
+2. **The idle-Beat test** (§5.14) — *confirmed*: a Beat whose latest published Brief is unread is
+   not researched; a learner with no stored time zone is treated as UTC (iOS TDD D16, D17).
+3. **Flow and backgrounding** (§5.12) — *resolved*: a flow survives backgrounding, not termination
+   (iOS TDD D19).
+4. **The Flow W32 collision** (§8) — *resolved*: Flow becomes W34 (iOS TDD D20).
+5. **Required-check mechanics** for path-filtered jobs (§9.4) — *resolved*: a `changes` job plus
+   `if:`-skipped jobs, which report success (iOS TDD §17.1).
 
 ## 14. Release criteria (v1 = Slices 1–8)
 
 The app's v1 is shipped when:
 
 - [ ] Every §8 workflow for Slices 1–8 passes on CI against the full stub-model backend, and
-      W34/W35 pass against Auth0 at least in the release checklist.
+      W35/W36 pass against Auth0 at least in the release checklist.
 - [ ] A learner can sign in with their web account and see exactly the paths, progress and Beats
       the web shows — and a completion or Brief read in either client shows in the other on its
       next read.
 - [ ] The Quick check answer is never present in the app before an Attempt (W6), and no screen
       grades on the client.
-- [ ] A hostile Read passage renders inert (W36); no surface renders model output through anything
+- [ ] A hostile Read passage renders inert (W37); no surface renders model output through anything
       but the one Markdown renderer.
 - [ ] Every screen state in §5 has a snapshot in dark and at an accessibility text size, committed
       and green.
