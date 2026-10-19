@@ -34,7 +34,7 @@ afterthought.
 | **4 — Adaptive paths** | ⬜ Not started — **no PRD yet** (2B pre-built the proposal/apply machinery) | — |
 | **5 — Momentum** | 🟡 In progress — streaks shipped **and launched**; goal ring and daily minutes unbuilt | streaks: [PRD](prds/phase-5-streaks.md) · [TDD](tdds/phase-5-streaks.md) |
 | **6 — The analyst** | ✅ Shipped & launched (`analyst` flag on) — a second pillar beside paths, not a deepening of one | [PRD](prds/phase-6-analyst.md) · [TDD](tdds/phase-6-analyst.md) |
-| **Flow** | 🟡 In progress — behind the `flow` flag | [TDD](tdds/flow.md) · [mock](mocks/aleph-flow-mode.html) |
+| **Flow** | ✅ Shipped & launched (`flow` flag on) | [TDD](tdds/flow.md) · [mock](mocks/aleph-flow-mode.html) |
 | **Beyond** | ⬜ Unscoped, sequenced against real usage | — |
 
 Three tails hang off the shipped phases and are tracked as open issues rather than
@@ -304,8 +304,8 @@ one. The PRD's historical suggestion of drafting flashcards from Briefs is retir
 
 ## Flow
 
-> 🟡 **Status:** in progress, behind the `flow` flag — dark by default, admin-on,
-> the same dark-then-flip playbook as the flags above. Unlike every one of them,
+> ✅ **Status:** shipped and launched — the `flow` flag defaults on (iOS TDD D19),
+> after the same dark-then-flip playbook as the flags above. Unlike every one of them,
 > Flow is **100% client-side**: no table, no route, no migration; the flag is a
 > plain client check rather than a router `404`.
 > 📄 **Full spec:** [Flow TDD](tdds/flow.md), mock: [Flow mode](mocks/aleph-flow-mode.html)

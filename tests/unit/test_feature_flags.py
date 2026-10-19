@@ -166,26 +166,27 @@ def test_analyst_is_registered_and_launched_on_by_default() -> None:
 
 
 @pytest.mark.anyio
-async def test_flow_is_registered_dark_and_admin_on(
+async def test_flow_is_registered_and_launched_on_by_default(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Flow's one flag (flow TDD D10): dark by default, admin-on.
+    """Flow's one flag (flow TDD D10), launched the same way (iOS TDD D19).
 
-    Flow spends its whole build-out at ``False``, exactly like the five phase
-    flags above did — the difference is that Flow is 100% client-side, so this
-    is the *only* backend touch the whole feature needs: no route to gate
-    ``404``, just a key the client reads with ``useFeatureFlag("flow")``.
-    Membership in :data:`ADMIN_DEFAULT_FLAGS` is what makes it dogfoodable by
-    admins before the launch ticket (flow TDD §8, ticket 7) flips the default.
+    Flow spent its whole build-out at ``False``, exactly like the phase flags
+    above did. It is 100% client-side, so this flag is the *only* backend touch
+    the whole feature needs: no route to gate ``404``, just a key both clients
+    read. This flip is the launch itself: a plain learner with nothing
+    configured resolves it on. Membership in :data:`ADMIN_DEFAULT_FLAGS` is
+    asserted still: it is redundant while the default is ``True``, but it is
+    what the flag falls back to if this is ever flipped dark again.
     """
     monkeypatch.setattr(settings, "feature_flag_defaults", "")
     service = _service(StubFeatureFlagRepository())
 
     assert feature_flags.FeatureFlag.FLOW == "flow"
-    assert feature_flags.FLAG_DEFAULTS[feature_flags.FeatureFlag.FLOW] is False
+    assert feature_flags.FLAG_DEFAULTS[feature_flags.FeatureFlag.FLOW] is True
     assert feature_flags.FeatureFlag.FLOW in feature_flags.ADMIN_DEFAULT_FLAGS
     assert (await service.resolve_for_user(_admin_user()))["flow"] is True
-    assert (await service.resolve_for_user(_user()))["flow"] is False
+    assert (await service.resolve_for_user(_user()))["flow"] is True
 
 
 def test_the_registry_is_exactly_the_five_phase_flags() -> None:

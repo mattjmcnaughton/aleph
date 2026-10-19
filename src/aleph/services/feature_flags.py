@@ -41,7 +41,8 @@ without disturbing the other.
 
 ``streaks`` (Phase 5, D7) was registered the same way again, and rode the same
 playbook from dark to launched. ``analyst`` (Phase 6, TDD D12) followed the
-same rollout pattern.
+same rollout pattern, and so did ``flow`` (flow TDD D10, launched by iOS TDD
+D19), the first flag gated only in the client.
 
 **All launched flags default on.** Their entry in :data:`FLAG_DEFAULTS`
 is the whole of that: a clone with no ``FEATURE_FLAG_DEFAULTS`` set — a laptop, a
@@ -137,12 +138,13 @@ FLAG_DEFAULTS: dict[FeatureFlag, bool] = {
     # and Briefs via ``ADMIN_DEFAULT_FLAGS`` below. This flip is the launch
     # itself, following the same earlier launch playbook.
     FeatureFlag.ANALYST: True,
-    # Off: Flow (docs/tdds/flow.md) is unbuilt-to-launched, same as every
-    # phase above spent its own build-out — dark here, on for admins via
-    # `ADMIN_DEFAULT_FLAGS` below, so the door, setup sheet, flow bar and
-    # receipt merge and deploy with zero learner exposure until the launch
-    # ticket (flow TDD §8, ticket 7) flips this to `True`.
-    FeatureFlag.FLOW: False,
+    # On: Flow (docs/tdds/flow.md) is launched (iOS TDD D19, AL-623). It
+    # spent its whole build-out at ``False`` — dark here, on for admins via
+    # ``ADMIN_DEFAULT_FLAGS`` below, so the door, setup sheet, flow bar and
+    # receipt merged and deployed with zero learner exposure. Production then
+    # ran it on by override; this flip makes the code default say the same,
+    # so both clients, a fresh clone and every CI run see it.
+    FeatureFlag.FLOW: True,
 }
 
 
@@ -160,9 +162,8 @@ FLAG_DEFAULTS: dict[FeatureFlag, bool] = {
 # because this is the seam the *next* dark phase uses, and re-deriving which
 # flags belong here is exactly the kind of thing that gets forgotten at the
 # moment a flag flips back off — membership costs nothing while a flag is
-# launched and saves a forgotten step the day one isn't. ``FLOW`` is the next
-# dark phase itself: its code default is still ``False``, so membership here
-# is what makes it dogfoodable by admins in production before the launch flip.
+# launched and saves a forgotten step the day one isn't. ``FLOW`` was the last
+# flag to use this seam for real, before its own launch flip (AL-623).
 ADMIN_DEFAULT_FLAGS: frozenset[FeatureFlag] = frozenset(
     {
         FeatureFlag.TUTOR,

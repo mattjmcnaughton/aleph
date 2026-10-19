@@ -429,7 +429,7 @@ that block. Resolution order and the full semantics are in
 (`services/feature_flags.py`) from `False` to `True`. That is the launch: it
 reaches production *and* every developer's laptop and every CI run at once, which
 is why it beats setting the env var — one statement of what is live, not two.
-`tutor`, `shaping`, `streaks`, and `analyst` were launched this way. The retired
+`tutor`, `shaping`, `streaks`, `analyst`, and `flow` were launched this way. The retired
 flashcard flag is no longer registered.
 
 Use the `fly.toml` env var instead only when the flip must be **reversible
