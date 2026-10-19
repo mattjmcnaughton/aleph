@@ -17,11 +17,14 @@
 
 import type { ReactNode } from "react";
 
-/** Status tone per row variant — refusal is iris, failure is danger (CONTEXT). */
+/** Status tone per row variant — refusal is iris, failure is danger (CONTEXT).
+ *  `unread` (a Beat with a Brief waiting) is iris too, told apart from a
+ *  refusal by its lighter tint, glow, and the unread dot the Beat row adds. */
 export const ROW_STATUS_TONE = {
   neutral: "text-mist",
   refusal: "text-iris-300",
   error: "text-danger",
+  unread: "text-iris-400",
 } as const;
 
 export type RowVariant = keyof typeof ROW_STATUS_TONE;
@@ -35,6 +38,8 @@ const ROW_TONE = {
   refusal: "border-iris-700 bg-iris-900 lg:shadow-[inset_2px_0_0_theme(colors.iris.700)]",
   error:
     "border-danger-border/60 bg-danger-bg lg:shadow-[inset_2px_0_0_theme(colors.danger.DEFAULT)]",
+  unread:
+    "border-iris/50 bg-iris/[0.06] shadow-glow-iris lg:shadow-[inset_2px_0_0_theme(colors.iris.DEFAULT)]",
 } as const;
 
 // `group` is what lets a row's Delete button reveal on hover (see `RowActions`).
