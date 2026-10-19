@@ -55,6 +55,22 @@ typecheck-be:
 typecheck-fe:
     cd {{fe_dir}} && pnpm run typecheck
 
+# Write the API contract both clients generate from (clients/openapi.json, iOS TDD §4.1)
+openapi:
+    uv run python -m scripts.export_openapi
+
+# Fail if clients/openapi.json is stale (regenerate to a temp file and diff)
+openapi-check:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    tmp="$(mktemp)"
+    trap 'rm -f "$tmp"' EXIT
+    uv run python -m scripts.export_openapi --output "$tmp"
+    if ! diff -u clients/openapi.json "$tmp"; then
+        echo "clients/openapi.json is stale: run \`just openapi\` and commit the result" >&2
+        exit 1
+    fi
+
 # Run all tests
 test-all: test-unit test-integration test-e2e
 
@@ -122,7 +138,7 @@ record-retrieval-fixtures *ARGS:
 gate: gate-be gate-fe
 
 # Backend gate
-gate-be: fmt-be lint-be typecheck-be test-unit-be
+gate-be: fmt-be lint-be typecheck-be openapi-check test-unit-be
 
 # Frontend gate
 gate-fe: fmt-fe lint-fe typecheck-fe test-unit-fe

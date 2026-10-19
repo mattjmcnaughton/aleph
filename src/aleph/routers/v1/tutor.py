@@ -70,6 +70,10 @@ from aleph.config import settings
 from aleph.db import get_session
 from aleph.dependencies import get_current_user
 from aleph.domains.grading import Outcome
+from aleph.dtos.stream import (
+    TutorStreamFrame,
+    event_stream_responses,
+)
 from aleph.dtos.tutor import (
     ConversationResponse,
     MessageDTO,
@@ -225,6 +229,11 @@ def _message_dto(entry: ThreadMessage) -> MessageDTO:
 @router.post(
     "/paths/{path_id}/conversation/messages",
     response_class=StreamingResponse,
+    response_model=TutorStreamFrame,
+    responses=event_stream_responses(
+        TutorStreamFrame,
+        "The reply as an event stream: delta, tutor_check, then done or error.",
+    ),
 )
 async def send_message(
     path: OwnedPath,

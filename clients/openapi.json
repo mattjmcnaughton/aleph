@@ -1,0 +1,3701 @@
+{
+  "components": {
+    "schemas": {
+      "ActivityCellDTO": {
+        "description": "One day of the 49-day activity strip (D12): a date and its lesson count.\n\n``count`` is zero-filled for a day with no completions — the strip always\ncarries exactly ``STREAK_ACTIVITY_WINDOW_DAYS`` entries, oldest first,\nending at ``today`` (``domains.streaks.activity_window``).",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "date": {
+            "format": "date",
+            "title": "Date",
+            "type": "string"
+          }
+        },
+        "required": [
+          "date",
+          "count"
+        ],
+        "title": "ActivityCellDTO",
+        "type": "object"
+      },
+      "AddLessonsOperation": {
+        "additionalProperties": false,
+        "description": "The ``add_lessons`` operation: new lessons at a position (TDD §4).\n\n``insert_at_position`` is a ``position_in_path`` value in the payload's\nsnapshot of the path; apply re-resolves it against live state (D5).",
+        "properties": {
+          "estimated_minutes": {
+            "exclusiveMinimum": 0.0,
+            "title": "Estimated Minutes",
+            "type": "integer"
+          },
+          "insert_at_position": {
+            "minimum": 1.0,
+            "title": "Insert At Position",
+            "type": "integer"
+          },
+          "lessons": {
+            "items": {
+              "$ref": "#/components/schemas/ProposedLesson"
+            },
+            "minItems": 1,
+            "title": "Lessons",
+            "type": "array"
+          },
+          "new_unit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProposedUnit"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rationale": {
+            "title": "Rationale",
+            "type": "string"
+          }
+        },
+        "required": [
+          "insert_at_position",
+          "lessons",
+          "rationale",
+          "estimated_minutes"
+        ],
+        "title": "AddLessonsOperation",
+        "type": "object"
+      },
+      "ApplyProposalResponse": {
+        "description": "``POST /api/v1/messages/{id}/apply-proposal`` body (§5.6 step 4).\n\nThe Change that was just committed **and the refreshed path**, in one round\ntrip, so the rail can swap its **ghost rows** for real ones without a second\nrequest and without guessing what landed. ``path`` is exactly what\n``GET /paths/{id}`` returns — the same query Phase 1's polling populates\n(TDD §8) — so the client drops it straight into the cache it already has.\n\nA Change is *applied* when the structure lands, not when generation finishes\n(PRD §5.7): the added rows in ``path`` are ``ungenerated`` and a revised one\nhas gone back to ``ungenerated``, and Phase 1's untouched pipeline takes it\nfrom there.",
+        "properties": {
+          "change": {
+            "$ref": "#/components/schemas/ChangeDTO"
+          },
+          "path": {
+            "$ref": "#/components/schemas/PathDetailResponse"
+          }
+        },
+        "required": [
+          "change",
+          "path"
+        ],
+        "title": "ApplyProposalResponse",
+        "type": "object"
+      },
+      "AttemptRequest": {
+        "description": "``POST /api/v1/lessons/{id}/attempt`` body: the selected option index.\n\n``selected_index`` is the 0-based index of the option the learner chose. It\nis graded server-side against the keyed ``correct_index``; an out-of-range\nindex simply grades ``incorrect`` (grading's contract, ``domains/grading``),\nso no bound is enforced here — the option count is the agent validator's job.",
+        "properties": {
+          "selected_index": {
+            "title": "Selected Index",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "selected_index"
+        ],
+        "title": "AttemptRequest",
+        "type": "object"
+      },
+      "AttemptResultDTO": {
+        "description": "The revealed Quick-check outcome, present only **after** an Attempt.\n\nSerialized on the lesson detail (``attempt``) once the learner has a\nrecorded Attempt, and returned directly from the attempt endpoint. Carries\nthe recorded (first-wins) ``selected_index``, the deterministic\n``outcome`` re-derived from it, and the now-revealed ``correct_index`` +\n``explanation`` (CONTEXT.md: the Outcome reveals the explanation and lets the\nlearner proceed either way). Because it appears only post-Attempt, the\npre-Attempt payload has no correct answer anywhere (W6).",
+        "properties": {
+          "correct_index": {
+            "title": "Correct Index",
+            "type": "integer"
+          },
+          "explanation": {
+            "title": "Explanation",
+            "type": "string"
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/Outcome"
+          },
+          "selected_index": {
+            "title": "Selected Index",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "selected_index",
+          "outcome",
+          "correct_index",
+          "explanation"
+        ],
+        "title": "AttemptResultDTO",
+        "type": "object"
+      },
+      "BeatDetailDTO": {
+        "description": "``GET /api/v1/beats/{id}`` body (§6) — the poll target and the rail.\n\n``research_state`` is ``idle | researching | failed | refused`` (D3).\n``refusal_message`` is non-null only when ``research_state == refused``\n(the ``PathDetailResponse.refusal_message`` precedent, one phase over).\n``entries`` is newest first, **never locked** (PRD §3) — every entry in\nthe list is always fully rendered, unlike a path's lesson list.",
+        "properties": {
+          "anchor_weekday": {
+            "maximum": 6.0,
+            "minimum": 0.0,
+            "title": "Anchor Weekday",
+            "type": "integer"
+          },
+          "cadence": {
+            "const": "weekly",
+            "title": "Cadence",
+            "type": "string"
+          },
+          "entries": {
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "published": "#/components/schemas/PublishedEntryDTO",
+                  "skipped": "#/components/schemas/SkippedEntryDTO"
+                },
+                "propertyName": "kind"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/PublishedEntryDTO"
+                },
+                {
+                  "$ref": "#/components/schemas/SkippedEntryDTO"
+                }
+              ]
+            },
+            "title": "Entries",
+            "type": "array"
+          },
+          "guidance": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Guidance"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "level": {
+            "$ref": "#/components/schemas/Level"
+          },
+          "refusal_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refusal Message"
+          },
+          "research_started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Research Started At"
+          },
+          "research_state": {
+            "$ref": "#/components/schemas/BeatResearchState"
+          },
+          "topic": {
+            "title": "Topic",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "topic",
+          "level",
+          "guidance",
+          "anchor_weekday",
+          "cadence",
+          "research_state",
+          "research_started_at",
+          "refusal_message",
+          "entries"
+        ],
+        "title": "BeatDetailDTO",
+        "type": "object"
+      },
+      "BeatListResponse": {
+        "description": "``GET /api/v1/beats`` body: the learner's Beats.\n\nWrapped in an object (never a bare top-level array), the\n``PathListResponse`` precedent, so the payload can grow fields without a\nbreaking shape change.",
+        "properties": {
+          "beats": {
+            "items": {
+              "$ref": "#/components/schemas/BeatSummaryDTO"
+            },
+            "title": "Beats",
+            "type": "array"
+          }
+        },
+        "required": [
+          "beats"
+        ],
+        "title": "BeatListResponse",
+        "type": "object"
+      },
+      "BeatResearchState": {
+        "description": "A Beat's research run state (Phase 6 TDD §4/D3).\n\n``idle`` -> ``researching`` -> ``idle``, with ``failed`` (retryable) and\n``refused`` (terminal, safety) branches — the ``PathStatus`` claim shape\n(``repositories/_generation.py``), one asymmetry: a path's status is\n*terminal* on success (``ready``); a Beat's returns to ``idle`` because it\nreports again next Anchor day, so this is its own enum rather than a reuse\nof ``PathStatus``.",
+        "enum": [
+          "idle",
+          "researching",
+          "failed",
+          "refused"
+        ],
+        "title": "BeatResearchState",
+        "type": "string"
+      },
+      "BeatSummaryDTO": {
+        "description": "One row of ``GET /api/v1/beats`` (§6: \"the learner's Beats with unread\ncounts and research state\").\n\n``unread_count`` counts **published Briefs only** with ``read_at IS\nNULL`` for this Beat (``BriefRepository.unread_counts_by_beat``,\ncode-review FIX 3 on AL-522) — the figure behind the home card's \"3 new\nbriefs\" copy (§8); it does not itself distinguish which Briefs are\nunread, only how many. Deliberately excludes Skipped entries: nothing\ncan ever stamp a Skipped row's read state (it carries no ``read_at`` at\nall, and its rail row links nowhere in the shipped frontend), so counting\nit here would make the figure monotone in skips and unable to reach zero.",
+        "properties": {
+          "anchor_weekday": {
+            "maximum": 6.0,
+            "minimum": 0.0,
+            "title": "Anchor Weekday",
+            "type": "integer"
+          },
+          "cadence": {
+            "const": "weekly",
+            "title": "Cadence",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "level": {
+            "$ref": "#/components/schemas/Level"
+          },
+          "refusal_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refusal Message"
+          },
+          "research_started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Research Started At"
+          },
+          "research_state": {
+            "$ref": "#/components/schemas/BeatResearchState"
+          },
+          "topic": {
+            "title": "Topic",
+            "type": "string"
+          },
+          "unread_count": {
+            "title": "Unread Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "topic",
+          "level",
+          "anchor_weekday",
+          "cadence",
+          "research_state",
+          "research_started_at",
+          "refusal_message",
+          "unread_count"
+        ],
+        "title": "BeatSummaryDTO",
+        "type": "object"
+      },
+      "BriefDetailDTO": {
+        "description": "``GET /api/v1/briefs/{id}`` body (§6): body Markdown, Sources,\n`builds_on`.\n\n``number``/``title``/``body_markdown`` are nullable — not because the\ncommon case (a published Brief, TDD §6's own example) ever leaves them\nunset, but because this same route also resolves a Skipped entry's id\n(its rail row links nowhere in the shipped frontend, §8, but the API\nitself draws no such line): a Skipped row's own ``CHECK`` constraint\n(D2/§4) guarantees exactly these three columns are ``NULL`` at the\nstorage layer, and this DTO mirrors that truthfully rather than\nfabricating placeholder text.",
+        "properties": {
+          "beat_id": {
+            "format": "uuid",
+            "title": "Beat Id",
+            "type": "string"
+          },
+          "body_markdown": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Body Markdown"
+          },
+          "builds_on": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BuildsOnDTO"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "number": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Number"
+          },
+          "published_on": {
+            "format": "date",
+            "title": "Published On",
+            "type": "string"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/SourceDTO"
+            },
+            "title": "Sources",
+            "type": "array"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "required": [
+          "id",
+          "beat_id",
+          "number",
+          "published_on",
+          "title",
+          "body_markdown",
+          "builds_on",
+          "sources"
+        ],
+        "title": "BriefDetailDTO",
+        "type": "object"
+      },
+      "BuildsOnDTO": {
+        "description": "The `Builds on Brief #N` line's data (CONTEXT.md: Brief continuity).\n\n``None`` on the parent ``BriefDetailDTO`` for Brief #1 and for every\nSkipped entry (D1: \"no `builds_on_brief_id`\" — this is a derived\n``number < :n`` read, never a stored edge).",
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "number": {
+            "title": "Number",
+            "type": "integer"
+          },
+          "published_on": {
+            "format": "date",
+            "title": "Published On",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "number",
+          "published_on"
+        ],
+        "title": "BuildsOnDTO",
+        "type": "object"
+      },
+      "ChangeDTO": {
+        "description": "One applied **Change** as the history sheet reports it (§6).\n\nPlain-language summary, the edit shape(s), the status, the timestamps —\nTDD §6's list and nothing more. It is a **record, not a second edit\nsurface** (PRD §5.5), so there is no payload here: the operations already\nrendered as a card in the thread, and the history is what happened, in the\nlearner's own summary.\n\n``kinds`` is plural because one Apply may carry both shapes: a Proposal's\n``operations`` are a list of Additions *and* Revisions (D1), and they land\nas one Change because a Change is the unit of Apply **and** of Undo\n(CONTEXT.md) — undoing half of what the learner consented to as one edit\nwould leave the path in a shape nobody proposed. The row's own ``kind``\ncolumn names the change's dominant shape; this field is derived from the\npayload and is what the sheet renders.\n\n``undone_at`` is ``None`` for a live Change. Whether undo is still *open* is\ndeliberately **not** here: it is the D2 engagement re-check, run at undo\ntime, because the learner can engage at any moment and a flag computed at\nread time would be stale before it was rendered. The ``409 engaged`` is the\nenforcer; the client's own knowledge of the path is the convenience.",
+        "properties": {
+          "applied_at": {
+            "format": "date-time",
+            "title": "Applied At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "kinds": {
+            "items": {
+              "$ref": "#/components/schemas/PathChangeKind"
+            },
+            "title": "Kinds",
+            "type": "array"
+          },
+          "status": {
+            "$ref": "#/components/schemas/PathChangeStatus"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          },
+          "undone_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Undone At"
+          }
+        },
+        "required": [
+          "id",
+          "summary",
+          "kinds",
+          "status",
+          "applied_at",
+          "undone_at"
+        ],
+        "title": "ChangeDTO",
+        "type": "object"
+      },
+      "ChangeHistoryResponse": {
+        "description": "``GET /api/v1/paths/{id}/changes`` body — the whole **Change history**.\n\nObject-wrapped (never a bare array) like every other list payload, and\n**newest first**: the history reads in the order the learner made it happen.\nUndone Changes are included — undo is a status, not a delete, and the\nhistory is the record of what happened (CONTEXT.md).\n\nIt survives \"new conversation\" (PRD §5.8): the rows hang off the path, not\noff the thread, so this list is answered identically before and after a\nlearner clears their shaping conversation.",
+        "properties": {
+          "changes": {
+            "items": {
+              "$ref": "#/components/schemas/ChangeDTO"
+            },
+            "title": "Changes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "changes"
+        ],
+        "title": "ChangeHistoryResponse",
+        "type": "object"
+      },
+      "CompleteLessonResponse": {
+        "description": "``200`` body for ``POST /lessons/{id}/complete`` — the new unlock state.\n\nCompletion is idempotent: marking the available lesson complete returns\n``unlock_state == complete``; re-completing an already-complete lesson is a\nno-op that returns the same. A locked lesson never reaches this response —\nit is rejected with ``403`` (only the available lesson may be completed,\nAL-012 / TDD §6).\n\n``path_completion`` is idempotent in the same way: it reflects the state of\nthe path *after* this call, not what this call changed, so re-completing the\nfinal lesson answers \"yes, the path is complete\" a second time rather than\nonly for the request that happened to perform the transition. That keeps a\nretried mutation (a flaky first POST, a double tap) from silently\ndowngrading the learner's completion screen to the mid-path one.",
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "path_completion": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PathCompletionDTO"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "unlock_state": {
+            "$ref": "#/components/schemas/UnlockState"
+          }
+        },
+        "required": [
+          "id",
+          "unlock_state"
+        ],
+        "title": "CompleteLessonResponse",
+        "type": "object"
+      },
+      "ConversationResponse": {
+        "description": "``GET /api/v1/paths/{id}/conversation`` body — the whole thread.\n\nObject-wrapped (never a bare array) like every other list payload, so the\nresponse can gain fields without a breaking change. Messages are in\n``position`` order, oldest first.\n\nA path with no conversation yet answers ``200`` with an empty list, not\n``404``: the row is created lazily on the first completed turn (TDD §4), so\n\"no thread yet\" is the opening state of every path rather than a missing\nresource. **Unpaginated this phase** — an accepted risk (TDD §14): a long\nthread is a whole-payload read.",
+        "properties": {
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/MessageDTO"
+            },
+            "title": "Messages",
+            "type": "array"
+          }
+        },
+        "required": [
+          "messages"
+        ],
+        "title": "ConversationResponse",
+        "type": "object"
+      },
+      "CreatePathRequest": {
+        "description": "``POST /api/v1/paths`` body: the topic + onboarding level (W1).\n\n``model_outline``/``model_lesson`` are the **admin** model-picker overrides\n(AL-052, TDD §5.3/D14): optional bare OpenRouter ids the frontend picker\n(AL-065) sends, one per generation slot, selected from the ``MODEL_ALLOWLIST``\nthe session endpoint exposes to admins. Omitted (the common case) means the\nconfigured slot default. They are *authorization-* and *allowlist-*enforced\nserver-side at the route (403 non-admin, 422 off-allowlist) — the field\nmerely carries the request; the wire field being present is never itself a\ngrant.\n\n``guidance`` is the learner's optional free text steering the outline's\nshape (CONTEXT.md: *Guidance*) — a second generation input alongside\n``topic``/``level``, fixed once the path exists (there is no route to change\nit later, unlike ``title``). Omitted or blank collapses to \"no guidance\" —\n``build_outline_prompt`` (``agents/outline.py``) then emits the bare topic,\nbyte-identical to a path created before this field existed.\n\n``teaching_style`` is the learner's optional Teaching style (CONTEXT.md):\nhow every lesson on the path should be taught. Omitted means none. Unlike\n``guidance`` it can be changed later (``UpdateTeachingStyleRequest``).",
+        "properties": {
+          "guidance": {
+            "anyOf": [
+              {
+                "maxLength": 4000,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Guidance"
+          },
+          "level": {
+            "$ref": "#/components/schemas/Level"
+          },
+          "model_lesson": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Lesson"
+          },
+          "model_outline": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Outline"
+          },
+          "teaching_style": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Teaching Style"
+          },
+          "topic": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Topic",
+            "type": "string"
+          }
+        },
+        "required": [
+          "topic",
+          "level"
+        ],
+        "title": "CreatePathRequest",
+        "type": "object"
+      },
+      "CreatePathResponse": {
+        "description": "``202`` body for create and retry — the path's UUID to poll (§5.4).",
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "CreatePathResponse",
+        "type": "object"
+      },
+      "DeployBeatRequest": {
+        "description": "``POST /api/v1/beats`` body (§6): deploy an analyst.\n\n``topic``/``guidance`` reuse ``dtos/paths.py``'s ``TopicStr``/\n``GuidanceStr`` — CONTEXT.md's Topic/Guidance are one concept whether a\nPath or a Beat is reading them, and a Beat's copies are frozen at\ndeployment exactly as a path's are (no route ever writes them after\ncreation — CONTEXT.md: Beat). ``model_research``/``model_brief`` are the\nadmin-only per-Beat picker overrides (TDD D7/§5.3):\n``routers/v1/paths.py::validate_model_override`` enforces them (``403``\nnon-admin, ``422`` off-allowlist) before any billed work, the identical\nenforcement ``POST /paths`` already runs for its own two slots.",
+        "properties": {
+          "anchor_weekday": {
+            "maximum": 6.0,
+            "minimum": 0.0,
+            "title": "Anchor Weekday",
+            "type": "integer"
+          },
+          "guidance": {
+            "anyOf": [
+              {
+                "maxLength": 4000,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Guidance"
+          },
+          "level": {
+            "$ref": "#/components/schemas/Level"
+          },
+          "model_brief": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Brief"
+          },
+          "model_research": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Research"
+          },
+          "topic": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Topic",
+            "type": "string"
+          }
+        },
+        "required": [
+          "topic",
+          "level",
+          "anchor_weekday"
+        ],
+        "title": "DeployBeatRequest",
+        "type": "object"
+      },
+      "ErrorDetail": {
+        "description": "The body of the envelope: what failed, in a code and in words.",
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "details": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Details"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "request_id"
+        ],
+        "title": "ErrorDetail",
+        "type": "object"
+      },
+      "ErrorEnvelope": {
+        "description": "Every API error's body (iOS TDD §4.1): ``{\"error\": {...}}``.\n\nDeclared as the ``default`` response of every ``/api/v1`` operation\n(``app.py``), so a generated client can decode it. :func:`error_response`\nbuilds the same shape; a unit test validates its output against this model.",
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/ErrorDetail"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "title": "ErrorEnvelope",
+        "type": "object"
+      },
+      "FeatureFlagDTO": {
+        "description": "One code-defined flag: its effective default and per-user override count.\n\n``enabled_default`` is the **global** default (code default with\n``FEATURE_FLAG_DEFAULTS`` applied) — deliberately not the admin baseline,\nwhich is a resolution-time property of the reader, not of the flag.",
+        "properties": {
+          "enabled_default": {
+            "title": "Enabled Default",
+            "type": "boolean"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "override_count": {
+            "title": "Override Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "key",
+          "enabled_default",
+          "override_count"
+        ],
+        "title": "FeatureFlagDTO",
+        "type": "object"
+      },
+      "FeatureFlagListDTO": {
+        "properties": {
+          "flags": {
+            "items": {
+              "$ref": "#/components/schemas/FeatureFlagDTO"
+            },
+            "title": "Flags",
+            "type": "array"
+          }
+        },
+        "required": [
+          "flags"
+        ],
+        "title": "FeatureFlagListDTO",
+        "type": "object"
+      },
+      "FeatureFlagOverrideDTO": {
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "flag_key": {
+            "title": "Flag Key",
+            "type": "string"
+          },
+          "user_id": {
+            "format": "uuid",
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "flag_key",
+          "user_id",
+          "enabled"
+        ],
+        "title": "FeatureFlagOverrideDTO",
+        "type": "object"
+      },
+      "FeatureFlagOverrideSetDTO": {
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "title": "FeatureFlagOverrideSetDTO",
+        "type": "object"
+      },
+      "GenerateLessonResponse": {
+        "description": "``202`` body for ``POST /lessons/{id}/generate`` — the id to poll (§5.4).",
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "GenerateLessonResponse",
+        "type": "object"
+      },
+      "LessonDetailResponse": {
+        "description": "``GET /api/v1/lessons/{id}`` body — the lesson poll target (§5.4/§6).\n\nThe two orthogonal axes (CONTEXT.md) both surface: ``generation_state`` (the\nstored, effective system axis — a stale ``generating`` reads as ``failed``,\n§5.4) and ``unlock_state`` (the derived learner axis —\n``locked``/``available``/``complete``, from ``domains/progression``).\n\nContent fields are populated by state:\n\n* ``read_passage`` / ``quick_check`` are non-null **only** when\n  ``generation_state == generated``.\n* ``attempt`` is non-null **only** after the learner has recorded an Attempt\n  — it is the sole carrier of the keyed answer (``correct_index`` /\n  ``explanation``), so a pre-Attempt payload hides the answer (W6).\n* ``generation_error`` is a generic, learner-safe message, non-null **only**\n  when ``generation_state == failed`` (never raw provider text, §5.5).",
+        "properties": {
+          "attempt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AttemptResultDTO"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "generation_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Generation Error"
+          },
+          "generation_state": {
+            "$ref": "#/components/schemas/LessonGenerationState"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "path_id": {
+            "format": "uuid",
+            "title": "Path Id",
+            "type": "string"
+          },
+          "position_in_path": {
+            "title": "Position In Path",
+            "type": "integer"
+          },
+          "position_in_unit": {
+            "title": "Position In Unit",
+            "type": "integer"
+          },
+          "quick_check": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/QuickCheckDTO"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "read_passage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Read Passage"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "unlock_state": {
+            "$ref": "#/components/schemas/UnlockState"
+          }
+        },
+        "required": [
+          "id",
+          "path_id",
+          "title",
+          "position_in_path",
+          "position_in_unit",
+          "generation_state",
+          "unlock_state",
+          "read_passage",
+          "quick_check",
+          "attempt",
+          "generation_error"
+        ],
+        "title": "LessonDetailResponse",
+        "type": "object"
+      },
+      "LessonGenerationState": {
+        "description": "Whether a lesson's content exists yet (TDD §4).\n\n``ungenerated`` -> ``generating`` -> ``generated`` (terminal, content\nimmutable) with ``failed`` as the retryable error branch.",
+        "enum": [
+          "ungenerated",
+          "generating",
+          "generated",
+          "failed"
+        ],
+        "title": "LessonGenerationState",
+        "type": "string"
+      },
+      "LessonSummaryDTO": {
+        "description": "A lesson's slot in the path outline (no content — that is the lesson API).\n\n``generation_state`` is the effective system axis; ``unlock_state`` is the\nderived learner axis (CONTEXT.md's two orthogonal axes).",
+        "properties": {
+          "generation_state": {
+            "$ref": "#/components/schemas/LessonGenerationState"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "position_in_path": {
+            "title": "Position In Path",
+            "type": "integer"
+          },
+          "position_in_unit": {
+            "title": "Position In Unit",
+            "type": "integer"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "unlock_state": {
+            "$ref": "#/components/schemas/UnlockState"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "position_in_path",
+          "position_in_unit",
+          "generation_state",
+          "unlock_state"
+        ],
+        "title": "LessonSummaryDTO",
+        "type": "object"
+      },
+      "Level": {
+        "description": "A learner's self-assessed starting point for a path (CONTEXT.md).",
+        "enum": [
+          "new_to_it",
+          "some_experience",
+          "work_in_it"
+        ],
+        "title": "Level",
+        "type": "string"
+      },
+      "MessageDTO": {
+        "description": "One message in the thread — learner or tutor (§6).\n\n``lesson_id`` + ``lesson_title`` are **the lesson the message was asked in**\n(PRD §5.8), which is what lets a revisited thread show where each turn\nhappened and what 2B renders its lesson dividers from. The conversation is\nper *path*, not per lesson, so these vary down a single thread.\n\n``tutor_check`` is non-null only on a tutor message that posed one. The\nlearner-row ``source`` (typed vs suggestion) is deliberately **not** on the\nwire: it is the §7 entry-mix datum, carried by the product events, and the\nrail renders a learner bubble the same either way.",
+        "properties": {
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "lesson_id": {
+            "format": "uuid",
+            "title": "Lesson Id",
+            "type": "string"
+          },
+          "lesson_title": {
+            "title": "Lesson Title",
+            "type": "string"
+          },
+          "role": {
+            "$ref": "#/components/schemas/MessageRole"
+          },
+          "tutor_check": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TutorCheckDTO"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "role",
+          "content",
+          "lesson_id",
+          "lesson_title",
+          "tutor_check",
+          "created_at"
+        ],
+        "title": "MessageDTO",
+        "type": "object"
+      },
+      "MessageRole": {
+        "description": "Who spoke a Message in a conversation (CONTEXT.md: Tutor, Turn).\n\nTwo members only: the learner and the tutor. There is no system/tool role —\na turn is exactly one ``learner`` message and the ``tutor`` message it\nproduced (Phase 2 TDD §4).",
+        "enum": [
+          "learner",
+          "tutor"
+        ],
+        "title": "MessageRole",
+        "type": "string"
+      },
+      "MessageSource": {
+        "description": "How a learner Message was entered (CONTEXT.md: Suggestion).\n\nApplies to learner rows only (app-enforced, not a CHECK constraint — Phase 2\nTDD §4); ``NULL`` on tutor rows. It is the entry-mix datum behind the §7\nsuggestion-usage metric. Selection-to-quote is Phase 2B; when it lands this\nenum gains a ``quote`` member additively.",
+        "enum": [
+          "typed",
+          "suggestion"
+        ],
+        "title": "MessageSource",
+        "type": "string"
+      },
+      "NextLessonDTO": {
+        "description": "Where a path resumes: its **available** lesson (CONTEXT.md: *Unlock state*).\n\nPresent only when the path has an incomplete lesson — a finished path, a\nrefused one, and one whose outline has not landed yet all carry ``None``,\nwhich is what lets home render them without a resume affordance rather than\nwith a dead one. ``position_in_path`` is the total order (1-based on the\nwire is *not* assumed: this is the stored position, and the client labels\nwith the title, never the number).",
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "position_in_path": {
+            "title": "Position In Path",
+            "type": "integer"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "position_in_path"
+        ],
+        "title": "NextLessonDTO",
+        "type": "object"
+      },
+      "Outcome": {
+        "description": "The result of an Attempt (CONTEXT.md): correct or incorrect.\n\nFormative and non-gating — it reveals the explanation and lets the learner\nproceed either way; it does not affect unlock state.",
+        "enum": [
+          "correct",
+          "incorrect"
+        ],
+        "title": "Outcome",
+        "type": "string"
+      },
+      "PathChangeKind": {
+        "description": "The edit a Change applied (CONTEXT.md: Addition, Revision).\n\nExactly the two operations of the proposal vocabulary (Phase 2B TDD D1) —\na closed vocabulary is what makes \"consent is structural\" checkable.\n``add_lessons`` inserts new lessons (optionally as a new unit);\n``revise_lesson`` regenerates one unengaged lesson's content. Removal and\nreordering are Phase 4, and get a **declined edit** until then.",
+        "enum": [
+          "add_lessons",
+          "revise_lesson"
+        ],
+        "title": "PathChangeKind",
+        "type": "string"
+      },
+      "PathChangeStatus": {
+        "description": "Whether a Change is in force (CONTEXT.md: Change, Undo).\n\n``applied`` -> ``undone`` and no further: once the learner engages with\nanything the Change created or revised, undo closes and the row is permanent\nhistory (Phase 2B TDD D8). There is no ``pending`` — a Change exists only\nbecause **Apply** committed it.",
+        "enum": [
+          "applied",
+          "undone"
+        ],
+        "title": "PathChangeStatus",
+        "type": "string"
+      },
+      "PathCompletionDTO": {
+        "description": "The path this lesson belongs to has no incomplete lesson left.\n\nPresent on a completion response **only** when every lesson on the path is\ncomplete — its presence *is* the \"was that the last one?\" answer, which is\nwhy there is no separate boolean beside it. Carried on the completion\nresponse rather than left for the client to derive from a refetched path\ndetail, because the celebration this feeds has to render on the same frame\nas the tap: inferring it from the invalidated ``GET /paths/{id}`` would put\na round trip between \"Mark complete\" and the acknowledgement, and the card\nwould show the mid-path copy first and then change its mind.\n\n``first_completed_at``/``completed_at`` are the span of the learner's work\non this path, sent as instants rather than a day count on purpose: a\n**Day** is a calendar day in the *learner's* local timezone (CONTEXT.md),\nand this route — unlike the streak reader — takes no ``tz_offset_minutes``.\nThe client owns the local-day arithmetic, the same way it owns it for the\nactivity strip.",
+        "properties": {
+          "completed_at": {
+            "format": "date-time",
+            "title": "Completed At",
+            "type": "string"
+          },
+          "first_completed_at": {
+            "format": "date-time",
+            "title": "First Completed At",
+            "type": "string"
+          },
+          "lesson_count": {
+            "title": "Lesson Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "lesson_count",
+          "first_completed_at",
+          "completed_at"
+        ],
+        "title": "PathCompletionDTO",
+        "type": "object"
+      },
+      "PathDetailResponse": {
+        "description": "``GET /api/v1/paths/{id}`` body — the poll target (§5.4/§6).\n\n``status`` is the **effective** path status (a stale ``generating`` outline\nreads as ``failed`` so the client shows retry, not a dead spinner).\n``refusal_message`` is populated **only** when ``status == refused`` (W7) — a\n``failed`` path carries ``null`` here, keeping refusal and failure distinct.\n\n``title`` is always populated (the server-applied ``Path.display_title``\nfallback, as in ``PathSummaryDTO``). ``guidance`` is the learner's free text\nfrom creation, or ``null`` when none was given — display-only here (the\noutline already ran with it); there is no route that lets a learner change\nit after the fact. ``teaching_style`` is the path's current Teaching style,\nor ``null`` when none is set; unlike ``guidance`` it is editable\n(``PUT /paths/{id}/teaching-style``).\n\n``PATCH /paths/{id}`` (``update_path``) returns this exact shape — the same\nbody ``GET`` does — so the client can drop the response straight into the\nquery it already polls (precedent: Phase 2B's Apply, ``path_detail_response``'s\ndocstring).",
+        "properties": {
+          "guidance": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Guidance"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "level": {
+            "$ref": "#/components/schemas/Level"
+          },
+          "progress": {
+            "$ref": "#/components/schemas/PathProgressDTO"
+          },
+          "refusal_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refusal Message"
+          },
+          "status": {
+            "$ref": "#/components/schemas/PathStatus"
+          },
+          "teaching_style": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Teaching Style"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "topic": {
+            "title": "Topic",
+            "type": "string"
+          },
+          "units": {
+            "items": {
+              "$ref": "#/components/schemas/UnitDTO"
+            },
+            "title": "Units",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "topic",
+          "title",
+          "guidance",
+          "teaching_style",
+          "level",
+          "status",
+          "refusal_message",
+          "progress",
+          "units"
+        ],
+        "title": "PathDetailResponse",
+        "type": "object"
+      },
+      "PathListResponse": {
+        "description": "``GET /api/v1/paths`` body: the learner's paths, most recently worked first.\n\nWrapped in an object (never a bare top-level array) so the payload can grow\nfields without a breaking shape change.",
+        "properties": {
+          "paths": {
+            "items": {
+              "$ref": "#/components/schemas/PathSummaryDTO"
+            },
+            "title": "Paths",
+            "type": "array"
+          }
+        },
+        "required": [
+          "paths"
+        ],
+        "title": "PathListResponse",
+        "type": "object"
+      },
+      "PathProgressDTO": {
+        "description": "Per-path lesson roll-up (from ``LessonRepository.progress_summaries``).\n\n``generated_lessons``/``completed_lessons`` over ``total_lessons`` drive the\nswitcher's progress summary and the path-view progress. Counts are over the\n*effective* generation state (stale ``generating`` → ``failed``, §5.4).",
+        "properties": {
+          "completed_lessons": {
+            "title": "Completed Lessons",
+            "type": "integer"
+          },
+          "generated_lessons": {
+            "title": "Generated Lessons",
+            "type": "integer"
+          },
+          "total_lessons": {
+            "title": "Total Lessons",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total_lessons",
+          "generated_lessons",
+          "completed_lessons"
+        ],
+        "title": "PathProgressDTO",
+        "type": "object"
+      },
+      "PathStatus": {
+        "description": "Lifecycle of a path's outline generation (TDD §4).\n\n``pending`` -> ``generating`` -> ``ready`` with ``failed`` (retryable) and\n``refused`` (terminal, safety) branches.",
+        "enum": [
+          "pending",
+          "generating",
+          "ready",
+          "failed",
+          "refused"
+        ],
+        "title": "PathStatus",
+        "type": "string"
+      },
+      "PathStreakDTO": {
+        "description": "One path's row in the per-path breakdown (CONTEXT.md: **Path streak**).\n\nA quieter stat than the global streak — the frontend hides its chip below 2\ndays (PRD §4.3) and never celebrates it, but the payload carries the same\nthree numbers as the global streak for consistency. A path with no\ncompletions is **absent** from the response's ``paths`` list entirely (D5,\n§14 R2) rather than appearing here with zeros.",
+        "properties": {
+          "best_streak": {
+            "title": "Best Streak",
+            "type": "integer"
+          },
+          "completed_today": {
+            "title": "Completed Today",
+            "type": "integer"
+          },
+          "current_streak": {
+            "title": "Current Streak",
+            "type": "integer"
+          },
+          "path_id": {
+            "format": "uuid",
+            "title": "Path Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path_id",
+          "current_streak",
+          "best_streak",
+          "completed_today"
+        ],
+        "title": "PathStreakDTO",
+        "type": "object"
+      },
+      "PathSummaryDTO": {
+        "description": "One row of the \"Your paths\" switcher (``GET /api/v1/paths``, §6).\n\n``title`` is always populated on the wire — the server applies\n``Path.display_title``'s topic fallback before this DTO is built, so the\nclient never has to respell \"no title yet, show the topic\" itself.\n``topic`` is retained alongside it (unchanged, still the generation input)\nrather than replaced, so any existing reader of the raw topic keeps working.\n\n``last_activity_at`` is the path's most recent lesson completion (``None``\nfor a path never worked). It is the field the list is **ordered** by, and\nit ships on the row as well as governing the sort so the client can name\nthe ordering it is rendering instead of inferring one.\n\n``next_lesson`` is where \"continue\" goes — see :class:`NextLessonDTO`.",
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "last_activity_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Activity At"
+          },
+          "level": {
+            "$ref": "#/components/schemas/Level"
+          },
+          "next_lesson": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NextLessonDTO"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "progress": {
+            "$ref": "#/components/schemas/PathProgressDTO"
+          },
+          "status": {
+            "$ref": "#/components/schemas/PathStatus"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "topic": {
+            "title": "Topic",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "topic",
+          "title",
+          "level",
+          "status",
+          "progress",
+          "last_activity_at",
+          "next_lesson"
+        ],
+        "title": "PathSummaryDTO",
+        "type": "object"
+      },
+      "ProgressSummaryResponse": {
+        "description": "``GET /api/v1/progress/summary`` body (§6): the whole streak payload.\n\n``today`` is the learner's local calendar day, as the server resolved it\nfrom ``tz_offset_minutes`` — the service is the sole owner of \"today\"\n(§5.3), and echoing it back is what lets the frontend render \"Day N\" copy\nwithout recomputing the boundary itself.\n\n``current_streak``/``best_streak``/``completed_today`` are the **global**\nDaily streak (CONTEXT.md) — the one that gets the flame. ``activity`` is\nalways exactly ``STREAK_ACTIVITY_WINDOW_DAYS`` entries (§13); ``paths`` is a\n**list**, not a map keyed by path id (§6) — the frontend indexes it by\n``path_id`` on arrival, and a list reads far better in a response body than\na JSON object keyed by UUID.",
+        "properties": {
+          "activity": {
+            "items": {
+              "$ref": "#/components/schemas/ActivityCellDTO"
+            },
+            "title": "Activity",
+            "type": "array"
+          },
+          "best_streak": {
+            "title": "Best Streak",
+            "type": "integer"
+          },
+          "completed_today": {
+            "title": "Completed Today",
+            "type": "integer"
+          },
+          "current_streak": {
+            "title": "Current Streak",
+            "type": "integer"
+          },
+          "paths": {
+            "items": {
+              "$ref": "#/components/schemas/PathStreakDTO"
+            },
+            "title": "Paths",
+            "type": "array"
+          },
+          "today": {
+            "format": "date",
+            "title": "Today",
+            "type": "string"
+          }
+        },
+        "required": [
+          "today",
+          "current_streak",
+          "best_streak",
+          "completed_today",
+          "activity",
+          "paths"
+        ],
+        "title": "ProgressSummaryResponse",
+        "type": "object"
+      },
+      "ProposalDTO": {
+        "description": "A stored Proposal as the conversation read reports it (§6).\n\nThe payload plus its **derived** ``resolution`` (D3). The card renders its\nstate from this one field, so it is computed by the shared derivation rather\nthan by anything local to this surface.\n\n**There is deliberately no ``change_id``** (AL-321). The card's states are\n§8's — pending / applying / applied (\"view in path\") / stale / undone — and\nnone of them needs one: **Apply** answers with the whole\n:class:`ChangeDTO`, so a card that just applied holds the id it needs, and\n**Undo** is reached from the change-history sheet, which carries every id by\ndefinition. Adding it here would mean a nullable field that is ``None`` for\nthe entire life of the ordinary case, plus a second derivation to keep in\nstep with ``resolution`` — the exact drift D3 avoided by not storing a status\ncolumn. If a card ever grows an undo affordance of its own, the additive move\nis to put the id in the same derivation that already computes the state, not\nbeside it.",
+        "properties": {
+          "operations": {
+            "items": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/AddLessonsOperation"
+                },
+                {
+                  "$ref": "#/components/schemas/ReviseLessonOperation"
+                }
+              ]
+            },
+            "title": "Operations",
+            "type": "array"
+          },
+          "resolution": {
+            "$ref": "#/components/schemas/ProposalResolutionDTO"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operations",
+          "summary",
+          "resolution"
+        ],
+        "title": "ProposalDTO",
+        "type": "object"
+      },
+      "ProposalResolutionDTO": {
+        "description": "Where a Proposal stands (CONTEXT.md; TDD §4 — derived, never stored).\n\nA ``StrEnum`` member *is* its wire value, and the values are exactly\n``agents/shaper.py``'s ``ProposalResolution`` literals: the derivation\nreturns those strings and this enum is how they reach the client's card\nstate machine (TDD §8) with one spelling.",
+        "enum": [
+          "pending",
+          "applied",
+          "undone",
+          "superseded"
+        ],
+        "title": "ProposalResolutionDTO",
+        "type": "string"
+      },
+      "ProposedLesson": {
+        "additionalProperties": false,
+        "description": "One lesson an **Addition** inserts. A title and nothing more.\n\nAdded lessons are ordinary ``ungenerated`` rows (CONTEXT.md: *Addition*) —\nPhase 1's machinery writes their content, so the Proposal names them only.",
+        "properties": {
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "title": "ProposedLesson",
+        "type": "object"
+      },
+      "ProposedUnit": {
+        "additionalProperties": false,
+        "description": "The new unit an **Addition** may group its lessons under (optional).",
+        "properties": {
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "summary"
+        ],
+        "title": "ProposedUnit",
+        "type": "object"
+      },
+      "PublishedEntryDTO": {
+        "description": "A published Brief's row in the Beat rail (TDD §6's `GET /beats/{id}`\nexample).\n\n``kind`` doubles as the discriminator (:data:`BriefEntryDTO`) and as the\nliteral wire tag the frontend switches on. Carries no ``skip_line`` field\nat all (not a nullable one): a published entry has nothing to skip.",
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "const": "published",
+            "default": "published",
+            "title": "Kind",
+            "type": "string"
+          },
+          "number": {
+            "title": "Number",
+            "type": "integer"
+          },
+          "published_on": {
+            "format": "date",
+            "title": "Published On",
+            "type": "string"
+          },
+          "read_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Read At"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "number",
+          "published_on",
+          "title",
+          "read_at"
+        ],
+        "title": "PublishedEntryDTO",
+        "type": "object"
+      },
+      "QuickCheckDTO": {
+        "description": "The Quick check as shown **before** an Attempt (W6 answer-hiding).\n\nDeliberately only ``stem`` + ``options`` — no ``correct_index``, no\n``explanation``. The keyed answer is revealed exclusively through\n:class:`AttemptResultDTO` after the learner attempts, so this object never\ncarries it (TDD §6). The options are in their keyed order (the index the\nlearner submits is an index into this list).",
+        "properties": {
+          "options": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Options",
+            "type": "array"
+          },
+          "stem": {
+            "title": "Stem",
+            "type": "string"
+          }
+        },
+        "required": [
+          "stem",
+          "options"
+        ],
+        "title": "QuickCheckDTO",
+        "type": "object"
+      },
+      "ReadPingRequest": {
+        "description": "``POST /api/v1/briefs/{id}/read`` body (D11): which ping fired.\n\n``opened`` and ``sources`` are independent first-write-wins columns\n(``read_at``/``sources_seen_at``) — this DTO carries exactly one marker\nper call, matching the frontend's own two separate call sites (open, and\nthe Sources block's `IntersectionObserver`, §8).",
+        "properties": {
+          "marker": {
+            "enum": [
+              "opened",
+              "sources"
+            ],
+            "title": "Marker",
+            "type": "string"
+          }
+        },
+        "required": [
+          "marker"
+        ],
+        "title": "ReadPingRequest",
+        "type": "object"
+      },
+      "ReviseLessonOperation": {
+        "additionalProperties": false,
+        "description": "The ``revise_lesson`` operation: re-teach an unengaged lesson (TDD §4).\n\nKeeps the lesson's slot in the path; ``new_title`` optionally adjusts the\ntitle to match the revised content (CONTEXT.md: *Revision*).",
+        "properties": {
+          "instruction": {
+            "title": "Instruction",
+            "type": "string"
+          },
+          "lesson_id": {
+            "title": "Lesson Id",
+            "type": "string"
+          },
+          "new_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "New Title"
+          },
+          "rationale": {
+            "title": "Rationale",
+            "type": "string"
+          }
+        },
+        "required": [
+          "lesson_id",
+          "instruction",
+          "rationale"
+        ],
+        "title": "ReviseLessonOperation",
+        "type": "object"
+      },
+      "SendMessageRequest": {
+        "description": "``POST /api/v1/paths/{id}/conversation/messages`` body (AL-220, §5.4).\n\nDefined here with the rest of the tutor contract so the rail and the turn\nservice share one shape; the endpoint itself lands with AL-220.\n\n``lesson_id`` is the lesson the question is asked in — the scope the tutor\ngrounds on this phase, and the tag persisted on both rows of the turn.\n``source`` records how the learner entered it (a suggestion button sends as\nif typed, with ``source=suggestion``), the §7 entry-mix datum.\n\n``model`` is the **admin** per-message model override (TDD §5.3): a bare\nOpenRouter id from the ``MODEL_ALLOWLIST`` the session endpoint exposes to\nadmins, enforced server-side exactly like Phase 1's picker (``403``\nnon-admin, ``422`` off-allowlist) and resolved per request, **persisted\nnowhere** — a tutor reply is request-scoped, so there is nothing to resume\nand no column to add. The field being present is never itself a grant.",
+        "properties": {
+          "content": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Content",
+            "type": "string"
+          },
+          "lesson_id": {
+            "format": "uuid",
+            "title": "Lesson Id",
+            "type": "string"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "source": {
+            "$ref": "#/components/schemas/MessageSource",
+            "default": "typed"
+          }
+        },
+        "required": [
+          "lesson_id",
+          "content"
+        ],
+        "title": "SendMessageRequest",
+        "type": "object"
+      },
+      "SendShapingMessageRequest": {
+        "description": "``POST /api/v1/paths/{id}/shaping/conversation/messages`` body (§5.4).\n\n``content`` reuses 2A's :data:`~aleph.dtos.tutor.TutorMessageStr` — stripped,\nnon-empty, ≤ 2000 characters, rejected as a ``422`` *before* the stream opens\n— because it is the same thing: one learner message typed into one rail.\n\nThere is no ``lesson_id``: a shaping turn is about the path as a whole\n(PRD §5.1). ``source`` records how the learner entered it (the four §5.3\nsuggestions send as ``suggestion``), the §7 entry-mix datum.\n\n``model`` is the **admin** per-message model override (TDD §5.3/D10),\nenforced exactly as 2A's: ``403`` for a non-admin (checked before the\nallowlist), ``422`` off ``MODEL_ALLOWLIST``, resolved per request and\n**persisted nowhere**. It binds the shaper slot (AL-301 put ``MODEL_SHAPER``\nbehind the same allowlist), so an A/B of proposal quality costs no deploy.",
+        "properties": {
+          "content": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Content",
+            "type": "string"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "source": {
+            "$ref": "#/components/schemas/MessageSource",
+            "default": "typed"
+          }
+        },
+        "required": [
+          "content"
+        ],
+        "title": "SendShapingMessageRequest",
+        "type": "object"
+      },
+      "SessionDTO": {
+        "properties": {
+          "authenticated": {
+            "title": "Authenticated",
+            "type": "boolean"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "user": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UserDTO"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "authenticated",
+          "provider"
+        ],
+        "title": "SessionDTO",
+        "type": "object"
+      },
+      "ShapingConversationResponse": {
+        "description": "``GET /api/v1/paths/{id}/shaping/conversation`` body — the whole thread.\n\nObject-wrapped (never a bare array) like every other list payload. Messages\nare in ``position`` order, oldest first.\n\nA path with no shaping conversation yet answers ``200`` with an empty list,\nnot ``404``: the row is created lazily on the first completed turn (§5.5),\nso an untouched path and a cleared one read identically — which is exactly\nwhat \"new conversation\" should leave behind. **Unpaginated this phase**, the\nsame accepted risk as the in-lesson thread (TDD §14).",
+        "properties": {
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/ShapingMessageDTO"
+            },
+            "title": "Messages",
+            "type": "array"
+          }
+        },
+        "required": [
+          "messages"
+        ],
+        "title": "ShapingConversationResponse",
+        "type": "object"
+      },
+      "ShapingMessageDTO": {
+        "description": "One message in the **Shaping conversation** — learner or tutor (§6).\n\nNo lesson fields, deliberately (module docstring): shaping is path-level.\n``proposal`` is non-null only on a tutor message that made one. The learner\nrow's ``source`` stays off the wire for 2A's reason — it is the §7 entry-mix\ndatum, carried by the product events, and the rail renders a learner bubble\nthe same either way.",
+        "properties": {
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "proposal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProposalDTO"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "role": {
+            "$ref": "#/components/schemas/MessageRole"
+          }
+        },
+        "required": [
+          "id",
+          "role",
+          "content",
+          "proposal",
+          "created_at"
+        ],
+        "title": "ShapingMessageDTO",
+        "type": "object"
+      },
+      "SkippedEntryDTO": {
+        "description": "A Skipped period's row in the Beat rail (D2, CONTEXT.md: Skipped).\n\n``number`` is carried explicitly as ``None`` — present and ``null`` on\nthe wire, matching TDD §6's own example line (``\"number\": null``) —\nbecause a Skipped entry is still numbered *among* the rail's positions\nconceptually even though it has no Brief number of its own (D2's sparse\nnumbering). Deliberately carries **no** ``title``/``read_at`` fields at\nall: a Skipped entry has no body to title and nothing to mark read\n(D11's two columns are Brief-wide, but the rail never invites a read\nping on a row with nothing to open).",
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "const": "skipped",
+            "default": "skipped",
+            "title": "Kind",
+            "type": "string"
+          },
+          "number": {
+            "title": "Number",
+            "type": "null"
+          },
+          "published_on": {
+            "format": "date",
+            "title": "Published On",
+            "type": "string"
+          },
+          "skip_line": {
+            "title": "Skip Line",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "published_on",
+          "skip_line"
+        ],
+        "title": "SkippedEntryDTO",
+        "type": "object"
+      },
+      "SourceDTO": {
+        "description": "One Source in a Brief's Sources block (§6's `GET /briefs/{id}` example,\nCONTEXT.md: Source).\n\nEvery field is metadata a service joined from the retriever's own\n``RetrievedDocument`` at persist time (TDD §5.5: \"a Source's metadata is\nnever model-written\") — this DTO only carries it to the wire, unchanged.",
+        "properties": {
+          "position": {
+            "title": "Position",
+            "type": "integer"
+          },
+          "published_on": {
+            "format": "date",
+            "title": "Published On",
+            "type": "string"
+          },
+          "publisher": {
+            "title": "Publisher",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "position",
+          "publisher",
+          "title",
+          "published_on",
+          "url"
+        ],
+        "title": "SourceDTO",
+        "type": "object"
+      },
+      "StreamDelta": {
+        "description": "``event: delta``: one streamed fragment of the reply's Markdown.",
+        "properties": {
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "StreamDelta",
+        "type": "object"
+      },
+      "StreamDone": {
+        "description": "``event: done``: terminal success. The turn is persisted.",
+        "properties": {
+          "learner_message_id": {
+            "format": "uuid",
+            "title": "Learner Message Id",
+            "type": "string"
+          },
+          "tutor_message_id": {
+            "format": "uuid",
+            "title": "Tutor Message Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "learner_message_id",
+          "tutor_message_id"
+        ],
+        "title": "StreamDone",
+        "type": "object"
+      },
+      "StreamError": {
+        "description": "``event: error``: terminal failure. Nothing is persisted.",
+        "properties": {
+          "code": {
+            "$ref": "#/components/schemas/TutorErrorCode"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "StreamError",
+        "type": "object"
+      },
+      "StreamProposal": {
+        "description": "``event: proposal``: the validated Proposal the shaping reply offers.",
+        "properties": {
+          "operations": {
+            "items": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/AddLessonsOperation"
+                },
+                {
+                  "$ref": "#/components/schemas/ReviseLessonOperation"
+                }
+              ]
+            },
+            "title": "Operations",
+            "type": "array"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operations",
+          "summary"
+        ],
+        "title": "StreamProposal",
+        "type": "object"
+      },
+      "StreamTutorCheck": {
+        "description": "``event: tutor_check``: the Tutor check card, attached to the reply.",
+        "properties": {
+          "answered_index": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Answered Index"
+          },
+          "correct_index": {
+            "title": "Correct Index",
+            "type": "integer"
+          },
+          "explanation": {
+            "title": "Explanation",
+            "type": "string"
+          },
+          "options": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Options",
+            "type": "array"
+          },
+          "stem": {
+            "title": "Stem",
+            "type": "string"
+          }
+        },
+        "required": [
+          "stem",
+          "options",
+          "correct_index",
+          "explanation"
+        ],
+        "title": "StreamTutorCheck",
+        "type": "object"
+      },
+      "TutorCheckAnswerRequest": {
+        "description": "``POST /api/v1/messages/{id}/tutor-check-answer`` body.\n\n``selected_index`` is the 0-based index into the check's ``options``. Unlike\nthe Quick check's :class:`~aleph.dtos.lessons.AttemptRequest` — where an\nout-of-range index simply grades ``incorrect`` — this one is bounded at the\nroute (``422``): nothing grades a Tutor check, so the index is *only* ever\nused to index ``options`` when re-rendering the revealed card. An\nunindexable value would be stored happily and break that render later.",
+        "properties": {
+          "selected_index": {
+            "minimum": 0.0,
+            "title": "Selected Index",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "selected_index"
+        ],
+        "title": "TutorCheckAnswerRequest",
+        "type": "object"
+      },
+      "TutorCheckDTO": {
+        "description": "A Tutor check as it rides on a tutor message (PRD §5.5).\n\nThe full payload the ``pose_tutor_check`` tool produced, plus\n``answered_index`` — the option the learner picked, ``None`` until the\ncheck-answer endpoint records one. Carrying ``correct_index`` and\n``explanation`` is deliberate (see the module docstring): the card reveals\nfeedback client-side the instant an option is tapped, and re-opening the\nthread has to render that same revealed state without a second round trip.\n\nA Tutor check is non-scoring and outside progress: answering one creates no\nAttempt and changes no lesson, progression, or §7 Attempt-derived metric\n(W12).",
+        "properties": {
+          "answered_index": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Answered Index"
+          },
+          "correct_index": {
+            "title": "Correct Index",
+            "type": "integer"
+          },
+          "explanation": {
+            "title": "Explanation",
+            "type": "string"
+          },
+          "options": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Options",
+            "type": "array"
+          },
+          "stem": {
+            "title": "Stem",
+            "type": "string"
+          }
+        },
+        "required": [
+          "stem",
+          "options",
+          "correct_index",
+          "explanation"
+        ],
+        "title": "TutorCheckDTO",
+        "type": "object"
+      },
+      "TutorErrorCode": {
+        "description": "The ``code`` on a terminal ``error`` event (TDD §5.6).\n\nA small, closed vocabulary so the client can word an upstream failure\nhonestly — the PRD's named wording gap: a provider outage must not be\nreported as \"check your connection\". Deliberately *not* the HTTP envelope's\ncode set: pre-stream failures already speak that vocabulary as ordinary JSON\nerrors, and by the time an SSE ``error`` frame is possible the status line\nis long since ``200``.",
+        "enum": [
+          "timeout",
+          "upstream_error",
+          "internal_error"
+        ],
+        "title": "TutorErrorCode",
+        "type": "string"
+      },
+      "UnitDTO": {
+        "description": "A unit and its ordered lessons in the path outline (§6).",
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "lessons": {
+            "items": {
+              "$ref": "#/components/schemas/LessonSummaryDTO"
+            },
+            "title": "Lessons",
+            "type": "array"
+          },
+          "position": {
+            "title": "Position",
+            "type": "integer"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "summary",
+          "position",
+          "lessons"
+        ],
+        "title": "UnitDTO",
+        "type": "object"
+      },
+      "UnlockState": {
+        "description": "Where a lesson sits on the learner's path (CONTEXT.md: Unlock state).\n\n``locked`` -> ``available`` -> ``complete``. The learner-facing axis, derived\nhere; orthogonal to the stored generation state.",
+        "enum": [
+          "locked",
+          "available",
+          "complete"
+        ],
+        "title": "UnlockState",
+        "type": "string"
+      },
+      "UpdatePathRequest": {
+        "description": "``PATCH /api/v1/paths/{id}`` body: rename the path's display label.\n\nExactly **one** field, and it is ``title`` — never ``topic``. That is not\nan incidental minimalism; it is what makes \"topic is immutable\" a fact\nabout the wire contract rather than a review habit someone has to keep\nremembering to enforce: there is no field here a caller could even attempt\nto use to rewrite the generation input, so no route/service code has to\nreject one. Safe at any path status (renaming triggers no regeneration —\nsee ``routers/v1/paths.py``'s ``update_path``).",
+        "properties": {
+          "title": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "title": "UpdatePathRequest",
+        "type": "object"
+      },
+      "UpdateTeachingStyleRequest": {
+        "description": "``PUT /api/v1/paths/{id}/teaching-style`` body: replace or clear it.\n\nA separate request (and route) from ``UpdatePathRequest`` on purpose: that\none is display-only, and keeping it to ``title`` alone is what lets it\npromise it never touches a generation input. This one is a generation input.\n\n``teaching_style`` is **required** and nullable: ``null`` clears the style,\na string replaces it. A present-but-blank string is a ``422`` (the client\nsends ``null`` to clear), the same rule ``guidance`` follows. The change is\nforward-only: lessons already written keep the style they were written in.",
+        "properties": {
+          "teaching_style": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Teaching Style"
+          }
+        },
+        "required": [
+          "teaching_style"
+        ],
+        "title": "UpdateTeachingStyleRequest",
+        "type": "object"
+      },
+      "UserDTO": {
+        "properties": {
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "feature_flags": {
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "default": {},
+            "title": "Feature Flags",
+            "type": "object"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "is_admin": {
+            "default": false,
+            "title": "Is Admin",
+            "type": "boolean"
+          },
+          "model_allowlist": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Model Allowlist",
+            "type": "array"
+          },
+          "username": {
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "username",
+          "display_name"
+        ],
+        "title": "UserDTO",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "description": "Mobile-friendly AI tutor: name a topic, get a generated learning path",
+    "title": "aleph",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/v1/admin/feature-flags": {
+      "get": {
+        "description": "Every registered flag with its effective default and override count.",
+        "operationId": "list_feature_flags_api_v1_admin_feature_flags_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureFlagListDTO"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error envelope"
+          }
+        },
+        "summary": "List Feature Flags",
+        "tags": [
+          "feature-flags"
+        ]
+      }
+    },
+    "/api/v1/admin/feature-flags/{flag_key}/users/{user_id}": {
+      "delete": {
+        "description": "Drop one learner's override so the flag's default applies again.",
+        "operationId": "clear_feature_flag_override_api_v1_admin_feature_flags__flag_key__users__user_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "flag_key",
+            "required": true,
+            "schema": {
+              "title": "Flag Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "Unknown flag"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error envelope"
+          }
+        },
+        "summary": "Clear Feature Flag Override",
+        "tags": [
+          "feature-flags"
+        ]
+      },
+      "put": {
+        "description": "Force one flag on or off for one learner (upsert; a repeat updates).",
+        "operationId": "set_feature_flag_override_api_v1_admin_feature_flags__flag_key__users__user_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "flag_key",
+            "required": true,
+            "schema": {
+              "title": "Flag Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FeatureFlagOverrideSetDTO"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureFlagOverrideDTO"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "Unknown flag or user"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error envelope"
+          }
+        },
+        "summary": "Set Feature Flag Override",
+        "tags": [
+          "feature-flags"
+        ]
+      }
+    },
+    "/api/v1/auth/session": {
+      "get": {
+        "description": "Current session for the SPA root ``beforeLoad`` (TDD §6/§7/D14).\n\nWorks for anonymous requests (``authenticated: false``) — the frontend calls\nit signed-out to decide whether to render the login gate, so it must never\n``401``. Admins receive the model-picker allowlist; everyone else gets ``[]``.\n\nThis is also the **only** feature-flag delivery surface (AL-203): the\nlearner's resolved map rides the payload the SPA already fetches on every\nload, so ``useFeatureFlag`` can gate a surface with no second request and\nregular learners never touch the admin flag routes.\n\nA native client calls it with its bearer token: the same payload for the\nsame account, and an invalid token is ``401`` (it never reads as signed out).",
+        "operationId": "get_auth_session_api_v1_auth_session_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionDTO"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error envelope"
+          }
+        },
+        "summary": "Get Auth Session",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/beats": {
+      "get": {
+        "description": "The learner's Beats, newest first, with unread counts (§6). Drains.\n\nDrain, THEN re-read (code-review FIX 1, see the module docstring): the\nresponse below is built from ``beats``/``unread`` read *after* ``_drain``\nhas run, so this request's own arrival-triggered claim (if any) is\nalready reflected in what it returns — a freshly claimed Beat reads\n``research_state: \"researching\"`` in this very response, not a stale\n``idle`` a first poll would treat as terminal.",
+        "operationId": "list_beats_api_v1_beats_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "tz_offset_minutes",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "maximum": 900,
+              "minimum": -900,
+              "title": "Tz Offset Minutes",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BeatListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error envelope"
+          }
+        },
+        "summary": "List Beats",
+        "tags": [
+          "beats"
+        ]
+      },
+      "post": {
+        "description": "Deploy an analyst -> ``202``, first run already claimed (PRD §3, §6;\nD15's trigger + poll, verbatim — the same status Phase 1's `POST /paths`\nuses for the identical \"the row exists, the work is still in flight\"\nshape).\n\nModel overrides are enforced **first** — admin-only (``403``),\nallowlist-bound (``422``) — the identical ``validate_model_override``\n``POST /paths`` already runs for its own two slots, so an unauthorized or\noff-allowlist request is rejected before any quota is spent. The **stock**\nBeat cap (``check_beat_creation``, ``MAX_BEATS_PER_LEARNER``, admins\nexempt) is then checked before the row is created. This is this route's\nonly ``429`` (the daily research cap never raises here — TDD §7 — it can\nonly ever 429 ``POST /beats/{id}/retry``, code-review FIX 2, see that\nroute's own docstring).\n\nOn pass the Beat is created and committed, then the SAME arrival drain\nthe two ``GET`` routes use (``BriefingService.drain_claimable``) claims\nand spawns its first research run — a fresh Beat's cadence is\nunconditionally due (D4: \"a Beat with no entries is claimable\nimmediately\"), so no separate claim path exists or is needed. The\nresearch itself is spawned, never awaited: this route returns as soon as\nthe claim (a fast, atomic ``UPDATE``) resolves, and the client polls\n``GET /beats/{id}`` for the Brief. ``session.refresh`` picks up the\nclaim's write — it landed on the drain's own short transaction (TDD\n§5.6's FIX C), not this request's session, so without it the response\nwould echo the stale, pre-claim ``research_state`` straight back.",
+        "operationId": "deploy_beat_api_v1_beats_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "tz_offset_minutes",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "maximum": 900,
+              "minimum": -900,
+              "title": "Tz Offset Minutes",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeployBeatRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BeatDetailDTO"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error envelope"
+          }
+        },
+        "summary": "Deploy Beat",
+        "tags": [
+          "beats"
+        ]
+      }
+    },
+    "/api/v1/beats/{beat_id}": {
+      "delete": {
+        "description": "Hard-delete a Beat; cascades to its Briefs and Sources (§4, §6).\n\nOwnership via ``OwnedBeat`` (``404`` otherwise). This is also how\nstanding orders change (CONTEXT.md: Beat — delete and redeploy, PRD\n§4.11). Not undoable (the UI confirms). No drain: deleting is not a read\nthe learner is waiting on an answer from.",
+        "operationId": "delete_beat_api_v1_beats__beat_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "beat_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Beat Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error envelope"
+          }
+        },
+        "summary": "Delete Beat",
+        "tags": [
+          "beats"
+        ]
+      },
+      "get": {
+        "description": "One Beat: standing orders, research state, the rail (§6). Drains.\n\nOwnership via ``OwnedBeat`` (``404`` otherwise). Drain, THEN re-read\n(code-review FIX 1, see the module docstring): ``beat`` was resolved by\nthe ``OwnedBeat`` dependency *before* the drain runs, so it is already\nsitting in this session's identity map — ``session.refresh`` is what\npicks up the claim's write (it landed on the drain's own short\ntransaction, TDD §5.6's FIX C, not this request's session), exactly the\nguard ``deploy_beat`` above already needs for the identical reason.\nWithout it this route would keep echoing the stale, pre-drain\n``research_state`` regardless of what the drain just committed.",
+        "operationId": "get_beat_api_v1_beats__beat_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "beat_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Beat Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tz_offset_minutes",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "maximum": 900,
+              "minimum": -900,
+              "title": "Tz Offset Minutes",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BeatDetailDTO"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error envelope"
+          }
+        },
+        "summary": "Get Beat",
+        "tags": [
+          "beats"
+        ]
+      }
+    },
+    "/api/v1/beats/{beat_id}/retry": {
+      "post": {
+        "description": "Re-claim a ``failed`` run -> ``202`` (D3; trigger + poll; §6).\n\nOwnership via ``OwnedBeat`` (``404`` otherwise). **Real work only when\nthe Beat is actually ``failed`` (code-review FIX 2b).** The repository's\nown retry predicate (``_RETRY_CLAIMABLE_STATES = (idle, failed)``,\n``repositories/beats.py`` D3) stays faithful to the TDD, which is right\nat that layer — but the product rule the *route* must enforce is\nnarrower: unlike a path, whose auto-claimable ``pending`` is a\npre-run, non-terminal state (so a stray retry is a genuine no-op),\n``idle`` is a Beat's **healthy steady state** — the very row a fresh\narrival will claim on its own next Anchor day. Letting a stray retry win\nthat claim would drive a full billed research run and publish an\noff-cadence Brief that then resets D4's cadence floor early, for no\nlearner-visible reason. So on any state other than ``failed`` — ``idle``,\n``researching`` (already in flight), ``refused`` (terminal, PRD §2's\nsafety branch) — this route is a **genuine no-op**: no cap check, no\nclaim, no spawn, no billing, just the Beat and its rail as they already\nstand. ``202`` either way (the ``POST /paths/{id}/retry`` precedent: a\nstray retry there is *also* a silent no-op that still answers ``202``,\nsince the response is a status snapshot for the poller either way, never\nan assertion that new work started).\n\n**The daily research cap (code-review FIX 2a), checked only on the real\npath.** TDD §7's \"never at the route\" is the arrival drain's rule, and\nits own reasoning — \"the drain is a side effect of a read the learner did\nnot explicitly ask to be billed for\" — is precisely backwards for this\nroute: an explicit ``POST`` *is* billing the learner asked for, the\n``POST /paths/{id}/retry`` shape (``check_outline_generation``, called\nbefore ``trigger_outline_retry``). ``check_brief_research_retry`` mirrors\nthat: called right here, before the claim, only once the Beat is known\nto be ``failed`` — a breach must not cost a no-op its own quota unit.\n\nOn the real path: the claim half of ``trigger_retry`` is awaited before\nthis route builds its response (code-review FIX 9), so ``session.refresh``\nbelow picks up the claim's write exactly as ``deploy_beat``/``get_beat``\nalready refresh after their own drain — only the pipeline itself\n(retrieval + the two model calls) is left running in the background for\nthe client's poll of ``GET /beats/{id}`` to observe. No drain of its own\neither way (this is an explicit, single-Beat action, not an arrival\nread).",
+        "operationId": "retry_beat_api_v1_beats__beat_id__retry_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "beat_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Beat Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tz_offset_minutes",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "maximum": 900,
+              "minimum": -900,
+              "title": "Tz Offset Minutes",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BeatDetailDTO"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error envelope"
+          }
+        },
+        "summary": "Retry Beat",
+        "tags": [
+          "beats"
+        ]
+      }
+    },
+    "/api/v1/briefs/{brief_id}": {
+      "get": {
+        "description": "A Brief: body Markdown, Sources, ``builds_on`` (§6).\n\nOwnership via ``OwnedBrief`` (``404`` otherwise, walking Brief -> Beat ->\nuser — TDD §6). ``builds_on`` resolves only for a **published** Brief\n(``BriefRepository.previous_published``, the highest-numbered published\nBrief strictly below this one's ``number``) — ``None`` on Brief #1 (no\nsuch row exists) and, by construction here (never queried at all), on\nevery Skipped entry, which has no ``number`` of its own to search below.\n``sources`` is ``[]`` for a Skipped entry (no ``brief_sources`` rows\nexist for one, D2).",
+        "operationId": "get_brief_api_v1_briefs__brief_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "brief_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Brief Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BriefDetailDTO"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error envelope"
+          }
+        },
+        "summary": "Get Brief",
+        "tags": [
+          "beats"
+        ]
+      }
+    },
+    "/api/v1/briefs/{brief_id}/read": {
+      "post": {
+        "description": "Ping a Brief read -> ``204`` (D11, §6/§9).\n\nOwnership via ``OwnedBrief`` (``404`` otherwise). ``opened`` and\n``sources`` are independent, first-write-wins columns\n(``mark_read``/``mark_sources_seen``) — idempotent per marker: a repeat\nping with the same ``marker`` is still ``204`` and never moves the\ntimestamp (the north-star metric, §9, asks *when a learner first opened*\na Brief). An unrecognized ``marker`` is a ``422 validation_error`` before\nthis body ever runs (``ReadPingMarker``'s ``Literal``).\n\n**AL-540:** ``brief_read`` fires only on the real, first-write-wins\ntransition — the ``quick_check_attempted`` precedent (a repeat ping is\nnot a second read) — after the ping's own commit, so a raising sink\ncannot turn an already-recorded read into a ``500``.\n\n**``age_days`` is computed against the learner's LOCAL day** (FIX 9,\ncode-review — corrected from an earlier version that always used\n``datetime.now(UTC).date()``). ``published_on`` is itself the learner's\nlocal day at the moment the arrival that produced it ran (D4a) — comparing\nit against UTC's *today* is not a rounding nicety, it is comparing two\ndifferent calendars. For a learner east of UTC reading a fresh Brief in\ntheir own morning, UTC's *today* can still be *yesterday*, which made\n``age_days`` **negative** — a value with no honest reading (an age of\n``-1`` is not \"no age yet\", `age_days` has no ``NULL``/sentinel\nconvention anywhere else this field is used). ``tz_offset_minutes`` is\nalready a query param on every other route in this file\n(``TzOffsetMinutes``, §7's shared ``local_today`` derivation), so this was\na self-imposed gap, not a missing capability. Defaults to ``0`` (UTC) so\nan old client that has not been updated to send it keeps today's exact\nbehavior. **AL-531 shipped this:** ``lib/api.ts``'s ``pingBriefRead``\nsends ``tz_offset_minutes`` on every call, pinned by a frontend test —\nsee the frontend read-ping call site.\n\n**A ping targeting a Skipped Brief is also a ``204`` no-op (code-review\nFIX 2, AL-531).** Deliberately the same shape as a repeat ping, not a\n``404``: ``GET /briefs/{id}`` already resolves a Skipped id successfully\n(nulling ``number``/``title``/``body_markdown`` rather than 404ing —\n``get_brief``'s own docstring), so this route stays consistent with that\nprecedent rather than introducing a second, kind-dependent meaning for\n``404`` on the same id. The no-op itself lives one layer down —\n``BriefRepository.mark_read``/``mark_sources_seen`` now filter to\n``BriefKind.PUBLISHED`` — so this handler does not need to branch on\n``brief.kind`` at all; it already cannot stamp a Skipped row's\n``read_at``/``sources_seen_at`` no matter what a caller (a client bug, or\na request crafted by hand) sends. The shipped client also guards this on\nits own side (``routes/briefs.$briefId.tsx``'s effect never fires\n`opened` for a Brief with no body) — this is defense in depth for the\ndata-integrity invariant ``repositories/briefs.py`` states outright: a\nSkipped period is never a read (PRD §4.6), and ``brief_read_rate.sql``\ndepends on that holding at the row level, not just at the one client this\nticket shipped.",
+        "operationId": "read_brief_api_v1_briefs__brief_id__read_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "brief_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Brief Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tz_offset_minutes",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "maximum": 900,
+              "minimum": -900,
+              "title": "Tz Offset Minutes",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReadPingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error envelope"
+          }
+        },
+        "summary": "Read Brief",
+        "tags": [
+          "beats"
+        ]
+      }
+    },
+    "/api/v1/changes/{change_id}/undo": {
+      "post": {
+        "description": "**Undo** a Change, restoring the path exactly → ``204`` (§5.7).\n\nOwnership walks change → path → account (``404`` otherwise). The engagement\nre-check (D2) happens in the service, inside the lock and against live state,\nbecause that is the rule — the history sheet's disabled button is a\nconvenience, and a learner can start a lesson between the sheet rendering and\nthe tap. A Change whose content has been met answers ``409`` with reason\n``engaged``, and the sheet says plainly that it is now permanent history\nrather than hiding the affordance (PRD §5.5).\n\n``204`` and not the restored path: undo is reached from the history sheet,\nwhich is a read-only record, and the rail refetches the outline it already\npolls. Apply returns a path because it has ghosts to swap; undo has none.",
+        "operationId": "undo_change_api_v1_changes__change_id__undo_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "change_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Change Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error envelope"
+          }
+        },
+        "summary": "Undo Change",
+        "tags": [
+          "shaping"
+        ]
+      }
+    },
+    "/api/v1/lessons/{lesson_id}": {
+      "get": {
+        "description": "Poll target: generation state, unlock state, content, and Attempt (§6).\n\nOwnership is resolved by ``OwnedLesson`` (``404`` otherwise). The composition\n— poll-as-trigger resume + prefetch advance, effective generation state,\nderived unlock state, content when generated, and the revealed Attempt only\nonce one exists (W6) — lives in ``services.lessons_read.load_lesson_detail``;\nthis route only translates the result. A ``None`` view means the lesson was\ndeleted between the ownership read and the poll (a raced path delete) →\n``404``.",
+        "operationId": "get_lesson_api_v1_lessons__lesson_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lesson_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Lesson Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LessonDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error envelope"
+          }
+        },
+        "summary": "Get Lesson",
+        "tags": [
+          "lessons"
+        ]
+      }
+    },
+    "/api/v1/lessons/{lesson_id}/attempt": {
+      "post": {
+        "description": "Record an Attempt (first wins) and return the graded Outcome (W6, §4/§6).\n\nOwnership via ``OwnedLesson`` (``404`` otherwise). Guards, in order:\n\n* a **locked** lesson → ``403``. Attempt gates on *not locked*, **not**\n  available-only: a **complete** lesson stays attemptable (completion is\n  orthogonal to the Attempt — a learner may complete a lesson and still answer\n  its Quick check, AL-012 / TN-3). Only a locked (later / not-yet-reached)\n  lesson is refused; its state is still readable on ``GET``.\n* an ungenerated lesson (no Quick check yet) → ``409``.\n\nGrading is deterministic and server-side (``domains/grading``). The Attempt is\nrecorded first-wins (``AttemptRepository.record``, ``ON CONFLICT DO NOTHING``),\nso a second submit never overwrites the first; the returned row is the Attempt\n**of record**, and the Outcome is re-derived from *its* stored\n``selected_index`` (never the ``is_correct`` denormalization, AL-012). The\nresponse reveals the keyed ``correct_index`` + ``explanation`` — this endpoint\nis the reveal boundary, mirroring the ``attempt`` object on ``GET``.",
+        "operationId": "attempt_lesson_api_v1_lessons__lesson_id__attempt_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lesson_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Lesson Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AttemptRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttemptResultDTO"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error envelope"
+          }
+        },
+        "summary": "Attempt Lesson",
+        "tags": [
+          "lessons"
+        ]
+      }
+    },
+    "/api/v1/lessons/{lesson_id}/complete": {
+      "post": {
+        "description": "Mark the available lesson complete (non-gating) → ``200`` (§4/§6).\n\nOwnership via ``OwnedLesson`` (``404`` otherwise). Completion is orthogonal to\nthe Quick-check Outcome (non-gating, CONTEXT.md) and to generation state, but\nit is gated on the **unlock** axis: only the available lesson may be completed\n(AL-012 executor-routed rule). Derived cases:\n\n* **locked** → ``403`` (a later or not-yet-reached lesson; you cannot skip\n  ahead — a generated-but-locked lesson is rejected here too).\n* **complete** → idempotent ``200`` no-op: re-completing does not re-stamp\n  ``completed_at`` or move the window.\n* **available** → mark complete, commit, then advance the prefetch window\n  **after** the commit (``on_lesson_completed`` recomputes ``first_incomplete``\n  in a fresh session, AL-040 docstring note), so the newly-unlocked next\n  lesson begins prefetching.\n\nThe window advance is fired **only** when this request performed the\ntransition (``mark_completed_and_finalize`` returns ``newly_completed``). A\nconcurrent second complete that raced past the ``COMPLETE`` early-return\nre-stamps nothing (the repo's ``completed_at IS NULL`` guard, TN-4) and must\nnot re-fire the advance either. Path completion is derived **atomically** in\nthe repository (under the path lock), so ``path_completed`` fires exactly once\n— never a double-emit if two lessons on a path resolve concurrently.",
+        "operationId": "complete_lesson_api_v1_lessons__lesson_id__complete_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lesson_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Lesson Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompleteLessonResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error envelope"
+          }
+        },
+        "summary": "Complete Lesson",
+        "tags": [
+          "lessons"
+        ]
+      }
+    },
+    "/api/v1/lessons/{lesson_id}/generate": {
+      "post": {
+        "description": "Ensure/retry a lesson's generation → ``202 {id}`` (W8; trigger + poll).\n\nOwnership via ``OwnedLesson`` (``404`` otherwise). A billed trigger, so it\ncarries the daily lesson-generation cap (``check_lesson_generation``, admins\nexempt, TDD §10) *before* triggering — a breach raises ``429`` with the\n``rate_limited`` envelope. On pass the orchestrator's public\n``trigger_lesson_generation`` fires ``retry_lesson`` through the registry-bound\nspawn: it *ensures* a chain-head ``ungenerated`` lesson the learner reached and\n*retries* a chain-head ``failed`` one (the chain-head ordering guard lives in\nthe orchestrator, §5.2/§5.5), then refills the prefetch window. The request\nreturns immediately; the client polls ``GET /lessons/{id}``. A trigger on a\nterminal ``generated`` lesson or a non-chain-head one still returns ``202`` but\nis a no-op for that lesson (only the window is advanced) — never an error to\nmodel in the route.",
+        "operationId": "generate_lesson_api_v1_lessons__lesson_id__generate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lesson_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Lesson Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenerateLessonResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error envelope"
+          }
+        },
+        "summary": "Generate Lesson",
+        "tags": [
+          "lessons"
+        ]
+      }
+    },
+    "/api/v1/messages/{message_id}/apply-proposal": {
+      "post": {
+        "description": "**Apply** the Proposal on a shaping message → the Change + the fresh path.\n\nThe learner's tap, and the only write path into path structure (§5.6). It\naddresses the *message* rather than the path because the Proposal is what is\nbeing consented to — a payload validated when it was made, re-validated here\nagainst live state, and applied whole or not at all.\n\nOwnership is its **own** walk (message → conversation → path → account), not\n``OwnedPath``'s and not the Tutor-check route's: a shaping message carries no\n``lesson_id``, so ``get_message_for_user``'s inner join cannot return one\n(its docstring says so). A message that is not the caller's, is not a shaping\nmessage, or carries no Proposal is a plain ``404`` — three different facts,\none answer, because distinguishing them would disclose the first.\n\nEverything after that is ``services/shaping.py``'s, under the per-path apply\nlock (D11), and every refusal is a ``409`` whose ``details.reason`` is a\n:class:`~aleph.dtos.shaping.ShapingConflictReason` the card renders: already\napplied, stale (with which rule broke), positions shifted, or a target being\ngenerated right now. §5.8 makes that path first-class UX rather than an error\ncorner — a Proposal going stale is *normal* (the learner chats, walks away,\nattempts the target, comes back and taps).\n\nThe response carries the **refreshed path** because the rail is holding ghost\nrows it now has to swap for real ones, and loading it through the same read\nseam ``GET /paths/{id}`` uses is also what kicks Phase 1's prefetch driver —\n§5.6's \"so new work starts without waiting for a poll\". One round trip,\nno new orchestration (D7).",
+        "operationId": "apply_proposal_api_v1_messages__message_id__apply_proposal_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "message_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Message Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplyProposalResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error envelope"
+          }
+        },
+        "summary": "Apply Proposal",
+        "tags": [
+          "shaping"
+        ]
+      }
+    },
+    "/api/v1/messages/{message_id}/tutor-check-answer": {
+      "post": {
+        "description": "Record the learner's Tutor-check choice → ``204`` (PRD §5.5, W12).\n\nOwnership walks message → conversation → path → user in one join, so\nsomeone else's message is indistinguishable from a missing one (``404``).\nThat same query returns the event locator (path id and the lesson's\nposition, which the message row does not carry), so proving ownership and\nstamping ``tutor_check_answered`` cost one round trip between them.\nGuards, in order:\n\n* a message with no Tutor check → ``409``. The row exists and is the\n  caller's; the request conflicts with its state (Phase 1's \"not generated\n  yet\" precedent), so it is neither ``404`` nor ``422``.\n* an index outside the stored ``options`` → ``422``. Nothing grades a Tutor\n  check, so ``selected_index`` is only ever used to index those options when\n  re-rendering the revealed card; an unindexable value would store fine and\n  break that render later.\n\nThe write is a **reassignment** of the JSONB payload\n(``set_tutor_check_answer``) — plain ``JSONB`` has no ORM mutation tracking,\nso an in-place edit would never be flushed. Nothing else is written: no\nAttempt, no progress, no lesson state. A Tutor check is non-scoring and\noutside progress, which is a property of this schema rather than a\nconvention (TDD §4).\n\nAnswering twice overwrites, deliberately unlike the Quick check's first-wins\nAttempt: first-wins exists because an Attempt is graded and feeds the §7\nmetrics, and neither is true here.\n\n**A re-answer re-emits** ``tutor_check_answered``, tagged\n``first_answer=False`` (AL-240's call on what AL-221 left open). The event\nrecords a real state change — the payload really is rewritten, where a\nrepeat Quick-check submit writes nothing — and ``first_answer`` is what lets\nany per-check rate exclude the repeats. See\n:func:`aleph.events.emit_tutor_check_answered`.\n\n``Outcome`` here is the shared correct/incorrect vocabulary (CONTEXT.md),\nnot the Quick check's grading path: a Tutor check is non-scoring, so nothing\nis graded, recorded as an Attempt, or first-wins about it.",
+        "operationId": "answer_tutor_check_api_v1_messages__message_id__tutor_check_answer_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "message_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Message Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TutorCheckAnswerRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error envelope"
+          }
+        },
+        "summary": "Answer Tutor Check",
+        "tags": [
+          "tutor"
+        ]
+      }
+    },
+    "/api/v1/paths": {
+      "get": {
+        "description": "The \"Your paths\" switcher: topic, level, status, progress, resume (§6).\n\nThree queries regardless of path count: the learner's paths (**most recently\nworked first**) with their **effective** status, a single grouped progress\nroll-up over all of them, and one ``DISTINCT ON`` for every path's available\nlesson. ``status`` is effective (a stale ``generating`` reads as ``failed``),\nmatching the detail poll — so the switcher and the path view never disagree on\na crashed outline.\n\nThe ordering is the repository's (last activity desc, nulls last); this route\ndoes not re-sort. ``last_activity_at`` ships on each row from the same\nroll-up that produced the sort key, so the list and the field it is sorted\nby cannot drift apart.",
+        "operationId": "list_paths_api_v1_paths_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PathListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error envelope"
+          }
+        },
+        "summary": "List Paths",
+        "tags": [
+          "paths"
+        ]
+      },
+      "post": {
+        "description": "Create a path and trigger its outline → ``202 {id}`` (W1; rate-limited).\n\nAn admin may pin the outline/lesson model per-path via ``model_outline``/\n``model_lesson`` (the picker, §5.3/D14). Those overrides are enforced\n**first** — admin-only (``403``), allowlist-bound (``422``) — so an\nunauthorized or off-allowlist request is rejected before any quota is spent;\nthe validated choices travel on the persisted row so the DB-driven\nresume/reconcile routes the chosen model (§5.4/D6), not just the first task.\n\n``guidance`` (CONTEXT.md: *Guidance*) is the learner's optional free text\nsteering the outline's shape — a second generation input alongside\n``topic``/``level``, passed straight through to the orchestrator, which\npersists it on the row so the outline (and any DB-driven re-run of it)\nreads it. There is no picker-style enforcement on it: unlike the model\noverrides it is available to every learner, not admin-gated. The optional\n``teaching_style`` (CONTEXT.md: *Teaching style*) is persisted the same way\nand read by lesson generation.\n\nThe daily per-account cap is then checked *before* the billed work (admins\nexempt, TDD §10); a breach raises ``429`` with the ``rate_limited`` envelope.\nOn pass the orchestrator inserts the ``pending`` row, spawns the outline task,\nand returns immediately — the client polls ``GET /paths/{id}`` for the\noutcome.",
+        "operationId": "create_path_api_v1_paths_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePathRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreatePathResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error envelope"
+          }
+        },
+        "summary": "Create Path",
+        "tags": [
+          "paths"
+        ]
+      }
+    },
+    "/api/v1/paths/{path_id}": {
+      "delete": {
+        "description": "Hard-delete a path; the cascade tears down its whole tree (W5, §4).\n\nOwnership via ``OwnedPath`` (``404`` otherwise). ``DELETE paths`` cascades to\nunits, lessons, quick checks, and attempts (ON DELETE CASCADE); other paths\nare untouched. Not undoable (the UI confirms); doubles as reset (CONTEXT.md).",
+        "operationId": "delete_path_api_v1_paths__path_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "path_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Path Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error envelope"
+          }
+        },
+        "summary": "Delete Path",
+        "tags": [
+          "paths"
+        ]
+      },
+      "get": {
+        "description": "Poll target: effective status, outline, per-lesson state + unlock, progress.\n\nOwnership is resolved by ``OwnedPath`` (``404`` otherwise). The composition —\npoll-as-trigger resume, effective status/refusal/progress snapshot, and the\noutline with each lesson's effective generation state and derived unlock\nstate — lives in ``services.paths_read.load_path_detail`` (the read seam\nAL-051 reuses); this route only translates the result to the DTO. A ``None``\nview means the path was deleted between the ownership read and the poll (a\nraced delete) → ``404``.",
+        "operationId": "get_path_api_v1_paths__path_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "path_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Path Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PathDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error envelope"
+          }
+        },
+        "summary": "Get Path",
+        "tags": [
+          "paths"
+        ]
+      },
+      "patch": {
+        "description": "Rename a path's display label (CONTEXT.md: *Path title*).\n\nDisplay only: ``topic`` — the generation input — is never touched, and the\nrename itself writes only ``title``, nothing more (there is no other field\nto write, so there is nothing else this route could accidentally do —\n``UpdatePathRequest``'s docstring). Ownership via ``OwnedPath`` (``404``\nfor a path the caller does not own or that does not exist; ``401`` first\nfor anonymous, same as every other route). Safe at **any** path status —\n``pending``/``generating``/``ready``/``failed``/``refused`` all rename the\nsame way, since renaming never touches the generation state machine.\n\n**Why the refresh.** ``path`` is the ORM instance ``OwnedPath`` loaded\n*before* this write. With SQLAlchemy's default ``synchronize_session``,\nthe ORM-enabled Core ``UPDATE`` in\n:meth:`~aleph.repositories.paths.PathRepository.set_title` would in fact\nalready patch ``path.title`` on commit — its ``WHERE`` is a\nPython-evaluatable literal-id equality, so the response would be correct\neven without this call. The explicit ``session.refresh(path)`` is kept\nanyway: it does not make this route depend on that ``synchronize_session``\nimplementation detail (a future non-evaluatable criterion on ``set_title``\nwould silently fall back to no synchronization), and it also picks up the\nDB-side ``updated_at`` the ``UPDATE`` just wrote.\n\n**The response is not just the rename.** It is built through the same\nread seam ``GET /paths/{id}`` uses (``load_path_detail`` below) — which is\nthe poll-as-trigger (§5.4/D5): a rename spawns the same idempotent resume\na ``GET`` would, including billable lesson generation to fill the prefetch\nwindow, if the path's generation state has work to resume. That is\nintentional (it matches ``GET``, which is also unlimited) and is why this\nroute returns the same ``PathDetailResponse`` shape ``GET /paths/{id}``\ndoes (via the same ``load_path_detail`` + :func:`path_detail_response` the\npoll route uses) — the client drops the body straight into the query it\nalready polls, exactly as Phase 2B's Apply does\n(``path_detail_response``'s docstring).",
+        "operationId": "update_path_api_v1_paths__path_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "path_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Path Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePathRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PathDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error envelope"
+          }
+        },
+        "summary": "Update Path",
+        "tags": [
+          "paths"
+        ]
+      }
+    },
+    "/api/v1/paths/{path_id}/changes": {
+      "get": {
+        "description": "The path's **Change history**, newest first (§6).\n\nOwnership via ``OwnedPath`` (``404`` otherwise). Read-only: it is a record,\nnot a second edit surface (PRD §5.5), so undone Changes are listed too —\nundo is a status, and the history is what happened.\n\nIt is scoped by **path**, never by conversation, which is why it answers\nidentically before and after \"new conversation\": the rows outlive the thread\nthat produced them (D3), and an applied Change is real path structure that\nclearing a conversation could not take back even if it wanted to.\n\n``200`` with an empty list on a path nothing has ever shaped — and on a\nnon-``ready`` path, for the conversation read's reason: the ``ready`` rule\nbounds sending, not reading.",
+        "operationId": "get_change_history_api_v1_paths__path_id__changes_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "path_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Path Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChangeHistoryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error envelope"
+          }
+        },
+        "summary": "Get Change History",
+        "tags": [
+          "shaping"
+        ]
+      }
+    },
+    "/api/v1/paths/{path_id}/conversation": {
+      "delete": {
+        "description": "**New conversation**: drop the thread (PRD §5.8) → ``204``, idempotent.\n\nOwnership via ``OwnedPath`` (``404`` otherwise). Deleting the conversation\nrow cascades its messages; the path, its lessons, and every scrap of Phase 1\nstate are untouched (TDD §3). Clearing an already-empty thread is ``204``\ntoo — the affordance is one tap, retries and double taps must not read as\nerrors.\n\nIt never refunds quota (TDD D8): the tutor cap is disabled at its default of\n0, so no usage rows exist to refund. That the count would be refundable *if*\nthe cap were enabled is the recorded precondition for enabling it, not work\nto do here.",
+        "operationId": "delete_conversation_api_v1_paths__path_id__conversation_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "path_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Path Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error envelope"
+          }
+        },
+        "summary": "Delete Conversation",
+        "tags": [
+          "tutor"
+        ]
+      },
+      "get": {
+        "description": "The path's whole thread, oldest first (§6).\n\nOwnership via ``OwnedPath`` (``404`` otherwise). A path with no conversation\nyet is ``200`` with an empty list, not ``404``: the row is created lazily on\nthe first completed turn (TDD §4), so an untouched path and a cleared one\nread identically — which is exactly what \"new conversation\" should leave\nbehind.\n\nOne query serves it: the repository resolves each message's lesson title in\nthe thread join rather than looking it up per message. Unpaginated this\nphase (an accepted risk, TDD §14).",
+        "operationId": "get_conversation_api_v1_paths__path_id__conversation_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "path_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Path Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error envelope"
+          }
+        },
+        "summary": "Get Conversation",
+        "tags": [
+          "tutor"
+        ]
+      }
+    },
+    "/api/v1/paths/{path_id}/conversation/messages": {
+      "post": {
+        "description": "Send a turn → ``text/event-stream``, the reply as it is produced (§5.4).\n\nOwnership via ``OwnedPath`` (``404`` otherwise). The gates run in this order,\nand the order is the contract:\n\n1. **The picker**, first and before any billed work — a ``model`` override is\n   admin-only (``403``, checked before the allowlist so a non-admin never\n   learns its shape) and allowlist-bound (``422``). It is resolved **per\n   request and persisted nowhere**: Phase 1 pins its choice on the path row\n   because background resume has to route the same model, while a tutor reply\n   is request-scoped (D2), so there is nothing to resume and no column to\n   add. Which model served a reply is recoverable from the pydantic-ai span.\n2. **Admission** (``services/tutor.py``): the lesson is on the path and\n   generated (``404``/``409``), the conversation has no reply in flight\n   (``409``, D9), the learner is under the daily cap (``429``, D8), and the\n   context assembles. All of these are ordinary JSON error envelopes —\n   **SSE starts only once the turn is admitted**, which is what makes a\n   pre-stream failure something a normal fetch error handler can read.\n3. **The stream**: ``delta`` / ``tutor_check`` frames, a ``: ping`` comment\n   through model silence, and exactly one terminal ``done`` (the turn is\n   persisted, both ids on the wire) or ``error`` (nothing persisted, D2).\n\n``session`` is declared here only to be *closed*: FastAPI caches a dependency\nper request, so this is the very instance ``OwnedPath`` resolved ownership\non, and closing it hands its pooled connection back before the stream opens\nrather than when the dependency stack unwinds (module docstring). Closing is\nidempotent, so the stack's own later teardown is a harmless no-op, and\neverything downstream of here uses its own short-lived sessions.\n\nThe response is deliberately not a ``response_model``: its body is an event\nstream, and the payload shapes that ride in it are the ``dtos/tutor.py``\nstream DTOs rather than one envelope OpenAPI could describe.",
+        "operationId": "send_message_api_v1_paths__path_id__conversation_messages_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "path_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Path Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SendMessageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/StreamDelta"
+                    },
+                    {
+                      "$ref": "#/components/schemas/StreamTutorCheck"
+                    },
+                    {
+                      "$ref": "#/components/schemas/StreamDone"
+                    },
+                    {
+                      "$ref": "#/components/schemas/StreamError"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "The reply as an event stream: delta, tutor_check, then done or error."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error envelope"
+          }
+        },
+        "summary": "Send Message",
+        "tags": [
+          "tutor"
+        ]
+      }
+    },
+    "/api/v1/paths/{path_id}/retry": {
+      "post": {
+        "description": "Retry a ``failed`` outline → ``202 {id}`` (W8; trigger + poll; rate-limited).\n\nOwnership via ``OwnedPath`` (``404`` otherwise). This is a billed trigger that\ninserts no row, so it carries its **own** daily cap\n(``check_outline_generation``, admins exempt) *before* triggering — a breach\nraises ``429`` with the ``rate_limited`` envelope. The cap counts paths with\nan outline attempt today and bounds cross-path retry storms; a same-path retry\nloop is bounded only by claim serialization + client patience (see\n``services.rate_limit``).\n\nOn pass the re-claim is *triggered*, not awaited, through the orchestrator's\npublic ``trigger_outline_retry`` (the registry-bound ``spawn`` seam create\nuses), so the request returns immediately and the client polls\n``GET /paths/{id}`` for the result — never blocking the HTTP worker on a model\ncall (§5.4/D5). ``retry_outline`` re-claims only a ``pending``/``failed``\noutline; on a terminal ``ready``/``refused``/fresh-``generating`` path the\nclaim is a **silent no-op** (a refusal is terminal — the learner starts a new\ntopic, §5.5), so a stray retry still returns ``202`` but changes nothing,\nrather than being an error to model in the route.",
+        "operationId": "retry_path_api_v1_paths__path_id__retry_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "path_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Path Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreatePathResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error envelope"
+          }
+        },
+        "summary": "Retry Path",
+        "tags": [
+          "paths"
+        ]
+      }
+    },
+    "/api/v1/paths/{path_id}/shaping/conversation": {
+      "delete": {
+        "description": "**New conversation**: drop the shaping thread (PRD §5.8) → ``204``.\n\nOwnership via ``OwnedPath`` (``404`` otherwise). Deleting the conversation\nrow cascades its messages; the path, its lessons, and every scrap of Phase 1\nstate are untouched — and so is the **in-lesson thread**, which is a\ndifferent row of a different kind (D3). Clearing an already-empty thread is\n``204`` too — the affordance is one tap, and retries and double taps must not\nread as errors.\n\n**The Change history survives it** (D3, PRD §5.8): ``path_changes`` hangs off\nthe path and its ``message_id`` is ``ON DELETE SET NULL``, so the cascade\nnulls the reference and keeps every row. A learner starting a fresh\nconversation does not lose the record of what they already changed — and,\nbecause applied changes are real path structure, could not.\n\nIt never refunds quota, for 2A's reason: the shaping cap is disabled at its\ndefault of 0, so no usage rows exist to refund.",
+        "operationId": "delete_shaping_conversation_api_v1_paths__path_id__shaping_conversation_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "path_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Path Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error envelope"
+          }
+        },
+        "summary": "Delete Shaping Conversation",
+        "tags": [
+          "shaping"
+        ]
+      },
+      "get": {
+        "description": "The path's whole shaping thread, oldest first (§6).\n\nOwnership via ``OwnedPath`` (``404`` otherwise). A path with no shaping\nconversation yet is ``200`` with an empty list, not ``404``: the row is\ncreated lazily on the first completed turn, so an untouched path and a\ncleared one read identically — which is exactly what \"new conversation\"\nshould leave behind. Unpaginated this phase (an accepted risk, TDD §14).\n\n**Each Proposal's ``resolution`` is derived here, not stored** (D3), by\n:func:`~aleph.services.tutor_context.derive_proposal_resolutions` — the same\nfunction that decides how a prior Proposal reads in the shaper's carried\nhistory. Deriving it twice is how the card and the model would start\ndisagreeing about whether an edit already landed, so *superseded* in\nparticular costs this route the path reads the derivation needs: a stale\nProposal is one that no longer validates against **live** path state (the\nshared D1 predicates), which cannot be known from the message row alone.\n\nThose reads are **skipped entirely on a thread that carries no Proposal** —\nthe ordinary case, since most asks are questions. There is no resolution to\nderive without a Proposal to resolve, so the four extra queries would answer\na question nobody asked; the empty mapping is exactly what the derivation\nreturns for such a thread anyway.",
+        "operationId": "get_shaping_conversation_api_v1_paths__path_id__shaping_conversation_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "path_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Path Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShapingConversationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error envelope"
+          }
+        },
+        "summary": "Get Shaping Conversation",
+        "tags": [
+          "shaping"
+        ]
+      }
+    },
+    "/api/v1/paths/{path_id}/shaping/conversation/messages": {
+      "post": {
+        "description": "Send a shaping turn → ``text/event-stream``, the reply as it is produced.\n\nOwnership via ``OwnedPath`` (``404`` otherwise). The gates run in this order,\nand the order is the contract:\n\n1. **The picker**, first and before any billed work — a ``model`` override is\n   admin-only (``403``, checked before the allowlist so a non-admin never\n   learns its shape) and allowlist-bound (``422``). It is resolved **per\n   request and persisted nowhere**, exactly as 2A's is: a reply is\n   request-scoped, so there is nothing to resume and no column to add. It\n   binds the ``MODEL_SHAPER`` slot (D10).\n2. **Admission** (``services/shaping.py``): the path is ``ready`` (``409`` —\n   PRD §5.1's rule, server-enforced), the shaping conversation has no reply\n   in flight (``409``, D11), the learner is under the daily cap (``429``,\n   §7), and the context assembles. All of these are ordinary JSON error\n   envelopes — **SSE starts only once the turn is admitted**, which is what\n   makes a pre-stream failure something a normal fetch error handler can\n   read.\n3. **The stream**: ``delta`` / ``proposal`` frames, a ``: ping`` comment\n   through model silence, and exactly one terminal ``done`` (the turn is\n   persisted, both ids on the wire) or ``error`` (nothing persisted).\n\n``session`` is declared here only to be *closed*: FastAPI caches a dependency\nper request, so this is the very instance ``OwnedPath`` resolved ownership\non, and closing it hands its pooled connection back before the stream opens\nrather than when the dependency stack unwinds. Closing is idempotent, so the\nstack's own later teardown is a harmless no-op, and everything downstream of\nhere uses its own short-lived sessions.\n\nThe response is deliberately not a ``response_model``: its body is an event\nstream, and the payload shapes that ride in it are the stream DTOs rather\nthan one envelope OpenAPI could describe.",
+        "operationId": "send_shaping_message_api_v1_paths__path_id__shaping_conversation_messages_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "path_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Path Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SendShapingMessageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/StreamDelta"
+                    },
+                    {
+                      "$ref": "#/components/schemas/StreamProposal"
+                    },
+                    {
+                      "$ref": "#/components/schemas/StreamDone"
+                    },
+                    {
+                      "$ref": "#/components/schemas/StreamError"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "The reply as an event stream: delta, proposal, then done or error."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error envelope"
+          }
+        },
+        "summary": "Send Shaping Message",
+        "tags": [
+          "shaping"
+        ]
+      }
+    },
+    "/api/v1/paths/{path_id}/teaching-style": {
+      "put": {
+        "description": "Replace or clear a path's Teaching style (CONTEXT.md: *Teaching style*).\n\n**Forward-only.** The write is the whole effect: nothing is reset or\nregenerated. Lesson generation reads the column when each lesson runs, so\nlessons generated after this commit use the new style, and lessons already\nwritten (including ones prefetched ahead of the learner) keep theirs.\n\nOwnership via ``OwnedPath`` (``404`` otherwise); safe at any path status.\nAnswers with the same ``PathDetailResponse`` ``GET /paths/{id}`` does, built\nthrough the same read seam, for the same reasons ``update_path`` gives.",
+        "operationId": "update_teaching_style_api_v1_paths__path_id__teaching_style_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "path_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Path Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateTeachingStyleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PathDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error envelope"
+          }
+        },
+        "summary": "Update Teaching Style",
+        "tags": [
+          "paths"
+        ]
+      }
+    },
+    "/api/v1/progress/summary": {
+      "get": {
+        "description": "The global streak, the activity window and the per-path breakdown (§6).\n\n``tz_offset_minutes`` is the client's ``getTimezoneOffset()`` value\nverbatim (D3), validated to ``[-900, 900]`` at the DTO boundary — an\nout-of-range value is a ``422`` through the shared envelope before this\nbody ever runs. Defaults to ``0`` (UTC) so a caller that omits it gets a\ncoherent, if not learner-local, answer rather than a required-field error.\n\nNo caching, no rate limiting (§7): the cost is bounded by the caller's own\ncompletion history, and there is no model call to guard against.\n\nThe router-level ``streaks`` dependency hides this whole route when the\nfeature is disabled.",
+        "operationId": "get_progress_summary_api_v1_progress_summary_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "tz_offset_minutes",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "maximum": 900,
+              "minimum": -900,
+              "title": "Tz Offset Minutes",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProgressSummaryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error envelope"
+          }
+        },
+        "summary": "Get Progress Summary",
+        "tags": [
+          "progress"
+        ]
+      }
+    }
+  }
+}

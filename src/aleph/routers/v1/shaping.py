@@ -73,6 +73,10 @@ from aleph.dtos.shaping import (
     ShapingConversationResponse,
     ShapingMessageDTO,
 )
+from aleph.dtos.stream import (
+    ShapingStreamFrame,
+    event_stream_responses,
+)
 from aleph.models import (  # noqa: TC001 - FastAPI resolves annotations.
     ConversationKind,
     User,
@@ -156,6 +160,11 @@ router = APIRouter(
 @router.post(
     "/paths/{path_id}/shaping/conversation/messages",
     response_class=StreamingResponse,
+    response_model=ShapingStreamFrame,
+    responses=event_stream_responses(
+        ShapingStreamFrame,
+        "The reply as an event stream: delta, proposal, then done or error.",
+    ),
 )
 async def send_shaping_message(
     path: OwnedPath,
