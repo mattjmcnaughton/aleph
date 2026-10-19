@@ -18,7 +18,7 @@ from fastapi import Depends, HTTPException
 from httpx import ASGITransport, AsyncClient
 from starlette.requests import Request
 
-from aleph import dependencies
+from aleph import dependencies, events
 from aleph.app import create_app
 from aleph.bearer import (
     AccessTokenVerifier,
@@ -27,7 +27,7 @@ from aleph.bearer import (
     get_bearer_authenticator,
 )
 from aleph.config import Settings
-from aleph.dependencies import bearer_token, get_current_user
+from aleph.dependencies import bearer_client, bearer_token, get_current_user
 from aleph.models import User
 from tests._bearer_fakes import (
     AUDIENCE,
@@ -41,12 +41,23 @@ from tests._bearer_fakes import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from sqlalchemy.ext.asyncio import AsyncSession
 
 
 @pytest.fixture
 def anyio_backend() -> str:
     return "asyncio"
+
+
+@pytest.fixture(autouse=True)
+def no_request_client() -> Iterator[None]:
+    # The dependency binds ``request_client`` in the caller's context; a test
+    # calling it directly must not leak that binding into the next test.
+    token = events.request_client.set(None)
+    yield
+    events.request_client.reset(token)
 
 
 COOKIE_USER = User(id=uuid.uuid4(), username="cookie", display_name="Cookie")
@@ -95,6 +106,7 @@ async def test_no_header_keeps_the_cookie_path() -> None:
 
     assert user is COOKIE_USER
     assert request.state.auth_method == "session"
+    assert events.request_client.get() == "web"
 
 
 @pytest.mark.anyio
@@ -104,6 +116,7 @@ async def test_no_header_and_no_cookie_is_anonymous() -> None:
     )
 
     assert user is None
+    assert events.request_client.get() is None
 
 
 @pytest.mark.anyio
@@ -132,6 +145,7 @@ async def test_invalid_bearer_never_falls_back_to_a_valid_cookie(token: str) -> 
     # left exactly as it was (nothing cookie-specific happens for bearer).
     assert db.calls == []
     assert session == cookie_session()
+    assert events.request_client.get() is None
 
 
 @pytest.mark.anyio
@@ -249,3 +263,26 @@ def test_api_audience_must_not_equal_the_web_client_id() -> None:
     # equal to it would accept them as API access tokens.
     with pytest.raises(ValueError, match="OIDC_API_AUDIENCE"):
         Settings(oidc_client_id="aleph", oidc_api_audience="aleph")
+
+
+# --- the ``client`` event dimension's lookup (TDD §12, D18) ------------------- #
+
+LABELS = {"aleph-ios": "ios", "auth0-native-id": "ios"}
+
+
+@pytest.mark.parametrize("client_id", ["aleph-ios", "auth0-native-id"])
+def test_a_mapped_bearer_client_takes_its_label(client_id: str) -> None:
+    assert bearer_client(client_id, LABELS) == "ios"
+
+
+@pytest.mark.parametrize("client_id", ["aleph-api-test", "ALEPH-IOS", "", None])
+def test_an_unmapped_or_missing_bearer_client_is_unknown(
+    client_id: str | None,
+) -> None:
+    # Exact match only, and never a guess: an id the map does not name, or a
+    # token naming no client at all, records as ``unknown``.
+    assert bearer_client(client_id, LABELS) == "unknown"
+
+
+def test_an_empty_map_makes_every_bearer_client_unknown() -> None:
+    assert bearer_client("aleph-ios", {}) == "unknown"

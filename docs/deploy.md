@@ -119,6 +119,23 @@ token) configuration" below). Unset, bearer-token auth is off and every
 either way. Startup rejects an `OIDC_API_AUDIENCE` equal to `OIDC_CLIENT_ID`, since
 the web client's ID tokens carry that value as their `aud`.
 
+`OIDC_CLIENT_MAP` joins them with the app too: it maps a bearer token's client
+id (`azp`, else `client_id`) to the `client` label its product events carry
+(iOS TDD §12, [metrics.md](metrics.md#the-client-dimension)), as
+`<client id>:<label>,...`. Production's value is the Auth0 **Native**
+application's client id mapped to `ios`:
+
+```toml
+OIDC_CLIENT_MAP = '<auth0 native client id>:ios'   # placeholder: the id comes from AL-621
+```
+
+The id is not known yet: it is created with the Native application in AL-621
+(step 2 of "Native app (bearer token) configuration" below). Until it is set,
+the code default (`aleph-ios:ios`, dev Keycloak's client) applies, nothing in
+Auth0 matches it, and the app's events record as `unknown`; nothing else is
+affected. A client id is not a secret. Malformed entries are dropped, not fatal,
+like `FEATURE_FLAG_DEFAULTS`. Cookie requests are always `web`, whatever the map.
+
 There is deliberately no `HOST`/`PORT` here (nor in the image's `ENV`): the `CMD`
 hardcodes `--host 0.0.0.0 --port 8000` and nothing reads `Settings.host` /
 `Settings.port`, so an entry would look like a binding knob without being one.
@@ -213,7 +230,9 @@ PKCE itself and calls `/api/v1` with `Authorization: Bearer <access token>`
 2. **Applications → Create Application → Native.** Allowed Callback URL (and
    Allowed Logout URL) is the app's custom-scheme or universal-link redirect.
    Grant types: Authorization Code and Refresh Token only (no Password, no
-   Implicit). It has no client secret and needs no Fly secret.
+   Implicit). It has no client secret and needs no Fly secret. Put its client
+   id in `OIDC_CLIENT_MAP` as `<client id>:ios` (see "Committed, non-secret"
+   above), so the app's product events carry `client=ios`.
 3. The app authorizes with `audience=<API Identifier>` and
    `scope=openid profile email` (add `offline_access` for refresh tokens). The
    `openid` scope is load-bearing: aleph resolves the learner's profile and
@@ -221,7 +240,7 @@ PKCE itself and calls `/api/v1` with `Authorization: Bearer <access token>`
    tokens carry no email, and derived admin keys off it), and Auth0 only admits a
    token to `/userinfo` when `openid` was requested.
 
-Nothing else is needed server-side: aleph discovers the JWKS and userinfo
+Nothing else is needed server-side for auth: aleph discovers the JWKS and userinfo
 endpoint from `$OIDC_ISSUER/.well-known/openid-configuration`, and a token from
 the native app resolves to the same account as the same person's web sign-in
 (both are keyed by Auth0's `(iss, sub)`).
@@ -483,6 +502,7 @@ panel is never reading a window the feature was dark for.
 | 2 — tutor (AL-240) | 8 | `tutor_assisted_continuation` (primary), `tutor_adoption`, `tutor_repeat_use`, `tutor_depth`, `tutor_entry_mix`, `tutor_check_uptake`, `tutor_completion_guardrail`, `tutor_reply_failure_latency` |
 | 2B — shaping (AL-340) | 8 | `shaping_yield` (primary), `shaping_adoption`, `proposal_acceptance`, `edit_shape_mix`, `undo_rate`, `depth_to_proposal`, `shaped_path_completion_guardrail`, `shaping_reply_failure_latency` |
 | 6 — analyst (AL-540) | 6 | `brief_return` (north star), `brief_read_rate`, `brief_depth_of_read`, `brief_skip_rate`, `brief_wait_tolerance` (guardrail), `cost_per_read_brief` (guardrail) |
+| iOS app (AL-613) | 4 | `app_active_day_share` and `return_by_first_client` (the primary, two panels), `app_adoption`, `client_view_drift` (guardrail) |
 
 Two things to expect on the shaping set:
 

@@ -19,6 +19,10 @@ Each event is a Logfire log record whose `span_name` is the event name and whose
 fields are record `attributes`. Every event carries `account_id` and a `workflow`
 tag (§12), plus the ids that apply. The record's own timestamp is the event time.
 
+Every event a request caused also carries **`client`** (AL-613; iOS TDD §12,
+D18), described [below](#the-client-dimension); the table lists each event's own
+fields only.
+
 | Event | Emitted from | Key fields (beyond `account_id`, `workflow`) | Workflow |
 | --- | --- | --- | --- |
 | `account_created` | `services/auth.py` — new-account provision only | — | W1 |
@@ -44,6 +48,37 @@ tag (§12), plus the ids that apply. The record's own timestamp is the event tim
 | `beat_deployed` | `routers/v1/beats.py` `deploy_beat` — after the Beat is created, committed, and the arrival drain has claimed and spawned its first run | `beat_id`, `beat_level`, `anchor_weekday`, `has_guidance` | W29 |
 | `brief_research_completed` | `services/briefing.py` `BriefingService` — every fenced-win resolution of a claimed research run | `beat_id`, `outcome` (published/skipped/failed/refused), `duration_ms`, `queries`, `documents_retrieved`, `documents_after_filters`, `findings`, `survivors`, `prompt_tokens`, `completion_tokens`, `total_tokens` | W29 / W31 / W8 / W7 |
 | `brief_read` | `routers/v1/beats.py` `read_brief` — the real, first-write-wins transition only | `beat_id`, `brief_id`, `marker` (opened/sources), `age_days` | W29 |
+
+### The `client` dimension
+
+`client` says which client caused the event. It is **derived on the server from
+how the request authenticated**, never from anything the client sends:
+
+| Request | `client` |
+| --- | --- |
+| Session cookie (the web app, including the sign-in callback) | `web` |
+| Bearer token whose client id (`azp`, else `client_id`) is in `OIDC_CLIENT_MAP` | the mapped label: `ios` for the iOS app (`aleph-ios` in dev Keycloak, the Auth0 Native application's id in production) |
+| Bearer token from any other client, or naming none | `unknown` — never a guess |
+| No request: the reconciler, the scheduled job | **absent** |
+
+It is a `ContextVar` (`events.request_client`) bound by
+`dependencies._bind_user_to_request` (and by `/auth/callback`), and `_emit` adds
+it when set. A task the request spawns inherits it, so `outline_generated`,
+`lesson_generated`, `brief_research_completed` and the reply events carry the
+client that caused them. A first bearer request's `account_created` carries it
+too (the client is bound before the account is resolved). Events from before
+AL-613, and from work no request started, carry no `client`; the queries below
+treat a missing `client` as "not attributable", never as `web`.
+
+`EVENT_FIELDS` lists `client` in every event's set (`events.REQUEST_FIELDS`), so
+`tests/unit/test_metrics_queries.py` checks a query's `client` reference like any
+other field. `tests/unit/test_events.py` anchors both shapes (with a request:
+the full set; without: the set minus `client`), and
+`tests/integration/test_event_client.py` proves the values over both credentials.
+
+Production needs the Auth0 Native application's client id in `OIDC_CLIENT_MAP`
+([deploy.md](deploy.md#committed-non-secret-flytoml-env)); until it is there,
+the app's events record as `unknown`.
 
 `outline_generated` / `lesson_generated` are emitted **only on a fenced-win mark**
 (a lost claim's mark is a silent no-op), so each generation resolves the metric
@@ -424,6 +459,37 @@ adding `brief_read` there would be a deliberate act — so
 `tests/unit/test_metrics_queries.py` pins it directly, alongside every other
 activation-cohort query (`breadth.sql`, `return_rate.sql`) that reuses the
 same `activated` definition.
+
+### The iOS app — the `client` dimension (iOS PRD §7, TDD §12)
+
+The app gets no north star of its own: **Activation rate** stays it. The app's
+primary metric is about return, stated so it can fail.
+
+| Metric (iOS PRD §7) | Query | Events consumed |
+| --- | --- | --- |
+| **Return through the app (primary), part 1** — among accounts that use both clients, the share of Active days on which the app was used | [`app_active_day_share.sql`](../queries/logfire/app_active_day_share.sql) | `lesson_completed` (Active days) + every learner action (`client`) |
+| **Return through the app (primary), part 2** — Return (a second distinct Day) for activated learners whose first path was started in the app vs on the web | [`return_by_first_client.sql`](../queries/logfire/return_by_first_client.sql) | `account_created`, `lesson_completed`, `quick_check_attempted`, `lesson_viewed`, `path_created` (`client`) |
+| **App adoption** — % of active accounts with at least one `ios` event in a week | [`app_adoption.sql`](../queries/logfire/app_adoption.sql) | every learner action (`client`) |
+| **No metric drift between clients** (guardrail) — `lesson_viewed` per completed lesson, per client | [`client_view_drift.sql`](../queries/logfire/client_view_drift.sql) | `lesson_viewed`, `lesson_completed` (`client`) |
+
+"Learner action" is the same twelve events in both queries that use it:
+`path_created`, `lesson_viewed`, `quick_check_attempted`, `lesson_completed`,
+`path_deleted`, `tutor_message_sent`, `tutor_check_answered`,
+`shaping_message_sent`, `change_applied`, `change_undone`, `beat_deployed`,
+`brief_read`. Generation and reply-resolution events are left out: they inherit
+the client, but they are the system's work, not the learner's.
+
+`return_by_first_client.sql` reuses `return_rate.sql`'s `activated` cohort in
+full, so it is one of the activation-cohort queries that must never read
+`brief_read`. It drops accounts whose first path predates the dimension rather
+than guessing their client.
+
+The rest of PRD §7 is not an event query: **slice uptake** from the app is the
+existing tutor, shaping, streak and analyst panels filtered on
+`attributes ->> 'client' = 'ios'`; **first-lesson time** is measured with
+`XCTMetric`/os_signpost in the UI suite; **crash-free launches** come from App
+Store Connect; **sign-in failures** are the `bearer_auth_rejected` log events;
+the **push** metrics arrive with the push tickets (AL-615 onward).
 
 ## Importing the queries into Logfire
 

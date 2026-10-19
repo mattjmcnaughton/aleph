@@ -1,11 +1,15 @@
 """Application configuration via environment variables."""
 
 import datetime
+import re
 from pathlib import Path
 from typing import Literal, Self
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings
+
+# A ``client`` event label (``ios``, ``web``, ...): a lowercase identifier.
+_CLIENT_LABEL = re.compile(r"[a-z][a-z0-9_-]*")
 
 # The config-selectable id (TDD §12/D9) that resolves to the deterministic stub
 # model instead of an OpenRouter-backed one. Guarded out of production below.
@@ -211,6 +215,25 @@ class Settings(BaseSettings):
     # cookie authenticates. Auth0: the API Identifier; dev Keycloak:
     # ``aleph-api`` (the realm's audience mapper).
     oidc_api_audience: str = ""
+    # The ``client`` product-event dimension (TDD §12, D18): a bearer token's
+    # client id (``azp``, else ``client_id``) -> the ``client`` label its
+    # requests' events carry, as ``<client id>:<label>,...``. An unmapped
+    # client id records as ``unknown``; cookie requests are always ``web``.
+    # The default is the dev Keycloak realm's native client; production adds
+    # the Auth0 Native application's client id (docs/deploy.md). Parsed
+    # leniently, like ``feature_flag_defaults``: a malformed entry is dropped.
+    oidc_client_map: str = "aleph-ios:ios"
+
+    @property
+    def oidc_client_labels(self) -> dict[str, str]:
+        """Parsed ``oidc_client_map``: client id -> label, malformed dropped."""
+        parsed: dict[str, str] = {}
+        for entry in self.oidc_client_map.split(","):
+            client_id, separator, label = entry.strip().partition(":")
+            client_id, label = client_id.strip(), label.strip()
+            if separator and client_id and _CLIENT_LABEL.fullmatch(label):
+                parsed[client_id] = label
+        return parsed
 
     @model_validator(mode="after")
     def _check_api_audience(self) -> Self:
