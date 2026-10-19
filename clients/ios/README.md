@@ -1,8 +1,53 @@
 # aleph iOS
 
-The native SwiftUI iPhone client (iOS TDD, `docs/tdds/ios-app.md`). Its packages and app
-target arrive ticket by ticket (AL-603 onward). So far this directory holds the
-generated API client, the CI helper scripts and `.swift-format`.
+The native SwiftUI iPhone client (iOS TDD, `docs/tdds/ios-app.md`; PRD
+`docs/prds/ios-app.md`). iOS 26, dark only, Swift 6 language mode. Screens arrive
+ticket by ticket; AL-603 laid the skeleton every screen copies.
+
+## Layout
+
+| Path | Holds |
+| ---- | ----- |
+| `project.yml` | The XcodeGen spec. `xcodegen generate` writes `Aleph.xcodeproj`, which is never committed. |
+| `App/` | The thin `Aleph` app target: `AlephApp`, `AppDependencies+Live.swift` (builds the live services once), `UITesting/UITestAuthSession.swift`, Info plists, `PrivacyInfo.xcprivacy`, assets. |
+| `Packages/Core` | App-owned models (`Account`, `FeatureFlags`, ids), `AppError`, the service protocols (`AuthSession`, `TokenProvider`, `SessionAPI`, ...), `AppDependencies`, `TokenRefresher`. A dynamic library, so the app and the app-hosted snapshot tests share one copy of its types. Linux. |
+| `Packages/CoreTestSupport` | In-memory fakes of the `Core` protocols and `ManualClock`, for every test target. Its own package because a static library holding `Core`'s target would duplicate `Core` beside the app's copy. Linux. |
+| `Packages/API` | The generated client (`Generated/`), adapters to `Core` models, the bearer/refresh middleware, error mapping, `LiveSessionAPI`. Linux. |
+| `Packages/Auth` | `LiveAuthSession` (AppAuth 3.0.0), `KeychainTokenStore`, the reinstall purge. iOS only. |
+| `Packages/Markdown` | Module `AlephMarkdown` (swift-markdown's module is already called `Markdown`): the link allowlist now, the parser with AL-605. Linux. |
+| `Packages/Design` | (Dynamic, like `Features`.) Nocturne tokens (`Palette`, `Spacing`, `Radius`) and shared components (`AlephMark`, `StateCard`, `.alephPrimary`). iOS only. |
+| `Packages/Features` | Screens and their `@Observable` models, `SessionStore`, `Router`, `Route`, `AlephRootView`. iOS only. |
+| `AlephSnapshotTests/` | App-hosted snapshot tests; references in `__Snapshots__/`. |
+| `AlephUITests/` | XCUITest against the stub backend in fake-issuer mode; `Fixtures/tokens.json`. |
+
+**Layering is the manifests.** `Features` depends on `Core` and `Design` only, so it
+cannot import `API`, `Auth`, AppAuth or OpenAPIRuntime, and never sees a generated type.
+Screens take protocol-typed dependencies through their initialiser (TDD §3.4, §6.1).
+`App`, `Features` and `Design` default to the main actor; `Core`, `API`, `Auth` and
+`Markdown` are nonisolated. Pure state enums are marked `nonisolated` so their
+`Equatable`/`Codable` conformances need no actor.
+
+## Build configurations
+
+| Configuration | API | Sign-in | Notes |
+| ------------- | --- | ------- | ----- |
+| Debug | `http://127.0.0.1:8000` (`just dev-be`) | dev Keycloak (`127.0.0.1:18080`, the issuer the backend expects), client `aleph-ios` | `NSAllowsLocalNetworking` |
+| UITest | `http://127.0.0.1:8000` (the e2e stub backend) | the fake issuer | Debug plus `ALEPH_UI_TESTING` |
+| Release | production | Auth0 Native app (values arrive with AL-621) | |
+
+The values are build settings in `project.yml`, read at runtime from Info.plist keys
+(`AlephAPIBaseURL`, `AlephOIDCIssuer`, `AlephOIDCClientID`, `AlephOIDCAudience`).
+
+**UI-test auth (TDD §5.5, D22).** `UITestAuthSession` lives in the app target, not in
+`Auth`, because only a target the `UITest` configuration builds directly can see the
+`ALEPH_UI_TESTING` condition; a package cannot. It reads `-AlephTestTokens <json array>`
+at launch. `ios-gate` builds Release and fails if the binary contains `AlephTestTokens`.
+The tokens are signed by the e2e fake issuer's committed test-only key; see
+`docs/ci.md` ("Fake-issuer mode") and `scripts/mint_e2e_tokens.py`.
+
+**Running it on a Mac.** `cd clients/ios && xcodegen generate && open Aleph.xcodeproj`,
+with `just dev-be` and dev Keycloak (`just compose-keycloak-up`) running for the Debug
+configuration.
 
 ## The generated API client
 
@@ -69,12 +114,14 @@ has the full description and the required-check setup.
 | Job | Runner | Does |
 | --- | ------ | ---- |
 | `changes` | ubuntu | The path filter: `scripts/ios-relevant.sh` over the diff. |
-| `swift-linux` | `swift:6.2` container | `swift format lint --strict` (all tracked Swift here except `Generated/`, with `.swift-format`), `swift test` in `Tools/GenerateAPI`, `scripts/generate-api.sh --check`, `swift test` in `Packages/Core`, `Packages/Markdown`, `Packages/API`. |
+| `swift-linux` | `swift:6.2` container | `swift format lint --strict` (all tracked Swift here except `Generated/`, with `.swift-format`), `swift test` in `Tools/GenerateAPI`, `scripts/generate-api.sh --check`, `swift test` in `Packages/Core`, `Packages/CoreTestSupport`, `Packages/Markdown`, `Packages/API`. |
 | `ios-gate` | `macos-26`, Xcode 26.6 | XcodeGen, the pinned *iPhone 17 / iOS 26.5* simulator, build (warnings are errors), unit and snapshot tests, the Release-binary `AlephTestTokens` check. |
 | `ios-e2e` | `macos-26`, Xcode 26.6 | Postgres 16, the stub backend in fake-issuer mode, `AlephUITests` in the `UITest` configuration. |
 
-A change outside `clients/ios/`, `clients/openapi.json`, `scripts/e2e_backend.py` and
-the workflow file skips the last three, which counts as passing.
+A change outside `clients/ios/`, `clients/openapi.json`, the e2e backend and its fake
+issuer (`scripts/e2e_backend.py`, `scripts/e2e_fake_issuer.py`,
+`tests/fixtures/e2e_oidc/`) and the workflow file skips the last three, which counts as
+passing.
 
 Run the lint locally (Swift 6.2):
 
@@ -83,15 +130,17 @@ git ls-files -z -- 'clients/ios/*.swift' ':(exclude)clients/ios/Packages/API/Sou
   | xargs -0 swift format lint --strict
 ```
 
-### What the macOS jobs expect from the Xcode project (AL-603)
+### What the macOS jobs expect from the Xcode project
 
-Until `project.yml` exists, both macOS jobs stop after the toolchain and simulator
-checks with a "No Xcode project yet" notice. Once it does, they assume:
+The jobs assume:
 
-- `project.yml` generates `Aleph.xcodeproj` with an `Aleph` scheme. Its test action
-  holds the iOS-only packages' unit tests and `AlephSnapshotTests`; `ios-gate` runs it
-  with `-skip-testing:AlephUITests`. `ios-e2e` runs `-only-testing:AlephUITests` with
-  `-configuration UITest`.
+- `project.yml` generates `Aleph.xcodeproj` with two schemes. `Aleph`'s test action
+  (Debug) holds the iOS-only packages' unit tests (`AuthTests`, `FeaturesTests`),
+  `AlephSnapshotTests` and `AlephUITests`; `ios-gate` runs it with
+  `-skip-testing:AlephUITests`. `AlephUITests` holds only the UI tests, and `ios-e2e`
+  runs it with `-configuration UITest -only-testing:AlephUITests`: Xcode builds local
+  packages in a custom configuration optimised and without testability, so the
+  `@testable` package and snapshot tests cannot build in `UITest`.
 - A Release build produces one `.app` whose executable doesn't contain the string
   `AlephTestTokens` (TDD §5.5).
 - The snapshot helpers read `SNAPSHOT_RECORD` and `SNAPSHOT_ARTIFACTS`, and the UI

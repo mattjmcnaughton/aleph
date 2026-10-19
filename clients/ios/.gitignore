@@ -1,3 +1,8 @@
 # SwiftPM build and checkout state (Package.resolved is committed).
 .build/
 .swiftpm/
+# XcodeGen output and local Xcode builds (project.yml is the source; TDD §3.2).
+*.xcodeproj/
+*.xcworkspace/
+build/
+DerivedData/

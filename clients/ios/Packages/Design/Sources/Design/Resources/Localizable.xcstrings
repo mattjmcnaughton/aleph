@@ -1,0 +1,14 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "Can't reach sign-in right now. Try again.": {},
+    "Daily limit reached. Try again tomorrow.": {},
+    "Loading…": {},
+    "Something went wrong. Try again.": {},
+    "That isn't here.": {},
+    "That took too long. Try again.": {},
+    "Try again": {},
+    "You're offline. Check your connection and try again.": {}
+  },
+  "version": "1.0"
+}
