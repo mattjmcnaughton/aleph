@@ -1,0 +1,177 @@
+# XcodeGen spec (iOS TDD §3.2, §17.1). The .xcodeproj is generated, never committed:
+#   cd clients/ios && xcodegen generate
+#
+# Configurations: Debug (local backend + dev Keycloak), UITest (a copy of Debug that also
+# sets ALEPH_UI_TESTING, so UITestAuthSession exists; the e2e stub backend in fake-issuer
+# mode), Release (production + Auth0). Signing is deferred (TDD §20.1): CI builds with
+# CODE_SIGNING_ALLOWED=NO.
+name: Aleph
+options:
+  bundleIdPrefix: com.mattjmcnaughton.aleph
+  deploymentTarget:
+    iOS: "26.0"
+  createIntermediateGroups: true
+  defaultConfig: Debug
+
+configs:
+  Debug: debug
+  UITest: debug
+  Release: release
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    DEVELOPMENT_TEAM: ""
+    CODE_SIGN_STYLE: Automatic
+    MARKETING_VERSION: "0.1"
+    CURRENT_PROJECT_VERSION: "1"
+
+# The six local packages (TDD §3.3), plus CoreTestSupport. Their manifests are the
+# layering rule.
+packages:
+  Core:
+    path: Packages/Core
+  CoreTestSupport:
+    path: Packages/CoreTestSupport
+  API:
+    path: Packages/API
+  Auth:
+    path: Packages/Auth
+  Markdown:
+    path: Packages/Markdown
+  Design:
+    path: Packages/Design
+  Features:
+    path: Packages/Features
+  SnapshotTesting:
+    url: https://github.com/pointfreeco/swift-snapshot-testing
+    exactVersion: "1.19.6"
+
+targets:
+  Aleph:
+    type: application
+    platform: iOS
+    sources:
+      - path: App
+        excludes:
+          - "Info*.plist"
+    dependencies:
+      - package: Core
+      - package: API
+      - package: Auth
+      - package: Features
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.mattjmcnaughton.aleph.app
+        PRODUCT_NAME: Aleph
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_FILE: App/Info.plist
+        INFOPLIST_KEY_CFBundleDisplayName: aleph
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
+        # Dark only, system sheets and alerts included (TDD §1.B8, D2).
+        INFOPLIST_KEY_UIUserInterfaceStyle: Dark
+        TARGETED_DEVICE_FAMILY: "1"
+        ASSETCATALOG_COMPILER_APPICON_NAME: ""
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        # TDD §1.A2: the App target defaults to the main actor, like Features and Design.
+        SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
+        SWIFT_UPCOMING_FEATURE_NONISOLATED_NONSENDING_BY_DEFAULT: YES
+        SWIFT_STRICT_CONCURRENCY: complete
+      configs:
+        Debug:
+          # Debug only: plain HTTP to localhost (NSAllowsLocalNetworking).
+          INFOPLIST_FILE: App/Info-Local.plist
+          ALEPH_API_BASE_URL: http://127.0.0.1:8000
+          ALEPH_OIDC_ISSUER: http://127.0.0.1:18080/realms/aleph
+          ALEPH_OIDC_CLIENT_ID: aleph-ios
+          ALEPH_OIDC_AUDIENCE: ""
+        UITest:
+          INFOPLIST_FILE: App/Info-Local.plist
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG ALEPH_UI_TESTING
+          # The ios-e2e job's stub backend and its fake issuer (TDD §16.3, D22).
+          ALEPH_API_BASE_URL: http://127.0.0.1:8000
+          ALEPH_OIDC_ISSUER: http://127.0.0.1:8000/__e2e__/oidc
+          ALEPH_OIDC_CLIENT_ID: aleph-ios
+          ALEPH_OIDC_AUDIENCE: ""
+        Release:
+          ALEPH_API_BASE_URL: https://aleph-prod-mattjmcnaughton.fly.dev
+          # The Auth0 Native application and API arrive with AL-621; until then a Release
+          # build cannot sign in ("Sign-in didn't complete").
+          ALEPH_OIDC_ISSUER: ""
+          ALEPH_OIDC_CLIENT_ID: ""
+          ALEPH_OIDC_AUDIENCE: ""
+
+  # App-hosted, as in the PoC: every screen state, dark at the default size and at
+  # .accessibility3 (TDD §16.2). References live in __Snapshots__/ and are not bundled.
+  AlephSnapshotTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: AlephSnapshotTests
+        excludes:
+          - "__Snapshots__/**"
+    dependencies:
+      - target: Aleph
+      - package: SnapshotTesting
+      - package: Features
+      - package: Design
+      - package: Core
+      - package: CoreTestSupport
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.mattjmcnaughton.aleph.snapshottests
+
+  # XCUITest against the full stub-model backend in fake-issuer mode (TDD §16.3), run by
+  # ios-e2e in the UITest configuration.
+  AlephUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: AlephUITests
+    dependencies:
+      - target: Aleph
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.mattjmcnaughton.aleph.uitests
+        TEST_TARGET_NAME: Aleph
+
+schemes:
+  Aleph:
+    build:
+      targets:
+        Aleph: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      gatherCoverageData: false
+      targets:
+        - AlephSnapshotTests
+        - AlephUITests
+        # The iOS-only packages' unit tests; Core, Markdown and API run on Linux too.
+        - package: Auth/AuthTests
+        - package: Features/FeaturesTests
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release
+
+  # ios-e2e's scheme: the app and the UI tests only, in the UITest configuration. Xcode
+  # builds local packages in a custom configuration with optimisation and without
+  # testability, so the package and snapshot tests (which use @testable imports) cannot
+  # build there; they run in the Aleph scheme's Debug test action instead.
+  AlephUITests:
+    build:
+      targets:
+        Aleph: all
+        AlephUITests: [test]
+    test:
+      config: UITest
+      gatherCoverageData: false
+      targets:
+        - AlephUITests

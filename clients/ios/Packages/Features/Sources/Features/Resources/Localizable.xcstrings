@@ -1,0 +1,18 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "Account": {},
+    "Can't reach sign-in right now. Try again.": {},
+    "Name a topic, get a generated learning path. Your paths and progress sync to your account.": {},
+    "Sign in": {},
+    "Sign in to Aleph": {},
+    "Sign out": {},
+    "Sign-in didn't complete. Try again.": {},
+    "Signing in…": {},
+    "We couldn't load Aleph.": {},
+    "We only read your public profile and email.": {},
+    "Welcome back, %@.": {},
+    "Your paths": {}
+  },
+  "version": "1.0"
+}

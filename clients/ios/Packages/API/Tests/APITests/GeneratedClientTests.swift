@@ -5,7 +5,7 @@ import Testing
 @testable import API
 
 /// The committed generated client builds and decodes the contract's shared shapes
-/// (iOS TDD §4.1, §4.2). Adapters and their tests arrive with AL-603.
+/// (iOS TDD §4.1, §4.2).
 struct GeneratedClientTests {
     @Test func clientBuildsOverTheURLSessionTransport() throws {
         let serverURL = try #require(URL(string: "https://aleph.example/"))
