@@ -28,8 +28,10 @@ if git diff --cached --quiet; then
   exit 0
 fi
 git commit -m "chore(ios): record snapshot references and screenshots [skip ci]"
+# --autostash: the build may have modified other tracked files (Xcode rewrites String
+# Catalogs, for one). They are not committed, and must not block the rebase.
 for i in 1 2 3; do
-  if git pull --rebase origin "$branch" && git push origin "HEAD:$branch"; then
+  if git pull --rebase --autostash origin "$branch" && git push origin "HEAD:$branch"; then
     exit 0
   fi
   sleep $((i * 5))

@@ -23,6 +23,7 @@ two Playwright projects sharing one backend never trip a cap.
 from __future__ import annotations
 
 import asyncio
+import os
 import uuid  # noqa: TC003 - pydantic resolves the Shift*Request classes' annotations at class-definition time.
 from typing import TYPE_CHECKING, Annotated
 
@@ -38,6 +39,11 @@ from aleph.db import get_session
 from aleph.models import Lesson
 from aleph.services.briefing import briefing_service
 from aleph.services.retrieval import StubRetriever
+from scripts.e2e_fake_issuer import (
+    configure_fake_issuer,
+    fake_issuer_requested,
+    fake_issuer_router,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -241,11 +247,28 @@ def create_stub_app() -> FastAPI:
     retriever = ControlledRetriever()
     briefing_service._retriever = retriever  # noqa: SLF001
 
+    # iOS TDD D22: the iOS UI tests' fake OIDC issuer, opt-in with
+    # ``E2E_FAKE_ISSUER=1`` (the ios-e2e job) and refused unless ``ENV=test``,
+    # because its signing key is committed. Settings first, so the app below is
+    # assembled against the fake issuer; the routes are mounted after, like
+    # every other ``/__e2e__`` route, and never by ``create_app``.
+    fake_issuer = fake_issuer_requested(os.environ)
+    if fake_issuer:
+        configure_fake_issuer(settings)
+
     # Imported lazily so mutating settings above lands before app assembly.
     from aleph.app import create_app
 
     app = create_app()
     app.state.retriever = retriever
+    if fake_issuer:
+        admin_domains = sorted(settings.admin_email_domain_set)
+        app.include_router(
+            fake_issuer_router(
+                settings.oidc_issuer,
+                admin_domain=admin_domains[0] if admin_domains else None,
+            )
+        )
     # Mounted **only here** — never by ``create_app`` (D11, TDD §11): the
     # production factory has no reference to this module at all, which is the
     # whole guarantee ``tests/unit/test_smoke.py`` pins.

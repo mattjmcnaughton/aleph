@@ -56,6 +56,9 @@ def _run(
         "clients/ios/project.yml",
         "clients/openapi.json",
         "scripts/e2e_backend.py",
+        # The UI tests' fake issuer and its committed key (iOS TDD D22).
+        "scripts/e2e_fake_issuer.py",
+        "tests/fixtures/e2e_oidc/signing_key.jwk",
         ".github/workflows/ios.yml",
     ],
 )
@@ -78,6 +81,8 @@ def test_an_ios_relevant_change_runs_the_ios_jobs(changed: str) -> None:
         "clients/openapi.json.bak\n",
         "docs/clients/ios/notes.md\n",
         "scripts/e2e_backend.pyc\n",
+        "scripts/e2e_fake_issuer.pyc\n",
+        "tests/fixtures/other/key.jwk\n",
         "",
     ],
 )
@@ -319,3 +324,46 @@ def test_nothing_recorded_commits_nothing(ios_dev_checkout: tuple[Path, Path]) -
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert _git("rev-parse", BRANCH, cwd=remote) == before
+
+
+def test_a_build_that_touched_other_tracked_files_still_commits_back(
+    ios_dev_checkout: tuple[Path, Path],
+) -> None:
+    """The build can modify tracked files outside the recorded paths (Xcode rewrites
+    String Catalogs, for one); they are neither committed nor allowed to block the
+    rebase onto a concurrent commit-back from the other macOS job."""
+    work, remote = ios_dev_checkout
+    # The other job's commit-back lands first.
+    other = work.parent / "other"
+    _git("clone", "-q", "--branch", BRANCH, str(remote), str(other), cwd=work.parent)
+    (other / "screenshot.png").write_bytes(b"png")
+    _git("add", "screenshot.png", cwd=other)
+    _git(
+        "-c",
+        "user.name=t",
+        "-c",
+        "user.email=t@example.com",
+        "commit",
+        "-q",
+        "-m",
+        "other job",
+        cwd=other,
+    )
+    _git("push", "-q", "origin", BRANCH, cwd=other)
+    # This job's build modified a tracked file and recorded a snapshot.
+    (work / "README.md").write_text("rewritten by the build\n")
+    snapshots = work / "clients" / "ios" / "AlephSnapshotTests" / "__Snapshots__"
+    snapshots.mkdir(parents=True)
+    (snapshots / "PathView.dark.png").write_bytes(b"png")
+
+    result = _run(
+        "commit-back.sh",
+        BRANCH,
+        "clients/ios/AlephSnapshotTests/__Snapshots__",
+        cwd=work,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    files = _git("show", "--name-only", "--format=", BRANCH, cwd=remote)
+    assert files == "clients/ios/AlephSnapshotTests/__Snapshots__/PathView.dark.png"
+    assert _git("show", f"{BRANCH}:README.md", cwd=remote) == "aleph"

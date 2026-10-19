@@ -11,6 +11,8 @@ patterns=(
   '^clients/ios/'                # the app, its packages, tools and these scripts
   '^clients/openapi\.json$'      # the contract the Swift client is generated from
   '^scripts/e2e_backend\.py$'    # the stub backend the UI tests run against
+  '^scripts/e2e_fake_issuer\.py$' # its fake OIDC issuer (TDD D22)
+  '^tests/fixtures/e2e_oidc/'    # the issuer's committed test-only signing key
   '^\.github/workflows/ios\.yml$'
 )
 
