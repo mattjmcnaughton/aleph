@@ -7,7 +7,7 @@ import Foundation
 let arguments = CommandLine.arguments
 guard arguments.count == 3 else {
     FileHandle.standardError.write(Data("usage: prepare-contract <input> <output>\n".utf8))
-          exit(2)
+    exit(2)
 }
 do {
     let input = try Data(contentsOf: URL(fileURLWithPath: arguments[1]))
