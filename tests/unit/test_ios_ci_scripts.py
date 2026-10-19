@@ -10,6 +10,7 @@ runner:
   only. The committed generated client warns under Swift 6.2 and is exempt.
 - ``create-simulator.sh``: the pinned simulator, created rather than picked, and a
   loud failure naming what exists when the runner image lacks it.
+- ``commit-back.sh``: record mode on ``ios-dev/*`` commits the PNGs back.
 """
 
 from __future__ import annotations
@@ -32,6 +33,7 @@ def _run(
     *args: str,
     stdin: str = "",
     env: dict[str, str] | None = None,
+    cwd: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["bash", str(SCRIPTS / script), *args],
@@ -39,6 +41,7 @@ def _run(
         capture_output=True,
         text=True,
         env={**os.environ, **(env or {})},
+        cwd=cwd,
         check=False,
     )
 
@@ -245,3 +248,74 @@ def test_a_missing_device_type_fails_and_names_what_exists(
     assert "iPhone 99" in result.stderr
     assert "iPhone 17 Pro" in result.stderr
     assert not calls.exists()
+
+
+# --- commit-back.sh -------------------------------------------------------------
+
+BRANCH = "ios-dev/topic"
+
+
+def _git(*args: str, cwd: Path) -> str:
+    return subprocess.run(
+        ["git", *args], cwd=cwd, capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+
+@pytest.fixture
+def ios_dev_checkout(tmp_path: Path) -> tuple[Path, Path]:
+    """A clone of a bare remote, on an ``ios-dev`` branch, as CI checks it out."""
+    remote = tmp_path / "remote.git"
+    _git("init", "--bare", "-q", str(remote), cwd=tmp_path)
+    work = tmp_path / "work"
+    _git("clone", "-q", str(remote), str(work), cwd=tmp_path)
+    _git("checkout", "-q", "-b", BRANCH, cwd=work)
+    (work / "README.md").write_text("aleph\n")
+    _git("add", "README.md", cwd=work)
+    _git(
+        "-c",
+        "user.name=t",
+        "-c",
+        "user.email=t@example.com",
+        "commit",
+        "-q",
+        "-m",
+        "init",
+        cwd=work,
+    )
+    _git("push", "-q", "origin", BRANCH, cwd=work)
+    return work, remote
+
+
+def test_recorded_pngs_are_committed_back_to_the_branch(
+    ios_dev_checkout: tuple[Path, Path],
+) -> None:
+    work, remote = ios_dev_checkout
+    snapshots = work / "clients" / "ios" / "AlephSnapshotTests" / "__Snapshots__"
+    snapshots.mkdir(parents=True)
+    (snapshots / "PathView.dark.png").write_bytes(b"png")
+
+    result = _run(
+        "commit-back.sh",
+        BRANCH,
+        "clients/ios/AlephSnapshotTests/__Snapshots__",
+        cwd=work,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    subject = _git("log", "-1", "--format=%s", BRANCH, cwd=remote)
+    assert subject == (
+        "chore(ios): record snapshot references and screenshots [skip ci]"
+    )
+    files = _git("show", "--name-only", "--format=", BRANCH, cwd=remote)
+    assert files == "clients/ios/AlephSnapshotTests/__Snapshots__/PathView.dark.png"
+
+
+def test_nothing_recorded_commits_nothing(ios_dev_checkout: tuple[Path, Path]) -> None:
+    work, remote = ios_dev_checkout
+    before = _git("rev-parse", BRANCH, cwd=remote)
+
+    # A path that was never created is not an error.
+    result = _run("commit-back.sh", BRANCH, "clients/ios/screenshots", cwd=work)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert _git("rev-parse", BRANCH, cwd=remote) == before

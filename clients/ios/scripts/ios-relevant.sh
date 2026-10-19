@@ -19,8 +19,12 @@ for p in "${patterns[@]}"; do
   args+=(-e "$p")
 done
 
-if grep -Eq "${args[@]}"; then
-  echo true
-else
-  echo false
-fi
+# grep exits 0 on a match and 1 on none; anything else is an error, which must fail
+# the job rather than read as "nothing changed" and skip the iOS checks.
+status=0
+grep -Eq "${args[@]}" || status=$?
+case "$status" in
+  0) echo true ;;
+  1) echo false ;;
+  *) exit "$status" ;;
+esac

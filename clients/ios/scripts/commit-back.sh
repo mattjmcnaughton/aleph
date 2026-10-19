@@ -17,7 +17,12 @@ shift
 
 git config user.name "github-actions[bot]"
 git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-git add -A -- "$@"
+# A path that was never created (say, no UI test wrote a screenshot) is not an error.
+for path in "$@"; do
+  if [ -e "$path" ] || git ls-files --error-unmatch -- "$path" >/dev/null 2>&1; then
+    git add -A -- "$path"
+  fi
+done
 if git diff --cached --quiet; then
   echo "Recorded files unchanged; nothing to commit."
   exit 0
