@@ -1,31 +1,31 @@
 # Production image (TDD §13/D3, ticket AL-100). Adapted from habagou's.
 #
 # Three stages:
-#   frontend-build — pnpm/Vite build of src/aleph/web/frontend -> dist/
+#   frontend-build — pnpm/Vite build of clients/web -> dist/
 #   backend-build  — uv-installed virtualenv (project deps only) + application code
 #   production     — slim runtime: unprivileged user, venv on PATH, uvicorn
 #
-# One process serves both halves (D15): the built SPA is copied *into the package
-# tree* at src/aleph/web/frontend/dist, which is exactly where
+# One process serves both halves (D15): the built SPA is copied to
+# /app/clients/web/dist and FRONTEND_DIST_DIR points there, which is exactly where
 # `aleph.web.serve.mount_frontend` looks, so the API and the shell come off the
 # same port with no second service and no CDN.
 
 FROM node:22-bookworm-slim AS frontend-deps
 
-WORKDIR /app/src/aleph/web/frontend
+WORKDIR /app/clients/web
 # pnpm pinned to the version .github/workflows/ci.yml uses, so a lockfile that
 # satisfies CI satisfies the image.
 RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
 # Manifest + lockfile only: this layer is the expensive one and must not be
 # invalidated by an edit to a component.
-COPY src/aleph/web/frontend/package.json \
-  src/aleph/web/frontend/pnpm-lock.yaml \
-  src/aleph/web/frontend/.npmrc ./
+COPY clients/web/package.json \
+  clients/web/pnpm-lock.yaml \
+  clients/web/.npmrc ./
 RUN pnpm install --frozen-lockfile
 
 FROM frontend-deps AS frontend-build
 
-COPY src/aleph/web/frontend ./
+COPY clients/web ./
 RUN pnpm run build
 
 FROM python:3.12-slim AS backend-build
@@ -56,7 +56,7 @@ RUN uv sync --no-dev --frozen --no-install-project
 COPY alembic.ini ./
 COPY alembic ./alembic
 COPY src ./src
-COPY --from=frontend-build /app/src/aleph/web/frontend/dist ./src/aleph/web/frontend/dist
+COPY --from=frontend-build /app/clients/web/dist ./clients/web/dist
 RUN uv sync --no-dev --frozen
 
 FROM python:3.12-slim AS production
@@ -81,6 +81,11 @@ COPY --chown=app:app --chmod=0755 docker/release.sh /app/docker/release.sh
 # `Settings.host`/`Settings.port`. Setting them would advertise a knob that does
 # not turn.
 ENV PATH="/app/.venv/bin:${PATH}"
+# Where `mount_frontend` serves the SPA from (settings.frontend_dist_dir; the
+# built `dist` the backend-build stage copied in). Explicit rather than relying on
+# the checkout-relative default, so the image does not depend on how the package
+# was installed.
+ENV FRONTEND_DIST_DIR=/app/clients/web/dist
 
 USER app
 

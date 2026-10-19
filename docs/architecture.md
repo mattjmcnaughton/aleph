@@ -25,8 +25,7 @@ src/aleph/
                        # the Brief novelty gate)
   dtos/                # Pydantic request/response models
   web/                 # Frontend integration
-    serve.py           # Static file serving for production
-    frontend/          # Frontend app (scaffolded separately)
+    serve.py           # Static file serving for production (FRONTEND_DIST_DIR)
   db.py                # Async engine/session factory
   models/              # SQLAlchemy async models
   repositories/        # Data access layer
@@ -40,9 +39,10 @@ evals/                 # Agent eval harness — a peer of tests/, dev-only and
                        # never packaged; opt-in runs (docs/evals.md)
 scripts/
   e2e_backend.py       # Stub-model app factory the Playwright harness boots
-src/aleph/web/frontend/
-  playwright.config.ts # E2E harness config (desktop + mobile-390x844 projects)
-  tests/e2e/           # Playwright browser suite (end-to-end user journeys)
+clients/
+  web/                 # Frontend app (scaffolded separately)
+    playwright.config.ts # E2E harness config (desktop + mobile-390x844 projects)
+    tests/e2e/         # Playwright browser suite (end-to-end user journeys)
 ```
 
 ## Layering
@@ -193,7 +193,7 @@ regression the Phase 6 pipeline may repeat.
 
 ## Frontend
 
-The frontend is scaffolded separately into `src/aleph/web/frontend/` using the `frontend-react` Copier template. In development, the frontend dev server runs independently with API proxying. In production, built static files are served by FastAPI via `web/serve.py`.
+The frontend is scaffolded separately into `clients/web/` using the `frontend-react` Copier template. In development, the frontend dev server runs independently with API proxying. In production, built static files are served by FastAPI via `web/serve.py`, from `settings.frontend_dist_dir` (`FRONTEND_DIST_DIR`; default `clients/web/dist` under the checkout root).
 
 **Generated content is Markdown, rendered at the edge.** The lesson agent writes the Read passage as GitHub-Flavored Markdown (a bounded subset — see [`docs/api.md`](api.md)); it is stored and served as source, and `src/components/markdown.tsx` is the single place that turns it into DOM. That component is the security boundary for model-generated text: `react-markdown` + `remark-gfm`, no `rehype-raw`, so raw HTML is escaped rather than executed and dangerous URL protocols are stripped. Any new surface showing generated prose should render through it rather than reaching for its own Markdown pipeline.
 

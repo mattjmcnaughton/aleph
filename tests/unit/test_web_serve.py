@@ -6,10 +6,11 @@ browser and not a file in ``dist/``. Only the production image serves ``dist/``
 history fallback hides the gap entirely — so these tests are the regression
 fence for deep-link refreshes.
 
-The mount is exercised through the real ``create_app()`` (with ``FRONTEND_DIST``
-pointed at a fixture tree) rather than a bare ``StaticFiles`` instance, because
-half of what matters is the *interaction*: the SPA fallback must not swallow the
-404s the API routers and the error envelope are responsible for.
+The mount is exercised through the real ``create_app()`` (with
+``settings.frontend_dist_dir`` pointed at a fixture tree) rather than a bare
+``StaticFiles`` instance, because half of what matters is the *interaction*: the
+SPA fallback must not swallow the 404s the API routers and the error envelope are
+responsible for.
 """
 
 from __future__ import annotations
@@ -35,7 +36,7 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     (tmp_path / "index.html").write_text(SHELL)
     (tmp_path / "assets").mkdir()
     (tmp_path / "assets" / "app-abc123.js").write_text(BUNDLE)
-    monkeypatch.setattr(serve, "FRONTEND_DIST", tmp_path)
+    monkeypatch.setattr(serve.settings, "frontend_dist_dir", tmp_path)
     return TestClient(app_module.create_app())
 
 

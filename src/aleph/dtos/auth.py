@@ -1,7 +1,7 @@
 """Authentication API DTOs (AL-021, TDD §7).
 
 The session payload the SPA root ``beforeLoad`` consumes on every load, signed
-in or out (the frontend contract in ``web/frontend/src/lib/api.ts``).
+in or out (the frontend contract in ``clients/web/src/lib/api.ts``).
 """
 
 from uuid import UUID

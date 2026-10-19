@@ -2,7 +2,7 @@
 
 Mobile-friendly AI tutor: name a topic, get a generated learning path.
 
-Python web application using FastAPI, uvicorn, OpenTelemetry, uv, ruff, ty, and pytest. Web frontend lives in `src/aleph/web/frontend/`; the native SwiftUI iPhone app lives in `clients/ios/`. The two are kept at feature parity (see "Two Clients" below).
+Python web application using FastAPI, uvicorn, OpenTelemetry, uv, ruff, ty, and pytest. Web frontend lives in `clients/web/`; the native SwiftUI iPhone app lives in `clients/ios/`. The two are kept at feature parity (see "Two Clients" below).
 
 > **Vocabulary is authoritative: [`docs/CONTEXT.md`](docs/CONTEXT.md).** Same word,
 > same meaning, in prose, prompts, and code alike. Use the exact term — **path** not
@@ -50,8 +50,7 @@ src/aleph/
   repositories/             # Data access layer
   models/                   # SQLAlchemy models
   dtos/                     # Pydantic request/response models
-  web/serve.py              # Static file serving for production
-  web/frontend/             # Frontend application (scaffolded separately)
+  web/serve.py              # Static file serving for production (FRONTEND_DIST_DIR)
 tests/
   unit/                     # Unit tests
   integration/              # Integration tests (real Postgres + Keycloak)
@@ -59,7 +58,9 @@ tests/
 evals/                      # Agent eval harness (dev-only, never packaged;
                             # opt-in runs — see docs/evals.md)
 scripts/e2e_backend.py      # Stub-model app factory the Playwright harness boots
-src/aleph/web/frontend/tests/e2e/  # Playwright browser suite (E2E, phone viewport)
+clients/
+  web/                      # React web app (scaffolded separately)
+    tests/e2e/              # Playwright browser suite (E2E, phone viewport)
 ```
 
 ## Key Conventions
@@ -70,9 +71,9 @@ src/aleph/web/frontend/tests/e2e/  # Playwright browser suite (E2E, phone viewpo
   db, repositories, models) nor FastAPI/SQLAlchemy — enforced by a layering test. Pure
   domain logic (grading, progression) lives in `domains/` and does no I/O.
 - **DTOs** are Pydantic models for API I/O, always separate from DB models.
-- **Frontend** is scaffolded separately into `src/aleph/web/frontend/` using the `frontend-react` template.
+- **Frontend** is scaffolded separately into `clients/web/` using the `frontend-react` template.
 - Tests are organized by type: `tests/unit/`, `tests/integration/`, `tests/external/`
-  (backend), and the Playwright browser suite in `src/aleph/web/frontend/tests/e2e/`.
+  (backend), and the Playwright browser suite in `clients/web/tests/e2e/`.
   Mark tests that hit external services with `@pytest.mark.external` (opt-in, never in
   CI); tag workflow-proving tests with `@pytest.mark.workflow("W1")`. CI runs four jobs
   — gate / integration / e2e / compose-smoke (see `docs/ci.md`).
@@ -84,7 +85,7 @@ src/aleph/web/frontend/tests/e2e/  # Playwright browser suite (E2E, phone viewpo
 
 ## Two Clients: Web and iOS
 
-aleph has two frontends over one API: the React web app (`src/aleph/web/frontend/`)
+aleph has two frontends over one API: the React web app (`clients/web/`)
 and the native SwiftUI iPhone app (`clients/ios/`, see
 [`docs/prds/ios-app.md`](docs/prds/ios-app.md)). **They are kept at feature parity.**
 

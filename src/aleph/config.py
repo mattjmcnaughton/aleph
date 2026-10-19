@@ -1,6 +1,7 @@
 """Application configuration via environment variables."""
 
 import datetime
+from pathlib import Path
 from typing import Literal, Self
 
 from pydantic import Field, model_validator
@@ -34,6 +35,10 @@ MODEL_SLOTS: tuple[str, ...] = (
 # guard cannot drift apart.
 DEV_SESSION_SECRET_KEY = "dev-session-secret-change-me"
 
+# The checkout root (``src/aleph/config.py`` -> ``src/aleph`` -> ``src`` -> root).
+# Anchors checkout-relative defaults so they do not depend on the working directory.
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
@@ -50,6 +55,13 @@ class Settings(BaseSettings):
     otel_exporter_otlp_endpoint: str = ""
 
     database_url: str = "postgresql+asyncpg://localhost:5432/aleph"
+
+    # Where the built web app lives (iOS TDD §15). The app sits at ``clients/web/``,
+    # outside the Python package, so the default is the checkout-relative
+    # ``clients/web/dist``; the production image sets ``FRONTEND_DIST_DIR`` to the
+    # ``dist`` it copies in. ``web/serve.mount_frontend`` mounts it only if it exists
+    # (dev and e2e run the vite dev server instead).
+    frontend_dist_dir: Path = REPO_ROOT / "clients" / "web" / "dist"
 
     # Generation timings (TDD §5.4 / §14). A model call is bounded by
     # ``generation_timeout_seconds`` so ``failed`` is always reached (no dead

@@ -2,7 +2,7 @@
   "name": "aleph-release",
   "version": "0.0.0-development",
   "private": true,
-  "description": "Release automation for aleph. Not the frontend — that lives in src/aleph/web/frontend and has its own manifest.",
+  "description": "Release automation for aleph. Not the frontend — that lives in clients/web and has its own manifest.",
   "scripts": {
     "semantic-release": "semantic-release"
   },

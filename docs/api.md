@@ -143,7 +143,7 @@ disclosed). Same **trigger + poll** model: `POST /lessons/{id}/generate` returns
   generated`. `generation_error` is non-null **only** when `generation_state ==
   failed` (a generic, learner-safe message — never raw provider text).
 - **`read_passage` is GitHub-Flavored Markdown**, served as source and rendered
-  at the edge (`web/frontend/src/components/markdown.tsx`). The agent is
+  at the edge (`clients/web/src/components/markdown.tsx`). The agent is
   prompted for a bounded subset — headings (`##`/`###`), lists, emphasis, inline
   code, fenced code blocks, GFM tables, blockquotes — and no raw HTML or images.
   A client that renders it must treat it as untrusted model output: no raw-HTML

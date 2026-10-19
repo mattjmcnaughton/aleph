@@ -76,7 +76,7 @@ time uv sync --python 3.12 --dev --frozen
 
 echo "==> Locked release and frontend dependencies"
 time pnpm install --frozen-lockfile
-time pnpm --dir src/aleph/web/frontend install --frozen-lockfile
+time pnpm --dir clients/web install --frozen-lockfile
 
 echo "==> Setup complete (backing services are started separately)"
 node --version

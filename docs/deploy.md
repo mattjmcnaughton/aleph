@@ -23,7 +23,7 @@ Fly cutover — see [The Compose smoke](#the-compose-smoke-just-compose-smoke).
 
 | File | Role |
 | ---- | ---- |
-| [`Dockerfile`](../Dockerfile) | Three stages: pnpm/Vite frontend build → uv-installed backend venv → slim `production` runtime. The built SPA lands in the package tree at `src/aleph/web/frontend/dist`, which is where `aleph.web.serve.mount_frontend` looks, so one process serves the API and the shell. |
+| [`Dockerfile`](../Dockerfile) | Three stages: pnpm/Vite frontend build → uv-installed backend venv → slim `production` runtime. The built SPA is copied to `/app/clients/web/dist` and the image sets `FRONTEND_DIST_DIR` to it, which is where `aleph.web.serve.mount_frontend` looks, so one process serves the API and the shell. |
 | [`docker/release.sh`](../docker/release.sh) | `alembic upgrade head` with retries. Fly's `release_command`, and the Compose smoke's one-shot `migrate` service. |
 | [`fly.toml`](../fly.toml) | App `aleph-prod-mattjmcnaughton`, region `ewr`, `internal_port` 8000, `/readyz` check, single machine, non-secret `[env]`. |
 | [`.releaserc.json`](../.releaserc.json) + [`package.json`](../package.json) | semantic-release config and its toolchain (repo root — *not* the frontend manifest). |
