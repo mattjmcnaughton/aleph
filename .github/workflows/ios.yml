@@ -112,7 +112,9 @@ jobs:
           path: |
             ~/.cache/org.swift.swiftpm
             clients/ios/Tools/GenerateAPI/.build
-          key: swiftpm-linux-${{ hashFiles('clients/ios/**/Package.resolved') }}
+          # Explicit depth, never `**`: the post-job save re-evaluates the key, and
+          # by then .build/ holds checkouts hashFiles cannot walk.
+          key: swiftpm-linux-${{ hashFiles('clients/ios/Packages/*/Package.resolved', 'clients/ios/Tools/*/Package.resolved') }}
           restore-keys: swiftpm-linux-
 
       # The committed generated client is exempt: it is never edited by hand.
@@ -120,9 +122,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git ls-files -z -- 'clients/ios/*.swift' \
-              ':(exclude)clients/ios/Packages/API/Sources/API/Generated/**' \
-            | xargs -0 -r swift format lint --strict --parallel
+          mapfile -d '' files < <(git ls-files -z -- 'clients/ios/*.swift' \
+            ':(exclude)clients/ios/Packages/API/Sources/API/Generated/**')
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "::error::no Swift files to lint; the file list is wrong"
+            exit 1
+          fi
+          echo "Linting ${#files[@]} files"
+          swift format lint --strict --parallel "${files[@]}"
 
       - name: Test Tools/GenerateAPI (the contract rewrite)
         run: swift test --package-path clients/ios/Tools/GenerateAPI
@@ -218,7 +225,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: clients/ios/build/SourcePackages
-          key: spm-macos-${{ hashFiles('clients/ios/**/Package.resolved', 'clients/ios/project.yml') }}
+          key: spm-macos-${{ hashFiles('clients/ios/Packages/*/Package.resolved', 'clients/ios/Tools/*/Package.resolved', 'clients/ios/project.yml') }}
           restore-keys: spm-macos-
 
       - name: Generate project
@@ -449,7 +456,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: clients/ios/build/SourcePackages
-          key: spm-macos-${{ hashFiles('clients/ios/**/Package.resolved', 'clients/ios/project.yml') }}
+          key: spm-macos-${{ hashFiles('clients/ios/Packages/*/Package.resolved', 'clients/ios/Tools/*/Package.resolved', 'clients/ios/project.yml') }}
           restore-keys: spm-macos-
 
       - name: Generate project
