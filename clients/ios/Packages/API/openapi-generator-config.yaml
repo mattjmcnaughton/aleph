@@ -1,0 +1,20 @@
+# swift-openapi-generator config for the iOS client (iOS TDD §4.2).
+# Run clients/ios/scripts/generate-api.sh to regenerate Sources/API/Generated/.
+generate:
+  - types
+  - client
+accessModifier: package
+namingStrategy: idiomatic
+# The generator's filter is include-only. List every learner tag; the admin tag
+# (feature-flags, /api/v1/admin/) is left out because admin tools stay web-only
+# (CLAUDE.md "Two Clients"). tests/unit/test_swift_generator_config.py checks
+# this list against clients/openapi.json.
+filter:
+  tags:
+    - auth
+    - beats
+    - lessons
+    - paths
+    - progress
+    - shaping
+    - tutor

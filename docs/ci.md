@@ -19,7 +19,7 @@ shape (gate / integration / e2e / compose-smoke).
 
 | Job | Command | Services | Purpose |
 | --- | ------- | -------- | ------- |
-| **gate** | `just gate` | none | Formatting (ruff/biome), linting, typecheck (ty/tsc), backend + frontend unit tests, and the contract drift checks: `just openapi-check` (`clients/openapi.json` against the app; fix with `just openapi`) and `just openapi-ts-check` (the web's `schema.d.ts` against `clients/openapi.json`; fix with `just openapi-ts`). |
+| **gate** | `just gate` | none | Formatting (ruff/biome), linting, typecheck (ty/tsc), backend + frontend unit tests, and the contract drift checks: `just openapi-check` (`clients/openapi.json` against the app; fix with `just openapi`) and `just openapi-ts-check` (the web's `schema.d.ts` against `clients/openapi.json`; fix with `just openapi-ts`). The third committed contract file, the generated Swift client, is checked by `clients/ios/scripts/generate-api.sh --check` (fix by running it without `--check`), which needs a Swift toolchain and runs in the iOS workflow's Linux job (AL-617), not in `gate`. |
 | **integration** | `just test-integration` | Postgres 16 + Keycloak | API against a real per-test Postgres database and the real OIDC code flow. |
 | **e2e** | `just test-e2e` | Postgres 16 + Keycloak | Playwright browser suite (phone viewport) against the stub-model backend + dev frontend. |
 | **compose-smoke** | `just compose-smoke` | Compose Postgres | Builds the **production image** and proves it serves: `/healthz`, `/readyz` against a migrated database, the SPA shell, and the auth boundary in both directions. |
