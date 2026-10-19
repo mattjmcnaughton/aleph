@@ -1,0 +1,508 @@
+name: iOS
+
+# Builds and tests the SwiftUI client in clients/ios/ (iOS TDD §17.1, PRD §9.4).
+# See clients/ios/README.md and docs/ci.md.
+#
+# - pull_request to main or claude/ios, workflow_dispatch: COMPARE mode. Snapshot
+#   tests run against the committed references and fail on any mismatch; the diffs
+#   are uploaded as an artifact. UI-test screenshots are never compared.
+# - push to ios-dev/**: RECORD mode. Snapshot references and UI-test screenshots
+#   are regenerated and committed back to that branch [skip ci]. Agents (which
+#   cannot build iOS on Linux) push here to build and look (TDD §17.3).
+#
+# No trigger-level `paths:` filter: a workflow that never starts leaves a
+# required check pending forever. Instead the `changes` job computes the diff
+# itself, and the other jobs are skipped (which satisfies a required check) when
+# nothing iOS-relevant changed. Keep job names stable; branch protection refers
+# to them: changes, swift-linux, ios-gate, ios-e2e.
+#
+# Until clients/ios/project.yml exists (AL-603), ios-gate and ios-e2e check the
+# pinned toolchain and simulator, then skip every Xcode-project step with a
+# "no Xcode project yet" notice.
+on:
+  pull_request:
+    branches: [main, claude/ios]
+  push:
+    branches: ["ios-dev/**"]
+  workflow_dispatch:
+    inputs:
+      base:
+        description: >-
+          Optional commit to diff against for the path filter (to exercise it).
+          Empty runs everything.
+        required: false
+        default: ""
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Pinned, not inherited from the runner image (TDD D3, PRD §9.4), so an image
+  # update cannot silently change every snapshot.
+  XCODE_APP: /Applications/Xcode_26.6.app
+  SIM_DEVICE: iPhone 17
+  SIM_RUNTIME: iOS 26.5
+  XCODEGEN_VERSION: "2.46.0"
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      ios: ${{ steps.filter.outputs.ios }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect iOS-relevant changes
+        id: filter
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          DISPATCH_BASE: ${{ inputs.base }}
+        run: |
+          set -euo pipefail
+          case "$EVENT" in
+            pull_request) base="$PR_BASE" ;;
+            push) base="$PUSH_BEFORE" ;;            # all zeros on a new branch
+            *) base="${DISPATCH_BASE:-}" ;;         # workflow_dispatch
+          esac
+
+          if [ -z "$base" ] || [[ "$base" =~ ^0+$ ]] \
+              || ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            echo "No usable base (event=$EVENT base='${base}'); running everything."
+            echo "ios=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Changed files ($base..HEAD):"
+          git diff --name-only "$base" HEAD | tee changed.txt
+          # The patterns live in the script (unit-tested in
+          # tests/unit/test_ios_ci_scripts.py): clients/ios/, clients/openapi.json,
+          # scripts/e2e_backend.py, this workflow.
+          ios="$(clients/ios/scripts/ios-relevant.sh < changed.txt)"
+          echo "ios=$ios" | tee -a "$GITHUB_OUTPUT"
+
+  swift-linux:
+    needs: changes
+    if: needs.changes.outputs.ios == 'true'
+    runs-on: ubuntu-latest
+    container: swift:6.2
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          swift --version
+
+      # SwiftPM's shared clone cache, and Tools/GenerateAPI's build directory (the
+      # generator takes about a minute to build cold). DerivedData-style package
+      # builds are not cached.
+      - name: Cache SwiftPM
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/org.swift.swiftpm
+            clients/ios/Tools/GenerateAPI/.build
+          # Explicit depth, never `**`: the post-job save re-evaluates the key, and
+          # by then .build/ holds checkouts hashFiles cannot walk.
+          key: swiftpm-linux-${{ hashFiles('clients/ios/Packages/*/Package.resolved', 'clients/ios/Tools/*/Package.resolved') }}
+          restore-keys: swiftpm-linux-
+
+      # The committed generated client is exempt: it is never edited by hand.
+      - name: swift format lint --strict
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -d '' files < <(git ls-files -z -- 'clients/ios/*.swift' \
+            ':(exclude)clients/ios/Packages/API/Sources/API/Generated/**')
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "::error::no Swift files to lint; the file list is wrong"
+            exit 1
+          fi
+          echo "Linting ${#files[@]} files"
+          swift format lint --strict --parallel "${files[@]}"
+
+      - name: Test Tools/GenerateAPI (the contract rewrite)
+        run: swift test --package-path clients/ios/Tools/GenerateAPI
+
+      - name: Generated Swift client is up to date (generate-api.sh --check)
+        run: clients/ios/scripts/generate-api.sh --check
+
+      # The Linux-capable packages (TDD §3.3). Core and Markdown arrive with
+      # AL-603; until then a missing package is a warning, not a failure.
+      # TODO(AL-603): drop the tolerance once Core and Markdown exist.
+      - name: Test the Linux-capable packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          for pkg in Core Markdown API; do
+            dir="clients/ios/Packages/$pkg"
+            if [ ! -f "$dir/Package.swift" ]; then
+              echo "::warning title=swift-linux::$dir does not exist yet (it arrives with AL-603); skipping its tests."
+              continue
+            fi
+            echo "::group::swift test $dir"
+            swift test --package-path "$dir"
+            echo "::endgroup::"
+          done
+
+  ios-gate:
+    needs: changes
+    if: needs.changes.outputs.ios == 'true'
+    runs-on: macos-26
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    env:
+      MODE: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/heads/ios-dev/') && 'record' || 'compare' }}
+      SNAPSHOTS: clients/ios/AlephSnapshotTests/__Snapshots__
+    defaults:
+      run:
+        working-directory: clients/ios
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: |
+          if [ ! -d "$XCODE_APP" ]; then
+            echo "::error::$XCODE_APP is not on this runner image. Installed:"
+            ls -d /Applications/Xcode*
+            exit 1
+          fi
+          sudo xcode-select -s "$XCODE_APP"
+          echo "Snapshot mode: $MODE"
+          sw_vers
+          xcodebuild -version
+          xcrun simctl list runtimes
+
+      - name: Install XcodeGen ${{ env.XCODEGEN_VERSION }}
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/xcodegen.zip" \
+            "https://github.com/yonaskolb/XcodeGen/releases/download/$XCODEGEN_VERSION/xcodegen.zip"
+          unzip -q "$RUNNER_TEMP/xcodegen.zip" -d "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/xcodegen/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/xcodegen/bin/xcodegen" --version
+
+      - name: Create the pinned simulator (${{ env.SIM_DEVICE }} / ${{ env.SIM_RUNTIME }})
+        id: sim
+        run: echo "udid=$(./scripts/create-simulator.sh)" >> "$GITHUB_OUTPUT"
+
+      - name: Check for the Xcode project
+        id: project
+        run: |
+          if [ -f project.yml ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            msg="No Xcode project yet (clients/ios/project.yml arrives with AL-603): skipping the build, unit, snapshot and Release-binary steps."
+            echo "::notice title=ios-gate::$msg"
+            echo "$msg" >> "$GITHUB_STEP_SUMMARY"
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Boot simulator
+        if: steps.project.outputs.present == 'true'
+        env:
+          UDID: ${{ steps.sim.outputs.udid }}
+        run: |
+          xcrun simctl boot "$UDID"
+          xcrun simctl bootstatus "$UDID" -b
+          xcrun simctl status_bar "$UDID" override \
+            --time 9:41 --dataNetwork wifi --wifiMode active --wifiBars 3 \
+            --cellularMode active --cellularBars 4 \
+            --batteryState charged --batteryLevel 100 || true
+
+      - name: Cache SwiftPM checkouts
+        if: steps.project.outputs.present == 'true'
+        uses: actions/cache@v4
+        with:
+          path: clients/ios/build/SourcePackages
+          key: spm-macos-${{ hashFiles('clients/ios/Packages/*/Package.resolved', 'clients/ios/Tools/*/Package.resolved', 'clients/ios/project.yml') }}
+          restore-keys: spm-macos-
+
+      - name: Generate project
+        if: steps.project.outputs.present == 'true'
+        run: xcodegen generate
+
+      # Warnings are errors for the app's own Swift; the committed generated
+      # client (which warns under Swift 6.2) and third-party packages are exempt.
+      - name: Build for testing (warnings are errors)
+        if: steps.project.outputs.present == 'true'
+        env:
+          UDID: ${{ steps.sim.outputs.udid }}
+        run: |
+          set -o pipefail
+          mkdir -p build
+          xcodebuild build-for-testing \
+            -project Aleph.xcodeproj \
+            -scheme Aleph \
+            -destination "id=$UDID" \
+            -derivedDataPath build/DerivedData \
+            -clonedSourcePackagesDirPath build/SourcePackages \
+            -skipPackagePluginValidation \
+            CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee build/xcodebuild-build.log
+          ./scripts/check-warnings.sh build/xcodebuild-build.log
+
+      # The Aleph scheme's test action holds the iOS-only packages' unit tests and
+      # AlephSnapshotTests; the UI tests run in ios-e2e.
+      - name: Unit and snapshot tests (${{ env.MODE }})
+        if: steps.project.outputs.present == 'true'
+        env:
+          UDID: ${{ steps.sim.outputs.udid }}
+          # TEST_RUNNER_-prefixed vars reach the test process with the prefix stripped.
+          TEST_RUNNER_SNAPSHOT_RECORD: ${{ env.MODE == 'record' && '1' || '0' }}
+          TEST_RUNNER_SNAPSHOT_ARTIFACTS: ${{ github.workspace }}/clients/ios/build/snapshot-failures
+        run: |
+          set -o pipefail
+          if [ "$MODE" = record ] && [ -d AlephSnapshotTests/__Snapshots__ ]; then
+            # Drop stale references so renamed/removed tests don't leave orphans.
+            find AlephSnapshotTests/__Snapshots__ -name '*.png' -delete
+          fi
+          mkdir -p build/snapshot-failures
+          xcodebuild test-without-building \
+            -project Aleph.xcodeproj \
+            -scheme Aleph \
+            -destination "id=$UDID" \
+            -derivedDataPath build/DerivedData \
+            -clonedSourcePackagesDirPath build/SourcePackages \
+            -skip-testing:AlephUITests \
+            -resultBundlePath build/AlephTests.xcresult \
+            CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee build/xcodebuild-test.log
+
+      # The UI-test token hook must never ship (TDD §5.5).
+      - name: Release binary has no test hook
+        if: steps.project.outputs.present == 'true'
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project Aleph.xcodeproj \
+            -scheme Aleph \
+            -configuration Release \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build/Release \
+            -clonedSourcePackagesDirPath build/SourcePackages \
+            -skipPackagePluginValidation \
+            CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee build/xcodebuild-release.log
+          app="$(find build/Release/Build/Products/Release-iphonesimulator -maxdepth 1 -name '*.app' -print -quit)"
+          if [ -z "$app" ]; then
+            echo "::error::no Release .app was built"
+            exit 1
+          fi
+          exe="$app/$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Info.plist")"
+          if strings "$exe" | grep -q AlephTestTokens; then
+            echo "::error::the Release binary $exe contains AlephTestTokens"
+            exit 1
+          fi
+          echo "$exe has no AlephTestTokens."
+
+      - name: Export xcresult attachments
+        if: always() && steps.project.outputs.present == 'true'
+        run: |
+          mkdir -p build/attachments
+          if [ -d build/AlephTests.xcresult ]; then
+            xcrun xcresulttool export attachments \
+              --path build/AlephTests.xcresult --output-path build/attachments || true
+          fi
+
+      - name: Upload snapshots, diffs and logs
+        if: always() && steps.project.outputs.present == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-gate-${{ env.MODE }}
+          path: |
+            clients/ios/AlephSnapshotTests/__Snapshots__
+            clients/ios/build/snapshot-failures
+            clients/ios/build/attachments
+            clients/ios/build/AlephTests.xcresult
+            clients/ios/build/*.log
+          if-no-files-found: warn
+
+      - name: Commit references back to the ios-dev branch
+        if: success() && env.MODE == 'record' && steps.project.outputs.present == 'true'
+        working-directory: .
+        run: clients/ios/scripts/commit-back.sh "$GITHUB_REF_NAME" "$SNAPSHOTS"
+
+  ios-e2e:
+    needs: changes
+    if: needs.changes.outputs.ios == 'true'
+    runs-on: macos-26
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    env:
+      MODE: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/heads/ios-dev/') && 'record' || 'compare' }}
+      SCREENSHOTS: clients/ios/screenshots
+      DATABASE_URL: postgresql+asyncpg://aleph:aleph@localhost:5432/aleph_e2e
+      BACKEND_LOG: ${{ github.workspace }}/clients/ios/build/backend.log
+    defaults:
+      run:
+        working-directory: clients/ios
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: |
+          if [ ! -d "$XCODE_APP" ]; then
+            echo "::error::$XCODE_APP is not on this runner image. Installed:"
+            ls -d /Applications/Xcode*
+            exit 1
+          fi
+          sudo xcode-select -s "$XCODE_APP"
+          xcodebuild -version
+
+      - name: Create the pinned simulator (${{ env.SIM_DEVICE }} / ${{ env.SIM_RUNTIME }})
+        id: sim
+        run: echo "udid=$(./scripts/create-simulator.sh)" >> "$GITHUB_OUTPUT"
+
+      # The full stub-model backend, as the Playwright harness boots it, with
+      # Postgres installed natively (no Docker on macOS runners; TDD §16.3).
+      - name: Install and start Postgres 16
+        run: |
+          brew install postgresql@16
+          brew services start postgresql@16
+          pg="$(brew --prefix postgresql@16)/bin"
+          for _ in $(seq 1 30); do
+            "$pg/pg_isready" -h localhost -q && break
+            sleep 1
+          done
+          "$pg/pg_isready" -h localhost
+          "$pg/psql" -h localhost -d postgres -v ON_ERROR_STOP=1 \
+            -c "CREATE ROLE aleph LOGIN SUPERUSER PASSWORD 'aleph'"
+          "$pg/createdb" -h localhost -O aleph aleph_e2e
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install the backend
+        working-directory: .
+        run: |
+          uv python install 3.12
+          uv sync --frozen
+
+      - name: Migrate
+        working-directory: .
+        run: uv run alembic upgrade head
+
+      # Fake-issuer mode (TDD D22) and E2E_SIMCTL_UDID (simctl push, §13.4) are
+      # read by the e2e backend once AL-603 / AL-614 add them.
+      - name: Start the stub backend
+        working-directory: .
+        env:
+          ENV: test
+          E2E_FAKE_ISSUER: "1"
+          E2E_SIMCTL_UDID: ${{ steps.sim.outputs.udid }}
+        run: |
+          mkdir -p "$(dirname "$BACKEND_LOG")"
+          nohup uv run uvicorn scripts.e2e_backend:create_stub_app --factory \
+            --host 127.0.0.1 --port 8000 > "$BACKEND_LOG" 2>&1 &
+          for _ in $(seq 1 60); do
+            if curl -fsS --max-time 5 http://127.0.0.1:8000/readyz; then
+              echo
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::the stub backend did not become ready"
+          cat "$BACKEND_LOG"
+          exit 1
+
+      - name: Check for the Xcode project
+        id: project
+        run: |
+          if [ -f project.yml ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            msg="No Xcode project yet (clients/ios/project.yml arrives with AL-603): skipping the UI tests."
+            echo "::notice title=ios-e2e::$msg"
+            echo "$msg" >> "$GITHUB_STEP_SUMMARY"
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install XcodeGen ${{ env.XCODEGEN_VERSION }}
+        if: steps.project.outputs.present == 'true'
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/xcodegen.zip" \
+            "https://github.com/yonaskolb/XcodeGen/releases/download/$XCODEGEN_VERSION/xcodegen.zip"
+          unzip -q "$RUNNER_TEMP/xcodegen.zip" -d "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/xcodegen/bin" >> "$GITHUB_PATH"
+
+      - name: Boot simulator
+        if: steps.project.outputs.present == 'true'
+        env:
+          UDID: ${{ steps.sim.outputs.udid }}
+        run: |
+          xcrun simctl boot "$UDID"
+          xcrun simctl bootstatus "$UDID" -b
+          # Freeze the status bar so the UI-test screenshot is stable between
+          # runs (it is still never compared).
+          xcrun simctl status_bar "$UDID" override \
+            --time 9:41 --dataNetwork wifi --wifiMode active --wifiBars 3 \
+            --cellularMode active --cellularBars 4 \
+            --batteryState charged --batteryLevel 100 || true
+
+      - name: Cache SwiftPM checkouts
+        if: steps.project.outputs.present == 'true'
+        uses: actions/cache@v4
+        with:
+          path: clients/ios/build/SourcePackages
+          key: spm-macos-${{ hashFiles('clients/ios/Packages/*/Package.resolved', 'clients/ios/Tools/*/Package.resolved', 'clients/ios/project.yml') }}
+          restore-keys: spm-macos-
+
+      - name: Generate project
+        if: steps.project.outputs.present == 'true'
+        run: xcodegen generate
+
+      - name: UI tests (UITest configuration)
+        if: steps.project.outputs.present == 'true'
+        env:
+          UDID: ${{ steps.sim.outputs.udid }}
+          TEST_RUNNER_SCREENSHOT_DIR: ${{ github.workspace }}/clients/ios/screenshots
+        run: |
+          set -o pipefail
+          mkdir -p screenshots
+          if [ "$MODE" = record ]; then
+            rm -f screenshots/*.png
+          fi
+          xcodebuild test \
+            -project Aleph.xcodeproj \
+            -scheme Aleph \
+            -configuration UITest \
+            -destination "id=$UDID" \
+            -derivedDataPath build/DerivedData \
+            -clonedSourcePackagesDirPath build/SourcePackages \
+            -only-testing:AlephUITests \
+            -resultBundlePath build/AlephUITests.xcresult \
+            -skipPackagePluginValidation \
+            CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee build/xcodebuild-uitest.log
+
+      - name: Stop the stub backend
+        if: always()
+        run: pkill -f 'uvicorn scripts.e2e_backend' || true
+
+      - name: Upload xcresult, screenshots and backend log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-e2e-${{ env.MODE }}
+          path: |
+            clients/ios/build/AlephUITests.xcresult
+            clients/ios/build/*.log
+            clients/ios/screenshots/*.png
+          if-no-files-found: warn
+
+      - name: Commit screenshots back to the ios-dev branch
+        if: success() && env.MODE == 'record' && steps.project.outputs.present == 'true'
+        working-directory: .
+        run: clients/ios/scripts/commit-back.sh "$GITHUB_REF_NAME" "$SCREENSHOTS"

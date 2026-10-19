@@ -1,14 +1,16 @@
 # Continuous Integration
 
-Three GitHub Actions workflows. [`ci.yml`](../.github/workflows/ci.yml) runs on every
-push/PR to `main`; [`release.yml`](../.github/workflows/release.yml) runs after a
-green CI on `main` (and can be dispatched as a dry run);
-[`evals.yml`](../.github/workflows/evals.yml) is dispatch-only because it spends
-money.
+Four GitHub Actions workflows. [`ci.yml`](../.github/workflows/ci.yml) runs on every
+push/PR to `main` (and `claude/ios`); [`ios.yml`](../.github/workflows/ios.yml) builds
+and tests the iOS client on PRs and `ios-dev/*` pushes;
+[`release.yml`](../.github/workflows/release.yml) runs after a green CI on `main` (and
+can be dispatched as a dry run); [`evals.yml`](../.github/workflows/evals.yml) is
+dispatch-only because it spends money.
 
 | Workflow | Trigger | Purpose |
 | -------- | ------- | ------- |
-| **CI** | push/PR to `main` | Correctness gates (below) |
+| **CI** | push/PR to `main` or `claude/ios` | Correctness gates (below) |
+| **iOS** | PR to `main` or `claude/ios`, push to `ios-dev/**`, `workflow_dispatch` | The iOS client: Swift lint, Linux package tests, the generated-Swift drift check, macOS build, unit, snapshot and UI tests ([below](#the-ios-workflow-iosyml)) |
 | **Release** | after a green CI on `main`, or `workflow_dispatch` | semantic-release → GHCR image → Fly deploy ([deploy.md](deploy.md)) |
 | **Evals** | `workflow_dispatch` only | Agent quality measurement ([evals.md](evals.md)) |
 
@@ -19,7 +21,7 @@ shape (gate / integration / e2e / compose-smoke).
 
 | Job | Command | Services | Purpose |
 | --- | ------- | -------- | ------- |
-| **gate** | `just gate` | none | Formatting (ruff/biome), linting, typecheck (ty/tsc), backend + frontend unit tests, and the contract drift checks: `just openapi-check` (`clients/openapi.json` against the app; fix with `just openapi`) and `just openapi-ts-check` (the web's `schema.d.ts` against `clients/openapi.json`; fix with `just openapi-ts`). The third committed contract file, the generated Swift client, is checked by `clients/ios/scripts/generate-api.sh --check` (fix by running it without `--check`), which needs a Swift toolchain and runs in the iOS workflow's Linux job (AL-617), not in `gate`. |
+| **gate** | `just gate` | none | Formatting (ruff/biome), linting, typecheck (ty/tsc), backend + frontend unit tests, and the contract drift checks: `just openapi-check` (`clients/openapi.json` against the app; fix with `just openapi`) and `just openapi-ts-check` (the web's `schema.d.ts` against `clients/openapi.json`; fix with `just openapi-ts`). The third committed contract file, the generated Swift client, is checked by `clients/ios/scripts/generate-api.sh --check` (fix by running it without `--check`), which needs a Swift toolchain and runs in the iOS workflow's Linux `swift-linux` job, not in `gate`. |
 | **integration** | `just test-integration` | Postgres 16 + Keycloak | API against a real per-test Postgres database and the real OIDC code flow. |
 | **e2e** | `just test-e2e` | Postgres 16 + Keycloak | Playwright browser suite (phone viewport) against the stub-model backend + dev frontend. |
 | **compose-smoke** | `just compose-smoke` | Compose Postgres | Builds the **production image** and proves it serves: `/healthz`, `/readyz` against a migrated database, the SPA shell, and the auth boundary in both directions. |
@@ -37,6 +39,75 @@ depends on.
 
 Runs on the same ref cancel their predecessors (`concurrency`), and each job
 uploads its JUnit / Playwright report as an artifact.
+
+## The iOS workflow (`ios.yml`)
+
+Builds and tests the SwiftUI client in `clients/ios/` (iOS TDD §17.1). Its own
+`concurrency` group (`ios-<ref>`) cancels superseded runs on the same ref.
+
+| Job | Runner | Runs when | Does |
+| --- | ------ | --------- | ---- |
+| **changes** | ubuntu | always | The path filter (below). Outputs `ios=true` or `ios=false`. |
+| **swift-linux** | ubuntu, container `swift:6.2` | `ios == 'true'` | `swift format lint --strict` on every tracked `.swift` file under `clients/ios/` except the generated client (`Packages/API/Sources/API/Generated/`), using `clients/ios/.swift-format`; `swift test` in `Tools/GenerateAPI` (the contract rewrite); `generate-api.sh --check` (the generated-Swift drift check); `swift test` in the Linux-capable packages `Packages/Core`, `Packages/Markdown` and `Packages/API`. Until AL-603 adds `Core` and `Markdown`, a missing package is a warning annotation, not a failure. |
+| **ios-gate** | `macos-26` | `ios == 'true'` | Selects `/Applications/Xcode_26.6.app` (`sudo xcode-select -s`), installs XcodeGen 2.46.0, creates the pinned *iPhone 17 / iOS 26.5* simulator, runs `xcodegen generate`, builds with warnings as errors, runs the `Aleph` scheme's unit and snapshot tests, and checks that the Release binary has no `AlephTestTokens` hook. |
+| **ios-e2e** | `macos-26` | `ios == 'true'` | Same Xcode and simulator; `brew install postgresql@16`, `uv sync`, `alembic upgrade head`, boots the stub backend (`scripts/e2e_backend.py`) with `E2E_FAKE_ISSUER=1` and `E2E_SIMCTL_UDID`, then runs `AlephUITests` in the `UITest` configuration. Uploads the `.xcresult` and the backend log. |
+
+Until `clients/ios/project.yml` exists (it arrives with AL-603), `ios-gate` and
+`ios-e2e` still select Xcode, create the simulator and (in `ios-e2e`) boot the
+backend, then skip every Xcode-project step with a "No Xcode project yet" notice. So
+the jobs are green and already prove the runner image has the pinned toolchain.
+
+**The path filter.** There is no trigger-level `paths:` filter, because a workflow
+that never starts leaves a required check pending forever. Instead `changes` diffs
+`git diff --name-only "$base" HEAD`, where `base` is the PR's base SHA, or the push's
+`before` SHA. A new branch, a commit it can't find, or a `workflow_dispatch` without
+a `base` input runs everything. The other three jobs run only when a changed path
+matches one of these (`clients/ios/scripts/ios-relevant.sh`, unit-tested in
+`tests/unit/test_ios_ci_scripts.py`):
+
+- `^clients/ios/`
+- `^clients/openapi\.json$`
+- `^scripts/e2e_backend\.py$`
+- `^\.github/workflows/ios\.yml$`
+
+Otherwise they're skipped by their `if:`, and a skipped job counts as passing for a
+required check. So a backend-only PR never waits on macOS.
+
+**Warnings as errors.** `ios-gate` scans the build log with
+`clients/ios/scripts/check-warnings.sh`: any Swift compiler warning in a source file
+under `clients/ios/` fails the job. The generated client is exempt, because under
+Swift 6.2 every generated file warns that a `package import` is unused, and it is
+never edited by hand. Third-party package checkouts and files Xcode generates into
+DerivedData are outside `clients/ios/` sources and are ignored too.
+
+**Snapshots.** On a PR or a `workflow_dispatch`, snapshot tests compare against the
+committed references in `clients/ios/AlephSnapshotTests/__Snapshots__/` and fail on a
+mismatch; the failures and diffs are uploaded as the `ios-gate-compare` artifact. On a
+push to `ios-dev/**`, they record instead (below).
+
+**Caching.** `swift-linux` caches SwiftPM's clone cache and `Tools/GenerateAPI/.build`
+on the `Package.resolved` files; the macOS jobs cache the cloned package checkouts on
+`Package.resolved` and `project.yml`. DerivedData isn't cached. There's no nightly run
+on `main`.
+
+### Required checks (a repository setting)
+
+`changes`, `swift-linux`, `ios-gate` and `ios-e2e` are required checks on `main` and
+`claude/ios`, next to CI's four jobs. Branch protection is a GitHub setting, not a
+file: an owner adds them under **Settings → Branches** (or **Rules → Rulesets**) for
+each branch. Keep the job names stable; branch protection refers to them.
+
+### Iterating on `ios-dev/*` (agents without Xcode)
+
+An agent that can't build iOS locally pushes to `ios-dev/<topic>`. There the workflow
+runs in **record** mode: `ios-gate` regenerates the snapshot references and `ios-e2e`
+the UI-test screenshots, and each commits them back to the same branch as
+`chore(ios): record snapshot references and screenshots [skip ci]`
+(`clients/ios/scripts/commit-back.sh`). Pull, read the PNGs, repeat, then bring the
+commits onto the PR branch, where CI only compares. Read results with the Actions
+tab or the job logs. A push to a new `ios-dev/*` branch runs everything; later pushes
+diff against the previous head, so a push that changes nothing iOS-relevant skips the
+iOS jobs.
 
 ## The Evals workflow (opt-in, never required)
 
