@@ -12,21 +12,14 @@
 // newest-first as `PathSummaryDTO` rows, and `DELETE /paths/{id}` hard-deletes
 // exactly one entry (recorded in `deletedPathIds()` for assertions).
 
-import { HttpResponse, delay, http } from "msw";
-import {
-  API_V1_BASE,
-  type Level,
-  type PathDetail,
-  type PathProgress,
-  type PathStatus,
-  type PathSummary,
-  type PathUnit,
-} from "../lib/api";
+import { HttpResponse, delay } from "msw";
+import type { Level, PathProgress, PathStatus, PathSummary, PathUnit, Schemas } from "../lib/api";
 import {
   PATH_TITLE_MAX_LENGTH,
   TEACHING_STYLE_MAX_LENGTH,
   TOPIC_MAX_LENGTH,
 } from "../lib/onboarding";
+import { contract, errorEnvelope } from "./contract";
 import { ADMIN_MODEL_ALLOWLIST } from "./models";
 
 // --- Reusable path-view fixtures (AL-062) -----------------------------------
@@ -557,12 +550,30 @@ export function removeLessonsFromPath(pathId: string, rows: AppliedRows): void {
 }
 
 /** A stored path exactly as `GET /paths/{id}` serves it — Apply's `path` field. */
-export function pathDetailFor(pathId: string): PathDetail | undefined {
+export function pathDetailFor(pathId: string): Schemas["PathDetailResponse"] | undefined {
   const path = store.get(pathId);
   return path ? detailFor(path) : undefined;
 }
 
-function detailFor(path: StoredPath): PathDetail {
+/**
+ * The stored units as the contract serves them (`UnitDTO`/`LessonSummaryDTO`).
+ * Fixtures are written as the web's narrower `PathUnit` view, so the fields the
+ * web never reads (a unit's `position` and `summary`, a lesson's
+ * `position_in_unit`) are derived here, in outline order, as the server's are.
+ */
+function contractUnits(units: PathUnit[]): Schemas["UnitDTO"][] {
+  return units.map((unit, unitIndex) => ({
+    ...unit,
+    position: unitIndex + 1,
+    summary: "",
+    lessons: unit.lessons.map((lesson, lessonIndex) => ({
+      ...lesson,
+      position_in_unit: lessonIndex + 1,
+    })),
+  }));
+}
+
+function detailFor(path: StoredPath): Schemas["PathDetailResponse"] {
   const generating = path.pollsRemaining > 0;
   const status: PathStatus = generating ? "generating" : path.resolution;
   const units = status === "ready" ? (path.units ?? READY_UNITS) : [];
@@ -580,7 +591,7 @@ function detailFor(path: StoredPath): PathDetail {
     refusal_message: status === "refused" ? REFUSAL_MESSAGE : null,
     // Roll-up derived from the same units the rail renders (docs/api.md).
     progress: status === "ready" ? progressFor(units) : EMPTY_PROGRESS,
-    units,
+    units: contractUnits(units),
   };
 }
 
@@ -621,30 +632,16 @@ function summaryFor(path: StoredPath): PathSummary {
 const MOCK_LAST_ACTIVITY_AT = "2025-01-15T10:00:00Z";
 
 function rateLimitEnvelope() {
-  return HttpResponse.json(
-    {
-      error: {
-        code: "rate_limited",
-        message: "You've reached today's limit for new paths. Try again tomorrow.",
-        request_id: "test-request-id",
-      },
-    },
-    { status: 429 },
+  return errorEnvelope(
+    429,
+    "rate_limited",
+    "You've reached today's limit for new paths. Try again tomorrow.",
   );
 }
 
 /** `422 validation_error` — the off-allowlist model override (docs/api.md). */
 function offAllowlistEnvelope(model: string) {
-  return HttpResponse.json(
-    {
-      error: {
-        code: "validation_error",
-        message: `Model '${model}' is not in the allowlist.`,
-        request_id: "test-request-id",
-      },
-    },
-    { status: 422 },
-  );
+  return errorEnvelope(422, "validation_error", `Model '${model}' is not in the allowlist.`);
 }
 
 /**
@@ -654,15 +651,10 @@ function offAllowlistEnvelope(model: string) {
  * sent, which is what keeps the picker from claiming this one.
  */
 function topicTooLongEnvelope() {
-  return HttpResponse.json(
-    {
-      error: {
-        code: "validation_error",
-        message: `Topic must be at most ${TOPIC_MAX_LENGTH} characters.`,
-        request_id: "test-request-id",
-      },
-    },
-    { status: 422 },
+  return errorEnvelope(
+    422,
+    "validation_error",
+    `Topic must be at most ${TOPIC_MAX_LENGTH} characters.`,
   );
 }
 
@@ -673,33 +665,19 @@ function topicTooLongEnvelope() {
  * (F10) rather than to be a realistic day-to-day response.
  */
 function titleInvalidEnvelope() {
-  return HttpResponse.json(
-    {
-      error: {
-        code: "validation_error",
-        message: `Title must be 1-${PATH_TITLE_MAX_LENGTH} characters.`,
-        request_id: "test-request-id",
-      },
-    },
-    { status: 422 },
+  return errorEnvelope(
+    422,
+    "validation_error",
+    `Title must be 1-${PATH_TITLE_MAX_LENGTH} characters.`,
   );
 }
 
 function serverErrorEnvelope() {
-  return HttpResponse.json(
-    {
-      error: {
-        code: "internal_error",
-        message: "Something went wrong.",
-        request_id: "test-request-id",
-      },
-    },
-    { status: 500 },
-  );
+  return errorEnvelope(500, "internal_error", "Something went wrong.");
 }
 
 export const pathsHandlers = [
-  http.post(`${API_V1_BASE}/paths`, async ({ request }) => {
+  contract.post("/api/v1/paths", async ({ request }) => {
     const body = (await request.json()) as Record<string, unknown> & {
       topic: string;
       level: Level;
@@ -741,7 +719,7 @@ export const pathsHandlers = [
 
   // Registered before `/paths/:id` for readability; MSW matches the exact path
   // regardless, so the two never collide.
-  http.get(`${API_V1_BASE}/paths`, () => {
+  contract.get("/api/v1/paths", () => {
     listRequests += 1;
     // Most recently worked first (docs/api.md): `last_activity_at` desc with
     // **nulls last**, `created_at` desc as tiebreak. The store is
@@ -764,19 +742,16 @@ export const pathsHandlers = [
     return HttpResponse.json({ paths });
   }),
 
-  http.delete(`${API_V1_BASE}/paths/:id`, async ({ params }) => {
+  contract.delete("/api/v1/paths/{path_id}", async ({ params }) => {
     if (config.deleteDelayMs > 0) {
       await delay(config.deleteDelayMs);
     }
     if (config.deleteFails) {
       return serverErrorEnvelope();
     }
-    const id = params.id as string;
+    const id = params.path_id as string;
     if (!store.has(id)) {
-      return HttpResponse.json(
-        { error: { code: "not_found", message: "Path not found." } },
-        { status: 404 },
-      );
+      return errorEnvelope(404, "not_found", "Path not found.");
     }
     // Hard delete, only this path — the learner's others are untouched (W5).
     store.delete(id);
@@ -784,13 +759,10 @@ export const pathsHandlers = [
     return new HttpResponse(null, { status: 204 });
   }),
 
-  http.get(`${API_V1_BASE}/paths/:id`, ({ params }) => {
-    const path = store.get(params.id as string);
+  contract.get("/api/v1/paths/{path_id}", ({ params }) => {
+    const path = store.get(params.path_id as string);
     if (!path) {
-      return HttpResponse.json(
-        { error: { code: "not_found", message: "Path not found." } },
-        { status: 404 },
-      );
+      return errorEnvelope(404, "not_found", "Path not found.");
     }
     const detail = detailFor(path);
     // A poll advances the generating clock (mirrors the real trigger+poll).
@@ -800,17 +772,14 @@ export const pathsHandlers = [
     return HttpResponse.json(detail);
   }),
 
-  http.patch(`${API_V1_BASE}/paths/:id`, async ({ request, params }) => {
+  contract.patch("/api/v1/paths/{path_id}", async ({ request, params }) => {
     // Not found first, and uncounted: a PATCH to a path this fake never had
     // did no rename work, so it should not read as one on `renameRequests`
     // (F10) — mirrors the real route's `OwnedPath` 404, which runs before any
     // write.
-    const path = store.get(params.id as string);
+    const path = store.get(params.path_id as string);
     if (!path) {
-      return HttpResponse.json(
-        { error: { code: "not_found", message: "Path not found." } },
-        { status: 404 },
-      );
+      return errorEnvelope(404, "not_found", "Path not found.");
     }
     renameRequests += 1;
     if (config.renameFails) {
@@ -832,13 +801,10 @@ export const pathsHandlers = [
     return HttpResponse.json(detailFor(path));
   }),
 
-  http.put(`${API_V1_BASE}/paths/:id/teaching-style`, async ({ request, params }) => {
-    const path = store.get(params.id as string);
+  contract.put("/api/v1/paths/{path_id}/teaching-style", async ({ request, params }) => {
+    const path = store.get(params.path_id as string);
     if (!path) {
-      return HttpResponse.json(
-        { error: { code: "not_found", message: "Path not found." } },
-        { status: 404 },
-      );
+      return errorEnvelope(404, "not_found", "Path not found.");
     }
     const body = (await request.json()) as Record<string, unknown>;
     teachingStyleBodies.push({ ...body });
@@ -854,34 +820,29 @@ export const pathsHandlers = [
     }
     const trimmed = typeof value === "string" ? value.trim() : "";
     if (!trimmed || trimmed.length > TEACHING_STYLE_MAX_LENGTH) {
-      return HttpResponse.json(
-        {
-          error: {
-            code: "validation_error",
-            message: `Teaching style must be 1-${TEACHING_STYLE_MAX_LENGTH} characters.`,
-            request_id: "test-request-id",
-          },
-        },
-        { status: 422 },
+      return errorEnvelope(
+        422,
+        "validation_error",
+        `Teaching style must be 1-${TEACHING_STYLE_MAX_LENGTH} characters.`,
       );
     }
     path.teachingStyle = trimmed;
     return HttpResponse.json(detailFor(path));
   }),
 
-  http.post(`${API_V1_BASE}/paths/:id/retry`, ({ params }) => {
+  contract.post("/api/v1/paths/{path_id}/retry", ({ params }) => {
     if (config.retryRateLimited) {
       return rateLimitEnvelope();
     }
     if (config.retryFails) {
       return serverErrorEnvelope();
     }
-    const path = store.get(params.id as string);
+    const path = store.get(params.path_id as string);
     if (path && path.resolution === "failed") {
       // A retry re-claims the failed outline; this time it succeeds (W8).
       path.resolution = "ready";
       path.pollsRemaining = config.pollsBeforeResolve;
     }
-    return HttpResponse.json({ id: params.id }, { status: 202 });
+    return HttpResponse.json({ id: params.path_id as string }, { status: 202 });
   }),
 ];

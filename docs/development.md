@@ -256,6 +256,12 @@ just typecheck
 just test-unit
 just test-all
 
+# Regenerate the API contract and the web's generated types after an /api/v1 change
+# (clients/openapi.json, clients/web/src/lib/api/schema.d.ts; both are committed
+# and drift-checked by `just gate`)
+just openapi
+just openapi-ts
+
 # Full pre-push check
 just gate
 

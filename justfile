@@ -71,6 +71,24 @@ openapi-check:
         exit 1
     fi
 
+# Generate the web's API types from the contract (clients/web/src/lib/api/schema.d.ts)
+openapi-ts:
+    cd {{fe_dir}} && pnpm run openapi
+
+# Fail if the web's generated API types are stale against clients/openapi.json
+openapi-ts-check:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    tmpdir="$(mktemp -d)"
+    trap 'rm -rf "$tmpdir"' EXIT
+    tmp="$tmpdir/schema.d.ts"
+    cd {{fe_dir}}
+    pnpm exec openapi-typescript ../openapi.json -o "$tmp" >/dev/null
+    if ! diff -u src/lib/api/schema.d.ts "$tmp"; then
+        echo "clients/web/src/lib/api/schema.d.ts is stale: run \`just openapi-ts\` and commit the result" >&2
+        exit 1
+    fi
+
 # Run all tests
 test-all: test-unit test-integration test-e2e
 
@@ -141,7 +159,7 @@ gate: gate-be gate-fe
 gate-be: fmt-be lint-be typecheck-be openapi-check test-unit-be
 
 # Frontend gate
-gate-fe: fmt-fe lint-fe typecheck-fe test-unit-fe
+gate-fe: fmt-fe lint-fe openapi-ts-check typecheck-fe test-unit-fe
 
 # Full check
 gate-expensive: gate test-integration test-e2e

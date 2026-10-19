@@ -16,9 +16,8 @@
 // outline query (AL-331), and that is a different query entirely.
 
 import { queryOptions, skipToken } from "@tanstack/react-query";
-import { ApiError, apiFetch, apiV1Path } from "./api";
+import { ApiError, type Schemas, apiClient, unwrap } from "./api";
 import type { PathDetail, PathLesson, PathUnit } from "./api";
-import type { TutorRole } from "./tutor";
 import type { AddLessonsOperation, Proposal, ProposalOperation } from "./tutor-stream";
 
 /**
@@ -29,12 +28,10 @@ import type { AddLessonsOperation, Proposal, ProposalOperation } from "./tutor-s
  * it and never computes it: the same rule that keeps apply's staleness check on
  * the server keeps this off the client.
  */
-export type ProposalResolution = "pending" | "applied" | "undone" | "superseded";
+export type ProposalResolution = Schemas["ProposalResolutionDTO"];
 
 /** A proposal as a *read* thread carries it: the payload plus its resolution. */
-export interface MessageProposal extends Proposal {
-  resolution: ProposalResolution;
-}
+export type MessageProposal = Schemas["ProposalDTO"];
 
 /**
  * One message in the shaping thread. Note what is absent next to
@@ -42,19 +39,10 @@ export interface MessageProposal extends Proposal {
  * the path, so there is no lesson to record — the shape of the DTO is the shape
  * of the scope.
  */
-export interface ShapingMessage {
-  id: string;
-  role: TutorRole;
-  content: string;
-  /** Set only on a tutor message that produced a Proposal (AL-331 renders it). */
-  proposal: MessageProposal | null;
-  created_at: string;
-}
+export type ShapingMessage = Schemas["ShapingMessageDTO"];
 
 /** `GET /api/v1/paths/{id}/shaping/conversation` — object-wrapped, oldest first. */
-export interface ShapingConversation {
-  messages: ShapingMessage[];
-}
+export type ShapingConversation = Schemas["ShapingConversationResponse"];
 
 /**
  * Which of the two operation shapes this is (D1). The wire union is **untagged**
@@ -67,7 +55,11 @@ export function isAddLessons(operation: ProposalOperation): operation is AddLess
 
 /** The whole shaping thread for a path. `200 {messages: []}` when none exists. */
 export function getShapingConversation(pathId: string): Promise<ShapingConversation> {
-  return apiFetch<ShapingConversation>(apiV1Path(`/paths/${pathId}/shaping/conversation`));
+  return unwrap(
+    apiClient.GET("/api/v1/paths/{path_id}/shaping/conversation", {
+      params: { path: { path_id: pathId } },
+    }),
+  );
 }
 
 /**
@@ -77,8 +69,12 @@ export function getShapingConversation(pathId: string): Promise<ShapingConversat
  * message FK), which is exactly why clearing a thread is safe to offer. Still
  * destructive and not undoable, so the caller MUST confirm first.
  */
-export function clearShapingConversation(pathId: string): Promise<void> {
-  return apiFetch<void>(apiV1Path(`/paths/${pathId}/shaping/conversation`), { method: "DELETE" });
+export async function clearShapingConversation(pathId: string): Promise<void> {
+  await unwrap(
+    apiClient.DELETE("/api/v1/paths/{path_id}/shaping/conversation", {
+      params: { path: { path_id: pathId } },
+    }),
+  );
 }
 
 /**
@@ -118,10 +114,10 @@ export function shapingConversationQueryOptions(pathId: string | null) {
 // pure function here, so it can be asserted without a render.
 
 /** The edit a Change applied (`PathChangeKind`) — the closed vocabulary (D1). */
-export type ChangeKind = "add_lessons" | "revise_lesson";
+export type ChangeKind = Schemas["PathChangeKind"];
 
 /** Whether a Change is in force (`PathChangeStatus`). Undo is a status, never a delete. */
-export type ChangeStatus = "applied" | "undone";
+export type ChangeStatus = Schemas["PathChangeStatus"];
 
 /**
  * One applied **Change**, as `GET /paths/{id}/changes` reports it (`ChangeDTO`).
@@ -131,22 +127,10 @@ export type ChangeStatus = "applied" | "undone";
  * engagement re-check run at undo time, because a learner can start a lesson
  * between this list rendering and the tap. The `409 engaged` is the enforcer.
  */
-export interface Change {
-  id: string;
-  /** Plain language, the server's own words — the sheet never rewrites it. */
-  summary: string;
-  /** Plural: one Apply may carry both shapes, and lands as one Change. */
-  kinds: ChangeKind[];
-  status: ChangeStatus;
-  applied_at: string;
-  /** Non-null only on an undone Change. */
-  undone_at: string | null;
-}
+export type Change = Schemas["ChangeDTO"];
 
 /** `GET /api/v1/paths/{id}/changes` — object-wrapped, **newest first**. */
-export interface ChangeHistory {
-  changes: Change[];
-}
+export type ChangeHistory = Schemas["ChangeHistoryResponse"];
 
 /**
  * `POST /api/v1/messages/{id}/apply-proposal` → `200 {change, path}`.
@@ -157,10 +141,9 @@ export interface ChangeHistory {
  * with no second fetch and no guess about what landed. Requesting it also kicks
  * Phase 1's prefetch driver server-side (TDD §5.6 step 4).
  */
-export interface ApplyProposalResult {
-  change: Change;
+export type ApplyProposalResult = Omit<Schemas["ApplyProposalResponse"], "path"> & {
   path: PathDetail;
-}
+};
 
 /**
  * Every `details.reason` a coded `409` can carry (`ShapingConflictReason`).
@@ -414,7 +397,8 @@ export function mergeProposalIntoOutline(
     if (ghosts.length === 0) return;
 
     const slot = findSlot(merged, operation.insert_at_position);
-    if (operation.new_unit === null) {
+    const newUnit = operation.new_unit ?? null;
+    if (newUnit === null) {
       // Into an existing unit, immediately before the row it displaces. Past the
       // end of the path (or an outline with no rows at all) it lands last, which
       // is where Apply will put it.
@@ -427,11 +411,7 @@ export function mergeProposalIntoOutline(
       return;
     }
     // A new unit is drawn whole, where the apply transaction lands it.
-    merged.splice(
-      newUnitIndex(merged, slot),
-      0,
-      ghostUnit(index, operation.new_unit.title, ghosts),
-    );
+    merged.splice(newUnitIndex(merged, slot), 0, ghostUnit(index, newUnit.title, ghosts));
   });
 
   return merged;
@@ -520,19 +500,27 @@ export function undoableChangeId(changes: readonly Change[]): string | null {
  * explicit control: nothing infers it from conversation text.
  */
 export function applyProposal(messageId: string): Promise<ApplyProposalResult> {
-  return apiFetch<ApplyProposalResult>(apiV1Path(`/messages/${messageId}/apply-proposal`), {
-    method: "POST",
-  });
+  return unwrap(
+    apiClient.POST("/api/v1/messages/{message_id}/apply-proposal", {
+      params: { path: { message_id: messageId } },
+    }),
+  );
 }
 
 /** **Undo** a Change (TDD §5.7) — `204`, and the path is restored exactly. */
-export function undoChange(changeId: string): Promise<void> {
-  return apiFetch<void>(apiV1Path(`/changes/${changeId}/undo`), { method: "POST" });
+export async function undoChange(changeId: string): Promise<void> {
+  await unwrap(
+    apiClient.POST("/api/v1/changes/{change_id}/undo", {
+      params: { path: { change_id: changeId } },
+    }),
+  );
 }
 
 /** The path's **Change history**, newest first. Survives "new conversation". */
 export function getChangeHistory(pathId: string): Promise<ChangeHistory> {
-  return apiFetch<ChangeHistory>(apiV1Path(`/paths/${pathId}/changes`));
+  return unwrap(
+    apiClient.GET("/api/v1/paths/{path_id}/changes", { params: { path: { path_id: pathId } } }),
+  );
 }
 
 /**

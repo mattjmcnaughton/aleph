@@ -15,11 +15,12 @@
 // One shaping conversation **per path**, created lazily: a path nobody has
 // shaped answers `200 {messages: []}`, never `404`.
 
-import { HttpResponse, delay, http } from "msw";
-import { API_V1_BASE } from "../lib/api";
+import { HttpResponse, delay } from "msw";
+import type { Schemas } from "../lib/api";
 import type { Change, ShapingConflictReason, ShapingMessage } from "../lib/shaping";
 import { isAddLessons } from "../lib/shaping";
 import type { Proposal, SendShapingMessageInput } from "../lib/tutor-stream";
+import { contract, errorEnvelope, sseFrame } from "./contract";
 import {
   type AppliedRows,
   addLessonsToPath,
@@ -27,7 +28,6 @@ import {
   removeLessonsFromPath,
   reviseLessonInPath,
 } from "./paths";
-import { frame } from "./tutor";
 
 interface ShapingConfig {
   /** One `delta` event per item — the reply text, streamed in fragments. */
@@ -35,7 +35,7 @@ interface ShapingConfig {
   /** Emitted as a `proposal` event after the deltas when set (TDD §5.4). */
   proposal: Proposal | null;
   /** When set, the stream ends in an `error` event instead of `done`. */
-  failWith: { code: string; message: string } | null;
+  failWith: Schemas["StreamError"] | null;
   /**
    * When true the stream stalls after its deltas instead of closing, so the only
    * ways out are the client aborting (stop / new conversation / unmount) or a
@@ -267,24 +267,14 @@ export function seedChanges(pathId: string, changes: Change[]): void {
 }
 
 function conflictEnvelope(status: number, conflict: ShapingConflictConfig) {
-  return HttpResponse.json(
-    {
-      error: {
-        code: "conflict",
-        message: conflict.message,
-        request_id: "req-shaping-conflict",
-        details: { reason: conflict.reason },
-      },
-    },
-    { status },
-  );
+  return errorEnvelope(status, "conflict", conflict.message, {
+    details: { reason: conflict.reason },
+    requestId: "req-shaping-conflict",
+  });
 }
 
 function notFoundEnvelope() {
-  return HttpResponse.json(
-    { error: { code: "not_found", message: "Not found.", request_id: "req-shaping-404" } },
-    { status: 404 },
-  );
+  return errorEnvelope(404, "not_found", "Not found.", { requestId: "req-shaping-404" });
 }
 
 /** Which path holds this message — the ownership walk, in one line of fake. */
@@ -297,24 +287,17 @@ function pathOfMessage(messageId: string): { pathId: string; message: ShapingMes
 }
 
 export const shapingHandlers = [
-  http.post(`${API_V1_BASE}/messages/:messageId/apply-proposal`, async ({ params }) => {
+  contract.post("/api/v1/messages/{message_id}/apply-proposal", async ({ params }) => {
     applyCallCount += 1;
     if (config.applyDelayMs > 0) await delay(config.applyDelayMs);
     if (config.applyConflict) return conflictEnvelope(409, config.applyConflict);
     if (config.applyFails) {
-      return HttpResponse.json(
-        {
-          error: {
-            code: "internal_error",
-            message: "Something went wrong.",
-            request_id: "req-shaping-500",
-          },
-        },
-        { status: 500 },
-      );
+      return errorEnvelope(500, "internal_error", "Something went wrong.", {
+        requestId: "req-shaping-500",
+      });
     }
 
-    const owned = pathOfMessage(params.messageId as string);
+    const owned = pathOfMessage(params.message_id as string);
     if (owned === null || owned.message.proposal === null) return notFoundEnvelope();
     const { pathId, message } = owned;
     const proposal = message.proposal;
@@ -326,12 +309,15 @@ export const shapingHandlers = [
     const kinds = new Set<Change["kinds"][number]>();
     for (const operation of proposal.operations) {
       if (isAddLessons(operation)) {
-        const created = addLessonsToPath(pathId, operation);
+        const created = addLessonsToPath(pathId, {
+          ...operation,
+          new_unit: operation.new_unit ?? null,
+        });
         rows.lessonIds.push(...created.lessonIds);
         rows.unitId = created.unitId ?? rows.unitId;
         kinds.add("add_lessons");
       } else {
-        reviseLessonInPath(pathId, operation.lesson_id, operation.new_title);
+        reviseLessonInPath(pathId, operation.lesson_id, operation.new_title ?? null);
         kinds.add("revise_lesson");
       }
     }
@@ -356,11 +342,11 @@ export const shapingHandlers = [
     return HttpResponse.json({ change, path });
   }),
 
-  http.post(`${API_V1_BASE}/changes/:changeId/undo`, ({ params }) => {
+  contract.post("/api/v1/changes/{change_id}/undo", ({ params }) => {
     undoCallCount += 1;
     if (config.undoConflict) return conflictEnvelope(409, config.undoConflict);
 
-    const changeId = params.changeId as string;
+    const changeId = params.change_id as string;
     for (const [pathId, changes] of changeStore.entries()) {
       const index = changes.findIndex((candidate) => candidate.id === changeId);
       if (index === -1) continue;
@@ -386,38 +372,31 @@ export const shapingHandlers = [
     return notFoundEnvelope();
   }),
 
-  http.get(`${API_V1_BASE}/paths/:pathId/changes`, ({ params }) => {
+  contract.get("/api/v1/paths/{path_id}/changes", ({ params }) => {
     changeReadCount += 1;
     if (config.changesFail) {
-      return HttpResponse.json(
-        {
-          error: {
-            code: "internal_error",
-            message: "Something went wrong.",
-            request_id: "req-shaping-500",
-          },
-        },
-        { status: 500 },
-      );
+      return errorEnvelope(500, "internal_error", "Something went wrong.", {
+        requestId: "req-shaping-500",
+      });
     }
-    return HttpResponse.json({ changes: changeStore.get(params.pathId as string) ?? [] });
+    return HttpResponse.json({ changes: changeStore.get(params.path_id as string) ?? [] });
   }),
 
-  http.get(`${API_V1_BASE}/paths/:pathId/shaping/conversation`, ({ params }) => {
+  contract.get("/api/v1/paths/{path_id}/shaping/conversation", ({ params }) => {
     readCount += 1;
-    return HttpResponse.json({ messages: store.get(params.pathId as string) ?? [] });
+    return HttpResponse.json({ messages: store.get(params.path_id as string) ?? [] });
   }),
 
-  http.delete(`${API_V1_BASE}/paths/:pathId/shaping/conversation`, ({ params }) => {
+  contract.delete("/api/v1/paths/{path_id}/shaping/conversation", ({ params }) => {
     clearCount += 1;
-    store.delete(params.pathId as string);
+    store.delete(params.path_id as string);
     return new HttpResponse(null, { status: 204 });
   }),
 
-  http.post(
-    `${API_V1_BASE}/paths/:pathId/shaping/conversation/messages`,
+  contract.post(
+    "/api/v1/paths/{path_id}/shaping/conversation/messages",
     async ({ params, request }) => {
-      const pathId = params.pathId as string;
+      const pathId = params.path_id as string;
       const body = (await request.json()) as SendShapingMessageInput;
       sentBodies.push(body);
 
@@ -426,10 +405,7 @@ export const shapingHandlers = [
         // The shared envelope verbatim (`errors.py`): `request_id` is always
         // present on it, so the fake carries one too — a client that quietly
         // depended on its absence would only find out in production.
-        return HttpResponse.json(
-          { error: { code, message, request_id: "req-shaping-pre-stream" } },
-          { status },
-        );
+        return errorEnvelope(status, code, message, { requestId: "req-shaping-pre-stream" });
       }
 
       const turnIds = {
@@ -450,12 +426,12 @@ export const shapingHandlers = [
           const settle = () => {
             if (hungUp) return;
             if (config.failWith) {
-              controller.enqueue(encoder.encode(frame("error", config.failWith)));
+              controller.enqueue(encoder.encode(sseFrame("error", config.failWith)));
             } else {
               persistTurn(pathId, body, turnIds);
               controller.enqueue(
                 encoder.encode(
-                  frame("done", {
+                  sseFrame("done", {
                     learner_message_id: turnIds.learner,
                     tutor_message_id: turnIds.tutor,
                   }),
@@ -466,12 +442,12 @@ export const shapingHandlers = [
           };
 
           for (const text of config.replyDeltas) {
-            controller.enqueue(encoder.encode(frame("delta", { text })));
+            controller.enqueue(encoder.encode(sseFrame("delta", { text })));
           }
           // After the prose, as the service observes it: the tool call lands
           // mid-reply and the payload is emitted when it does (TDD §5.4).
           if (config.proposal) {
-            controller.enqueue(encoder.encode(frame("proposal", config.proposal)));
+            controller.enqueue(encoder.encode(sseFrame("proposal", config.proposal)));
           }
           if (config.hang) {
             heldStreams.push(settle);
