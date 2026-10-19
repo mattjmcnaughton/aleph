@@ -33,6 +33,7 @@ from aleph import db
 from aleph.app import create_app
 from aleph.auth import AuthIdentity
 from aleph.config import settings
+from aleph.errors import ErrorEnvelope
 from aleph.models import Lesson, Path, PathStatus, QuickCheck, Unit
 from aleph.services import generation as gen_module
 from aleph.services.stub_model import StubModelForcedError, build_stub_model
@@ -652,6 +653,10 @@ async def test_patch_blank_title_is_422(
         resp = await client.patch(f"/api/v1/paths/{path_id}", json={"title": "   "})
         assert resp.status_code == 422
         assert resp.json()["error"]["code"] == "validation_error"
+        # The contract declares every error as the envelope, a 422 included
+        # (clients/openapi.json has no HTTPValidationError): hold runtime to it.
+        envelope = ErrorEnvelope.model_validate(resp.json())
+        assert envelope.error.details
 
 
 # --------------------------------------------------------------------------- #

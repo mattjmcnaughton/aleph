@@ -12,7 +12,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from aleph.auth import register_provider
 from aleph.config import settings
-from aleph.errors import error_response
+from aleph.errors import ERROR_RESPONSES, error_response
 from aleph.logging import configure_logging
 from aleph.routers import auth, health
 from aleph.routers.v1 import beats as v1_beats
@@ -79,27 +79,30 @@ def create_app() -> FastAPI:
     _install_error_handlers(app)
 
     app.include_router(health.router)
-    app.include_router(auth.router)
-    app.include_router(v1_paths.router)
-    app.include_router(v1_lessons.router)
-    app.include_router(v1_feature_flags.router)
+    # ``responses=ERROR_RESPONSES``: every error these routers return is the
+    # shared envelope, and the contract says so (iOS TDD §4.1), so a client
+    # generated from ``clients/openapi.json`` can decode it.
+    app.include_router(auth.router, responses=ERROR_RESPONSES)
+    app.include_router(v1_paths.router, responses=ERROR_RESPONSES)
+    app.include_router(v1_lessons.router, responses=ERROR_RESPONSES)
+    app.include_router(v1_feature_flags.router, responses=ERROR_RESPONSES)
     # Every route on this one is hidden behind the ``tutor`` feature flag
     # (404 when it resolves off), so mounting it is safe in production while
     # Phase 2 is still being built (epic #82, owner amendment 1).
-    app.include_router(v1_tutor.router)
+    app.include_router(v1_tutor.router, responses=ERROR_RESPONSES)
     # Likewise behind the ``shaping`` flag (epic #114, adopted convention 1) —
     # a separate key, so Phase 2B can ship dark and be killed without
     # disturbing the already-launched in-lesson tutor.
-    app.include_router(v1_shaping.router)
+    app.include_router(v1_shaping.router, responses=ERROR_RESPONSES)
     # Likewise behind the ``streaks`` flag (Phase 5 TDD D7) — its own key, so
     # this slice can ship dark and be killed without disturbing either
     # already-launched surface above.
-    app.include_router(v1_progress.router)
+    app.include_router(v1_progress.router, responses=ERROR_RESPONSES)
     # Likewise behind the ``analyst`` flag (Phase 6 TDD D12) — its own key,
     # so this slice can ship dark (deploy, list, the rail, retry, and the
     # Brief routes all 404 by default) and be dogfooded by admins without
     # disturbing any already-launched surface above.
-    app.include_router(v1_beats.router)
+    app.include_router(v1_beats.router, responses=ERROR_RESPONSES)
 
     # Mount frontend static files (only serves if dist/ exists)
     mount_frontend(app)

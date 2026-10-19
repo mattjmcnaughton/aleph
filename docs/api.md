@@ -1,5 +1,33 @@
 # API Reference
 
+## The contract (`clients/openapi.json`)
+
+The `/api/v1` routes below are also published as an OpenAPI 3.1 document,
+`clients/openapi.json`, which both clients generate their API code from: the web's
+`clients/web/src/lib/api/schema.d.ts` (openapi-typescript) and, from AL-602, the iOS
+app's Swift client (iOS TDD §4). It is exported from the app itself
+(`scripts/export_openapi.py`), holds only the `/api/v1` paths and the schemas they
+reference, and is committed. `just openapi` regenerates it; `just openapi-check`
+(in `just gate-be`) fails when it is stale, and `just openapi-ts-check` (in
+`just gate-fe`) fails when the web's generated types are stale against it. **Any
+`/api/v1` change regenerates both in the same PR** (`just openapi && just openapi-ts`).
+
+Two things the document states that FastAPI cannot infer by itself:
+
+- **Every error is the shared envelope.** Each `/api/v1` operation declares a
+  `default` response of `ErrorEnvelope`:
+  `{"error": {"code", "message", "request_id", "details"?}}`. `code` is
+  machine-readable (`unauthenticated`, `not_found`, `conflict`,
+  `validation_error`, `rate_limited`, …), `message` is copy, `request_id` echoes
+  the `X-Request-ID` header, and `details` appears only when there is more to say
+  (a `409`'s `{reason}`, a `422`'s field errors). There is no
+  `HTTPValidationError` body: a `422` is the envelope like every other error.
+- **The two send routes stream.** Their `200` is `text/event-stream`, and the
+  schema names each frame's `data` payload: `StreamDelta`, `StreamTutorCheck`
+  (tutor only), `StreamProposal` (shaping only), `StreamDone` and `StreamError`.
+  The `event:` name says which one a frame carries (see
+  [the tutor's event stream](#the-send-endpoints-event-stream-54)).
+
 ## Health
 
 | Method | Path | Description |
@@ -247,6 +275,11 @@ The response is `text/event-stream` with `Cache-Control: no-store` (and
 progressive rendering back into a blocking reply). Read it with `fetch` +
 `ReadableStream` — **not** `EventSource`, which cannot POST or carry a body.
 
+The `Data` column names each frame's schema in
+[the contract](#the-contract-clientsopenapijson): `delta` is `StreamDelta`,
+`tutor_check` is `StreamTutorCheck`, `done` is `StreamDone`, `error` is
+`StreamError`.
+
 | Event | Data | When |
 | ----- | ---- | ---- |
 | `delta` | `{text}` | Each streamed fragment of the reply's Markdown. Concatenated in order, the deltas *are* the reply. |
@@ -329,6 +362,8 @@ Shaping replies also share the tutor's concurrency pool
 waiting mid-sentence), while keeping their own one-in-flight lock per
 conversation, so a shaping reply and an in-lesson reply can run at once on one
 path.
+
+The `proposal` frame's schema in the contract is `StreamProposal`.
 
 | Event | Data | When |
 | ----- | ---- | ---- |
