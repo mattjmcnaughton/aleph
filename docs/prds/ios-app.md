@@ -1002,7 +1002,7 @@ Slices are numbered on their own to avoid colliding with the roadmap's phases. E
 | **4 — Shape your path** | §5.7. | W17–W21 pass. |
 | **5 — Streaks** | §5.8. Small — one read and three views — and could move earlier without disturbing anything. | W22, W23 pass. |
 | **6 — Beats & Briefs** | §5.10, §5.11; the path-complete *Follow it as a Beat* door. | W29, W31 pass. |
-| **7 — Flow** | §5.12, behind the `flow` flag exactly as the web is. | The Flow journey (W32 or its renumbering, §8) passes. |
+| **7 — Flow** | §5.12, behind the `flow` flag exactly as the web is. | The Flow journey (W34, renumbered from W32, §8) passes. |
 | **8 — Push & the scheduled job** | Backend: device registration, preferences, the APNs sender, the hourly job and its deploy lifecycle, Brief generation moved into the job (§5.13, §5.14). App: permission prompts, notification settings, routing. Shipped in order **A → B → C**. | W38, W39, W40 pass; the job's idempotency tests pass; one real push of each kind on a TestFlight device. |
 | **Later** | Sandboxed Mermaid; Universal Links; App Store submission (§10.3). | Sequenced against usage. |
 
