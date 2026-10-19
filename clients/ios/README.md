@@ -1,8 +1,8 @@
 # aleph iOS
 
-The native SwiftUI iPhone client (iOS TDD, `docs/tdds/ios-app.md`). Its packages, app
-target and CI arrive ticket by ticket (AL-603, AL-617). So far this directory holds the
-generated API client.
+The native SwiftUI iPhone client (iOS TDD, `docs/tdds/ios-app.md`). Its packages and app
+target arrive ticket by ticket (AL-603 onward). So far this directory holds the
+generated API client, the CI helper scripts and `.swift-format`.
 
 ## The generated API client
 
@@ -59,4 +59,54 @@ clients/ios/scripts/generate-api.sh --check
 (cd clients/ios/Packages/API && swift test)
 ```
 
-CI runs `--check` and `swift test` in the iOS workflow's Linux `swift-linux` job (AL-617).
+CI runs `--check` and `swift test` in the iOS workflow's Linux `swift-linux` job (below).
+
+## CI
+
+`.github/workflows/ios.yml` runs four jobs; [`docs/ci.md`](../../docs/ci.md#the-ios-workflow-iosyml)
+has the full description and the required-check setup.
+
+| Job | Runner | Does |
+| --- | ------ | ---- |
+| `changes` | ubuntu | The path filter: `scripts/ios-relevant.sh` over the diff. |
+| `swift-linux` | `swift:6.2` container | `swift format lint --strict` (all tracked Swift here except `Generated/`, with `.swift-format`), `swift test` in `Tools/GenerateAPI`, `scripts/generate-api.sh --check`, `swift test` in `Packages/Core`, `Packages/Markdown`, `Packages/API`. |
+| `ios-gate` | `macos-26`, Xcode 26.6 | XcodeGen, the pinned *iPhone 17 / iOS 26.5* simulator, build (warnings are errors), unit and snapshot tests, the Release-binary `AlephTestTokens` check. |
+| `ios-e2e` | `macos-26`, Xcode 26.6 | Postgres 16, the stub backend in fake-issuer mode, `AlephUITests` in the `UITest` configuration. |
+
+A change outside `clients/ios/`, `clients/openapi.json`, `scripts/e2e_backend.py` and
+the workflow file skips the last three, which counts as passing.
+
+Run the lint locally (Swift 6.2):
+
+```sh
+git ls-files -z -- 'clients/ios/*.swift' ':(exclude)clients/ios/Packages/API/Sources/API/Generated/**' \
+  | xargs -0 swift format lint --strict
+```
+
+### What the macOS jobs expect from the Xcode project (AL-603)
+
+Until `project.yml` exists, both macOS jobs stop after the toolchain and simulator
+checks with a "No Xcode project yet" notice. Once it does, they assume:
+
+- `project.yml` generates `Aleph.xcodeproj` with an `Aleph` scheme. Its test action
+  holds the iOS-only packages' unit tests and `AlephSnapshotTests`; `ios-gate` runs it
+  with `-skip-testing:AlephUITests`. `ios-e2e` runs `-only-testing:AlephUITests` with
+  `-configuration UITest`.
+- A Release build produces one `.app` whose executable doesn't contain the string
+  `AlephTestTokens` (TDD §5.5).
+- The snapshot helpers read `SNAPSHOT_RECORD` and `SNAPSHOT_ARTIFACTS`, and the UI
+  tests read `SCREENSHOT_DIR`. CI sets each one with a `TEST_RUNNER_` prefix, which
+  `xcodebuild` strips. References live in `AlephSnapshotTests/__Snapshots__/`, and UI
+  test screenshots in `screenshots/`.
+- The e2e backend listens on `127.0.0.1:8000`, with `E2E_FAKE_ISSUER=1` and
+  `E2E_SIMCTL_UDID` set.
+- Warnings: `scripts/check-warnings.sh` fails the build on any Swift warning in a
+  source under `clients/ios/`, except `Packages/API/Sources/API/Generated/` (which
+  warns about unused `package import`s under Swift 6.2).
+
+### Iterating without Xcode: `ios-dev/*` branches
+
+Push to `ios-dev/<topic>`. There the workflow records: snapshot references and UI-test
+screenshots are regenerated and committed back to the branch as `chore(ios): record
+snapshot references and screenshots [skip ci]`. Pull, read the PNGs, repeat, then
+bring the commits onto your PR branch, where CI only compares.
