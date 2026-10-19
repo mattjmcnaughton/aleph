@@ -15,11 +15,15 @@ Two credentials resolve to the same local account:
   The session is neither read nor written on this path.
 * **Session cookie** (the web SPA): no ``Authorization`` header, the existing
   behaviour, unchanged.
+
+Either way the request's ``client`` (TDD §12, D18) is bound for its product
+events: ``web`` for the cookie, and for a bearer token the label its client id
+maps to in ``OIDC_CLIENT_MAP``, else ``unknown``.
 """
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 from uuid import UUID
 
 import structlog
@@ -28,17 +32,22 @@ from sqlalchemy.ext.asyncio import (  # noqa: TC002 - FastAPI resolves annotatio
     AsyncSession,
 )
 
+from aleph import events
 from aleph.bearer import (
     BearerAuthenticator,
     IdentityProviderUnavailable,
     InvalidBearerToken,
     get_bearer_authenticator,
 )
+from aleph.config import settings
 from aleph.db import get_session
 from aleph.models import (  # noqa: TC001 - FastAPI resolves annotations.
     User,
 )
 from aleph.services.auth import AuthService
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 logger = structlog.get_logger()
 
@@ -98,7 +107,7 @@ async def get_optional_current_user(
         request.session.clear()
         return None
 
-    _bind_user_to_request(request, user)
+    _bind_user_to_request(request, user, client=events.CLIENT_WEB)
     return user
 
 
@@ -132,7 +141,7 @@ async def _resolve_bearer_user(
         logger.info("bearer_auth_rejected", reason="bearer auth not configured")
         raise _invalid_token()
     try:
-        identity = await authenticator.authenticate(token)
+        authenticated = await authenticator.authenticate(token)
     except InvalidBearerToken as exc:
         logger.info("bearer_auth_rejected", reason=str(exc))
         raise _invalid_token() from exc
@@ -143,12 +152,27 @@ async def _resolve_bearer_user(
             detail="identity provider unavailable",
         ) from exc
 
+    # Bound before the account is resolved, so a first request's
+    # ``account_created`` is attributed to the client that caused it too.
+    client = bearer_client(authenticated.client_id, settings.oidc_client_labels)
+    events.request_client.set(client)
     # The cookie flow's own identity -> account mapping (provision on first
     # sight, refresh presentation claims), so a learner reaches the same
     # account from the web and from the app.
-    user = await AuthService(session).resolve(identity)
-    _bind_user_to_request(request, user, auth_method="bearer")
+    user = await AuthService(session).resolve(authenticated.identity)
+    _bind_user_to_request(request, user, auth_method="bearer", client=client)
     return user
+
+
+def bearer_client(client_id: str | None, labels: Mapping[str, str]) -> str:
+    """The ``client`` label for a bearer token's client id (TDD §12, D18).
+
+    An exact match in the configured map (``OIDC_CLIENT_MAP``), else
+    ``unknown`` — never a guess from the id's shape.
+    """
+    if client_id and client_id in labels:
+        return labels[client_id]
+    return events.CLIENT_UNKNOWN
 
 
 def _invalid_token() -> HTTPException:
@@ -162,9 +186,15 @@ def _invalid_token() -> HTTPException:
 
 
 def _bind_user_to_request(
-    request: Request, user: User, *, auth_method: str = "session"
+    request: Request,
+    user: User,
+    *,
+    client: str,
+    auth_method: str = "session",
 ) -> None:
     user_id = str(user.id)
     request.state.current_user_id = user_id
     request.state.auth_method = auth_method
+    # The request's product events (and the tasks it spawns) carry ``client``.
+    events.request_client.set(client)
     structlog.contextvars.bind_contextvars(user_id=user_id, auth_method=auth_method)

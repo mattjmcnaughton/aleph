@@ -88,3 +88,46 @@ def test_admin_email_domain_set_is_lowercased_stripped_and_deduped() -> None:
 
 def test_admin_email_domain_set_is_empty_when_unset() -> None:
     assert Settings(admin_email_domains="").admin_email_domain_set == frozenset()
+
+
+# --- AL-613: the ``client`` event dimension's map (TDD §12, D18) -------------- #
+
+
+def test_oidc_client_map_defaults_to_the_dev_keycloak_native_client() -> None:
+    # ``aleph-ios`` is the dev realm's native client (docker/keycloak); an
+    # Auth0 client id is a random string, so the default cannot collide in prod.
+    assert Settings.model_validate({}).oidc_client_labels == {"aleph-ios": "ios"}
+
+
+def test_oidc_client_map_parses_several_entries() -> None:
+    labels = Settings.model_validate(
+        {"oidc_client_map": "aleph-ios:ios, AbC123xyz:ios ,other-app:watch"}
+    ).oidc_client_labels
+
+    assert labels == {"aleph-ios": "ios", "AbC123xyz": "ios", "other-app": "watch"}
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "",
+        "no-separator",
+        ":ios",  # no client id
+        "aleph-ios:",  # no label
+        "aleph-ios:iOS",  # labels are lowercase identifiers
+        "aleph-ios:i os",
+        "aleph-ios:ios:extra",
+    ],
+)
+def test_oidc_client_map_drops_malformed_entries(raw: str) -> None:
+    # Lenient like FEATURE_FLAG_DEFAULTS: a typo must not keep a deploy from
+    # starting; the unmapped client then records as ``unknown``.
+    assert Settings.model_validate({"oidc_client_map": raw}).oidc_client_labels == {}
+
+
+def test_oidc_client_map_keeps_good_entries_beside_bad_ones() -> None:
+    labels = Settings.model_validate(
+        {"oidc_client_map": "garbage,aleph-ios:ios,,x:"}
+    ).oidc_client_labels
+
+    assert labels == {"aleph-ios": "ios"}

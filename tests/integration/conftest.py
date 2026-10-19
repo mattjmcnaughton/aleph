@@ -599,6 +599,10 @@ def assert_event(capfire: Any, name: str) -> dict[str, Any]:
     records = captured_records(capfire, name)
     assert records, f"no {name} event captured"
     attributes = records[0]["attributes"]
-    missing = events.EVENT_FIELDS[name] - set(attributes)
+    # ``client`` rides only events a request caused (TDD §12); the routes here
+    # are, but a test may emit from work it started itself. Its value is pinned
+    # by ``test_event_client.py``.
+    required = events.EVENT_FIELDS[name] - events.REQUEST_FIELDS
+    missing = required - set(attributes)
     assert not missing, f"{name} missing fields {sorted(missing)}"
     return attributes

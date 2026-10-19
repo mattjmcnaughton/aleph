@@ -77,6 +77,11 @@ _REQUIRED_QUERIES = {
     "brief_skip_rate.sql",
     "brief_wait_tolerance.sql",
     "cost_per_read_brief.sql",
+    # The iOS app — the ``client`` dimension (AL-613, iOS PRD §7 / TDD §12).
+    "app_active_day_share.sql",
+    "return_by_first_client.sql",
+    "app_adoption.sql",
+    "client_view_drift.sql",
 }
 
 
@@ -166,11 +171,17 @@ def test_metrics_doc_maps_every_query() -> None:
         assert query.name in doc, f"{query.name} is not mapped in docs/metrics.md"
 
 
-# ``activation_rate.sql`` is the query, ``breadth.sql``/``return_rate.sql`` are
-# the other two queries that reuse its exact ``activated`` cohort definition
-# (docs/metrics.md's "Metric semantics & caveats" section) — all three must
-# stay ignorant of ``brief_read`` for the same reason.
-_ACTIVATION_COHORT_QUERIES = ("activation_rate.sql", "breadth.sql", "return_rate.sql")
+# ``activation_rate.sql`` is the query, ``breadth.sql``/``return_rate.sql``/
+# ``return_by_first_client.sql`` are the other queries that reuse its exact
+# ``activated`` cohort definition (docs/metrics.md's "Metric semantics &
+# caveats" section) — all of them must stay ignorant of ``brief_read`` for the
+# same reason.
+_ACTIVATION_COHORT_QUERIES = (
+    "activation_rate.sql",
+    "breadth.sql",
+    "return_rate.sql",
+    "return_by_first_client.sql",
+)
 
 
 @pytest.mark.parametrize("query_name", _ACTIVATION_COHORT_QUERIES)

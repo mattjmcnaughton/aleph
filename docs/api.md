@@ -78,6 +78,12 @@ on every request, offline: a user blocked at the provider keeps access until the
 token they hold expires, so keep the API's access-token lifetime short
 ([`deploy.md`](deploy.md#native-app-bearer-token-configuration)).
 
+The token's client id (`azp`, else `client_id`) only labels the request's product
+events: `OIDC_CLIENT_MAP` maps it to a `client` such as `ios`, anything unmapped
+records as `unknown`, and cookie requests are `web`
+([`metrics.md`](metrics.md#the-client-dimension)). It never changes what a request
+may do, and nothing a client sends can set it.
+
 Rules that matter to a client:
 
 - **No `Authorization` header** — the session cookie decides, unchanged.

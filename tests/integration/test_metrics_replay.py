@@ -664,7 +664,7 @@ def _tutor_records() -> list[dict]:
     ]
 
 
-async def _load_records(session) -> None:
+async def _load_records(session, rows: list[dict] | None = None) -> None:
     await session.execute(
         text(
             "CREATE TEMP TABLE records ("
@@ -674,7 +674,7 @@ async def _load_records(session) -> None:
             ") ON COMMIT DROP"
         )
     )
-    for row in _fixture_records():
+    for row in _fixture_records() if rows is None else rows:
         await session.execute(
             text(
                 "INSERT INTO records (span_name, attributes, start_timestamp)"
@@ -1058,6 +1058,148 @@ async def test_the_analyst_north_star_splits_pre_and_post_beat_return() -> None:
     assert row["brief_first_share"] == pytest.approx(0.5)
     assert row["return_rate_post_beat"] == pytest.approx(1.0)
     assert row["return_rate_pre_beat"] == pytest.approx(0.0)
+
+
+# --- the ``client`` dimension (AL-613, iOS PRD §7, TDD §12) ------------------ #
+#
+# Its own slice, loaded alone: two learners on fixed dates inside one Monday-
+# based week, so no Phase 1-6 assertion above can move. D started its first path
+# in the app and also uses the web; E is web-only. Both activate; only D returns.
+_CLIENT_SIGNUP = datetime(2026, 1, 5, 9, tzinfo=UTC)  # a Monday
+_CLIENT_DAY_1 = _CLIENT_SIGNUP + timedelta(days=1)
+_CLIENT_DAY_3 = _CLIENT_SIGNUP + timedelta(days=3)
+_ACCOUNT_D = str(uuid.uuid4())
+_ACCOUNT_E = str(uuid.uuid4())
+
+
+def _with_client(rows: list[dict], client: str) -> list[dict]:
+    return [
+        {
+            **row,
+            "attributes": json.dumps(
+                {**json.loads(row["attributes"]), "client": client}
+            ),
+        }
+        for row in rows
+    ]
+
+
+def _client_records() -> list[dict]:
+    d_lesson = str(uuid.uuid4())
+    return [
+        # Account rows predate any path; the reconciler-shaped outline carries
+        # no client at all, and must not count as anyone's use of a client.
+        _rec("account_created", _CLIENT_SIGNUP, account_id=_ACCOUNT_D, client="ios"),
+        _rec("account_created", _CLIENT_SIGNUP, account_id=_ACCOUNT_E, client="web"),
+        _rec("outline_generated", _CLIENT_SIGNUP, account_id=_ACCOUNT_E, path_id="e1"),
+        # D: first path in the app, activates there on day 1 (4 views too) ...
+        _rec(
+            "path_created",
+            _CLIENT_SIGNUP,
+            account_id=_ACCOUNT_D,
+            path_id="d1",
+            path_level="new_to_it",
+            client="ios",
+        ),
+        *_with_client(_activating_path(_ACCOUNT_D, "d1", _CLIENT_DAY_1), "ios"),
+        *[
+            _rec(
+                "lesson_viewed",
+                _CLIENT_DAY_1,
+                account_id=_ACCOUNT_D,
+                path_id="d1",
+                lesson_id=str(uuid.uuid4()),
+                position_in_path=n,
+                client="ios",
+            )
+            for n in range(1, 5)
+        ],
+        # ... then comes back on day 3 on the web: a second Active day, no app.
+        _rec(
+            "path_created",
+            _CLIENT_DAY_3,
+            account_id=_ACCOUNT_D,
+            path_id="d2",
+            path_level="new_to_it",
+            client="web",
+        ),
+        _rec(
+            "lesson_viewed",
+            _CLIENT_DAY_3,
+            account_id=_ACCOUNT_D,
+            path_id="d2",
+            lesson_id=d_lesson,
+            position_in_path=1,
+            client="web",
+        ),
+        _rec(
+            "lesson_completed",
+            _CLIENT_DAY_3,
+            account_id=_ACCOUNT_D,
+            path_id="d2",
+            lesson_id=d_lesson,
+            position_in_path=1,
+            client="web",
+        ),
+        # E: web only, activates on day 1 with 6 views for 4 completions, and
+        # never returns.
+        _rec(
+            "path_created",
+            _CLIENT_SIGNUP,
+            account_id=_ACCOUNT_E,
+            path_id="e1",
+            path_level="new_to_it",
+            client="web",
+        ),
+        *_with_client(_activating_path(_ACCOUNT_E, "e1", _CLIENT_DAY_1), "web"),
+        *[
+            _rec(
+                "lesson_viewed",
+                _CLIENT_DAY_1,
+                account_id=_ACCOUNT_E,
+                path_id="e1",
+                lesson_id=str(uuid.uuid4()),
+                position_in_path=1,
+                client="web",
+            )
+            for _ in range(6)
+        ],
+    ]
+
+
+@pytest.mark.anyio
+async def test_the_client_dimension_queries_compute_real_numbers() -> None:
+    """The iOS PRD §7 queries, executed: each would read NULL or a wrong split
+    if it mishandled ``client`` (a missing one, the first path's, a day's)."""
+    async with db.async_session() as session:
+        await _load_records(session, _client_records())
+        [share] = await _rows(session, "app_active_day_share.sql")
+        by_first_client = await _rows(session, "return_by_first_client.sql")
+        [adoption] = await _rows(session, "app_adoption.sql")
+        drift = await _rows(session, "client_view_drift.sql")
+
+    # Only D uses both clients; of its two Active days the app was used on one.
+    assert share["accounts_on_both_clients"] == 1
+    assert share["active_days"] == 2
+    assert share["app_active_day_share"] == pytest.approx(0.5)
+
+    # D's first path was in the app and D returned; E's was on the web and E
+    # did not. D's later web path does not move D out of the app row.
+    assert [
+        (row["first_path_client"], row["activated_learners"], row["return_rate"])
+        for row in by_first_client
+    ] == [("ios", 1, pytest.approx(1.0)), ("web", 1, pytest.approx(0.0))]
+
+    # One week, two active accounts, one with an app event.
+    assert adoption["active_accounts"] == 2
+    assert adoption["app_accounts"] == 1
+    assert adoption["app_adoption"] == pytest.approx(0.5)
+
+    # ios: 4 views / 4 completions; web: (1 + 6) views / (1 + 4) completions.
+    assert [
+        (row["client"], row["views"], row["completions"], row["views_per_completion"])
+        for row in drift
+    ] == [("ios", 4, 4, pytest.approx(1.0)), ("web", 7, 5, pytest.approx(1.4))]
 
 
 @pytest.mark.anyio

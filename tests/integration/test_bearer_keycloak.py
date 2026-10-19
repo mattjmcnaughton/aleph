@@ -17,7 +17,9 @@ from typing import TYPE_CHECKING
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from aleph.bearer import get_bearer_authenticator
 from aleph.config import settings
+from aleph.dependencies import bearer_client
 from tests.integration.conftest import build_authprobe_app
 from tests.integration.test_auth_keycloak import APP_BASE_URL, _run_code_flow
 
@@ -135,3 +137,19 @@ async def test_keycloak_id_token_is_not_an_api_access_token(
     )
 
     assert probe.status_code == 401
+
+
+@pytest.mark.anyio
+async def test_keycloak_access_token_names_its_client_for_the_event_dimension() -> None:
+    """A real Keycloak token's ``azp`` is the client id the ``client`` event
+    dimension maps (TDD §12): the realm's password-grant test client stands in
+    for ``aleph-ios``, which issues the same token shape via PKCE."""
+    tokens = await _password_grant("dev", "dev")
+    authenticator = await get_bearer_authenticator()
+    assert authenticator is not None
+
+    result = await authenticator.authenticate(tokens["access_token"])
+
+    assert result.client_id == TEST_CLIENT_ID
+    assert bearer_client(result.client_id, {TEST_CLIENT_ID: "ios"}) == "ios"
+    assert bearer_client(result.client_id, settings.oidc_client_labels) == "unknown"
