@@ -17,7 +17,9 @@ synonym (say **path**, not "course"; **Quick check**, not "quiz question").
 > [Phase 2B PRD](prds/phase-2b-shape-your-path.md) · [Phase 2B TDD](tdds/phase-2b-shape-your-path.md) ·
 > [Phase 5 streaks PRD](prds/phase-5-streaks.md) · [Phase 5 streaks TDD](tdds/phase-5-streaks.md) ·
 > [Phase 3 PRD](prds/phase-3-flashcards.md) · [Phase 6 PRD](prds/phase-6-analyst.md) ·
-> [Phase 6 TDD](tdds/phase-6-analyst.md). **Teaching style** was added directly, with no PRD or
+> [Phase 6 TDD](tdds/phase-6-analyst.md) · [iOS app PRD](prds/ios-app.md) and
+> [iOS app TDD](tdds/ios-app.md) (**Learner time zone**, **Reminder**, **Notification**,
+> **Device**). **Teaching style** was added directly, with no PRD or
 > TDD of its own: a small, forward-only lesson-generation input (defined in the Generation table).
 
 ## Core domain
@@ -162,6 +164,8 @@ of this document. Spec: [Flow TDD](tdds/flow.md), mock: [Flow mode](mocks/aleph-
 | **Day** | A calendar day in the learner's local timezone. Used in metrics ("second distinct day"). |
 | **Learner time zone** | The learner's local time zone, as most recently reported by any client (web or iOS). Never chosen in a setting; it follows the learner as they travel. Every "local" rule reads it when no request is in hand: **Day**, **Active day**, **Anchor day**, and when a **Reminder** is due. A request that carries its own offset still uses that offset for itself. |
 | **Reminder** | An opt-in daily push notification sent at the learner's chosen local hour. It nudges them to continue learning, and when a **Daily streak** is at stake it says so. At most one a day, and none on a day that is already an **Active day**. |
+| **Notification** | A push message aleph sends to a learner's iPhone. Exactly three kinds exist: **Path ready** (a path's outline finished — ready, refused or failed), the **Reminder**, and **Brief published** (a Beat published a Brief; never for a **Skipped** period). Each kind can be turned off by the learner. A Notification carries plain words and an id to open, never lesson or Brief content. The web has no Notifications. |
+| **Device** | One installation of the iOS app that a learner has signed in on and allowed to receive Notifications. An Account can have several. A Device belongs to whichever Account signed in on it last, and signing out removes it. |
 
 ## Design
 
