@@ -515,10 +515,9 @@ def analyst_flag_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
 def flow_flag_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
     """Turn the ``flow`` flag on globally for one test (flow TDD D10).
 
-    Flow ships dark: ``flow`` resolves off for a plain learner, so an
-    integration test exercising anything gated by ``useFeatureFlag("flow")``
-    would otherwise be testing the flag rather than Flow. Flow is 100%
-    client-side, so this fixture exists for symmetry with
+    Redundant while Flow defaults on in this feature branch (#262), unshipped.
+    Retained so a test can name its dependency even if the default changes.
+    Flow is 100% client-side, so this fixture exists for symmetry with
     ``tutor_flag_enabled``/``analyst_flag_enabled`` rather than for a route any
     integration test currently drives — there is no backend endpoint to gate.
     """
@@ -529,11 +528,8 @@ def flow_flag_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
 def flow_flag_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
     """Turn the ``flow`` flag off globally for one test.
 
-    The mirror of ``flow_flag_enabled``. Redundant while Flow's code default
-    is ``False``, exactly like ``streaks_flag_disabled``/``analyst_flag_disabled``
-    were redundant before their own launch flips — kept for the same reason:
-    it is what a test asserting the flag off would need if the default ever
-    changed underneath it, and it names which flag the assertion is about.
+    The mirror of ``flow_flag_enabled``. Flow defaults on in this branch,
+    so a test requiring it off must use the documented settings kill switch.
     """
     _disable_flag_globally(monkeypatch, "flow")
 

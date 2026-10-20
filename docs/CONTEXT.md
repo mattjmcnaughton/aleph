@@ -142,8 +142,9 @@ Spec: [Phase 6 PRD](prds/phase-6-analyst.md), [Phase 6 TDD](tdds/phase-6-analyst
 ## Flow
 
 Flow vocabulary. A bounded run of lessons, scoped once at the door instead of choosing after every
-one — **built behind the `flow` flag, dark** (default off); see the phase-boundary note at the foot
-of this document. Spec: [Flow TDD](tdds/flow.md), mock: [Flow mode](mocks/aleph-flow-mode.html).
+one — **default on in this feature branch, unshipped**; the `flow` flag remains a kill switch.
+See the phase-boundary note at the foot of this document.
+Spec: [Flow TDD](tdds/flow.md), mock: [Flow mode](mocks/aleph-flow-mode.html).
 
 | Term | Meaning |
 | --- | --- |
@@ -236,9 +237,10 @@ phase:
   same dark-then-flip playbook as `tutor`/`shaping`, and stays registered as a
   kill switch.
 - **Flow** / **Flow length** / **Flow scope** — the Flow section above: **built,
-  behind the `flow` flag, dark** ([TDD](tdds/flow.md)). Unlike every flag above,
+  default on in this feature branch, unshipped** ([TDD](tdds/flow.md)). Unlike every flag above,
   Flow is **100% client-side** — no table, no route, no migration, gated purely
   in the client by `useFeatureFlag("flow")` rather than a router `404` — so the
-  dark-then-flip playbook still applies (`FLAG_DEFAULTS[FeatureFlag.FLOW]`
-  starts `False`) but the flip is the only backend deploy this phase ever
-  needs.
+  code default is now `FLAG_DEFAULTS[FeatureFlag.FLOW] = True` (#262).
+  `FEATURE_FLAG_DEFAULTS=flow:off` outranks the code and admin defaults;
+  an explicit per-user override still wins. Production configuration is unchanged;
+  removing any production Flow override is a separate authorized post-deploy step.

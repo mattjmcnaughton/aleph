@@ -1,6 +1,6 @@
-// W32 — A flow opens the next lesson on its own (flow TDD §5.3/§5.6/§5.7,
+// W34 — A flow opens the next lesson on its own (flow TDD §5.3/§5.6/§5.7,
 // §5.5). Behind the `flow` flag; `scripts/e2e_backend.py` turns it on for
-// the plain e2e learner alongside every other launched flag.
+// the plain e2e learner alongside the other flags the journeys exercise.
 //
 // Two fresh paths, both with several lessons (`_build_outline`'s own floor:
 // 2-4 units of 3-4 lessons each, well past the two a length-3 interleaved
@@ -37,7 +37,7 @@ import {
 
 test.use({ storageState: DEV_STORAGE_STATE });
 
-test.describe("W32 a flow opens the next lesson on its own", { tag: "@w32" }, () => {
+test.describe("W34 a flow opens the next lesson on its own", { tag: "@w34" }, () => {
   test("three lessons across two paths, interleaved, land on the receipt", async ({ page }) => {
     const topicA = uniqueTopic("Flow alpha subject");
     const topicB = uniqueTopic("Flow beta subject");

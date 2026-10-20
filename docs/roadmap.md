@@ -34,7 +34,7 @@ afterthought.
 | **4 — Adaptive paths** | ⬜ Not started — **no PRD yet** (2B pre-built the proposal/apply machinery) | — |
 | **5 — Momentum** | 🟡 In progress — streaks shipped **and launched**; goal ring and daily minutes unbuilt | streaks: [PRD](prds/phase-5-streaks.md) · [TDD](tdds/phase-5-streaks.md) |
 | **6 — The analyst** | ✅ Shipped & launched (`analyst` flag on) — a second pillar beside paths, not a deepening of one | [PRD](prds/phase-6-analyst.md) · [TDD](tdds/phase-6-analyst.md) |
-| **Flow** | 🟡 In progress — behind the `flow` flag | [TDD](tdds/flow.md) · [mock](mocks/aleph-flow-mode.html) |
+| **Flow** | Default on in this feature branch, unshipped; `flow` remains a kill switch | [TDD](tdds/flow.md) · [mock](mocks/aleph-flow-mode.html) |
 | **Home Screen app** | Accepted for provisional feature-branch implementation; not shipped, T0 deferred to end | [PRD](prds/home-screen-app.md) · [TDD](tdds/home-screen-app.md) |
 | **Native iOS app** | Conditionally parked; historical reference/fallback, not active delivery | [parked PRD](prds/ios-app.md) · [parked TDD](tdds/ios-app.md) |
 | **Beyond** | ⬜ Unscoped, sequenced against real usage | — |
@@ -306,8 +306,9 @@ one. The PRD's historical suggestion of drafting flashcards from Briefs is retir
 
 ## Flow
 
-> 🟡 **Status:** in progress, behind the `flow` flag — dark by default, admin-on,
-> the same dark-then-flip playbook as the flags above. Unlike every one of them,
+> **Status:** built, default on in this feature branch, unshipped (#262).
+> `FEATURE_FLAG_DEFAULTS=flow:off` remains the kill switch; production configuration
+> is unchanged. Unlike the flags above,
 > Flow is **100% client-side**: no table, no route, no migration; the flag is a
 > plain client check rather than a router `404`.
 > 📄 **Full spec:** [Flow TDD](tdds/flow.md), mock: [Flow mode](mocks/aleph-flow-mode.html)
