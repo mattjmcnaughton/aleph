@@ -2,6 +2,10 @@
 
 Mobile-friendly AI tutor: name a topic, get a generated learning path.
 
+Read [`CONSTITUTION.md`](CONSTITUTION.md) before planning, implementation, or review.
+It owns durable product and technical principles; report conflicts rather than
+silently weakening them to match existing code.
+
 Python web application using FastAPI, uvicorn, OpenTelemetry, uv, ruff, ty, and pytest. Web frontend lives in `clients/web/`; the native SwiftUI iPhone app lives in `clients/ios/`. The two are kept at feature parity (see "Two Clients" below).
 
 > **Vocabulary is authoritative: [`docs/CONTEXT.md`](docs/CONTEXT.md).** Same word,
