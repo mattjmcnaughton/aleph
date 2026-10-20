@@ -556,6 +556,15 @@ export const beatHandlers = [
     return HttpResponse.json(detailFor(beat));
   }),
 
+  http.delete(`${API_V1_BASE}/beats/:id`, ({ params }) => {
+    const id = params.id as string;
+    if (!store.delete(id)) return notFoundEnvelope();
+    for (const [briefId, brief] of briefStore) {
+      if (brief.beatId === id) briefStore.delete(briefId);
+    }
+    return new HttpResponse(null, { status: 204 });
+  }),
+
   http.post(`${API_V1_BASE}/beats/:id/retry`, ({ params, request }) => {
     recordOffset(request, retryReceivedOffsets);
     if (config.retryRateLimited) {
