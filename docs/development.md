@@ -277,7 +277,7 @@ Tests are organized by type (see [`ci.md`](ci.md) for the CI job that runs each)
   workflows — Phase 1's `@w1`..`@w8`, the tutor's `@w9` and `@w11`..`@w16`
   (W10 is reserved for the deferred selection-to-quote), shaping's
   `@w17`..`@w21`, streaks' `@w22`/`@w23`, and the analyst's `@w29`/`@w31`
-  (W30/W32/W33 are integration cases instead, PRD §7.1) — and they sign in for
+  (W30/W32/W33 are integration cases instead, PRD §7.1), and Flow's `@w34` — and they sign in for
   real. The journeys run in the `mobile-390x844` project; the `desktop` project
   runs the non-journey specs. See [`ci.md`](ci.md).
 - `tests/external/` — live-provider contract tests, opt-in via `just test-external`.

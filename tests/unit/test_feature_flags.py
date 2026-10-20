@@ -166,26 +166,37 @@ def test_analyst_is_registered_and_launched_on_by_default() -> None:
 
 
 @pytest.mark.anyio
-async def test_flow_is_registered_dark_and_admin_on(
+async def test_flow_is_registered_and_on_by_default(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Flow's one flag (flow TDD D10): dark by default, admin-on.
-
-    Flow spends its whole build-out at ``False``, exactly like the five phase
-    flags above did — the difference is that Flow is 100% client-side, so this
-    is the *only* backend touch the whole feature needs: no route to gate
-    ``404``, just a key the client reads with ``useFeatureFlag("flow")``.
-    Membership in :data:`ADMIN_DEFAULT_FLAGS` is what makes it dogfoodable by
-    admins before the launch ticket (flow TDD §8, ticket 7) flips the default.
-    """
+    """Flow defaults on in this feature branch; this is not a launch claim."""
     monkeypatch.setattr(settings, "feature_flag_defaults", "")
     service = _service(StubFeatureFlagRepository())
 
     assert feature_flags.FeatureFlag.FLOW == "flow"
-    assert feature_flags.FLAG_DEFAULTS[feature_flags.FeatureFlag.FLOW] is False
+    assert feature_flags.FLAG_DEFAULTS[feature_flags.FeatureFlag.FLOW] is True
     assert feature_flags.FeatureFlag.FLOW in feature_flags.ADMIN_DEFAULT_FLAGS
     assert (await service.resolve_for_user(_admin_user()))["flow"] is True
-    assert (await service.resolve_for_user(_user()))["flow"] is False
+    assert (await service.resolve_for_user(_user()))["flow"] is True
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("admin", [False, True])
+async def test_flow_kill_switch_and_per_user_override(
+    monkeypatch: pytest.MonkeyPatch, admin: bool
+) -> None:
+    """Settings off reaches admins too; an explicit per-user override wins."""
+    monkeypatch.setattr(settings, "feature_flag_defaults", "flow:off")
+    user = _admin_user() if admin else _user()
+    service = _service(StubFeatureFlagRepository())
+    assert (await service.resolve_for_user(user))["flow"] is False
+
+    enabled = _service(StubFeatureFlagRepository(overrides={"flow": True}))
+    assert (await enabled.resolve_for_user(user))["flow"] is True
+
+    monkeypatch.setattr(settings, "feature_flag_defaults", "")
+    disabled = _service(StubFeatureFlagRepository(overrides={"flow": False}))
+    assert (await disabled.resolve_for_user(user))["flow"] is False
 
 
 def test_the_registry_is_exactly_the_five_phase_flags() -> None:

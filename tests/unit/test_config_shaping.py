@@ -126,9 +126,8 @@ def test_e2e_backend_boots_with_the_shaper_slot_stubbed_and_the_flag_on(
     # kept for all five rather than thinned to just ``shaping``: the suite
     # asserts against surfaces that must exist, and a silent code-default flip
     # should surface as a failure here before it turns into a confusing "every
-    # spec 404s on an absent surface" somewhere else. ``flow`` joins the pin
-    # still dark in code (D10) — W32 needs the same explicit ``:on`` the five
-    # launched flags above already required before their own flip.
+    # spec 404s on an absent surface" somewhere else. ``flow`` stays pinned
+    # for W34 even though it now defaults on in this feature branch (#262).
     assert restored_live_settings.feature_flag_default_map == {
         str(FeatureFlag.TUTOR): True,
         str(FeatureFlag.SHAPING): True,

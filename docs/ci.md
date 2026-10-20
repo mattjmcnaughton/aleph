@@ -153,13 +153,13 @@ own matching browser, so that local branch is skipped.
 
 ## The journeys (AL-090, AL-260, AL-360)
 
-`tests/e2e/journeys/` holds one spec per PRD §8 workflow, tagged `@w1`..`@w31`
+`tests/e2e/journeys/` holds one spec per browser workflow, with tags through `@w34`
 (Playwright tag annotations — `pnpm exec playwright test --grep @w3` runs one).
 They drive the SPA the way a learner does: real sign-in, real server, real
 Postgres, stub model. The conventions below were set by Phase 1's `@w1`..`@w8`
 and hold for the tutor's (`@w9`, `@w11`..`@w16`), shaping's (`@w17`..`@w21`),
 streaks' (`@w22`, `@w23`) and the analyst's (`@w29`, `@w31` — W30/W32/W33 are
-integration cases instead, PRD §7.1)
+integration cases instead, PRD §7.1) and Flow's (`@w34`)
 journeys too.
 
 - **Auth is real, not injected.** `auth.setup.ts` drives `/auth/login` → the
