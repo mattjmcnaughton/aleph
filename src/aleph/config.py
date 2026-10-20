@@ -236,6 +236,8 @@ class Settings(BaseSettings):
 
     # Signs the first-party session cookie (random Fly secret in production).
     session_secret_key: str = DEV_SESSION_SECRET_KEY
+    # Sliding lifetime for signed cookies; no server-side revocation (P3).
+    session_max_age_seconds: int = Field(default=7_776_000, gt=0)
     # Requires HTTPS for the session cookie; ``true`` in production only (forced
     # on in production by ``_enforce_production_auth``).
     session_cookie_secure: bool = False

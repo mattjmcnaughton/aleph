@@ -12,10 +12,12 @@ asserted before any real ``/api/v1/*`` route (AL-050/051) exists.
 from __future__ import annotations
 
 import uuid
+from http.cookies import SimpleCookie
 from typing import TYPE_CHECKING
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from itsdangerous import TimestampSigner
 from sqlalchemy import func, select
 
 from aleph import db
@@ -155,6 +157,85 @@ async def _sign_in(
     monkeypatch.setattr("aleph.routers.auth.fetch_identity", lambda *_args: identity)
     response = await client.get("/auth/callback", follow_redirects=False)
     assert response.status_code == 303
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("lifetime", [None, 3600])
+async def test_authenticated_response_session_max_age(
+    monkeypatch: pytest.MonkeyPatch, lifetime: int | None
+) -> None:
+    if lifetime is not None:
+        monkeypatch.setenv("SESSION_MAX_AGE_SECONDS", str(lifetime))
+        from aleph.config import Settings, settings
+
+        monkeypatch.setattr(
+            settings, "session_max_age_seconds", Settings().session_max_age_seconds
+        )
+    transport = ASGITransport(app=build_authprobe_app())
+    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+        await _sign_in(
+            client,
+            monkeypatch,
+            AuthIdentity(
+                issuer="https://issuer.example.test",
+                subject="lifetime",
+                username="dev",
+                display_name="Dev User",
+            ),
+        )
+        response = await client.get("/api/v1/_authprobe")
+    assert response.status_code == 200
+    cookie = SimpleCookie(response.headers["set-cookie"])["session"]
+    assert cookie["max-age"] == str(7776000 if lifetime is None else lifetime)
+    assert cookie["httponly"]
+    assert cookie["samesite"] == "lax"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("lifetime", [7776000, 3600])
+async def test_session_slides_with_activity_and_expires_without_it(
+    monkeypatch: pytest.MonkeyPatch, lifetime: int
+) -> None:
+    from aleph.config import settings
+
+    monkeypatch.setattr(settings, "session_max_age_seconds", lifetime)
+    # Control only signing/verification time, not the browser cookie jar's clock.
+    now = 1_800_000_000
+    monkeypatch.setattr(TimestampSigner, "get_timestamp", lambda _self: now)
+    transport = ASGITransport(app=build_authprobe_app())
+    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+        await _sign_in(
+            client,
+            monkeypatch,
+            AuthIdentity(
+                issuer="https://issuer.example.test",
+                subject="sliding",
+                username="dev",
+                display_name="Dev User",
+            ),
+        )
+        original = client.cookies["session"]
+        # Day 60 for the default, minute 40 for the configured hour.
+        now += lifetime * 2 // 3
+        within_window = await client.get("/api/v1/_authprobe")
+        assert within_window.status_code == 200
+        renewed = client.cookies["session"]
+        assert renewed != original
+        assert SimpleCookie(within_window.headers["set-cookie"])["session"][
+            "max-age"
+        ] == str(lifetime)
+
+        now += lifetime // 3 + 1
+        client.cookies.clear()
+        expired = await client.get(
+            "/api/v1/_authprobe", headers={"Cookie": f"session={original}"}
+        )
+        assert expired.status_code == 401
+        client.cookies.clear()
+        still_active = await client.get(
+            "/api/v1/_authprobe", headers={"Cookie": f"session={renewed}"}
+        )
+        assert still_active.status_code == 200
 
 
 @pytest.mark.anyio

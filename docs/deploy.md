@@ -195,6 +195,21 @@ is not optional, because derived admin (D14) classifies on the email domain.
 `POST /auth/logout` clears only aleph's local session; it does not redirect to
 Auth0's logout endpoint, so an Auth0 Allowed Logout URL is not required yet.
 
+The signed session cookie defaults to a **90-day sliding lifetime**
+(`SESSION_MAX_AGE_SECONDS=7776000`, a positive number of seconds). Successful
+cookie authentication rewrites the cookie with a fresh signature timestamp and
+Max-Age; merely opening a static page does not renew it. Both browser retention
+and server signature-age validation use this setting. An untouched cookie older
+than the configured window is rejected and requires sign-in again.
+
+P3 explicitly accepts the security tradeoff: there is **no server-side session
+store or per-session revocation**. Logout deletes the browser's copy, not a stolen
+copy. A leaked signed cookie can be replayed for up to 90 days from its signing
+time by default, and continued authenticated use can renew it beyond that window.
+Rotating `SESSION_SECRET_KEY` invalidates all signed cookies, not just one.
+Controlled-time tests cover renewal and expiry; they are not evidence of an
+actual 60-day Home Screen device observation.
+
 ### Native app (bearer token) configuration
 
 The iOS app is a separate, **public** OIDC client that runs Authorization Code +
