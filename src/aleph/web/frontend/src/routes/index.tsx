@@ -148,7 +148,7 @@ function Home() {
   const beatsQuery = useQuery(beatsListQueryOptions(analystEnabled));
   const beats = beatsQuery.data?.beats;
 
-  // Flow (flow TDD D10): dark until the launch flip, client-only gate — there
+  // Flow (flow TDD D10): default on in this feature branch, client-only gate — there
   // is no route to 404, so `FlowDoor` itself decides whether it has anything
   // to show once this says the surface exists at all.
   const flowEnabled = useFeatureFlag("flow");

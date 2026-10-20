@@ -18,10 +18,9 @@ Auth is the real cookie flow with a stubbed OIDC code exchange (mirroring
 ``test_auth_api`` / ``test_paths_api``), so the admin gate is genuine — admin
 status is derived from the email domain (``authz.is_admin``), never stored.
 
-**Four of the five registered flags are launched and default on** — ``tutor``
+**All five registered flags default on in this feature branch** — ``tutor``
 (AL-270), ``shaping`` (AL-370), Phase 5's ``streaks`` (D7),
-and Phase 6's ``analyst`` (D12); the fifth, ``flow``
-(flow TDD D10), is registered but still dark — which would make most
+Phase 6's ``analyst`` (D12), and unshipped ``flow`` (#262) — which would make most
 of the resolution machinery below untestable — a flag that is on for everyone
 cannot demonstrate an admin baseline, an override that flips a learner *on*,
 or a `404` gate. So ``dark_flag_defaults`` (autouse) puts every code default
@@ -71,10 +70,8 @@ STREAKS = "streaks"
 # Phase 6's flag (TDD D12), registered the same way and also launched. Also
 # in every resolved map below, for the same reason.
 ANALYST = "analyst"
-# Flow's flag (flow TDD D10), registered the same way but still **dark** in
-# code — the one flag in the registry whose real default is ``False``. In every
-# resolved map below for the same reason as the others; unlike them it stays
-# off in the launched-posture test too.
+# Flow's flag (flow TDD D10), default on in this feature branch, unshipped.
+# In every resolved map because the session carries the whole registry.
 FLOW = "flow"
 
 LEARNER = AuthIdentity(
@@ -126,7 +123,7 @@ async def _sign_in(
 def dark_flag_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     """Force every code default back to ``False`` for this module.
 
-    See the module docstring: four of the five flags are launched and default on, but
+    See the module docstring: all five flags default on in this branch, but
     every test here is about the *resolution machinery*, whose whole subject
     matter is a flag that is not simply on for everyone. Patching
     ``FLAG_DEFAULTS`` (rather than the settings map) is deliberate — the settings
@@ -162,9 +159,8 @@ def _resolved(
     ``streaks``, ``flow`` and ``analyst`` default to ``False`` here for
     the same reason ``tutor`` and ``shaping`` do: ``dark_flag_defaults``
     (autouse) closes every code default in the registry, all five alike, so a
-    plain learner sees all five off — the real code default for four of them
-    is ``True`` (``analyst`` included, now launched, TDD D12; only ``flow`` is
-    genuinely dark, flow TDD D10), but this module's whole point is exercising
+    plain learner sees all five off — the real code default for all of them
+    is ``True`` (Flow is default on here, not launched), but this module tests
     the dark-flag machinery, which needs a flag that is not simply on for
     everyone. All five still have to be passed
     explicitly in the **admin** scenarios: they are members of
@@ -306,10 +302,8 @@ async def test_launched_flags_reach_a_plain_learner(
     it. A plain learner — no admin domain, no override row, no
     ``FEATURE_FLAG_DEFAULTS`` — gets every launched surface, which is what
     makes a fresh clone and a local ``just dev`` show the real product.
-    ``flow`` is the exception by design: its real default is ``False`` (flow
-    TDD D10), so it is the one key ``_resolved`` leaves at its own default
-    here, and a code default that flips it on ahead of the launch ticket
-    fails this assertion.
+    Flow also defaults on in this feature branch (#262), without claiming
+    production launch. Its real default must reach the session unchanged.
     """
     monkeypatch.undo()
     assert not settings.feature_flag_defaults, "nothing may be configured here"
@@ -317,7 +311,7 @@ async def test_launched_flags_reach_a_plain_learner(
     async with _client(app) as learner:
         await _sign_in(learner, monkeypatch, LEARNER)
         assert await _flags_on_session(learner) == _resolved(
-            tutor=True, shaping=True, streaks=True, analyst=True
+            tutor=True, shaping=True, streaks=True, analyst=True, flow=True
         )
 
 

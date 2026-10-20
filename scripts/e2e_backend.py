@@ -200,7 +200,7 @@ def create_stub_app() -> FastAPI:
     # free to fan out into an unbounded drain the next time someone visits
     # home.
     settings.max_beats_per_learner = 30
-    # Pin all surfaces exercised by the browser suite, including dark Flow,
+    # Pin all surfaces exercised by the browser suite, including Flow,
     # so code-default changes cannot turn a journey into a flag-gate test.
     settings.feature_flag_defaults = "tutor:on,shaping:on,streaks:on,analyst:on,flow:on"
 
