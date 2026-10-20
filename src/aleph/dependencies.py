@@ -109,6 +109,9 @@ async def get_optional_current_user(
         request.session.clear()
         return None
 
+    # Starlette persists only modified sessions. Touch the validated cookie
+    # identity so authenticated activity renews its signature and Max-Age.
+    request.session["user_id"] = str(user.id)
     _bind_user_to_request(
         request,
         user,
