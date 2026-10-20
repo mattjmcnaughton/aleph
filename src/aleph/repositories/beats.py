@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import ColumnElement, delete, func, select, update
 
 from aleph.config import settings
-from aleph.models import Beat, BeatResearchRun, BeatResearchState
+from aleph.models import Beat, BeatResearchRun, BeatResearchState, BeatScanProgress
 from aleph.repositories._generation import (
     affected_rows,
     claimable_predicate,
@@ -246,6 +246,48 @@ class BeatRepository:
         )
         value = result.scalar_one_or_none()
         return BeatResearchState(value) if value is not None else None
+
+    async def scan_frontier(self) -> uuid.UUID | None:
+        """Resume the durable admission frontier, independent of the job clock."""
+        return await self.session.scalar(select(BeatScanProgress.after))
+
+    async def checkpoint_scan(self, after: uuid.UUID | None) -> None:
+        """Advance only admitted work; caller commits before eligibility locks."""
+        await self.session.execute(update(BeatScanProgress).values(after=after))
+
+    async def scheduled_candidates(
+        self, *, after: uuid.UUID | None, limit: int, until: uuid.UUID | None = None
+    ) -> list[Beat]:
+        """Keyset page of potentially claimable Beats across accounts.
+
+        The caller advances past not-due, idle and capped candidates rather
+        than repeatedly examining the same first LIMIT window.
+        """
+        query = select(Beat).where(
+            claimable_predicate(
+                state_col=Beat.research_state,
+                started_at_col=Beat.research_started_at,
+                claimable_states=_CLAIMABLE_STATES,
+                generating_state=BeatResearchState.RESEARCHING,
+                stale_after_seconds=self._stale_after_seconds,
+            )
+        )
+        if after is not None:
+            query = query.where(Beat.id > after)
+        if until is not None:
+            query = query.where(Beat.id <= until)
+        result = await self.session.execute(query.order_by(Beat.id).limit(limit))
+        return list(result.scalars())
+
+    async def lock(self, beat_id: uuid.UUID) -> Beat | None:
+        """Serialize schedule checks with settlement before attempting a claim."""
+        result = await self.session.execute(
+            select(Beat)
+            .where(Beat.id == beat_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        return result.scalar_one_or_none()
 
     async def delete(self, beat_id: uuid.UUID) -> bool:
         """Hard-delete a Beat; ON DELETE CASCADE tears down Briefs -> Sources.

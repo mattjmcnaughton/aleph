@@ -27,10 +27,11 @@ from datetime import UTC, date, datetime, timedelta
 from typing import TYPE_CHECKING
 
 import pytest
+from fastapi import HTTPException
 from pydantic import BaseModel
 from pydantic_ai.messages import ModelResponse, ToolCallPart
 from pydantic_ai.models.function import FunctionModel
-from sqlalchemy import select, update
+from sqlalchemy import select, text, update
 
 from aleph import db, events
 from aleph.agents.researcher import ResearcherDeps, RetrievedDocument
@@ -315,6 +316,127 @@ async def test_first_run_produces_a_published_brief_with_sources() -> None:
     assert len(sources) == 1
     assert sources[0].url == "https://example.com/a"
     assert sources[0].publisher == "Northlake Gazette"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("request_kind", ["initial", "retry"])
+async def test_job_and_distinct_request_share_last_account_budget_slot(request_kind):
+    """Park a real claim AFTER its quota read, while a sibling request competes.
+
+    A database trigger controls the interleaving, not mocked quota/claim methods.
+    Without account serialization, both transactions can see unused capacity.
+    """
+    from aleph.models import BeatResearchRun
+    from aleph.services.scheduled_beats import run_beats
+
+    user = await _create_user()
+    job_id, request_id = sorted(
+        [await _make_beat(user=user), await _make_beat(user=user)]
+    )
+    if request_kind == "retry":
+        await _force_state(
+            request_id,
+            research_state=BeatResearchState.FAILED,
+            research_started_at=datetime.now(UTC),
+        )
+    config = Settings(
+        rate_limit_brief_research_per_day=1,
+        job_beat_batch_size=1,
+        job_max_beats_per_tick=1,
+    )
+    service, spawn = _make_service(
+        retriever=_FakeRetriever(documents=[_doc("https://example.com/budget")]),
+        resolve_model_fn=_resolver(
+            FunctionModel(
+                _PipelineResponder(
+                    researcher=("findings", {"findings": []}),
+                    analyst=("detail", {"detail": ""}),
+                )
+            )
+        ),
+        config=config,
+    )
+    tasks = []
+    async with db.async_session() as control:
+        await control.execute(
+            text(f"""
+            CREATE FUNCTION hold_budget_claim() RETURNS trigger LANGUAGE plpgsql AS $$
+            BEGIN
+                IF NEW.id = '{job_id}'::uuid AND NEW.research_state = 'researching' THEN
+                    PERFORM pg_advisory_xact_lock(26742);
+                END IF;
+                RETURN NEW;
+            END $$
+        """)
+        )
+        await control.execute(
+            text("""
+            CREATE TRIGGER hold_budget_claim BEFORE UPDATE ON beats
+            FOR EACH ROW EXECUTE FUNCTION hold_budget_claim()
+        """)
+        )
+        await control.commit()
+        await control.execute(text("SELECT pg_advisory_lock(26742)"))
+        try:
+            tasks.append(asyncio.create_task(run_beats(service, config=config)))
+            async with asyncio.timeout(10):
+                job_pid = None
+                while job_pid is None:
+                    job_pid = await control.scalar(
+                        text("""
+                        SELECT pid FROM pg_locks WHERE locktype = 'advisory'
+                        AND objid = 26742 AND NOT granted
+                    """)
+                    )
+                    await asyncio.sleep(0.01)
+
+            async def request():
+                if request_kind == "initial":
+                    await service.trigger_initial(
+                        request_id,
+                        user_id=user.id,
+                        local_today=datetime.now(UTC).date(),
+                    )
+                else:
+                    try:
+                        await service.trigger_retry(
+                            request_id, datetime.now(UTC).date()
+                        )
+                    except HTTPException as error:
+                        assert error.status_code == 429
+
+            contender = asyncio.create_task(request())
+            tasks.append(contender)
+            async with asyncio.timeout(10):
+                while not contender.done():
+                    await control.execute(text("SELECT pg_stat_clear_snapshot()"))
+                    blocked = await control.scalar(
+                        text("""
+                        SELECT EXISTS (SELECT 1 FROM pg_stat_activity
+                        WHERE :job_pid = ANY(pg_blocking_pids(pid)))
+                    """),
+                        {"job_pid": job_pid},
+                    )
+                    if blocked:
+                        break
+                    await asyncio.sleep(0.01)
+            await control.execute(text("SELECT pg_advisory_unlock(26742)"))
+            await asyncio.wait_for(asyncio.gather(*tasks), 10)
+            await spawn.drain()
+            async with db.async_session() as session:
+                runs = list(await session.scalars(select(BeatResearchRun.beat_id)))
+            assert runs == [job_id]
+            assert len(await _briefs_for_beat(job_id)) == 1
+            assert await _briefs_for_beat(request_id) == []
+        finally:
+            await control.execute(text("SELECT pg_advisory_unlock(26742)"))
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            await spawn.cancel_pending()
+            await control.execute(text("DROP TRIGGER hold_budget_claim ON beats"))
+            await control.execute(text("DROP FUNCTION hold_budget_claim()"))
+            await control.commit()
 
 
 # --------------------------------------------------------------------------- #

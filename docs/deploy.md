@@ -640,6 +640,100 @@ verified here. Those remain T0/T7b/T9 and operational acceptance gates. In the
 test-only `scripts/e2e_backend.py` factory the InMemory sender records sends at
 `GET /__e2e__/pushes`; production exposes no e2e routes.
 
+## Scheduled machines
+
+Home Screen T8 adds a finite hourly `python -m aleph.jobs.tick` process. It does
+not start HTTP, a reconciler, or detached web tasks. T8 runs the Beat step only;
+T9 adds Reminders and Brief published delivery. Device and operational acceptance
+remain outstanding: no real scheduled Machine was created during implementation.
+
+`deploy/schedules.toml` declares the Machines; `fly.toml` cannot declare schedules.
+The existing **main-only**, successful-CI release job retains its concurrency
+group `deploy-aleph-prod-mattjmcnaughton`. After a successful `flyctl deploy`,
+`scripts/recreate_schedules.py --deploy-log <captured-output>` reads the single
+`image: registry.fly.io/<app>:deployment-...` line from **that deploy's output**.
+The workflow uses Bash `pipefail` with `tee`, so failed deploys never recreate.
+Do not substitute the newest release: it might be a failed release, not the one
+just deployed. Unparseable/ambiguous output fails before changing any Machine.
+
+The script lists `flyctl machine list --app <app> --json` and destroys only
+explicit IDs with `config.metadata.aleph_schedule` set, including schedules
+removed from the file. It never selects by image or destroys untagged web
+Machines. It then creates the declared schedules on the exact deployed image:
+
+```sh
+flyctl machine destroy <tagged-id> --app <app> --force
+flyctl machine run --app <app> --region <primary_region> \
+  --schedule hourly --restart no --vm-memory 512 \
+  --metadata aleph_schedule=tick --detach \
+  --env ENV=production <other-fly.toml-env-flags> \
+  -- <exact-deployed-image> python -m aleph.jobs.tick
+```
+
+Flags deliberately precede `--`: without it, Python's `-m` is parsed as flyctl's
+metadata shorthand. `machine run` builds a fresh Machine config; it does **not**
+copy `fly.toml`'s `[env]`, so the script forwards **all** non-secret env entries
+(especially `ENV=production`) and the app/primary region explicitly. App secrets
+are provided by Fly to Machines in the same app. `--vm-memory` receives megabytes
+(`512`, not the schedules file's `512mb`). No service/port or web process-group
+metadata is attached. `--detach` avoids waiting on the job; **never use `--rm`**
+for a recurring Machine, which must remain available after exiting.
+
+Creation starts the job **immediately**, then on Fly's **fuzzy** hourly cycle,
+not at the top of the hour. Rerunning the script replaces only tagged Machines;
+it does not run migrations (deploy's release command already did). Any list,
+destroy or create failure stops with nonzero status and fails the deploy job.
+This is not an atomic replacement: a failure may leave schedules absent or
+partially recreated. Inspect the Machines and rerun against the same successful
+deploy output after fixing the cause. A force-destroyed in-flight job is recovered
+by the existing stale/fenced claim protocol, not silently marked Skipped.
+
+For an explicitly authorized one-off operational check, use the same image,
+app/region/env flags, but omit schedule metadata/`--schedule` and add `--rm`:
+
+```sh
+flyctl machine run --app <app> --region <primary_region> --restart no \
+  --vm-memory 512 --rm --env ENV=production <other-fly.toml-env-flags> \
+  -- <exact-deployed-image> python -m aleph.jobs.tick
+```
+
+Locally, `uv run python -m aleph.jobs.tick` uses configured database and retrieval/
+model credentials; do not run against shared data or live providers as a test.
+The disposable-Postgres integration suite uses fake retrieval/models instead.
+The step deadline is `JOB_STEP_TIMEOUT_SECONDS` (1500). Candidate pages use
+`JOB_BEAT_BATCH_SIZE` (100), claims per tick use `JOB_MAX_BEATS_PER_TICK` (100),
+and generation concurrency uses `MAX_CONCURRENT_GENERATIONS`. Permits are acquired
+**before claims**, so queued jobs cannot age into stale claims. Scans advance
+past capped, not-due and idle Beats rather than pinning the first LIMIT window;
+the deadline bounds total scanning time. Web research keeps its separate pool.
+
+Migration `0019_beat_scan_progress` seeds one durable scan frontier. Apply it
+before starting the new worker; old code ignores the additive table. Each admitted
+Beat advances the frontier in a short transaction before account/Beat lock waits,
+so repeated deadlines cannot pin the same prefix. A tick wraps at most once.
+Fairness assumes one active scanner and enough time to commit an admission;
+overlapping scanners retain claim/fence safety, not strict scan fairness. A crash
+between checkpoint and processing can defer that Beat until the next sweep.
+Stop or revert the new worker before downgrading this migration. Reverting the
+scanner also restores its previous cross-tick starvation risk.
+
+`job_tick_started`, `job_step_finished`/`job_step_failed` and `job_tick_finished`
+report counts/outcomes (published, skipped, failed, refused, idle, capped,
+not_due, disabled, lost_claim). A timeout, infrastructure failure, or failed
+research produces a nonzero exit; a safety refusal or legitimate Skipped result
+does not. Each step has its own deadline/error boundary, so T9's Reminder failure
+will not conceal the Beat result. Cancellation awaits all child tasks; interrupted
+claims are left for stale recovery. Monitor job exit/logs separately: `--detach`
+means successful recreation is not proof a tick completed successfully.
+
+Semantics checked against the [official machine-run documentation](https://fly.io/docs/machines/flyctl/fly-machine-run/)
+and flyctl source at [`b3263736`](https://github.com/superfly/flyctl/tree/b3263736a487b5c713fc7733633cfbb2e2976dd6):
+`internal/command/machine/run.go` (fresh config/env, flags/command, schedule,
+detach), `list.go` (raw Machine JSON), `destroy.go` (explicit IDs/force), and
+`internal/command/deploy/deploy_build.go` (`image: <tag>` output). Actual Fly
+recreation on a released image, hourly waking, env/secrets and delivery remain
+separate human/operations gates; fake CLI tests are not that acceptance.
+
 ## Troubleshooting
 
 | Symptom | What to check |
