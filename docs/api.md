@@ -1,5 +1,27 @@
 # API Reference
 
+## Request conventions
+
+The web client (browser and Home Screen app) sends optional hints on JSON and
+streaming API requests:
+
+- `X-Aleph-Time-Zone`: an IANA name from the browser, at most 64 characters.
+  For authenticated requests a valid changed value updates `users.time_zone`
+  and `time_zone_seen_at` in the short authentication transaction, committed
+  before downstream work so its failures cannot undo observation. Missing,
+  invalid or oversized values are ignored; unchanged values do not rewrite seen-at.
+  The pinned runtime `tzdata` registry supplies portable names and aliases even
+  without system zone files; host-only `localtime` and `posixrules` are rejected.
+  This is the last observed Learner time zone, not a setting or a delivery-time promise.
+- `X-Aleph-Display-Mode`: `standalone` or `browser`. Cookie requests report
+  product-event `client=home_screen` only for exact `standalone`, otherwise
+  `web`. Bearer attribution instead uses the verified token's `azp`, falling
+  back to `client_id`, mapped through `OIDC_CLIENT_MAP`, else `unknown`.
+
+These hints grant no authorization and are not OpenAPI parameters. A request's
+`tz_offset_minutes` continues to govern that request's local-day arithmetic;
+the stored zone does not replace it. See [metrics.md](metrics.md) for attribution.
+
 ## Health
 
 | Method | Path | Description |

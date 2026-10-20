@@ -30,6 +30,7 @@ table behind this same seam — the swap is additive, callers are unchanged.
 from __future__ import annotations
 
 import contextlib
+from contextvars import ContextVar
 from typing import TYPE_CHECKING
 
 import structlog
@@ -114,10 +115,31 @@ _W_BRIEF_SKIPPED = "W31"  # a quiet period is Skipped, not padded
 # property of what does *not* happen, so it tags the guardrail *queries*
 # (TDD §9) rather than any record.
 
-# The manifest: the exact attribute set every event emits. Load-bearing — the
-# metric-coverage test checks each saved query's attribute references against it,
-# and the events unit test anchors it to what the emitters actually log.
-EVENT_FIELDS: dict[str, frozenset[str]] = {
+# --- the ``client`` dimension (TDD §12, D18; iOS PRD §7) ---------------------- #
+#
+# Which client caused an event: a measurement hint, never authorization.
+# Cookie display mode is client-reported; bearer client ids are verified.
+# Set once per request
+# by ``dependencies._bind_user_to_request`` (and by the cookie sign-in
+# callback): ``home_screen`` for standalone cookies, otherwise ``web``;
+# for a bearer token, its client id
+# looked up in ``settings.oidc_client_labels`` (``ios``), else ``unknown``.
+# A ``ContextVar``, so a task the request spawns (outline and lesson
+# generation, a Brief run, a tutor reply's producer) inherits it —
+# ``asyncio.create_task`` copies the context — and its events belong to the
+# client that caused them. Work started outside any request (the reconciler,
+# the scheduled job) never sets it, so its events carry no ``client``.
+
+CLIENT_WEB = "web"
+CLIENT_UNKNOWN = "unknown"
+
+request_client: ContextVar[str | None] = ContextVar("request_client", default=None)
+
+# Fields that ride every event, but only when a request caused it.
+REQUEST_FIELDS: frozenset[str] = frozenset({"client"})
+
+# Each event's own fields; :data:`EVENT_FIELDS` adds :data:`REQUEST_FIELDS`.
+_EVENT_OWN_FIELDS: dict[str, frozenset[str]] = {
     ACCOUNT_CREATED: frozenset({"account_id", "workflow"}),
     PATH_CREATED: frozenset({"account_id", "path_id", "path_level", "workflow"}),
     OUTLINE_GENERATED: frozenset(
@@ -291,6 +313,15 @@ EVENT_FIELDS: dict[str, frozenset[str]] = {
     ),
 }
 
+# The manifest: the exact attribute set every event emits from a request (one
+# outside a request emits the same set minus :data:`REQUEST_FIELDS`).
+# Load-bearing — the metric-coverage test checks each saved query's attribute
+# references against it, and the events unit test anchors it to what the
+# emitters actually log.
+EVENT_FIELDS: dict[str, frozenset[str]] = {
+    event: fields | REQUEST_FIELDS for event, fields in _EVENT_OWN_FIELDS.items()
+}
+
 
 def _emit(event: str, **fields: object) -> None:
     """Emit one product event as a structured info-level structlog record.
@@ -299,7 +330,12 @@ def _emit(event: str, **fields: object) -> None:
     reflects the current structlog config — cache-safe if a filtering logger was
     cached under a different pipeline (e.g. between ``configure_logging`` calls in
     tests).
+
+    Adds ``client`` when a request set :data:`request_client` (TDD §12).
     """
+    client = request_client.get()
+    if client is not None:
+        fields["client"] = client
     structlog.get_logger("aleph.events").info(event, **fields)
 
 

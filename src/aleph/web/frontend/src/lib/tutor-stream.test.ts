@@ -1,5 +1,5 @@
 import { http, HttpResponse } from "msw";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { server } from "../mocks/server";
 import { frame } from "../mocks/tutor";
 import { API_V1_BASE, ApiError } from "./api";
@@ -16,6 +16,27 @@ const LESSON_ID = "l1000000-0000-4000-8000-000000000001";
 const SEND_URL = `${API_V1_BASE}/paths/:pathId/conversation/messages`;
 
 const encoder = new TextEncoder();
+
+it("tutor transport reports the standalone client and zone", async () => {
+  const matchMedia = vi
+    .spyOn(window, "matchMedia")
+    .mockReturnValue({ matches: true } as MediaQueryList);
+  let seen: Headers | undefined;
+  server.use(
+    http.post(SEND_URL, ({ request }) => {
+      seen = request.headers;
+      return new HttpResponse(DONE, { headers: { "Content-Type": "text/event-stream" } });
+    }),
+  );
+  try {
+    await send({ deltas: [], checks: [] });
+    expect(seen?.get("X-Aleph-Time-Zone")).toBe(Intl.DateTimeFormat().resolvedOptions().timeZone);
+    expect(seen?.get("X-Aleph-Display-Mode")).toBe("standalone");
+    expect(seen?.get("Content-Type")).toBe("application/json");
+  } finally {
+    matchMedia.mockRestore();
+  }
+});
 
 /** Serve the send endpoint as `text/event-stream`, one chunk per array item. */
 function serveChunks(chunks: string[]): void {

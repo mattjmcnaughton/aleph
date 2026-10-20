@@ -4,6 +4,7 @@
 // `/api/v1` (TDD §6); the OIDC flow lives at unversioned `/auth/*`.
 
 import { queryOptions, skipToken } from "@tanstack/react-query";
+import { clientHeaders } from "./client-headers";
 
 const API_BASE = import.meta.env?.VITE_API_URL ?? "";
 
@@ -75,7 +76,10 @@ export async function apiErrorFrom(res: Response): Promise<ApiError> {
 
 /** Fetch wrapper: prefixes the API base, unwraps JSON, and raises ApiError. */
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, init);
+  const res = await fetch(`${API_BASE}${path}`, {
+    ...init,
+    headers: clientHeaders(init?.headers),
+  });
   if (!res.ok) {
     throw await apiErrorFrom(res);
   }

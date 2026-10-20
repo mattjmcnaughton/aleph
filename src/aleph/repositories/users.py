@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from sqlalchemy import select
+from sqlalchemy import func, select, update
 
 from aleph.models import User
 
@@ -24,6 +24,14 @@ class UserRepository:
 
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
+
+    async def observe_time_zone(self, user_id: uuid.UUID, zone: str) -> None:
+        """Atomically update changed zones only; caller owns the transaction."""
+        await self.session.execute(
+            update(User)
+            .where(User.id == user_id, User.time_zone.is_distinct_from(zone))
+            .values(time_zone=zone, time_zone_seen_at=func.now())
+        )
 
     async def lock_by_id(self, user_id: uuid.UUID) -> User | None:
         """Load an account by id, locking the row until the transaction ends.
