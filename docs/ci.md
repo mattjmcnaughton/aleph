@@ -1,16 +1,22 @@
 # Continuous Integration
 
 Three GitHub Actions workflows. [`ci.yml`](../.github/workflows/ci.yml) runs on every
-push/PR to `main`; [`release.yml`](../.github/workflows/release.yml) runs after a
+push/PR to `main` or `feature/home-screen-app`;
+[`release.yml`](../.github/workflows/release.yml) runs after a
 green CI on `main` (and can be dispatched as a dry run);
 [`evals.yml`](../.github/workflows/evals.yml) is dispatch-only because it spends
 money.
 
 | Workflow | Trigger | Purpose |
 | -------- | ------- | ------- |
-| **CI** | push/PR to `main` | Correctness gates (below) |
+| **CI** | push/PR to `main` or `feature/home-screen-app` | Correctness gates (below) |
 | **Release** | after a green CI on `main`, or `workflow_dispatch` | semantic-release → GHCR image → Fly deploy ([deploy.md](deploy.md)) |
 | **Evals** | `workflow_dispatch` only | Agent quality measurement ([evals.md](evals.md)) |
+
+Home Screen app ticket PRs target `feature/home-screen-app`. A green CI run on
+that integration branch does not release or deploy: the Release workflow and
+semantic-release remain restricted to `main`. Promotion to `main` is a separate
+release decision.
 
 ## CI (`ci.yml`)
 
