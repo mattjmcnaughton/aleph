@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { Link, createFileRoute, useRouterState } from "@tanstack/react-router";
 import { AlephGlyph, AlephLogo } from "../components/aleph-logo";
 import { AUTH_LOGIN_PATH } from "../lib/api";
 import { sessionQueryOptions } from "../lib/auth";
@@ -21,11 +21,12 @@ function formatProviderLabel(provider: string): string {
 // before this renders, so there is no signed-in branch to reach.
 function Login() {
   const session = useQuery(sessionQueryOptions);
-  const hasError = new URLSearchParams(window.location.search).get("error") === "auth_failed";
+  const search = useRouterState({ select: (state) => state.location.searchStr });
+  const hasError = new URLSearchParams(search).get("error") === "auth_failed";
   const providerLabel = formatProviderLabel(session.data?.provider ?? "keycloak");
 
   return (
-    <main className="min-h-screen bg-night px-4 py-6 text-porcelain">
+    <main className="min-h-screen bg-night px-4 pb-6 pt-[calc(1.5rem+env(safe-area-inset-top))] text-porcelain">
       <div className="mx-auto flex min-h-[calc(100vh-3rem)] w-full max-w-[440px] flex-col justify-center">
         <section className="rounded-lg border border-divider bg-surface p-6 text-center shadow-md">
           <div className="flex justify-center">
@@ -41,9 +42,15 @@ function Login() {
             account.
           </p>
           {hasError ? (
-            <p className="mt-5 rounded-md border border-danger-border/60 bg-danger-bg px-3 py-2 text-sm text-danger">
-              Sign-in didn&apos;t complete. Try again.
-            </p>
+            <div className="mt-5 rounded-md border border-danger-border/60 bg-danger-bg px-3 py-2 text-sm text-danger">
+              <p>Sign-in didn&apos;t complete. Try again.</p>
+              <Link
+                to="/login"
+                className="mt-2 inline-flex min-h-11 items-center rounded-md px-3 text-porcelain underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-teal"
+              >
+                Back to sign in
+              </Link>
+            </div>
           ) : null}
           <a
             href={AUTH_LOGIN_PATH}

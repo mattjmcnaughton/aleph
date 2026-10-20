@@ -1,5 +1,6 @@
 """Static file serving for the frontend in production."""
 
+import mimetypes
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -9,6 +10,7 @@ from starlette.staticfiles import StaticFiles
 from starlette.types import Scope
 
 FRONTEND_DIST = Path(__file__).parent / "frontend" / "dist"
+mimetypes.add_type("application/manifest+json", ".webmanifest")
 
 # Path prefixes the backend owns. A request under one of these must never fall
 # back to the SPA shell: a typo'd or retired API path has to answer with the
@@ -33,7 +35,10 @@ class SPAStaticFiles(StaticFiles):
 
     async def get_response(self, path: str, scope: Scope) -> Response:
         try:
-            return await super().get_response(path, scope)
+            response = await super().get_response(path, scope)
+            if path == "sw.js":
+                response.headers["Cache-Control"] = "no-cache"
+            return response
         except HTTPException as exc:
             if exc.status_code != 404 or not _is_spa_navigation(path, scope):
                 raise

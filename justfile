@@ -198,6 +198,15 @@ compose-smoke:
     curl -fsS "$base/healthz" | grep -q '"status":"ok"'
     curl -fsS "$base/readyz" | grep -q '"status":"ready"'
     curl -fsS "$base/" | grep -q '<div id="root">'
+    curl -fsSI "$base/manifest.webmanifest" | grep -qi 'content-type: application/manifest+json'
+    curl -fsSI "$base/sw.js" | grep -qi 'cache-control: no-cache'
+    curl -fsS "$base/manifest.webmanifest" | grep -q '"display": "standalone"'
+    for icon in icon-192.png icon-512.png icon-maskable-512.png apple-touch-icon.png; do
+        curl -fsSI "$base/icons/$icon" | grep -qi 'content-type: image/png'
+    done
+    for missing in missing.webmanifest missing-sw.js icons/missing.png; do
+        test "$(curl -sS -o /dev/null -w '%{http_code}' "$base/$missing")" = 404
+    done
     # A deep link into a client-side route (a refresh or a shared link) must
     # reach the SPA shell, not the JSON error envelope. Only the production
     # image serves dist/ — the dev/e2e vite server's own history fallback hides

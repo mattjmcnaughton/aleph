@@ -1,0 +1,11 @@
+<!-- AlephGlyph's Hebrew glyph outlined from DejaVu Sans Book (U+05D0).
+     Chromium's CSS.getPlatformFontsForNode confirms this is the existing
+     font-serif mark's Hebrew fallback in the development environment.
+     DejaVu changes are public domain; see LICENSE.txt for the font notice.
+     Outline avoids platform font substitution. Nocturne night/teal, 120px mark
+     scaled inside the maskable safe circle; no transparency in the background. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <rect width="512" height="512" fill="#161826"/>
+  <rect x="106" y="106" width="300" height="300" rx="35" fill="#4fb8c4" fill-opacity=".1" stroke="#4fb8c4" stroke-opacity=".6" stroke-width="2.5"/>
+  <path fill="#4fb8c4" transform="translate(167 329) scale(.13 -.13)" d="M896 411 1181 0H964L548 600Q520 586 502.5 575.5Q485 565 457 538.5Q429 512 412.5 479.5Q396 447 383 392Q370 337 370 268V0H186V185Q186 266 196 335Q206 404 221.5 452Q237 500 262 540.5Q287 581 309.5 606Q332 631 364.5 653Q397 675 419 685.5Q441 696 472 709L188 1120H405L821 520Q848 533 865.5 543.5Q883 554 911 581Q939 608 956 640.5Q973 673 986 728Q999 783 999 852V1120H1183V935Q1183 853 1173 784.5Q1163 716 1147.5 667.5Q1132 619 1107 578.5Q1082 538 1059 513.5Q1036 489 1004 467Q972 445 950 434.5Q928 424 896 411Z"/>
+</svg>
