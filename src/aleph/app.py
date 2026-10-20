@@ -62,14 +62,14 @@ def create_app() -> FastAPI:
 
     # First-party signed session cookie (TDD §7/D2): HttpOnly, SameSite=Lax,
     # holding only the local user UUID. ``https_only`` (Secure) is on in prod.
-    # Starlette's default ``max_age`` (14 days) is inherited deliberately
-    # (habagou parity): the cookie is a signed bearer with no server-side
-    # revocation, so logout clears it client-side and a leaked cookie stays
-    # valid until it expires or the signing secret rotates — an accepted MVP
-    # trade-off, revisited if session invalidation becomes a requirement.
+    # Cookie-authenticated requests renew it via get_optional_current_user.
+    # P3 accepts a 90-day sliding signed bearer with no server-side revocation:
+    # logout clears the browser's copy, not a leaked cookie. A leaked copy can
+    # be replayed until expiry (and renewed through use) or secret rotation.
     app.add_middleware(
         SessionMiddleware,
         secret_key=settings.session_secret_key,
+        max_age=settings.session_max_age_seconds,
         same_site="lax",
         https_only=settings.session_cookie_secure,
     )
