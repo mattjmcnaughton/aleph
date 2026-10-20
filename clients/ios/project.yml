@@ -95,6 +95,7 @@ targets:
           ALEPH_OIDC_CLIENT_ID: aleph-ios
           ALEPH_OIDC_AUDIENCE: ""
         Release:
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: ALEPH_UI_TESTING
           ALEPH_API_BASE_URL: https://aleph-prod-mattjmcnaughton.fly.dev
           # The Auth0 Native application and API arrive with AL-621; until then a Release
           # build cannot sign in ("Sign-in didn't complete").
