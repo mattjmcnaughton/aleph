@@ -178,11 +178,14 @@ from aleph.agents.researcher import (
     build_researcher_agent,
     build_researcher_prompt,
 )
+from aleph.authz import is_admin as user_is_admin
 from aleph.config import settings as global_settings
 from aleph.db import new_session
 from aleph.domains.cadence import is_claimable
 from aleph.domains.novelty import filter_new
+from aleph.models import BeatResearchState
 from aleph.repositories import BeatRepository, BriefRepository, NewSource
+from aleph.repositories.users import UserRepository
 from aleph.services.generation import AGENT_LEVEL, usage_tokens
 from aleph.services.openrouter import resolve_model
 from aleph.services.rate_limit import build_daily_rate_limiter
@@ -628,6 +631,34 @@ class BriefingService:
     def _beats(self, session: AsyncSession) -> BeatRepository:
         return BeatRepository(session, stale_after_seconds=self._stale)
 
+    async def trigger_initial(
+        self,
+        beat_id: uuid.UUID,
+        *,
+        user_id: uuid.UUID,
+        local_today: date,
+        is_admin: bool = False,
+    ) -> None:
+        """Claim only the newly deployed Beat, never drain its siblings."""
+        async with self._session_factory() as session:
+            await UserRepository(session).lock_by_id(user_id)
+            beat = await self._beats(session).lock(beat_id)
+            if beat is None or beat.user_id != user_id:
+                return
+            # A racing tick may already have settled this new Beat. Do not
+            # turn its healthy idle state into a second initial run.
+            if await BriefRepository(session).last_published_on_by_beat([beat_id]):
+                return
+            limiter = build_daily_rate_limiter(session, config=self._config)
+            if not await limiter.brief_research_capacity_available(
+                user_id=user_id, is_admin=is_admin
+            ):
+                return
+            fence = await self._beats(session).claim_research(beat_id)
+            await session.commit()
+        if fence is not None:
+            self._spawn(self.run_research(beat_id, local_today, fence=fence))
+
     # -- the arrival drain (TDD §5.6/D15) ------------------------------------ #
 
     async def drain_claimable(
@@ -748,12 +779,9 @@ class BriefingService:
         deliberately never re-claims a ``failed`` Beat, so a client reading
         a terminal-looking ``failed`` body stops polling for good.
 
-        Deliberately carries **no** rate-limit check (TDD §7: "the research
-        cap is checked inside the drain, before the claim — never at the
-        route" — and this explicit retry route is squarely "at the route").
-        A same-Beat retry loop is bounded only by claim serialization and
-        client patience, the accepted MVP shape ``services/rate_limit.py``
-        already documents for ``paths``' own retry cap.
+        Home Screen T8 rechecks capacity while holding the account lock, in
+        the same transaction as the claim. This serializes retries with job
+        and initial claims and preserves the account -> Beat lock order.
 
         A lost race (the Beat already resolved by a concurrent caller, or
         its state changed since the router read it) is a silent no-op,
@@ -761,6 +789,24 @@ class BriefingService:
         claim that did not win.
         """
         async with self._session_factory() as session:
+            current = await self._beats(session).get(beat_id)
+            if current is None:
+                return
+            # Same account -> Beat lock order as initial and scheduled claims.
+            # Serialize budget checks too; a retry racing a job cannot overspend.
+            user = await UserRepository(session).lock_by_id(current.user_id)
+            current = await self._beats(session).lock(beat_id)
+            if (
+                user is None
+                or current is None
+                or current.research_state != BeatResearchState.FAILED
+            ):
+                return
+            await build_daily_rate_limiter(
+                session, config=self._config
+            ).check_brief_research_retry(
+                user_id=user.id, is_admin=user_is_admin(user, self._config)
+            )
             fence = await self._beats(session).claim_research_for_retry(beat_id)
             await session.commit()
         if fence is None:

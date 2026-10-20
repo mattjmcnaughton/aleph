@@ -1,4 +1,8 @@
-"""Beats & Briefs API (AL-522, issue #172, epic #163, Phase 6 TDD §6).
+"""Beats & Briefs API (Home Screen T8 supersedes Phase 6 arrival triggering).
+
+GETs never claim research. POST /beats claims only its new Beat, subject to
+capacity; the hourly job owns subsequent cadence checks and stale recovery.
+Explicit retry retains its existing failure-only contract (Home Screen TDD §10).
 
 Session-cookie protected (``get_current_user`` -> ``401`` through the shared
 envelope). All addressing is by UUID; another learner's Beat or Brief reads as
@@ -14,86 +18,9 @@ any work: ``get_current_user`` runs first (an anonymous request is ``401``
 before the flag is ever consulted), and the flag check itself does no I/O
 beyond resolving the caller's flags — no repository read, no drain, no spawn.
 
-**Trigger + poll (D15), with one wrinkle `POST /paths` does not have.**
-``POST /beats`` deploys AND claims the first run in the same request (PRD
-§3: "researched immediately, not at the first Anchor day") by calling the
-SAME arrival drain the two ``GET`` routes use — a fresh Beat's cadence
-(``domains/cadence.py::is_claimable(None, ...)``) is unconditionally true
-(D4), so no separate claim path is needed. ``POST /beats/{id}/retry`` is the
-one explicit retry trigger (``BriefingService.trigger_retry``, mirroring
-``GenerationOrchestrator.trigger_outline_retry``'s split of claim from
-pipeline): its response is built from a re-read taken *after* the claim
-half of ``trigger_retry`` is awaited (code-review FIX 9), the identical
-drain-then-refresh shape the two ``GET`` routes already use — only the
-pipeline itself (retrieval + the two model calls) is spawned and left for
-the client's poll of ``GET /beats/{id}`` to observe finishing.
-
-**The arrival drain (D15, §5.6, §7) — DRAIN, THEN re-read, in that order**
-(code-review FIX 1, correcting this router's original ordering). Both
-``GET`` routes now call ``BriefingService.drain_claimable`` **first** and
-build their response from a read taken *after* it, the opposite of an
-earlier version of this file (and the opposite of TDD §3's architecture
-diagram, which shows ``load_beats(...)`` preceding ``drain_claimable(...)``
-— see the correction below). A GET built from a pre-drain read is stale in
-exactly the case that matters most: a Beat's pre-run state (``idle``) is
-*also* its post-success state, and ``lib/polling.ts`` stops polling the
-instant it sees any terminal state — ``idle`` included. A learner who opens
-`/beats/{id}` for the first time (a deep link, a PWA restore, a refresh) would
-see the response claim ``idle`` while the drain it just triggered committed
-``researching`` underneath it: polling never starts, ``state-card.tsx`` never
-renders "Researching…", and the Brief lands with nothing on screen — verbatim
-the defect AL-521's own FIX 1 eliminated one layer down, reintroduced here by
-reading before draining instead of after.
-
-**Resolving the conflict with TDD §7 explicitly, since it is what the old
-ordering was defending.** §7's "a `GET` that returns the same body whether or
-not it triggered work" is a *rhetorical* defence of a GET having a side
-effect at all — nothing downstream depends on this response being
-byte-identical to a hypothetical no-drain response, and reading after the
-drain is still fully deterministic, it just returns the newer, truer state
-of the very row this request's own arrival just changed. §7's other,
-load-bearing property — "nothing polls the beats list… a Beat that starts
-researching does so because this learner's own arrival triggered it, so the
-client already knows" — actually *requires* the response to reflect the
-trigger; it cannot hold if the response still says ``idle``. TDD §8's home
-card copy ("Researching… · started 30s ago") is unreachable from a Beat's own
-detail poll under the old ordering, for the same reason.
-
-``get_beat`` re-reads by ``session.refresh(beat)`` — the ``OwnedBeat``
-dependency resolved (and cached in this session's identity map) *before* the
-drain runs, so without an explicit refresh it would keep echoing the
-pre-drain row exactly as ``deploy_beat`` already has to guard against below
-(``db.py``'s ``expire_on_commit=False`` is what makes the refresh
-necessary rather than automatic — the same note ``services/briefing.py``'s
-own docstring makes about a caller-held identity going stale mid-handler).
-``list_beats`` re-reads via a fresh ``list_for_user`` query, which needs no
-explicit refresh: those rows were never in this session's identity map
-before this call. Note the internal inconsistency this fix removes:
-``deploy_beat`` already drained-then-refreshed-then-returned ``researching``;
-the two ``GET`` routes were the only ones still returning the opposite
-semantics for the identical DTO shape.
-
-**The daily research cap never 429s a `GET`; it now can 429 the retry route**
-(code-review FIX 2, correcting TDD §7's blanket "never at the route" and the
-in-code claim that used to sit here). §7's own reason for "never at the
-route" is that the drain's claim is "a side effect of a read the learner did
-not explicitly ask to be billed for" — that reasoning is specific to a `GET`
-the learner did not ask to trigger research, and does not extend to
-``POST /beats/{id}/retry``, an *explicit* billed trigger the learner asked
-for by name, on the `POST /paths/{id}/retry` precedent
-(``routers/v1/paths.py::retry_path``, which checks
-``check_outline_generation`` before triggering for exactly this reason).
-``BriefingService.drain_claimable`` still calls the drain's own,
-**non-raising** ``DailyRateLimiter.brief_research_capacity_available`` inside
-every claim it makes on a `GET`; ``retry_beat`` below calls a **raising**
-check of its own, ``DailyRateLimiter.check_brief_research_retry``, and only
-when the retry is about to do real work (see ``retry_beat``'s own docstring
-for why a non-``failed`` Beat never reaches that check at all). ``POST
-/beats`` carries a third, different cap — the **stock** Beat-count cap
-(``check_beat_creation``) — checked explicitly there, before creation. Three
-caps, three different shapes, on purpose: a stock cap on creation, a
-non-raising degrade on the arrival read, a raising cap on the one explicit
-billed trigger.
+Claims are awaited before returning a POST response; only the pipeline is
+spawned. The stock Beat cap may reject creation; the daily research cap leaves
+a new Beat idle when exhausted, but explicitly rejects a retry with 429.
 """
 
 from __future__ import annotations
@@ -264,35 +191,8 @@ def _source_dto(source: BriefSource) -> SourceDTO:
     )
 
 
-async def _drain(session: Session, user: User, tz_offset_minutes: int) -> None:
-    """The arrival trigger (D15) — see the module docstring's ordering note.
-
-    Called *before* the caller builds its response (code-review FIX 1),
-    never after: that ordering is what makes the response reflect the claim
-    this very request's own arrival triggered, so a first-ever poll sees
-    ``researching`` rather than a stale, terminal-looking ``idle``.
-    """
-    await briefing_service.drain_claimable(
-        session,
-        user_id=user.id,
-        tz_offset_minutes=tz_offset_minutes,
-        is_admin=is_admin(user, settings),
-    )
-
-
 def _local_today(tz_offset_minutes: int) -> date:
-    """The arrival's local day (D5) — one line, duplicated deliberately.
-
-    The same arithmetic ``services/briefing.py::_local_today`` and
-    ``services/progress_read.py`` each already carry their own copy of (see
-    ``services/briefing.py``'s own docstring: "``services/progress_read.py``'s
-    exact arithmetic, reused rather than re-derived"). There is no shared,
-    importable module beneath both a service and this router to hang one
-    copy from, so this is this router's own copy of one line — needed only
-    by ``POST /beats/{id}/retry``, which does not go through
-    ``BriefingService.drain_claimable`` (that method derives its own
-    ``local_today`` internally from the same ``tz_offset_minutes``).
-    """
+    """Freeze the POST request's local day for initial research or retry."""
     return (datetime.now(UTC) - timedelta(minutes=tz_offset_minutes)).date()
 
 
@@ -323,17 +223,9 @@ async def deploy_beat(
     only ever 429 ``POST /beats/{id}/retry``, code-review FIX 2, see that
     route's own docstring).
 
-    On pass the Beat is created and committed, then the SAME arrival drain
-    the two ``GET`` routes use (``BriefingService.drain_claimable``) claims
-    and spawns its first research run — a fresh Beat's cadence is
-    unconditionally due (D4: "a Beat with no entries is claimable
-    immediately"), so no separate claim path exists or is needed. The
-    research itself is spawned, never awaited: this route returns as soon as
-    the claim (a fast, atomic ``UPDATE``) resolves, and the client polls
-    ``GET /beats/{id}`` for the Brief. ``session.refresh`` picks up the
-    claim's write — it landed on the drain's own short transaction (TDD
-    §5.6's FIX C), not this request's session, so without it the response
-    would echo the stale, pre-claim ``research_state`` straight back.
+    On pass, commit the new Beat and claim only its first run. Existing Beats
+    are left for the hourly job. Research is spawned, never awaited; refresh
+    picks up the claim's short transaction before returning the polling state.
     """
     admin = is_admin(user, settings)
     model_research = validate_model_override(
@@ -357,7 +249,12 @@ async def deploy_beat(
     )
     await session.commit()
 
-    await _drain(session, user, tz_offset_minutes)
+    await briefing_service.trigger_initial(
+        beat.id,
+        user_id=user.id,
+        local_today=_local_today(tz_offset_minutes),
+        is_admin=admin,
+    )
     await session.refresh(beat)
 
     # AL-540: the Beat is created, committed, and its first run already
@@ -378,17 +275,7 @@ async def deploy_beat(
 async def list_beats(
     user: CurrentUser, session: Session, tz_offset_minutes: TzOffsetMinutes = 0
 ) -> BeatListResponse:
-    """The learner's Beats, newest first, with unread counts (§6). Drains.
-
-    Drain, THEN re-read (code-review FIX 1, see the module docstring): the
-    response below is built from ``beats``/``unread`` read *after* ``_drain``
-    has run, so this request's own arrival-triggered claim (if any) is
-    already reflected in what it returns — a freshly claimed Beat reads
-    ``research_state: "researching"`` in this very response, not a stale
-    ``idle`` a first poll would treat as terminal.
-    """
-    await _drain(session, user, tz_offset_minutes)
-
+    """The learner's Beats, newest first, with unread counts. No research writes."""
     beats = await BeatRepository(session).list_for_user(user_id=user.id)
     unread = await BriefRepository(session).unread_counts_by_beat(
         [beat.id for beat in beats]
@@ -412,21 +299,7 @@ async def get_beat(
     session: Session,
     tz_offset_minutes: TzOffsetMinutes = 0,
 ) -> BeatDetailDTO:
-    """One Beat: standing orders, research state, the rail (§6). Drains.
-
-    Ownership via ``OwnedBeat`` (``404`` otherwise). Drain, THEN re-read
-    (code-review FIX 1, see the module docstring): ``beat`` was resolved by
-    the ``OwnedBeat`` dependency *before* the drain runs, so it is already
-    sitting in this session's identity map — ``session.refresh`` is what
-    picks up the claim's write (it landed on the drain's own short
-    transaction, TDD §5.6's FIX C, not this request's session), exactly the
-    guard ``deploy_beat`` above already needs for the identical reason.
-    Without it this route would keep echoing the stale, pre-drain
-    ``research_state`` regardless of what the drain just committed.
-    """
-    await _drain(session, user, tz_offset_minutes)
-    await session.refresh(beat)
-
+    """Read standing orders, research state and rail. OwnedBeat enforces ownership."""
     entries = await BriefRepository(session).list_for_beat(beat.id)
     return _beat_detail_dto(beat, entries)
 

@@ -294,7 +294,9 @@ class BriefRepository:
         )
         return {beat_id: count for beat_id, count in result.all()}
 
-    async def list_for_beat(self, beat_id: uuid.UUID) -> list[Brief]:
+    async def list_for_beat(
+        self, beat_id: uuid.UUID, *, limit: int | None = None
+    ) -> list[Brief]:
         """The Beat rail: newest first, **both kinds interleaved** (D2) —
         served by ``ix_briefs_beat_id_published_on``. Ties (same
         ``published_on``) break on ``published_at``, the event timestamp
@@ -311,6 +313,7 @@ class BriefRepository:
                 Brief.published_at.desc(),
                 Brief.id.desc(),
             )
+            .limit(limit)
         )
         return list(result.scalars())
 

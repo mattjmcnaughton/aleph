@@ -386,6 +386,10 @@ class Settings(BaseSettings):
     # least one permit (``ge=1``): zero would deadlock every generation.
     max_concurrent_generations: int = Field(default=8, ge=1)
 
+    job_step_timeout_seconds: float = Field(default=1500, gt=0)
+    job_beat_batch_size: int = Field(default=100, ge=1)
+    job_max_beats_per_tick: int = Field(default=100, ge=1)
+
     # --- AL-005: Logfire instrumentation (TDD §9 / D11) -----------------------
     # Appended as a self-contained block at the END of Settings (other AL-0xx
     # branches append their own config blocks; keep them separate to avoid merge
