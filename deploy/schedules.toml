@@ -1,0 +1,6 @@
+# Recreated after each successful deploy, using that deploy's exact image.
+[[schedule]]
+name = "tick"
+schedule = "hourly"
+command = ["python", "-m", "aleph.jobs.tick"]
+memory = "512mb"

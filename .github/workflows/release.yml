@@ -170,4 +170,17 @@ jobs:
       - name: Deploy
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-        run: flyctl deploy --app aleph-prod-mattjmcnaughton --remote-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          NO_COLOR=1 flyctl deploy --app aleph-prod-mattjmcnaughton --remote-only 2>&1 | tee "$RUNNER_TEMP/aleph-deploy.log"
+
+      - name: Set up Python for schedules
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Recreate scheduled Machines on the deployed image
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: python scripts/recreate_schedules.py --deploy-log "$RUNNER_TEMP/aleph-deploy.log"

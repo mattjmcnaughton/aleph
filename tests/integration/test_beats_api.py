@@ -530,20 +530,13 @@ async def test_daily_research_cap_never_429s_a_get(
 
 
 # --------------------------------------------------------------------------- #
-# FIX 1 (code review, AL-522): a GET that triggers a drain must REFLECT the
-# claim that drain made — never the stale, pre-drain "idle" a naive
-# read-then-drain ordering would return, which `lib/polling.ts` treats as
-# terminal (idle is a Beat's pre-run AND post-success state) and would never
-# resume polling from. FIX 5: `hold=True` — a *local* CollectingSpawn, not
-# the module `spawn` fixture (which defaults to `hold=False`) — so the
-# spawned pipeline task is parked and can never race these assertions, which
-# read DB state written by the request itself, exactly the discipline
-# `tests/integration/conftest.py` and AL-521's own drain tests already use.
+# Home Screen T8: GETs never claim; deployment claims only its new Beat.
+# Hold the spawn seam so research cannot race assertions about request writes.
 # --------------------------------------------------------------------------- #
 
 
 @pytest.mark.anyio
-async def test_get_beat_reflects_the_claim_its_own_drain_made(
+async def test_get_beat_is_a_plain_read(
     app: FastAPI,
     monkeypatch: pytest.MonkeyPatch,
     analyst_flag_enabled: None,
@@ -553,8 +546,7 @@ async def test_get_beat_reflects_the_claim_its_own_drain_made(
 
     async with _client(app) as client:
         user_id = await _sign_in(client, monkeypatch, OWNER)
-        # A fresh, idle Beat with no entries: cadence is due immediately
-        # (D4), so THIS request's own drain WILL claim it.
+        # Even a fresh Beat that is due immediately must remain untouched.
         beat_id = await _seed_beat(user_id=user_id)
 
         before = await _reload_beat(beat_id)
@@ -564,20 +556,44 @@ async def test_get_beat_reflects_the_claim_its_own_drain_made(
 
     assert resp.status_code == 200, resp.text
     body = resp.json()
-    # The response reflects the claim THIS request's own drain just
-    # committed — never a stale pre-drain "idle".
-    assert body["research_state"] == "researching"
-    assert body["research_started_at"] is not None
+    assert body["research_state"] == "idle"
+    assert body["research_started_at"] is None
 
     after = await _reload_beat(beat_id)
-    assert after.research_state is BeatResearchState.RESEARCHING
-    assert after.research_started_at is not None
+    assert after.research_state is BeatResearchState.IDLE
+    assert after.research_started_at is None
+    assert len(held_spawn.tasks) == 0
+    await held_spawn.cancel_pending()
+
+
+@pytest.mark.anyio
+async def test_deploy_claims_only_its_new_beat(
+    app: FastAPI,
+    monkeypatch: pytest.MonkeyPatch,
+    analyst_flag_enabled: None,
+) -> None:
+    held_spawn = CollectingSpawn(hold=True)
+    monkeypatch.setattr(briefing_module.briefing_service, "_spawn", held_spawn)
+    async with _client(app) as client:
+        user_id = await _sign_in(client, monkeypatch, OWNER)
+        old_id = await _seed_beat(user_id=user_id)
+        response = await client.post(
+            "/api/v1/beats",
+            json={
+                "topic": "EU AI regulation",
+                "level": "some_experience",
+                "anchor_weekday": 0,
+            },
+        )
+    assert response.status_code == 202, response.text
+    assert response.json()["research_state"] == "researching"
+    assert (await _reload_beat(old_id)).research_state is BeatResearchState.IDLE
     assert len(held_spawn.tasks) == 1
     await held_spawn.cancel_pending()
 
 
 @pytest.mark.anyio
-async def test_list_beats_reflects_the_claim_its_own_drain_made(
+async def test_list_beats_is_a_plain_read(
     app: FastAPI,
     monkeypatch: pytest.MonkeyPatch,
     analyst_flag_enabled: None,
@@ -593,12 +609,12 @@ async def test_list_beats_reflects_the_claim_its_own_drain_made(
 
     assert resp.status_code == 200, resp.text
     row = next(r for r in resp.json()["beats"] if r["id"] == str(beat_id))
-    assert row["research_state"] == "researching"
-    assert row["research_started_at"] is not None
+    assert row["research_state"] == "idle"
+    assert row["research_started_at"] is None
 
     after = await _reload_beat(beat_id)
-    assert after.research_state is BeatResearchState.RESEARCHING
-    assert len(held_spawn.tasks) == 1
+    assert after.research_state is BeatResearchState.IDLE
+    assert len(held_spawn.tasks) == 0
     await held_spawn.cancel_pending()
 
 

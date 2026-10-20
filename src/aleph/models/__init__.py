@@ -11,6 +11,7 @@ from __future__ import annotations
 from aleph.models.attempt import Attempt
 from aleph.models.beat import Beat
 from aleph.models.beat_research_run import BeatResearchRun
+from aleph.models.beat_scan_progress import BeatScanProgress
 from aleph.models.brief import Brief, BriefSource
 from aleph.models.conversation import Conversation
 from aleph.models.device import Device
@@ -42,6 +43,7 @@ __all__ = [
     "Beat",
     "BeatResearchRun",
     "BeatResearchState",
+    "BeatScanProgress",
     "Brief",
     "BriefKind",
     "BriefSource",

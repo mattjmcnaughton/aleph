@@ -793,20 +793,20 @@ registered-flags table below.
 
 **Beats** (CONTEXT.md: *Beat* — a standing research assignment). `POST
 /beats` both deploys the Beat and claims its first research run in the same
-request (PRD §3: "researched immediately, not at the first Anchor day") — it
-reuses the same arrival drain the two `GET` routes use, since a fresh Beat's
-cadence is unconditionally due (a Beat with no entries is claimable
-immediately). The research itself is spawned, never awaited: the route
+request (PRD §3: "researched immediately, not at the first Anchor day"). It
+claims **only the new Beat**, never another Beat owned by the learner. Existing
+Beats are researched by the hourly job, not by reads. Research is spawned,
+never awaited: the route
 returns as soon as the claim (a fast, atomic `UPDATE`) resolves, and the
 client polls `GET /beats/{id}` for the Brief.
 
 | Method | Path | Query / Body | Success | Notes |
 | ------ | ---- | ------------- | ------- | ----- |
-| `POST` | `/api/v1/beats` | `tz_offset_minutes` (optional, default `0`, `-900..900`) + `{topic, level, anchor_weekday, guidance?, model_research?, model_brief?}` | `202` | Deploy an analyst; the first run is claimed in the same response when capacity allows (`research_state` reads `"researching"`, not `"idle"`) — **but** if the daily research cap (`RATE_LIMIT_BRIEF_RESEARCH_PER_DAY`) is already spent, the drain's non-raising capacity check silently declines and the response still reads `"idle"` (PRD §3's "researched immediately" then simply waits for tomorrow's capacity — never a `429` on this route for that reason). Rate-limited by the **stock** Beat cap (`check_beat_creation`, `MAX_BEATS_PER_LEARNER`, default 3; admins exempt) → `429 rate_limited`. `anchor_weekday` is `0..6` (Python's Monday = 0); out of range is `422 validation_error`. `model_research`/`model_brief` are the **admin-only** model-picker overrides (TDD D7/§5.3), enforced by the same `validate_model_override` `POST /paths` uses: `403 forbidden` for a non-admin, `422 validation_error` off `MODEL_ALLOWLIST`. |
-| `GET` | `/api/v1/beats` | `tz_offset_minutes` (optional, default `0`, `-900..900`) | `200 {beats: [...]}` | The learner's Beats, newest first, each with an `unread_count` (**published** Briefs only with no read ping yet — a Skipped row can never be marked read, so it is never counted, code-review FIX 3) and `research_state`. **Drains claimable Beats, then re-reads** (see "The arrival drain" below) — a Beat this request's own drain just claimed reads `"researching"` here, not a stale pre-drain `"idle"`. |
-| `GET` | `/api/v1/beats/{id}` | `tz_offset_minutes` (optional, default `0`) | `200` | One Beat: standing orders, research state, and the rail — `entries`, newest first, both kinds, **never locked** (every entry is always fully rendered). **Drains, then re-reads** (below) — same guarantee as the list route. |
+| `POST` | `/api/v1/beats` | `tz_offset_minutes` (optional, default `0`, `-900..900`) + `{topic, level, anchor_weekday, guidance?, model_research?, model_brief?}` | `202` | Deploy an analyst and claim **only its own** first run when capacity allows (`research_state: "researching"`). Exhausted daily research capacity leaves it `"idle"` for a later tick, never `429` for that reason. Rate-limited by the **stock** Beat cap (`MAX_BEATS_PER_LEARNER`, default 3; admins exempt) → `429 rate_limited`. `anchor_weekday` is `0..6` (Monday = 0), otherwise `422 validation_error`. Model overrides remain admin-only (`403 forbidden` for learners, `422 validation_error` off `MODEL_ALLOWLIST`). |
+| `GET` | `/api/v1/beats` | `tz_offset_minutes` (optional, default `0`, `-900..900`, retained for compatibility) | `200 {beats: [...]}` | The learner's Beats, newest first, with `unread_count` (unread **published** Briefs only) and `research_state`. Plain research-free read: never claims or retries work. |
+| `GET` | `/api/v1/beats/{id}` | `tz_offset_minutes` (optional, default `0`, retained for compatibility) | `200` | Standing orders, research state, and the rail — `entries`, newest first, both kinds, **never locked**. Plain research-free read: never claims or retries work. |
 | `DELETE` | `/api/v1/beats/{id}` | — | `204` | Hard-delete; `ON DELETE CASCADE` tears down its Briefs and Sources. This is also how standing orders change (CONTEXT.md: Beat — delete and redeploy; PRD §4.11). Not undoable (UI confirms). No drain. |
-| `POST` | `/api/v1/beats/{id}/retry` | `tz_offset_minutes` (optional, default `0`) | `202` | Re-claim a `failed` run — the **only** route that does (an ordinary arrival never re-claims a real failure, so a retrieval outage never silently bills a fresh run on every page load). **A genuine no-op on any other state** (`idle`, `researching`, `refused`) — no claim, no spawn, and no billing, since `idle` is a Beat's healthy steady state and letting a stray retry win that claim would drive an off-cadence, billed research run. Only on a real `failed` Beat: rate-limited by the daily research cap (`check_brief_research_retry`, same cap and counter as the arrival drain's own, but **raising** here — an explicit `POST` is the billed-trigger case the drain's own "never at the route" reasoning does not cover) → `429 rate_limited`, checked *before* the claim. **The claim is awaited before the response is built** (code-review FIX 9) — only the pipeline itself (retrieval + the two model calls) is spawned, so the `202` body already reads `"researching"`, never a stale pre-claim `"failed"`; poll `GET /beats/{id}` for the pipeline's outcome. No drain of its own either way. |
+| `POST` | `/api/v1/beats/{id}/retry` | `tz_offset_minutes` (optional, default `0`) | `202` | Explicitly retry a `failed` run; the job never retries real failures. Other states (`idle`, `researching`, `refused`) are genuine no-ops, with no claim or billing. The daily research cap raises `429 rate_limited` on a real retry and is rechecked under the same account lock as initial/job claims. The claim is committed before building the response; only the pipeline is spawned. Poll the plain GET for completion. Never drains other Beats. |
 
 ```jsonc
 // GET /api/v1/beats/{id}
@@ -864,36 +864,30 @@ below this one's number (CONTEXT.md: Brief continuity) — derived at read time
 (which has no `number` of its own to search below — never queried at all for
 one).
 
-**The arrival drain (D15).** Listing Beats or opening one evaluates the
-Cadence floor for each of the learner's Beats and claims + spawns what is due
-— the same "reaching a lesson kicks its generation" trigger-on-read model
-Phase 1 uses, one workload over. The window of Beats the drain evaluates is
-bounded by `MAX_BEATS_PER_LEARNER` and ordered **least-recently-researched
-first** (`research_started_at ASC NULLS FIRST`, code-review FIX 6) rather
-than oldest-created first — a fixed creation-order window could otherwise let
-a learner's oldest Beats permanently fill it and starve a newer one forever
-(reachable in practice only by an admin today, since the stock Beat cap that
-would otherwise prevent exceeding the window is admin-exempt); this ordering
-rotates instead, so no Beat can be systematically excluded.
+**Scheduled research (Home Screen T8 supersedes the arrival drain).** The hourly
+`python -m aleph.jobs.tick` job evaluates cadence in each learner's stored IANA
+time zone (UTC when absent). A published or Skipped entry resets the local-day
+cadence floor. An idle Beat — its latest **published** Brief remains unread —
+does not run; Skipped alone never makes a Beat idle. Once that Brief is read,
+the next eligible tick can research again. Long absences produce one report,
+not a backlog. GETs never trigger research, even for stale runs.
 
-**A `GET` that triggers a drain now reflects the claim it made (code-review
-FIX 1).** Both `GET` routes call the drain **first** and build their
-response from a read taken *after* it, so a Beat this very request's own
-arrival claimed reads `research_state: "researching"` in this same response
-— never a stale, pre-drain `"idle"` that a first poll would treat as
-terminal and never resume from. A later, separate request naturally observes
-the same committed state. The daily research cap
-(`RATE_LIMIT_BRIEF_RESEARCH_PER_DAY`, default 5) is checked **inside** the
-drain, before each claim, and is **non-raising** there: hitting it degrades
-to "no research this time," never a `429` on a `GET`.
+The job advances through bounded candidate pages, including past not-due, idle
+and capped Beats; successful claims are bounded by `JOB_MAX_BEATS_PER_TICK`
+(default 100). Generation uses `MAX_CONCURRENT_GENERATIONS`, separate from the
+web research pool. The daily UTC research cap (`RATE_LIMIT_BRIEF_RESEARCH_PER_DAY`,
+default 5; admins exempt) is checked before each claim. Exhaustion skips work,
+never turns a read into `429`. Failed work requires explicit retry; refused work
+remains terminal; interrupted stale claims are recovered with the existing
+atomic claim and fencing protocol. See [Scheduled machines](deploy.md#scheduled-machines).
 
 **Wire codes (Analyst):** `401 unauthenticated` · `404 not_found` (flag off,
 before any work; or an unowned/unknown Beat or Brief) · `422 validation_error`
 (a bad `anchor_weekday`, an out-of-range `tz_offset_minutes`, or an
 unrecognized read-ping `marker`) · `429 rate_limited` (the **stock** Beat cap
 on `POST /beats`, **or** the daily research cap on `POST /beats/{id}/retry`
-when it is about to re-claim a real `failed` run — the drain's own use of
-the same cap, inside a `GET`, never surfaces on the wire).
+when it is about to re-claim a real `failed` run — the job's use of the same cap
+never surfaces on the wire).
 
 ## Feature flags (admin) (`/api/v1/admin`, AL-203)
 
