@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it, vi } from "vitest";
 import { API_V1_BASE, type AuthSession } from "../lib/api";
@@ -8,6 +8,7 @@ import {
   beatDetailPollRequestCount,
   configureBeats,
   seedBeat,
+  seedBrief,
 } from "../mocks/beats";
 import { learnerUser } from "../mocks/handlers";
 import { server } from "../mocks/server";
@@ -40,6 +41,136 @@ async function gotoBeat(beatId: string) {
 }
 
 describe("Beat view — /beats/$beatId", () => {
+  it.each([false, true])(
+    "forgets visited Briefs only for the deleted Beat (lost response: %s)",
+    async (lostResponse) => {
+      for (const id of ["deleted", "survivor"]) {
+        seedBeat({
+          id,
+          topic: `${id} Beat`,
+          level: "new_to_it",
+          entries: [
+            {
+              kind: "published",
+              id: `${id}-brief`,
+              number: 1,
+              publishedOn: "2026-08-03",
+              title: `${id} Brief`,
+            },
+          ],
+        });
+        seedBrief({
+          id: `${id}-brief`,
+          beatId: id,
+          title: `${id} Brief`,
+          bodyMarkdown: `${id} body`,
+          sources: [
+            {
+              position: 1,
+              title: `${id} source`,
+              publisher: "Example",
+              published_on: "2026-08-03",
+              url: `https://example.com/${id}`,
+            },
+          ],
+        });
+      }
+      let requests = 0;
+      if (lostResponse) {
+        server.use(
+          http.delete(`${API_V1_BASE}/beats/deleted`, async ({ request }) => {
+            if (request.headers.has("x-test-commit")) return undefined;
+            requests++;
+            if (requests === 1) {
+              // The real stateful fake commits, but the acknowledgement is lost.
+              await fetch(request.url, { method: "DELETE", headers: { "x-test-commit": "true" } });
+              return HttpResponse.error();
+            }
+            return undefined; // Stateful fake now returns 404.
+          }),
+        );
+      }
+      await gotoBeat("survivor");
+      fireEvent.click(screen.getByRole("link", { name: /survivor Brief/ }));
+      await screen.findByText("survivor body");
+      fireEvent.click(screen.getByRole("link", { name: "Your beats" }));
+      fireEvent.click(await screen.findByRole("link", { name: /deleted Beat/ }));
+      await screen.findByTestId("standing-orders");
+      fireEvent.click(screen.getByRole("link", { name: /deleted Brief/ }));
+      await screen.findByText("deleted body");
+      expect(screen.getByRole("link", { name: "deleted source" })).toBeVisible();
+      window.history.back();
+      await screen.findByTestId("standing-orders");
+      fireEvent.click(screen.getByRole("button", { name: "Delete Beat" }));
+      fireEvent.click(screen.getByRole("button", { name: "Confirm deleting deleted Beat" }));
+      if (lostResponse) {
+        await screen.findByText(/We couldn't delete this Beat/);
+        fireEvent.click(screen.getByRole("button", { name: "Confirm deleting deleted Beat" }));
+      }
+      await screen.findByRole("link", { name: /survivor Beat/ });
+      expect(screen.queryByRole("link", { name: /deleted Beat/ })).toBeNull();
+      // Reopen the previously visited URL in the same SPA/cache lifetime.
+      window.history.pushState({}, "", "/briefs/deleted-brief");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+      await screen.findByTestId("brief-unavailable", {}, { timeout: 3000 });
+      expect(screen.queryByText("deleted body")).toBeNull();
+      expect(screen.queryByRole("link", { name: "deleted source" })).toBeNull();
+      window.history.back();
+      fireEvent.click(await screen.findByRole("link", { name: /survivor Beat/ }));
+      await screen.findByTestId("standing-orders");
+      // Make a refetch fail: the unrelated Brief must still be cached/readable.
+      server.use(http.get(`${API_V1_BASE}/briefs/survivor-brief`, () => HttpResponse.error()));
+      fireEvent.click(screen.getByRole("link", { name: /survivor Brief/ }));
+      await screen.findByText("survivor body");
+      expect(screen.getByRole("link", { name: "survivor source" })).toBeVisible();
+      if (lostResponse) expect(requests).toBe(2);
+    },
+  );
+
+  it("deletes only after confirmation, blocks duplicates, and lets a failed deletion retry", async () => {
+    seedBeat({ id: "delete-me", topic: "Delete this Beat", level: "new_to_it" });
+    seedBeat({ id: "keep-me", topic: "Surviving Beat", level: "new_to_it" });
+    let requests = 0;
+    let finish: () => void = () => {};
+    server.use(
+      http.delete(`${API_V1_BASE}/beats/delete-me`, async () => {
+        requests++;
+        if (requests === 1) {
+          await new Promise<void>((resolve) => {
+            finish = resolve;
+          });
+          return new HttpResponse(null, { status: 500 });
+        }
+        return undefined; // Retry falls through to the stateful Beat fake.
+      }),
+    );
+    await gotoBeat("delete-me");
+    fireEvent.click(screen.getByRole("button", { name: "Delete Beat" }));
+    expect(screen.getByText(/This can't be undone/)).toBeVisible();
+    expect(screen.getByRole("button", { name: "Keep it" })).toHaveFocus();
+    fireEvent.click(screen.getByRole("button", { name: "Keep it" }));
+    expect(screen.getByRole("heading", { name: "Delete this Beat" })).toBeVisible();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Delete Beat" })).toHaveFocus());
+    expect(requests).toBe(0);
+    fireEvent.click(screen.getByRole("button", { name: "Delete Beat" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm deleting Delete this Beat" }));
+    await waitFor(() => expect(requests).toBe(1));
+    const pending = screen.getByRole("button", { name: "Confirm deleting Delete this Beat" });
+    expect(pending).toBeDisabled();
+    expect(pending).toHaveTextContent("Deleting…");
+    expect(screen.getByRole("button", { name: "Keep it" })).toBeDisabled();
+    fireEvent.click(pending);
+    expect(requests).toBe(1);
+    finish();
+    await screen.findByText(/We couldn't delete this Beat/);
+    expect(window.location.pathname).toBe("/beats/delete-me");
+    fireEvent.click(screen.getByRole("button", { name: "Confirm deleting Delete this Beat" }));
+    await screen.findByText("Surviving Beat");
+    await waitFor(() => expect(window.location.pathname).toBe("/"));
+    expect(screen.queryByText("Delete this Beat")).toBeNull();
+    expect(requests).toBe(2);
+  });
+
   it("[FIX 3, flag off] renders a dead end rather than 'Loading your Beat…' forever", async () => {
     // Before this fix, `beatQueryOptions`'s `skipToken` meant `data` never
     // resolved and `isError` never flipped true, so this route rendered
