@@ -46,6 +46,10 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8000
 
+    vapid_private_key: str = Field(default="", repr=False)
+    vapid_public_key: str = ""
+    public_base_url: str = ""
+
     # Optional extra OTLP export target (empty by default, AL-005/AL-003): a
     # non-empty value adds a BatchSpanProcessor in ``telemetry.py``. Kept empty
     # in dev/CI so no exporter dials localhost:4318 (that connection-refused
@@ -645,6 +649,34 @@ class Settings(BaseSettings):
                 "slow research run is double-claimed (TDD §13)."
             )
             raise ValueError(msg)
+        return self
+
+    @model_validator(mode="after")
+    def _check_push_configuration(self) -> Self:
+        from urllib.parse import urlsplit
+
+        from aleph.push_keys import encode_key, load_private_key, public_bytes
+
+        if self.is_production or self.vapid_private_key:
+            url = urlsplit(self.public_base_url)
+            if (
+                url.scheme != "https"
+                or not url.hostname
+                or url.username
+                or url.password
+                or url.query
+                or url.fragment
+                or url.path not in ("", "/")
+                or re.search(r"[\s\\]", self.public_base_url)
+            ):
+                raise ValueError("PUBLIC_BASE_URL must be an HTTPS origin")
+        if self.vapid_private_key:
+            derived = encode_key(
+                public_bytes(load_private_key(self.vapid_private_key).public_key())
+            )
+            if self.vapid_public_key and self.vapid_public_key != derived:
+                raise ValueError("VAPID_PUBLIC_KEY does not match private key")
+            self.vapid_public_key = derived
         return self
 
 

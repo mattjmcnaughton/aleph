@@ -50,6 +50,8 @@ QUICK_CHECK_ATTEMPTED = "quick_check_attempted"
 LESSON_COMPLETED = "lesson_completed"
 PATH_COMPLETED = "path_completed"
 PATH_DELETED = "path_deleted"
+NOTIFICATION_SENT = "notification_sent"
+DEVICE_REMOVED = "device_removed"
 
 # Phase 2 — the in-lesson tutor (TDD §9).
 TUTOR_CONVERSATION_STARTED = "tutor_conversation_started"
@@ -140,6 +142,8 @@ REQUEST_FIELDS: frozenset[str] = frozenset({"client"})
 
 # Each event's own fields; :data:`EVENT_FIELDS` adds :data:`REQUEST_FIELDS`.
 _EVENT_OWN_FIELDS: dict[str, frozenset[str]] = {
+    NOTIFICATION_SENT: frozenset({"account_id", "kind", "outcome", "workflow"}),
+    DEVICE_REMOVED: frozenset({"account_id", "reason", "workflow"}),
     ACCOUNT_CREATED: frozenset({"account_id", "workflow"}),
     PATH_CREATED: frozenset({"account_id", "path_id", "path_level", "workflow"}),
     OUTLINE_GENERATED: frozenset(
@@ -375,6 +379,24 @@ def _emit_guarded(event: str, **fields: object) -> None:
 
 
 # --- account -----------------------------------------------------------------  #
+
+
+def emit_notification_sent(*, account_id: uuid.UUID, kind: str, outcome: str) -> None:
+    """Delivery outcome: delivered means push-service acceptance only (W38)."""
+    _emit_guarded(
+        NOTIFICATION_SENT,
+        account_id=str(account_id),
+        kind=kind,
+        outcome=outcome,
+        workflow="W38",
+    )
+
+
+def emit_device_removed(*, account_id: uuid.UUID, reason: str) -> None:
+    """A subscription was reported gone by its push service (W38)."""
+    _emit_guarded(
+        DEVICE_REMOVED, account_id=str(account_id), reason=reason, workflow="W38"
+    )
 
 
 def emit_account_created(*, account_id: uuid.UUID) -> None:

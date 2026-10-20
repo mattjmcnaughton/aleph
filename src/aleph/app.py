@@ -18,6 +18,7 @@ from aleph.routers import auth, health
 from aleph.routers.v1 import beats as v1_beats
 from aleph.routers.v1 import feature_flags as v1_feature_flags
 from aleph.routers.v1 import lessons as v1_lessons
+from aleph.routers.v1 import notifications as v1_notifications
 from aleph.routers.v1 import paths as v1_paths
 from aleph.routers.v1 import progress as v1_progress
 from aleph.routers.v1 import shaping as v1_shaping
@@ -82,6 +83,7 @@ def create_app() -> FastAPI:
     app.include_router(auth.router)
     app.include_router(v1_paths.router)
     app.include_router(v1_lessons.router)
+    app.include_router(v1_notifications.router)
     app.include_router(v1_feature_flags.router)
     # Every route on this one is hidden behind the ``tutor`` feature flag
     # (404 when it resolves off), so mounting it is safe in production while

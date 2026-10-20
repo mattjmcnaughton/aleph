@@ -18,6 +18,7 @@ x-smoke: &smoke
     target: production
   environment:
     ENV: production
+    PUBLIC_BASE_URL: https://aleph.example
     DATABASE_URL: postgresql+asyncpg://postgres:postgres@smoke-db:5432/aleph
     LOG_LEVEL: INFO
     LOG_FORMAT: json

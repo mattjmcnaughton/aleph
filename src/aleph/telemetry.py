@@ -14,10 +14,14 @@ connection-refused spam, AL-003). Instrumentation still runs; spans are simply
 created and dropped.
 """
 
+from typing import Any
+
 import logfire
 from fastapi import FastAPI
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from starlette.requests import Request
+from starlette.websockets import WebSocket
 
 from aleph import db
 from aleph.config import settings
@@ -25,10 +29,23 @@ from aleph.config import settings
 _logfire_configured = False
 
 
+def _request_attributes(
+    request: Request | WebSocket, attributes: dict[str, Any]
+) -> dict[str, Any]:
+    # Registration bodies are subscription capabilities. Validation errors also
+    # retain raw input, including malformed keys and whole submitted bodies.
+    # Drop both at the boundary before dependency AND root spans are populated;
+    # retain ordinary HTTP metadata and other routes' diagnostic attributes.
+    route = request.scope.get("route")
+    if getattr(route, "path", None) == "/api/v1/devices":
+        return {}
+    return attributes
+
+
 def setup_telemetry(app: FastAPI) -> None:
     """Configure process-wide telemetry and instrument this FastAPI app."""
     _configure_logfire()
-    logfire.instrument_fastapi(app)
+    logfire.instrument_fastapi(app, request_attributes_mapper=_request_attributes)
 
 
 def _configure_logfire() -> None:

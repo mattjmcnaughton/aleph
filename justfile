@@ -312,3 +312,7 @@ compose-smoke:
 # Stop Compose services
 compose-down:
     docker compose down
+
+# Generate a local VAPID key pair (prints private material; do not save in logs)
+vapid-keys:
+    uv run python -m scripts.vapid_keys
