@@ -7,7 +7,7 @@ export function AppHeader() {
   const { signOut, pending } = useLogout();
 
   return (
-    <header className="sticky top-0 z-10 box-border h-[var(--app-header-h)] border-b border-divider bg-night/85 backdrop-blur">
+    <header className="sticky top-0 z-10 box-border h-[var(--app-header-h)] border-b border-divider bg-night/85 pt-[env(safe-area-inset-top)] backdrop-blur">
       <div className="mx-auto flex h-full w-full max-w-[480px] items-center justify-between gap-3 px-4 lg:max-w-none lg:px-6">
         <Link to="/" aria-label="Aleph home" className="inline-flex shrink-0">
           <AlephLogo />

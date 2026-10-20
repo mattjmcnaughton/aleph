@@ -65,7 +65,7 @@ function RootLayout() {
 
 function RootError() {
   return (
-    <main className="min-h-screen bg-night px-4 py-6 text-porcelain">
+    <main className="min-h-screen bg-night px-4 pb-6 pt-[calc(1.5rem+env(safe-area-inset-top))] text-porcelain">
       <div className="mx-auto flex min-h-[calc(100vh-3rem)] w-full max-w-[480px] flex-col justify-center">
         <section className="rounded-lg border border-danger-border/60 bg-surface p-6 text-center shadow-md">
           <h1 className="text-xl font-semibold text-danger">Something went wrong.</h1>

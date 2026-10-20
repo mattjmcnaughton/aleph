@@ -1,3 +1,4 @@
+import "@testing-library/jest-dom/vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
@@ -7,6 +8,18 @@ import { server } from "../mocks/server";
 import { App } from "./app";
 
 describe("App shell + auth gate", () => {
+  it("can leave the sign-in error without browser controls", async () => {
+    server.use(http.get(`${API_V1_BASE}/auth/session`, () => HttpResponse.json(signedOutSession)));
+    window.history.pushState({}, "", "/login?error=auth_failed");
+    render(<App />);
+    const back = await screen.findByRole("link", { name: "Back to sign in" });
+    fireEvent.click(back);
+    await waitFor(() =>
+      expect(screen.queryByText("Sign-in didn't complete. Try again.")).toBeNull(),
+    );
+    expect(screen.getByRole("link", { name: "Continue with Keycloak (dev)" })).toBeVisible();
+  });
+
   it("[AL-060] renders the signed-in shell for an authenticated learner", async () => {
     window.history.pushState({}, "", "/");
 

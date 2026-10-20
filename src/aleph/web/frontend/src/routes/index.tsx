@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { AlephGlyph } from "../components/aleph-logo";
+import { InstallCard } from "../components/install-card";
 import {
   type PathStatus,
   type PathStreak,
@@ -308,6 +309,7 @@ function Home() {
       {/* One tap back into yesterday's work, above everything else on the page
           — and outside the two-column split below, so it stays first at every
           width rather than sliding into a rail. */}
+      <InstallCard />
       <ContinueCard path={resumeTarget} />
       {flowEnabled ? <FlowDoor paths={paths} /> : null}
       {beatsPromoted ? beatsSection : null}

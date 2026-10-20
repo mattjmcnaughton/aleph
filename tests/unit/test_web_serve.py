@@ -33,6 +33,8 @@ BUNDLE = "console.log('app');"
 def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     """The real app, serving a minimal stand-in for a built frontend."""
     (tmp_path / "index.html").write_text(SHELL)
+    (tmp_path / "manifest.webmanifest").write_text('{"name":"aleph"}')
+    (tmp_path / "sw.js").write_text("// No caching.\n")
     (tmp_path / "assets").mkdir()
     (tmp_path / "assets" / "app-abc123.js").write_text(BUNDLE)
     monkeypatch.setattr(serve, "FRONTEND_DIST", tmp_path)
@@ -44,6 +46,26 @@ def test_root_serves_the_shell(client: TestClient) -> None:
 
     assert response.status_code == 200
     assert '<div id="root">' in response.text
+
+
+def test_install_resources(client: TestClient) -> None:
+    manifest = client.get("/manifest.webmanifest")
+    assert manifest.status_code == 200
+    assert manifest.headers["content-type"] == "application/manifest+json"
+    assert manifest.json() == {"name": "aleph"}
+    worker = client.get("/sw.js")
+    assert worker.status_code == 200
+    assert worker.headers["cache-control"] == "no-cache"
+    assert client.head("/sw.js").headers["cache-control"] == "no-cache"
+
+
+@pytest.mark.parametrize(
+    "path", ["/missing.webmanifest", "/missing-sw.js", "/icons/missing.png"]
+)
+def test_missing_install_resources(client: TestClient, path: str) -> None:
+    response = client.get(path)
+    assert response.status_code == 404
+    assert '<div id="root">' not in response.text
 
 
 @pytest.mark.parametrize(

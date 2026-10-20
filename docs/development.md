@@ -308,3 +308,51 @@ override `ALEPH_APP_PORT` if 8000 is busy. Full description:
 
 Running the image by hand needs a reachable database and, under `ENV=production`, real
 auth secrets — `docker compose up app` supplies both.
+
+## Home Screen install assets and navigation
+
+The provisional Home Screen branch uses the existing web client, not a native
+build. `public/sw.js` is deliberately empty: registration happens after React's
+first commit, at scope `/`, without fetch interception or caching. The production
+mount serves it with `Cache-Control: no-cache`, and the manifest with
+`application/manifest+json`; `just compose-smoke` checks these and missing files.
+
+Regenerate committed icons from the repo root with the lockfile dependencies and
+Chrome for Testing **155.0.8059.79** (set `PW_CHROMIUM_PATH` to that executable):
+
+```sh
+node scripts/render_icons.mjs
+```
+
+`public/icons/aleph.svg` is a font-independent outline of the existing
+`AlephGlyph` א, not a new logo. Its history starts at `dbc7d31`; `309e607`
+added the iris variant, leaving the teal brand unchanged. Chromium's
+`CSS.getPlatformFontsForNode` identifies DejaVu Sans as the original Hebrew
+fallback despite the component's `font-serif` class. The vector freezes that
+glyph and uses Nocturne's night `#161826`, teal `#4fb8c4`, 60% border and 10%
+fill. A night canvas makes every PNG opaque; the mark fits inside the maskable
+safe circle. Two consecutive renders with the same browser produce identical
+SHA-256 hashes. No font, network or image-tool dependency is needed to rerender.
+If the brand/tokens change, update the vector and regenerate all four sizes.
+
+The install card's visit means one loaded document (including route changes).
+Memory limits it to one presentation per visit, even if storage is blocked;
+Not now stores a browser-local timestamp for 30 days. A new document can offer
+the card again if persistence failed. No permission request is made here.
+
+Standalone navigation audit (#261): home has New/Continue/row navigation;
+`new`, `beats.new`, `flow.new`, `flow.done`, path, lesson, Beat and Brief routes
+have breadcrumbs and/or the shared Aleph home link, including loading, refused,
+failed, unavailable and flag-off states. Flow setup also has Not now, its receipt
+has Back home, and a running Flow has End flow. The root error has Back to your
+paths. Sign-in has Continue with the provider; its error now also has Back to
+sign in, which clears the error without browser controls. Shared chrome and
+signed-out errors clear the top safe area; body/sheets clear the home indicator.
+The install journey exercises form/error exits and an empty root worker; the
+existing Flow journey exercises lesson-to-receipt navigation.
+
+Desktop Chromium at phone viewport, Safari user-agent/display-mode overrides and
+synthetic safe-area insets are **not a real iPhone**. Real-device install, icon,
+splash, notch/indicator, contained OIDC sign-in, force-quit/reopen and week-long
+use remain unchecked pending authorized hosting and the deferred T0/device gate.
+This work does not establish operational or release acceptance.
