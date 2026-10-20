@@ -35,6 +35,8 @@ afterthought.
 | **5 — Momentum** | 🟡 In progress — streaks shipped **and launched**; goal ring and daily minutes unbuilt | streaks: [PRD](prds/phase-5-streaks.md) · [TDD](tdds/phase-5-streaks.md) |
 | **6 — The analyst** | ✅ Shipped & launched (`analyst` flag on) — a second pillar beside paths, not a deepening of one | [PRD](prds/phase-6-analyst.md) · [TDD](tdds/phase-6-analyst.md) |
 | **Flow** | 🟡 In progress — behind the `flow` flag | [TDD](tdds/flow.md) · [mock](mocks/aleph-flow-mode.html) |
+| **Home Screen app** | Accepted for provisional feature-branch implementation; not shipped, T0 deferred to end | [PRD](prds/home-screen-app.md) · [TDD](tdds/home-screen-app.md) |
+| **Native iOS app** | Conditionally parked; historical reference/fallback, not active delivery | [parked PRD](prds/ios-app.md) · [parked TDD](tdds/ios-app.md) |
 | **Beyond** | ⬜ Unscoped, sequenced against real usage | — |
 
 Three tails hang off the shipped phases and are tracked as open issues rather than
@@ -320,6 +322,20 @@ flow is an ordinary Mark complete, so streaks and Activation see exactly what
 they always have — and nothing new is stored, since a flow is a small record
 kept in the browser tab that runs it. Flashcard drafting is unchanged; only the
 keep/discard moment moves, from every lesson to one batch on the flow's receipt.
+
+## Home Screen app
+
+One learner client: the existing web app made installable on the iPhone Home
+Screen, with Web Push Notifications, a longer session, stored Learner time zone
+and an hourly job for Reminders and away-time Briefs. No offline cache or native
+implementation. [Epic #257](https://github.com/mattjmcnaughton/aleph/issues/257)
+delivers only into `feature/home-screen-app`; it does not authorize main merges
+or production changes. P1–P6 and constitution §8 are approved; native parking is
+conditional. The owner deferred the real-iPhone spike to the end and accepted
+provisional/rework risk. Device and operational gates remain unverified, not
+waived. See the [current execution amendment](tdds/home-screen-app.md#execution-amendment-2026-10-20)
+for mapping #258–#270 and dependencies. Earlier phase descriptions of arrival-only
+Briefs describe the current shipped baseline, not the planned scheduled behavior.
 
 ## Beyond
 

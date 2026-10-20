@@ -1,5 +1,12 @@
 # PRD — The iOS app (native SwiftUI client)
 
+> **Parked (conditional), 2026-10-20.** The accepted
+> [Home Screen app execution amendment](home-screen-app.md#execution-amendment-2026-10-20)
+> supersedes this native implementation plan. T0 is deferred to the end, not passed;
+> native remains the fallback if feasibility fails. This document is historical
+> reference, not live contributor guidance; no native code/backlog changes are part
+> of this work. The historical status and decisions below are preserved.
+
 **Status:** Draft, decisions recorded (§13) · **Owner:** solo builder · **Roadmap item:** none yet — this PRD proposes one (§2.3)
 **References:** [`README.md`](../../README.md) · [`CLAUDE.md` — Two Clients](../../CLAUDE.md#two-clients-web-and-ios) · [`roadmap.md`](../roadmap.md) · [`CONTEXT.md`](../CONTEXT.md) (ubiquitous language) · [`api.md`](../api.md) · [`architecture.md`](../architecture.md) · [`ci.md`](../ci.md) · [`deploy.md`](../deploy.md) · [`metrics.md`](../metrics.md) · [Phase 1 PRD](phase-1-path-generation.md) · [Phase 2 PRD](phase-2-tutor.md) · [Phase 2B PRD](phase-2b-shape-your-path.md) · [Phase 5 streaks PRD](phase-5-streaks.md) · [Phase 6 PRD](phase-6-analyst.md) · [Flow TDD](../tdds/flow.md) · mocks: [MVP mobile](../mocks/aleph-mvp-mobile.html), [phase-2 tutor](../mocks/aleph-phase-2-tutor.html), [path complete](../mocks/aleph-path-complete.html), [Flow mode](../mocks/aleph-flow-mode.html)
 

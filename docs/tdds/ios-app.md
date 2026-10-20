@@ -1,5 +1,12 @@
 # TDD — The iOS app (native SwiftUI client)
 
+> **Parked (conditional), 2026-10-20.** Follow the accepted
+> [Home Screen app execution amendment](home-screen-app.md#execution-amendment-2026-10-20),
+> not this native build plan. T0 is deferred to the end, not passed; native remains
+> the fallback if feasibility fails. Instructions below (including Swift parity,
+> CI and shipping) are historical, not requirements for active Home Screen work.
+> No native implementation or native backlog edits are authorized by this adoption.
+
 **Status:** plan, ready to build · **Owner:** solo builder · **Companion to:** [iOS app PRD](../prds/ios-app.md)
 **References:** [`CLAUDE.md` — Two Clients](../../CLAUDE.md#two-clients-web-and-ios) · [`CONTEXT.md`](../CONTEXT.md) · [`api.md`](../api.md) · [`architecture.md`](../architecture.md) · [`ci.md`](../ci.md) · [`deploy.md`](../deploy.md) · [ADR 0001 — store the last-seen time zone](../adrs/0001-store-last-seen-time-zone.md) · [ADR 0002 — iOS-owned Markdown renderer](../adrs/0002-ios-owned-markdown-renderer.md) · [Flow TDD](flow.md) · [Phase 2 TDD](phase-2-tutor.md) · [Phase 6 TDD](phase-6-analyst.md)
 **Builds on:** the home-screen PoC on [`claude/ios-homescreen-poc`](https://github.com/mattjmcnaughton/aleph/tree/claude/ios-homescreen-poc) (kept as a reference branch, not merged; its CI runs: [record](https://github.com/mattjmcnaughton/aleph/actions/runs/39064335563), [compare](https://github.com/mattjmcnaughton/aleph/actions/runs/39065171978)) (`clients/ios/`, `.github/workflows/ios.yml`)
