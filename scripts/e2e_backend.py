@@ -188,9 +188,8 @@ def create_stub_app() -> FastAPI:
     # reason — but only into the low tens, not the thousands (code-review,
     # ticket AL-560 follow-up: the original `1_000` compounded with the cap
     # above into an unbounded local drain). `reuseExistingServer: !CI` keeps
-    # `aleph_e2e` warm across local re-runs, and every Beat this suite ever
-    # deploys stays a live, claim-eligible row forever after — there is no
-    # Beat-deletion control in this ticket's scope — so each one becomes
+    # `aleph_e2e` warm across local re-runs. W29 deletes its published Beat,
+    # but other journeys leave live rows behind, so each retained Beat becomes
     # claim-eligible again on its own next anchor weekday, and the very next
     # `GET /beats` that day drains and spawns every one of them at once, one
     # real (if stubbed) research run per row, through

@@ -13,7 +13,7 @@
 // posture Phase 1's stub model already gives every other generation surface.
 //
 // **The polling path is exercised for real, not a pre-seeded row.** This spec
-// never injects a Brief into the database or mocks the API — it drives the
+// never injects a Brief into the database or mocks generation — it drives the
 // real deploy form, reads the real `202` response (already `research_state:
 // "researching"`, the claim already committed server-side before the response
 // is built, `routers/v1/beats.py`'s own module doc), waits through the real
@@ -26,6 +26,8 @@
 // what catches a fourth — it times out and fails on exactly that class of
 // bug, rather than a reload quietly finding the server's already-completed
 // state and passing anyway.
+// Deletion additionally simulates a lost response AFTER a real server commit;
+// its retry uses the real 404 and checks same-SPA cached Brief disappearance.
 //
 // **Also covers the AL-530 review carry-over**: "390x844 phone viewport: no
 // horizontal scroll, tap targets >= 44px" could not be verified in jsdom (no
@@ -98,6 +100,7 @@ test.describe("W29 deploy an analyst, get a cited Brief", { tag: "@w29" }, () =>
     // --- open the Brief and read the Sources block ----------------------------
     await publishedRow.locator("a").click();
     await page.waitForURL(/\/briefs\//, { timeout: GENERATION_TIMEOUT });
+    const briefUrl = page.url();
     await expect(page.getByTestId("brief-body")).toBeVisible();
     await expectNoHorizontalOverflow(page);
 
@@ -125,10 +128,55 @@ test.describe("W29 deploy an analyst, get a cited Brief", { tag: "@w29" }, () =>
     // card is ever measured — despite this file's own header naming
     // `beat-card.tsx` among the components it "actually checks". Revisiting
     // home now, with this Beat published, is what actually measures one.
-    await page.goto("/");
+    await page.getByRole("link", { name: "Your beats", exact: true }).click();
     await expectMinTouchTarget(
       page.locator(`[data-testid="beat-list-item"][data-beat-id="${beatId}"]`),
     );
+
+    // Delete only after a second deliberate tap; cancellation keeps the Beat.
+    await page.locator(`[data-beat-id="${beatId}"]`).getByTestId("beat-item-open").click();
+    await expectMinTouchTarget(page.getByRole("button", { name: "Delete Beat" }));
+    await page.getByRole("button", { name: "Delete Beat" }).click();
+    await expect(page.getByText(/This can't be undone/)).toBeVisible();
+    await expectMinTouchTarget(page.getByRole("button", { name: "Keep it" }));
+    await page.getByRole("button", { name: "Keep it" }).click();
+    await expect(page.getByRole("heading", { name: topic, exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Delete Beat" }).click();
+    const confirm = page.getByRole("button", { name: `Confirm deleting ${topic}` });
+    await expectMinTouchTarget(confirm);
+    await expectNoHorizontalOverflow(page);
+    // Commit the real DELETE, then lose its acknowledgement. The retry must
+    // recover from the real server's 404, not claim failure forever.
+    await page.route(`**/api/v1/beats/${beatId}`, async (route) => {
+      if (route.request().method() !== "DELETE") return route.continue();
+      const response = await route.fetch();
+      expect(response.status()).toBe(204);
+      await route.abort("failed");
+      await page.unroute(`**/api/v1/beats/${beatId}`);
+    });
+    await confirm.click();
+    await expect(page.getByText(/We couldn't delete this Beat/)).toBeVisible();
+    const deleted = page.waitForResponse(
+      (response) =>
+        response.url().endsWith(`/beats/${beatId}`) && response.request().method() === "DELETE",
+    );
+    await confirm.click();
+    expect((await deleted).status()).toBe(404);
+    await expect(page).toHaveURL("/");
+    await expect(page.getByTestId("beats-section")).toBeVisible();
+    await expect(page.locator(`[data-beat-id="${beatId}"]`)).toHaveCount(0);
+    // Same app instance: revisit the cached URL without a document reload.
+    await page.evaluate((url) => {
+      window.history.pushState({}, "", url);
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    }, briefUrl);
+    await expect(page.getByTestId("brief-unavailable")).toBeVisible();
+    await expect(page.getByTestId("brief-body")).toHaveCount(0);
+    await expect(page.getByTestId("brief-sources")).toHaveCount(0);
+    await page.goBack();
+    await page.reload();
+    await expect(page.getByTestId("beats-section")).toBeVisible();
+    await expect(page.locator(`[data-beat-id="${beatId}"]`)).toHaveCount(0);
   });
 
   test("a failed research run's retry button meets the phone touch target", async ({ page }) => {

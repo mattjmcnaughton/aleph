@@ -950,7 +950,7 @@ export function retryBeat(id: string): Promise<BeatDetail> {
 
 /** Hard-delete a Beat (also how standing orders change — PRD §4.11: delete
  *  and redeploy). Destructive and not undoable, the `deletePath` precedent —
- *  no caller in this ticket's scope yet. */
+ *  the caller must confirm first. */
 export function deleteBeat(id: string): Promise<void> {
   return apiFetch<void>(apiV1Path(`/beats/${id}`), { method: "DELETE" });
 }
