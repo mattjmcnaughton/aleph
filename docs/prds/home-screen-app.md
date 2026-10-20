@@ -1,8 +1,40 @@
 # PRD — The Home Screen app (aleph on the phone, without a native client)
 
-**Status:** Draft, for owner review · **Owner:** solo builder · **Roadmap item:** proposes replacing *iOS app* (§2.3)
-**References:** [`CONSTITUTION.md`](../../CONSTITUTION.md) · [`CLAUDE.md` — Two Clients](../../CLAUDE.md#two-clients-web-and-ios) · [`CONTEXT.md`](../CONTEXT.md) · [`api.md`](../api.md) · [`deploy.md`](../deploy.md) · [`metrics.md`](../metrics.md) · [iOS app PRD](ios-app.md) · [iOS app TDD](../tdds/ios-app.md) · [ADR 0001 — store the last-seen time zone](../adrs/0001-store-last-seen-time-zone.md) · [Phase 5 streaks PRD](phase-5-streaks.md) · [Phase 6 PRD](phase-6-analyst.md)
+**Status:** Accepted for provisional feature-branch implementation; T0 and release acceptance outstanding · **Owner:** solo builder · **Roadmap item:** Home Screen app (§2.3)
+**References:** [`CONSTITUTION.md`](../../CONSTITUTION.md) · [`CLAUDE.md` — One Client](../../CLAUDE.md#one-client-web-and-home-screen-app) · [`CONTEXT.md`](../CONTEXT.md) · [`api.md`](../api.md) · [`deploy.md`](../deploy.md) · [`metrics.md`](../metrics.md) · [iOS app PRD](ios-app.md) · [iOS app TDD](../tdds/ios-app.md) · [ADR 0001 — store the last-seen time zone](../adrs/0001-store-last-seen-time-zone.md) · [Phase 5 streaks PRD](phase-5-streaks.md) · [Phase 6 PRD](phase-6-analyst.md)
 **Companion:** [Home Screen app TDD](../tdds/home-screen-app.md), which owns the mechanics and the tickets.
+
+## Execution amendment (2026-10-20)
+
+**This amendment takes precedence over the historical draft below**, including its
+proposed/if-accepted wording, spike-first phasing and release language.
+The owner [approved in epic #257](https://github.com/mattjmcnaughton/aleph/issues/257#issuecomment-6280580393)
+P1–P6 and the constitution §8 amendment (already recorded on 2026-10-19).
+P1/P2 adopt one web client and **conditionally park** native; P3 accepts **90 days
+since last visit**, renewed on responses, with signed cookies and **no server-side
+revocation** (logout clears the client cookie). P4 retains the three Notification
+kinds/permission moments without provisional permission; P5 approves the named
+Apple/Google/Mozilla/Microsoft endpoint allowlist; P6 approves `web`, `home_screen`,
+reserved `ios`, and `unknown` event values. These are not open owner proposals.
+
+The owner explicitly deferred **T0 to the END**, accepting provisional/rework risk.
+T0 is not passed; native remains the fallback if feasibility fails. Findings belong
+in TDD §13 after the real-iPhone check, not in an invented acceptance record.
+Delivery is ticket PRs into **`feature/home-screen-app` only**, never `main` in this
+run. No deployment, Auth0 changes, production secrets/data/infrastructure changes,
+paid evals or remote branch deletion are authorized. Human gates are deferred, not
+waived: real-iPhone sign-in, force-quit/reopen, delivery/tap-through for all three
+kinds, week-long use, session return and operational job acceptance remain unverified.
+See the [TDD execution amendment](../tdds/home-screen-app.md#execution-amendment-2026-10-20)
+for the issue mapping and actual implementation dependencies.
+
+**Unresolved, before Notifications UI prep:** §5.4 says install instructions replace
+the toggles in an iPhone Safari tab; TDD §8.8 permits account-wide preferences to be
+edited when the current Device is off. Must an uninstalled iPhone Safari tab show
+only installation instructions, or also editable account-wide preferences (with
+Device enablement unavailable)? Does the latter rule cover `needs_home_screen`,
+not just `off`? No owner choice is recorded; do not silently select either design.
+The Reminder toggle/hour and its pre-prompt belong to T9, not T7b.
 
 > **This PRD proposes a cheaper answer to the problem the iOS app PRD set out to solve.** That
 > PRD's diagnosis stands (§2.1 there): a phone browser tab is a weak place to return to. Its

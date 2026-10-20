@@ -1,7 +1,63 @@
 # TDD — The Home Screen app (installable web app and Web Push)
 
-**Status:** draft plan, for owner review · **Owner:** solo builder · **Companion to:** [Home Screen app PRD](../prds/home-screen-app.md)
+**Status:** Accepted for provisional feature-branch implementation; T0 and release acceptance outstanding · **Owner:** solo builder · **Companion to:** [Home Screen app PRD](../prds/home-screen-app.md)
 **References:** [`CONSTITUTION.md`](../../CONSTITUTION.md) (§1A) · [`CLAUDE.md`](../../CLAUDE.md) · [`CONTEXT.md`](../CONTEXT.md) · [`api.md`](../api.md) · [`architecture.md`](../architecture.md) · [`ci.md`](../ci.md) · [`deploy.md`](../deploy.md) · [ADR 0001 — store the last-seen time zone](../adrs/0001-store-last-seen-time-zone.md) · [iOS app TDD](ios-app.md) (parked if the PRD is accepted; §9 and §10 here restate what this plan keeps from it)
+
+## Execution amendment (2026-10-20)
+
+**This amendment overrides the historical draft below**, especially proposed owner
+decisions, spike-first dependencies, production delivery and optional T7 splitting.
+The [PRD execution amendment](../prds/home-screen-app.md#execution-amendment-2026-10-20)
+records approved P1–P6 and constitution §8; D1, D7, D11 and D14 are no longer
+awaiting those approvals. Native parking is conditional. Signed-cookie sessions
+are approved for 90 days since last visit without server-side revocation.
+The [owner authorization](https://github.com/mattjmcnaughton/aleph/issues/257#issuecomment-6280580393)
+defers T0 to the **end**, accepting provisional/rework risk, not declaring feasibility.
+Do not record spike findings until observed; §13 remains empty. No offline cache,
+native implementation or native backlog changes are in scope.
+
+**Delivery:** ticket PRs target `feature/home-screen-app`, not `main`. Feature-only
+integration is not release acceptance. No deployment, production secrets/data/
+infrastructure or Auth0 changes, paid evals or remote branch deletion are authorized.
+The throwaway T0 branch is not merged. Human and operational gates are deferred,
+not waived or passed: real-iPhone sign-in/force-quit/reopen, declarative payload with
+and without the push handler, tap-through of each kind, week-long use, long-session
+return, and job deployment/image/env/secrets/schedule checks need recorded evidence
+and separate authorization for any production work. CI fakes cannot prove these.
+
+### Ticket-to-issue mapping and provisional dependencies
+
+All issue numbers below are in [mattjmcnaughton/aleph](https://github.com/mattjmcnaughton/aleph/issues/257).
+Dependencies require behavior on the exact base, not merely a closed issue.
+
+| Unit | Issue | Provisional prerequisite / scope |
+| --- | --- | --- |
+| Bootstrap | [#258](https://github.com/mattjmcnaughton/aleph/issues/258) | Feature-branch CI/integration groundwork |
+| T0 | [#259](https://github.com/mattjmcnaughton/aleph/issues/259) | Deferred to end; real-iPhone feasibility, never assumed passed |
+| T1 | [#260](https://github.com/mattjmcnaughton/aleph/issues/260) | Bootstrap; documentation adoption, T0 no longer blocks provisional work |
+| T2 | [#261](https://github.com/mattjmcnaughton/aleph/issues/261) | T1; installability |
+| T3 | [#262](https://github.com/mattjmcnaughton/aleph/issues/262) | T1; Flow default and W34 port |
+| T4 | [#263](https://github.com/mattjmcnaughton/aleph/issues/263) | T1; Delete Beat web port |
+| T5 | [#264](https://github.com/mattjmcnaughton/aleph/issues/264) | T1; approved session lifetime |
+| T6 | [#265](https://github.com/mattjmcnaughton/aleph/issues/265) | T1; time zone and client dimension |
+| T7a | [#266](https://github.com/mattjmcnaughton/aleph/issues/266) | T2, T6; backend push, preferences, sender, Path ready |
+| T7b | [#268](https://github.com/mattjmcnaughton/aleph/issues/268) | T7a; service worker, permission/subscription, Path ready UI, W38 |
+| T8 | [#267](https://github.com/mattjmcnaughton/aleph/issues/267) | T6; job/Beats, no push prerequisite |
+| T9 | [#269](https://github.com/mattjmcnaughton/aleph/issues/269) | T7a, T7b, T8; Reminders/Brief published, W39/W40 |
+| Verification | [#270](https://github.com/mattjmcnaughton/aleph/issues/270) | Implemented units plus deferred T0 and recorded device/operational acceptance |
+
+T7 **is split**, backend first, not optionally split on review size. The Reminder
+toggle, chosen hour and Reminder pre-prompt belong to **T9**; references in §8.7,
+§8.8 and ticket 7 do not pull them forward into T7b. Backend preference schema/defaults
+may still be established in T7a. Review exact-base readiness: native-branch ports
+#248/#250/#253 are relevant prior work but are **not on the T1 baseline**; inspect
+and port deliberately rather than treating native branch behavior as already present.
+
+**Unresolved UI decision for later prep:** PRD §5.4 replaces toggles with install
+instructions in iPhone Safari tabs, while §8.8 below permits account-wide editing
+when a Device is `off`. The owner must clarify whether `needs_home_screen` permits
+editable account-wide preferences alongside install instructions or instructions
+only. No choice is made here; retain this question for T7b/T9 prep/handoff.
 
 > **This document is the implementer's brief.** Where it says **settled**, the owner decided.
 > Where it says **proposed**, the PRD asks the owner to confirm (PRD §11.1). Where it says

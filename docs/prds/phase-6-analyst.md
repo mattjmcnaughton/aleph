@@ -4,12 +4,14 @@
 **Companion to:** [Phase 6 TDD](../tdds/phase-6-analyst.md) — this document owns the product boundary only; the TDD's §14 records where the shipped design corrected this one
 **References:** [`README.md`](../../README.md) · [`roadmap.md`](../roadmap.md) · [`CONTEXT.md`](../CONTEXT.md) (ubiquitous language) · [Phase 1 PRD](phase-1-path-generation.md) · [Phase 2B PRD](phase-2b-shape-your-path.md) · [Phase 3 PRD](phase-3-flashcards.md) · [Phase 5 streaks PRD](phase-5-streaks.md) · [Phase 6 TDD](../tdds/phase-6-analyst.md) · [`architecture.md`](../architecture.md) · [`metrics.md`](../metrics.md) · [`evals.md`](../evals.md) · [`deploy.md`](../deploy.md)
 
-> **Amendment (iOS app): a stored time zone and a scheduler.** §4.2's arrival-only trigger and its
-> "no stored timezone" reasoning below are superseded. The learner's last-seen IANA time zone is now
+> **Planned amendment (Home Screen app, not shipped): a stored time zone and a scheduler.** §4.2's arrival-only trigger and its
+> "no stored timezone" reasoning below are superseded by the accepted plan, not yet by production behavior. The learner's last-seen IANA time zone will be
 > stored on the account ([ADR 0001](../adrs/0001-store-last-seen-time-zone.md)), and an hourly
 > scheduled job runs Beat research and publishes Briefs while the learner is away; `GET /beats` and
 > `GET /beats/{id}` stop draining, while `POST /beats` keeps its immediate first run
-> ([iOS TDD §14](../tdds/ios-app.md#14-the-scheduled-job)). The paragraphs below are kept as the
+> ([Home Screen TDD §10](../tdds/home-screen-app.md#10-the-scheduled-job-ticket-8)). Its
+> [execution amendment](../tdds/home-screen-app.md#execution-amendment-2026-10-20) governs
+> feature-only delivery and deferred T0/device/operational gates. The paragraphs below are kept as the
 > reasoning of the first slice.
 
 > **This document owns the product boundary only.** Schema, the claim protocol, **which
@@ -227,7 +229,7 @@ and the claim is driven by two triggers:
    moment it was written. It waits because the warm moment it exploits does not exist at current
    scale — which means **the first slice runs on arrival alone**.
 
-*(Superseded by ADR 0001 and the iOS TDD's scheduled job — see the amendment at the top.)*
+*(Superseded in the accepted plan by ADR 0001 and the Home Screen TDD's scheduled job — see the amendment at the top; not yet shipped.)*
 **The learner's local time comes from the arrival, so nothing has to be stored.** "Is it Monday
 for this learner" is only ever asked at the moment a request arrives, and a request already
 carries `tz_offset_minutes` — the same value `services/progress_read.py` uses to decide what
