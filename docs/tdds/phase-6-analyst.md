@@ -1,5 +1,12 @@
 # TDD — Phase 6, slice 1: The analyst
 
+> **Planned scheduler amendment (not shipped):** the [Home Screen app TDD §10](home-screen-app.md#10-the-scheduled-job-ticket-8)
+> replaces arrival drains with the hourly job and stored Learner time zone; §9
+> owns Brief published Notifications (never Skipped). Its
+> [execution amendment](home-screen-app.md#execution-amendment-2026-10-20) takes precedence
+> for that future work. This document retains the first slice's arrival-only design;
+> T0, real-device and operational acceptance are still outstanding, native conditionally parked.
+
 **Status:** Draft (complete — §§1–16) · **Owner:** solo builder
 **Companion to:** [Phase 6 PRD — The analyst](../prds/phase-6-analyst.md)
 **References:** [`roadmap.md`](../roadmap.md) · [`CONTEXT.md`](../CONTEXT.md) ·

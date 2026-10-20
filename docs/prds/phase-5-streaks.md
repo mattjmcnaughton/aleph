@@ -5,8 +5,8 @@
 > Path streak semantics are unchanged. Brief reads do not count toward any streak. Earlier
 > Phase 3/6 amendments below are retained as historical decision context only.
 >
-> **Push amendment (iOS app):** the "never a push" rule below is **superseded for opt-in push
-> reminders** by the [iOS app PRD](ios-app.md) (§5.13, decision D6): the iOS app may send a daily
+> **Push amendment (Home Screen app, planned, not shipped):** the "never a push" rule below is **superseded for opt-in push
+> reminders** by the [Home Screen app PRD](home-screen-app.md#execution-amendment-2026-10-20) (§5.4): the web app may send a daily
 > learning reminder and a streak reminder, each **off until the learner turns it on**, **at most
 > once per day** in total, at a **learner-chosen local hour**, and never on a day the learner has
 > already completed a lesson. Everything else this PRD rules out stays out: no e-mail, no in-app
@@ -90,7 +90,7 @@ not a lesson counter.
 
 **Never:** a push, an email, a "you're about to lose your streak" warning, a freeze/repair purchase,
 or a leaderboard. Restraint is the feature. *(Superseded for opt-in push reminders only — see the
-push amendment at the top and the [iOS app PRD](ios-app.md) §5.13.)*
+push amendment at the top and the [Home Screen app PRD](home-screen-app.md) §5.4.)*
 
 **Not in v1:** a chip on the path view or in the desktop sidebar's switcher. The streak surfaces on
 the phone-first home screen and nowhere else (TDD §14, R6).
@@ -168,7 +168,7 @@ instead of arguable.
 
 Weekly goal ring · daily-minutes target · a dedicated stats/progress page · streak freezes, repairs
 or purchases · notifications or email of any kind (opt-in push reminders later allowed by the
-[iOS app PRD](ios-app.md), see the push amendment) · leaderboards or any social surface · milestone
+[Home Screen app PRD](home-screen-app.md), see the push amendment) · leaderboards or any social surface · milestone
 badges (habagou has `next_milestone`; it is a nudge mechanic and this slice does not need one) ·
 per-path heatmaps · a path-view or sidebar streak chip (§3) · timezone as an account setting
 (TDD D3) · counting Attempts or lesson views as activity (§4.2).

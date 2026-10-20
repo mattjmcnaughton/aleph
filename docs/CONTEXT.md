@@ -17,9 +17,10 @@ synonym (say **path**, not "course"; **Quick check**, not "quiz question").
 > [Phase 2B PRD](prds/phase-2b-shape-your-path.md) · [Phase 2B TDD](tdds/phase-2b-shape-your-path.md) ·
 > [Phase 5 streaks PRD](prds/phase-5-streaks.md) · [Phase 5 streaks TDD](tdds/phase-5-streaks.md) ·
 > [Phase 3 PRD](prds/phase-3-flashcards.md) · [Phase 6 PRD](prds/phase-6-analyst.md) ·
-> [Phase 6 TDD](tdds/phase-6-analyst.md) · [iOS app PRD](prds/ios-app.md) and
-> [iOS app TDD](tdds/ios-app.md) (**Learner time zone**, **Reminder**, **Notification**,
-> **Device**). **Teaching style** was added directly, with no PRD or
+> [Phase 6 TDD](tdds/phase-6-analyst.md) · [Home Screen app PRD](prds/home-screen-app.md) and
+> [Home Screen app TDD](tdds/home-screen-app.md) (**Home Screen app**, **Learner time zone**,
+> **Reminder**, **Notification**, **Device**; accepted plan, not yet shipped).
+> **Teaching style** was added directly, with no PRD or
 > TDD of its own: a small, forward-only lesson-generation input (defined in the Generation table).
 
 ## Core domain
@@ -135,7 +136,7 @@ Spec: [Phase 6 PRD](prds/phase-6-analyst.md), [Phase 6 TDD](tdds/phase-6-analyst
 | **Cadence** | How often a Beat may report. A **floor on frequency, not a calendar appointment** (PRD §4.2): *weekly* means "at most one Brief a week", and the promise is that the Beat keeps up, not that it fires at 07:00. **The first slice ships weekly and nothing else** (PRD §4.11) — it is the cadence that strains the novelty gate least and costs 7× less per learner, so the gate is calibrated there before daily is trusted to it. Daily is deferred, not dropped, which is why this stays a named axis rather than collapsing into **Anchor day**. |
 | **Anchor day** | The weekday a learner picks at deployment for a Beat to report on — *Reports on ▾ Monday* — evaluated in the learner's **local** time, and the **only scheduling control the product exposes**. A weekly report is a habit and a habit has a day; **a day, never a time**, because §4.2's trigger model has nothing that could honour 07:00 and offering the control would promise precision the design does not buy (PRD §4.11). The Beat becomes **claimable** as its Anchor day opens (a little before, once **Brief prefetch** exists). Local time is the learner's **Learner time zone**, so the Anchor day can be honoured while the learner is away (by the scheduled job), not only when a request arrives. There is still **no stored delivery time**. (Superseded the original "no stored timezone" rule; see `docs/adrs/0001-store-last-seen-time-zone.md`.) Part of the standing orders, so changing it means deleting and redeploying the Beat (PRD §8 Q5 records that as the first rough edge to revisit). |
 | **Brief continuity** | The rule that Brief *N* is generated aware of Briefs *1…N-1* — their claims and, critically, **their cited Source URLs** — so it reports what *changed* rather than re-establishing the subject. The **Continuity** of the Generation section, pointed at a different problem: lesson continuity prevents re-*teaching*, Brief continuity prevents re-*reporting*, and prior Source URLs are what make "we already covered this" a mechanical check rather than a stylistic hope. Surfaced to the learner as the `Builds on Brief #4` line. |
-| **Brief prefetch** | Making a Beat claimable a little *before* its **Anchor day** opens, so a moment when the process is already warm — Sunday evening, for a Monday Beat — produces the next Brief early and it is genuinely waiting. **Prefetch (+N)** on the time axis: same trick, same latency hidden, "ahead" measured in hours instead of lesson positions. **Deferred from the phase's first slice** (PRD §7.1) — the warm moment it exploits did not exist while the app slept between visits. The iOS PRD's hourly scheduled job now provides that moment, so prefetch becomes possible once that job exists. |
+| **Brief prefetch** | Making a Beat claimable a little *before* its **Anchor day** opens, so a moment when the process is already warm — Sunday evening, for a Monday Beat — produces the next Brief early and it is genuinely waiting. **Prefetch (+N)** on the time axis: same trick, same latency hidden, "ahead" measured in hours instead of lesson positions. **Deferred from the phase's first slice** (PRD §7.1) — the warm moment it exploits did not exist while the app slept between visits. The Home Screen app plan's hourly scheduled job would provide that moment once implemented; prefetch itself remains deferred. |
 | **Skipped** | The outcome when no finding survives the novelty check against prior Briefs: a dated, one-line rail entry saying nothing material happened, instead of a padded Brief. A first-class result the way **Refused** is for a path — and, like Refused, **never conflated with failure**: Skipped means *the analyst found nothing*, and must never become a laundry slot for *we failed to run* (PRD §4.2, §4.6). A Skipped period is the feature working correctly. |
 
 ## Flow
@@ -162,10 +163,10 @@ of this document. Spec: [Flow TDD](tdds/flow.md), mock: [Flow mode](mocks/aleph-
 | **Activated learner** | A learner who has completed **more than 3 lessons** (≥ 4) **on a single path**, each with a recorded **Attempt**, within **7 days** of signup. The unit behind the north-star **Activation rate** (% of new accounts that activate). Signals real value, not curiosity. |
 | **Session** | A run of learner activity with no gap longer than 30 minutes. Used in metrics. |
 | **Day** | A calendar day in the learner's local timezone. Used in metrics ("second distinct day"). |
-| **Learner time zone** | The learner's local time zone, as most recently reported by any client (web or iOS). Never chosen in a setting; it follows the learner as they travel. Every "local" rule reads it when no request is in hand: **Day**, **Active day**, **Anchor day**, and when a **Reminder** is due. A request that carries its own offset still uses that offset for itself. |
+| **Learner time zone** | The learner's local time zone most recently reported by the web client, including the **Home Screen app**; it follows the learner rather than being chosen in a setting. Used for local-day rules when no request is in hand (**Day**, **Active day**, **Anchor day**, **Reminder**); a request carrying its own offset still uses that offset for itself. |
 | **Reminder** | An opt-in daily push notification sent at the learner's chosen local hour. It nudges them to continue learning, and when a **Daily streak** is at stake it says so. At most one a day, and none on a day that is already an **Active day**. |
-| **Notification** | A push message aleph sends to a learner's iPhone. Exactly three kinds exist: **Path ready** (a path's outline finished — ready, refused or failed), the **Reminder**, and **Brief published** (a Beat published a Brief; never for a **Skipped** period). Each kind can be turned off by the learner. A Notification carries plain words and an id to open, never lesson or Brief content. The web has no Notifications. |
-| **Device** | One installation of the iOS app that a learner has signed in on and allowed to receive Notifications. An Account can have several. A Device belongs to whichever Account signed in on it last, and signing out removes it. |
+| **Notification** | A push message aleph sends to a learner's phone or browser: **Path ready** (outline ready, refused or failed), **Reminder**, or **Brief published** (never **Skipped**), each independently switchable by the learner. It carries plain words and an opening target, never lesson or Brief content. |
+| **Device** | One browser or **Home Screen app** where a learner allowed Notifications; an Account can have several. It belongs to whichever Account registered it last and is removed on sign-out or when reported gone. |
 
 ## Design
 
@@ -173,6 +174,7 @@ of this document. Spec: [Flow TDD](tdds/flow.md), mock: [Flow mode](mocks/aleph-
 | --- | --- |
 | **Nocturne** | Aleph's visual system — dark, teal, mobile-first — established in the mocks. New surfaces extend it. |
 | **Mobile-first** | Every surface is designed for a phone first, desktop second. |
+| **Home Screen app** | The existing web app added to an iPhone Home Screen, opening full-screen without browser controls. A presentation of the same client, not a separate native client. |
 | **Sidebar** | The desktop-only left column (≥1024px) holding the Switcher and, on a lesson, the current path's condensed lesson list (the **path rail**). Absent on a phone, and never called "the rail" — that word is the tutor's surface. |
 
 ---
@@ -182,6 +184,11 @@ of this document. Spec: [Flow TDD](tdds/flow.md), mock: [Flow mode](mocks/aleph-
 Some terms name things drawn in the mocks that are **not all built**. Use them, but know their
 phase:
 
+- **Home Screen app**, Web Push **Notifications**, subscription **Devices**, stored
+  **Learner time zone**, and scheduled **Reminders**/Briefs — accepted for provisional
+  feature-branch implementation, **not shipped**; native is conditionally parked.
+  T0 and device/operational acceptance remain outstanding; see the
+  [execution amendment](prds/home-screen-app.md#execution-amendment-2026-10-20).
 - **Tutor** in **lesson scope** — the in-lesson rail, its **Suggestions**, its **Tutor check**, one
   **Conversation** per path, and streamed replies: **shipped and launched (Phase 2)** — AL-270
   flipped the `tutor` flag's global default on, so every learner sees it. Everything in "The

@@ -6,7 +6,7 @@ Read [`CONSTITUTION.md`](CONSTITUTION.md) before planning, implementation, or re
 It owns durable product and technical principles; report conflicts rather than
 silently weakening them to match existing code.
 
-Python web application using FastAPI, uvicorn, OpenTelemetry, uv, ruff, ty, and pytest. Web frontend lives in `src/aleph/web/frontend/`; the native SwiftUI iPhone app lives in `clients/ios/`. The two are kept at feature parity (see "Two Clients" below).
+Python web application using FastAPI, uvicorn, OpenTelemetry, uv, ruff, ty, and pytest. The one active learner client is the React web frontend in `src/aleph/web/frontend/`, including its planned Home Screen presentation (see "One Client" below).
 
 > **Vocabulary is authoritative: [`docs/CONTEXT.md`](docs/CONTEXT.md).** Same word,
 > same meaning, in prose, prompts, and code alike. Use the exact term — **path** not
@@ -86,44 +86,26 @@ src/aleph/web/frontend/tests/e2e/  # Playwright browser suite (E2E, phone viewpo
 - All Python tool config is in `pyproject.toml`.
 - Backend: `just dev-be`. Frontend: `just dev-fe`. Both: `just dev`.
 
-## Two Clients: Web and iOS
+<!-- Preserve historical native-spec links to the former guidance heading. -->
+<a id="two-clients-web-and-ios"></a>
 
-aleph has two frontends over one API: the React web app (`src/aleph/web/frontend/`)
-and the native SwiftUI iPhone app (`clients/ios/`, see
-[`docs/prds/ios-app.md`](docs/prds/ios-app.md)). **They are kept at feature parity.**
+## One Client: Web and Home Screen app
 
-- **A user-facing change lands in both clients in the same PR.** That covers a new
-  screen, a changed flow, new copy, a new state, or a new API field the UI shows. If
-  one side genuinely can't follow in that PR, open a tracked issue for it and link it
-  in the PR description. Never let the two drift silently.
-- **One named exception, and only one.** **Admin tools stay web-only**: the model
-  pickers, the tutor's per-message model override and feature-flag management.
-  **Notifications** are not an exception: they reach a learner on every client able
-  to receive them (Web Push on the web, per the [Home Screen app PRD](docs/prds/home-screen-app.md)
-  and CONSTITUTION.md §8). Anything else a learner can do on one client, they can do
-  on the other.
-- **The API is the contract, and both clients use it unchanged.** Any change under
-  `/api/v1` regenerates the committed OpenAPI document and the Swift client in the
-  same PR. Update `docs/api.md` as you already do. The web and iOS builds must both
-  pass.
-- **Rules that live in a client are written twice and tested twice.** For example:
-  the resume target, the polling cadence and give-up time, Day arithmetic and
-  `tz_offset_minutes`, streak copy, Markdown and Mermaid handling. When you change one
-  on the web, change and test it in Swift too, and the reverse. Prefer moving a rule to
-  the server when that's reasonable, so it exists once.
-- **Same vocabulary.** [`docs/CONTEXT.md`](docs/CONTEXT.md) applies to Swift type names
-  and UI copy exactly as it does to Python and TypeScript.
-- **Same workflow IDs.** An XCUITest that proves a workflow carries the same `W`-number
-  as its Playwright journey.
-- **Auth differs, on purpose.** The web uses the first-party session cookie. iOS uses
-  OIDC (PKCE) bearer tokens. Both resolve to the same user. Don't merge the two flows.
-- **Untrusted model output.** Both clients render the Read passage with no raw HTML and
-  with dangerous URL schemes stripped.
-- **Screenshots.** iOS snapshot reference PNGs are committed under `clients/ios/`, so
-  review visual changes from the PR diff. On a PR, CI only compares against them; CI
-  records and commits new references only on `ios-dev/*` branches, which exist for
-  agents that can't build iOS locally. Use the Playwright suite the same way on the
-  web side.
+The [Home Screen app plan](docs/prds/home-screen-app.md#execution-amendment-2026-10-20)
+uses the existing web client, not a second implementation. Native iOS is
+**conditionally parked**; its [PRD](docs/prds/ios-app.md) and [TDD](docs/tdds/ios-app.md)
+remain historical references. This work requires no Swift changes, native build,
+generated Swift client or native backlog edits. Keep API schemas and `docs/api.md`
+consistent with API changes. Render untrusted Read passages without raw HTML or
+dangerous URL schemes; verify client behavior with web tests.
+
+The owner approved provisional implementation on `feature/home-screen-app`, with
+the real-iPhone T0 spike deferred to the end and rework risk accepted. Neither
+feasibility nor release acceptance has passed. No main merge or production change
+is authorized by this plan. If native returns, CONSTITUTION.md §8's equivalent
+experiences obligation applies again: shared API/vocabulary, tracked parity gaps,
+and independently implemented client rules tested in each active client. Admin
+tools remain web-only; Notifications reach every capable active client.
 
 ## Testing Philosophy
 
@@ -155,17 +137,6 @@ major (**x**.y.z) bump.
 
 If a change needs to reach production, commit it as `fix` (or `feat`) — a
 `chore`/`docs` commit will not deploy.
-
-**iOS-only changes** must not deploy the backend. Give them the **`ios` scope**
-(`feat(ios):`, `fix(ios):`, `test(ios):`): `.releaserc.json` tells semantic-release
-to ignore every `(ios)`-scoped commit, whatever its type, so it cuts no release and
-no deploy. **A commit that touches the backend or the web app must not use the `ios`
-scope**, or that change will never ship. Split a mixed change into one commit per
-side (for example `feat(push): …` and `feat(ios): …`). Until the `.releaserc.json`
-rule lands (iOS TDD ticket 3), use non-releasing types for iOS-only work
-(`chore(ios):`, `ci(ios):`). The iOS app ships through its own workflow: a TestFlight
-upload on every merge to `main` that touches `clients/ios/`, a monthly re-upload
-before the 90-day build expiry, and a manual dispatch.
 
 ## More Information
 
