@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import (  # noqa: TC002 - FastAPI resolves annotatio
     AsyncSession,
 )
 
+from aleph import events
 from aleph.auth import fetch_identity, oauth
 from aleph.authz import is_admin
 from aleph.config import settings
@@ -53,6 +54,9 @@ async def auth_callback(
             )
         token = await client.authorize_access_token(request)
         identity = fetch_identity(token)
+        # The cookie sign-in is the web client's: a new account's
+        # ``account_created`` carries ``client=web`` (TDD §12).
+        events.request_client.set(events.CLIENT_WEB)
         user = await AuthService(session).sign_in(identity)
     except (OAuthError, ValueError) as exc:
         logger.warning("auth_callback_failed", error=str(exc))

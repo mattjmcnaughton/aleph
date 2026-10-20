@@ -222,8 +222,35 @@ def _select_jwk(
     return matches[0] if len(matches) == 1 else None
 
 
+@dataclass(frozen=True)
+class BearerAuthentication:
+    """What an accepted bearer token authenticates.
+
+    ``client_id`` is the OAuth client the token was issued to (``azp``, else
+    ``client_id``; ``None`` when the token names neither), read from the
+    verified claims of *this* token — the ``client`` event dimension (TDD §12)
+    maps it to ``ios`` or ``unknown``.
+    """
+
+    identity: AuthIdentity
+    client_id: str | None
+
+
+def token_client_id(claims: Mapping[str, Any]) -> str | None:
+    """The client a verified token was issued to: ``azp``, else ``client_id``.
+
+    Auth0 and Keycloak access tokens carry ``azp``; RFC 9068 tokens carry
+    ``client_id``. Anything but a non-empty string counts as absent.
+    """
+    for name in ("azp", "client_id"):
+        value = claims.get(name)
+        if isinstance(value, str) and value:
+            return value
+    return None
+
+
 class BearerAuthenticator:
-    """Bearer token -> :class:`AuthIdentity`, with a short identity cache."""
+    """Bearer token -> :class:`BearerAuthentication`, with a short identity cache."""
 
     def __init__(
         self,
@@ -244,14 +271,23 @@ class BearerAuthenticator:
         # concurrent cache misses for one subject make one userinfo call.
         self._locks: dict[tuple[str, str], tuple[asyncio.Lock, int]] = {}
 
-    async def authenticate(self, token: str) -> AuthIdentity:
-        """Verify ``token`` and return the identity it authenticates.
+    async def authenticate(self, token: str) -> BearerAuthentication:
+        """Verify ``token`` and return the identity and client it authenticates.
 
         Every call fully verifies the token; only the userinfo lookup is
         cached, keyed by the *verified* ``(iss, sub)`` so a forged token can
-        never read or poison another subject's entry.
+        never read or poison another subject's entry. The client id always
+        comes from this token's own claims, never from the cache.
         """
         verified = await self._verifier.verify(token)
+        identity = await self._identity(token, verified)
+        return BearerAuthentication(
+            identity=identity, client_id=token_client_id(verified.claims)
+        )
+
+    async def _identity(
+        self, token: str, verified: VerifiedAccessToken
+    ) -> AuthIdentity:
         key = (verified.issuer, verified.subject)
 
         cached = self._cached(key)

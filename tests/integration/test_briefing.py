@@ -361,7 +361,9 @@ async def test_a_published_run_emits_brief_research_completed_with_the_funnel(
 
     await service.run_research(beat_id, date(2026, 8, 3))
 
-    record = assert_event(capfire, events.BRIEF_RESEARCH_COMPLETED)
+    record = assert_event(
+        capfire, events.BRIEF_RESEARCH_COMPLETED, request_scoped=False
+    )
     assert record["beat_id"] == str(beat_id)
     assert record["outcome"] == "published"
     assert record["queries"] > 0
@@ -392,7 +394,9 @@ async def test_a_skipped_run_emits_brief_research_completed(capfire) -> None:
 
     await service.run_research(beat_id, date(2026, 8, 3))
 
-    record = assert_event(capfire, events.BRIEF_RESEARCH_COMPLETED)
+    record = assert_event(
+        capfire, events.BRIEF_RESEARCH_COMPLETED, request_scoped=False
+    )
     assert record["beat_id"] == str(beat_id)
     assert record["outcome"] == "skipped"
     assert record["documents_retrieved"] == 1
@@ -420,7 +424,9 @@ async def test_a_zero_documents_failed_run_emits_brief_research_completed(
 
     await service.run_research(beat_id, date(2026, 8, 3))
 
-    record = assert_event(capfire, events.BRIEF_RESEARCH_COMPLETED)
+    record = assert_event(
+        capfire, events.BRIEF_RESEARCH_COMPLETED, request_scoped=False
+    )
     assert record["beat_id"] == str(beat_id)
     assert record["outcome"] == "failed"
     assert record["documents_retrieved"] == 0
@@ -450,7 +456,9 @@ async def test_retrieval_unavailable_emits_brief_research_completed_failed(
 
     await service.run_research(beat_id, date(2026, 8, 3))
 
-    record = assert_event(capfire, events.BRIEF_RESEARCH_COMPLETED)
+    record = assert_event(
+        capfire, events.BRIEF_RESEARCH_COMPLETED, request_scoped=False
+    )
     assert record["beat_id"] == str(beat_id)
     assert record["outcome"] == "failed"
     # Nothing ever came back to count.
@@ -480,7 +488,9 @@ async def test_a_refused_run_emits_brief_research_completed(capfire) -> None:
 
     await service.run_research(beat_id, date(2026, 8, 3))
 
-    record = assert_event(capfire, events.BRIEF_RESEARCH_COMPLETED)
+    record = assert_event(
+        capfire, events.BRIEF_RESEARCH_COMPLETED, request_scoped=False
+    )
     assert record["beat_id"] == str(beat_id)
     assert record["outcome"] == "refused"
     # The researcher ran (it cost tokens/latency); the analyst never did.
@@ -645,7 +655,9 @@ async def test_duration_ms_includes_the_semaphore_wait(capfire) -> None:
     finally:
         await release_task
 
-    record = assert_event(capfire, events.BRIEF_RESEARCH_COMPLETED)
+    record = assert_event(
+        capfire, events.BRIEF_RESEARCH_COMPLETED, request_scoped=False
+    )
     assert record["outcome"] == "published"
     # Generous slack for scheduler jitter -- this only needs to prove the
     # wait landed inside duration_ms, not measure it precisely.

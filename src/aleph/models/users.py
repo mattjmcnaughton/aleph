@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import datetime  # noqa: TC003 - SQLAlchemy resolves mapped annotations at runtime.
 from typing import TYPE_CHECKING
 
-from sqlalchemy import String, UniqueConstraint
+from sqlalchemy import DateTime, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from aleph.db import Base
@@ -37,6 +38,10 @@ class User(Base, UUIDAuditMixin):
     username: Mapped[str] = mapped_column(String, nullable=False, unique=True)
     display_name: Mapped[str] = mapped_column(String, nullable=False)
     email: Mapped[str | None] = mapped_column(String, nullable=True)
+    time_zone: Mapped[str | None] = mapped_column(Text, nullable=True)
+    time_zone_seen_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     paths: Mapped[list[Path]] = relationship(
         back_populates="user",

@@ -19,6 +19,7 @@ from joserfc.jwk import OctKey
 from aleph.auth import AuthIdentity
 from aleph.bearer import (
     AccessTokenVerifier,
+    BearerAuthentication,
     BearerAuthenticator,
     IdentityProviderUnavailable,
     InvalidBearerToken,
@@ -298,7 +299,9 @@ def authenticator(
 
 @pytest.mark.anyio
 async def test_maps_userinfo_to_the_cookie_flow_identity() -> None:
-    identity = await authenticator(FakeUserInfo(USERINFO)).authenticate(mint())
+    identity = (
+        await authenticator(FakeUserInfo(USERINFO)).authenticate(mint())
+    ).identity
 
     assert identity == AuthIdentity(
         issuer=ISSUER,
@@ -315,7 +318,7 @@ async def test_drops_an_unverified_userinfo_email() -> None:
         {**USERINFO, "email": "x@mattjmcnaughton.com", "email_verified": False}
     )
 
-    identity = await authenticator(userinfo).authenticate(mint())
+    identity = (await authenticator(userinfo).authenticate(mint())).identity
 
     assert identity.email is None
 
@@ -326,9 +329,10 @@ async def test_identity_claims_never_come_from_the_access_token_body() -> None:
     # claim riding in it (absent from userinfo) must not become identity data.
     userinfo = FakeUserInfo({"sub": "subject-1", "preferred_username": "dev"})
 
-    identity = await authenticator(userinfo).authenticate(
+    authenticated = await authenticator(userinfo).authenticate(
         mint(email="admin@mattjmcnaughton.com", email_verified=True)
     )
+    identity = authenticated.identity
 
     assert identity.email is None
 
@@ -358,6 +362,56 @@ async def test_caches_identity_per_subject_but_still_verifies_every_token() -> N
     clock.now += 301
     await auth.authenticate(mint())
     assert userinfo.calls == 2
+
+
+# --- the token's client id, for the ``client`` event dimension (TDD §12) ---- #
+
+
+@pytest.mark.anyio
+async def test_returns_the_tokens_azp_as_its_client_id() -> None:
+    result = await authenticator(FakeUserInfo(USERINFO)).authenticate(mint())
+
+    assert result.client_id == "aleph-ios"
+
+
+@pytest.mark.anyio
+async def test_falls_back_to_client_id_when_there_is_no_azp() -> None:
+    result = await authenticator(FakeUserInfo(USERINFO)).authenticate(
+        mint(azp=None, client_id="some-native-app")
+    )
+
+    assert result.client_id == "some-native-app"
+
+
+@pytest.mark.anyio
+async def test_azp_wins_over_client_id() -> None:
+    result = await authenticator(FakeUserInfo(USERINFO)).authenticate(
+        mint(azp="aleph-ios", client_id="something-else")
+    )
+
+    assert result.client_id == "aleph-ios"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("value", [None, "", 42])
+async def test_a_missing_or_unusable_client_id_is_none(value: object) -> None:
+    result = await authenticator(FakeUserInfo(USERINFO)).authenticate(mint(azp=value))
+
+    assert result.client_id is None
+
+
+@pytest.mark.anyio
+async def test_the_client_id_comes_from_each_token_not_the_identity_cache() -> None:
+    # The identity is cached per subject; the client id is per token, so one
+    # learner on two clients is attributed to each correctly.
+    userinfo = FakeUserInfo(USERINFO)
+    auth = authenticator(userinfo)
+
+    first = await auth.authenticate(mint(azp="aleph-ios"))
+    second = await auth.authenticate(mint(azp="another-client", jti="second"))
+
+    assert userinfo.calls == 1
+    assert (first.client_id, second.client_id) == ("aleph-ios", "another-client")
 
 
 @pytest.mark.anyio
@@ -396,10 +450,10 @@ async def test_concurrent_cache_misses_for_one_subject_call_userinfo_once() -> N
     pending = asyncio.gather(*(auth.authenticate(mint(jti=str(n))) for n in range(5)))
     await asyncio.sleep(0)
     userinfo.release.set()
-    identities = await pending
+    results = await pending
 
     assert userinfo.calls == 1
-    assert {identity.subject for identity in identities} == {"subject-1"}
+    assert {result.identity.subject for result in results} == {"subject-1"}
 
 
 @pytest.mark.anyio
@@ -419,7 +473,7 @@ async def test_a_failed_userinfo_call_does_not_fail_waiting_requests() -> None:
     first, second = await pending
 
     assert isinstance(first, IdentityProviderUnavailable)
-    assert isinstance(second, AuthIdentity)
+    assert isinstance(second, BearerAuthentication)
     assert userinfo.calls == 2
 
 

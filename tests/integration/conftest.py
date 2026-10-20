@@ -589,7 +589,9 @@ def captured_records(capfire: Any, name: str) -> list[dict[str, Any]]:
     ]
 
 
-def assert_event(capfire: Any, name: str) -> dict[str, Any]:
+def assert_event(
+    capfire: Any, name: str, *, request_scoped: bool = True
+) -> dict[str, Any]:
     """The first captured ``name`` record's attributes, manifest fields checked.
 
     Asserting against ``EVENT_FIELDS`` here (rather than a hand-listed set) is
@@ -599,6 +601,10 @@ def assert_event(capfire: Any, name: str) -> dict[str, Any]:
     records = captured_records(capfire, name)
     assert records, f"no {name} event captured"
     attributes = records[0]["attributes"]
-    missing = events.EVENT_FIELDS[name] - set(attributes)
+    expected = events.EVENT_FIELDS[name]
+    if not request_scoped:
+        expected -= events.REQUEST_FIELDS
+        assert not events.REQUEST_FIELDS.intersection(attributes)
+    missing = expected - set(attributes)
     assert not missing, f"{name} missing fields {sorted(missing)}"
     return attributes
