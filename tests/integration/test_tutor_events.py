@@ -382,7 +382,9 @@ async def test_a_stopped_reply_is_recorded_as_stopped_not_failed(
     await response.body_iterator.aclose()  # ty: ignore[unresolved-attribute]
     release.set()
 
-    completed = assert_event(capfire, events.TUTOR_REPLY_COMPLETED)
+    completed = assert_event(
+        capfire, events.TUTOR_REPLY_COMPLETED, request_scoped=False
+    )
     assert completed["outcome"] == "stopped"
     assert completed["success"] is False
     assert completed["workflow"] == "W9", "an abort is not a failure workflow"

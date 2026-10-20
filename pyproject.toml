@@ -41,6 +41,8 @@ dependencies = [
     # transitively via authlib, whose own `authlib.jose` is deprecated in favour
     # of joserfc (same maintainer), so this adds no new package to the lock.
     "joserfc>=1.7.4",
+    # IANA zones remain available in the slim runtime without system tzdata.
+    "tzdata>=2026.1",
 ]
 
 [project.urls]

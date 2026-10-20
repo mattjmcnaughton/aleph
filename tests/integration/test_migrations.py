@@ -76,6 +76,7 @@ async def _enum_types(database_url: str) -> set[str]:
 # otherwise read as "step N's downgrade dropped it". Grows with each such step.
 LATER_COLUMNS: dict[str, set[str]] = {
     "paths": {"teaching_style"},  # 0015_path_teaching_style
+    "users": {"time_zone", "time_zone_seen_at"},  # 0017_user_time_zone
 }
 
 
@@ -485,6 +486,7 @@ def test_earlier_tables_keep_their_columns_through_the_shaping_reversal(
         "messages": {"proposal"},
         "lessons": {"revision_instruction"},
         "paths": {"title", "guidance", "teaching_style"},
+        "users": {"time_zone", "time_zone_seen_at"},
     }
     assert {
         table: columns - added.get(table, set()) for table, columns in before.items()
@@ -1786,7 +1788,7 @@ def test_removal_migration_deletes_only_retired_data_and_schema(
     before = asyncio.run(_retained_removal_rows(database_url))
     assert all(len(rows) == 1 for rows in before.values())
 
-    run_alembic(database_url, "head")
+    run_alembic(database_url, REMOVAL_HEAD)
 
     tables = asyncio.run(_tables(database_url))
     assert not (set(FLASHCARDS_TABLES) | {SETTINGS_TABLE}) & tables
@@ -1828,3 +1830,18 @@ def test_removal_migration_fresh_head_and_schema_only_round_trip(
     assert not (set(FLASHCARDS_TABLES) | {SETTINGS_TABLE}) & asyncio.run(
         _tables(database_url)
     )
+
+
+def test_time_zone_migration_nullable_and_reversible(isolated_database: str) -> None:
+    database_url = isolated_database
+    at_head = asyncio.run(_columns(database_url, "users"))
+    for column in ("time_zone", "time_zone_seen_at"):
+        assert column in at_head
+        assert asyncio.run(_is_nullable(database_url, "users", column))
+    run_alembic(database_url, REMOVAL_HEAD, downgrade=True)
+    assert asyncio.run(_columns(database_url, "users")) == at_head - {
+        "time_zone",
+        "time_zone_seen_at",
+    }
+    run_alembic(database_url, "0017_user_time_zone")
+    assert asyncio.run(_columns(database_url, "users")) == at_head

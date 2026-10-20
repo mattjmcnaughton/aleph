@@ -33,6 +33,7 @@
 // heartbeats and the stop race to drift apart.
 
 import { ApiError, apiErrorFrom, apiV1Path } from "./api";
+import { clientHeaders } from "./client-headers";
 
 /** How a learner message was entered — the §7 entry-mix datum (docs/api.md). */
 export type TutorMessageSource = "typed" | "suggestion";
@@ -230,7 +231,7 @@ async function streamReply(
 ): Promise<TutorStreamDone> {
   const response = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: clientHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(body),
     signal,
   });

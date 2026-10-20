@@ -17,11 +17,17 @@ the assertion here *is* the emitted interaction, TDD §12).
 
 from __future__ import annotations
 
+import asyncio
 import uuid
+from typing import TYPE_CHECKING
 
 import pytest
 
 from aleph import events
+from aleph.services.lifecycle import TaskRegistry
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 
 class _Recorder:
@@ -41,10 +47,19 @@ class _Recorder:
 
 
 @pytest.fixture
-def recorder(monkeypatch: pytest.MonkeyPatch) -> _Recorder:
+def recorder(monkeypatch: pytest.MonkeyPatch) -> Iterator[_Recorder]:
     rec = _Recorder()
     monkeypatch.setattr(events.structlog, "get_logger", rec.get_logger)
-    return rec
+    # Start from "no request in hand" whatever an earlier test left bound, so
+    # the exact field sets below are the job-shaped ones (no ``client``).
+    token = events.request_client.set(None)
+    yield rec
+    events.request_client.reset(token)
+
+
+@pytest.fixture
+def anyio_backend() -> str:
+    return "asyncio"
 
 
 ACCOUNT = uuid.UUID("11111111-1111-4111-8111-111111111111")
@@ -880,7 +895,13 @@ def _drive_every_emitter() -> None:
 
 
 def test_manifest_matches_real_emission(recorder: _Recorder) -> None:
-    _drive_every_emitter()
+    # Inside a request (here: an iOS one) every event carries ``client``, so the
+    # manifest's common ``client`` field is anchored like any other.
+    token = events.request_client.set("ios")
+    try:
+        _drive_every_emitter()
+    finally:
+        events.request_client.reset(token)
 
     emitted = {event: set(fields) for event, fields in recorder.records}
 
@@ -889,3 +910,74 @@ def test_manifest_matches_real_emission(recorder: _Recorder) -> None:
     assert set(emitted) == set(events.EVENT_FIELDS)
     for event, fields in events.EVENT_FIELDS.items():
         assert emitted[event] == set(fields), event
+
+
+def test_outside_a_request_no_event_carries_client(recorder: _Recorder) -> None:
+    """Work nothing request-shaped started (the scheduled job, AL-615; the
+    reconciler today) emits every manifest field except ``client`` (TDD §12)."""
+    _drive_every_emitter()
+
+    emitted = {event: set(fields) for event, fields in recorder.records}
+
+    assert set(emitted) == set(events.EVENT_FIELDS)
+    for event, fields in events.EVENT_FIELDS.items():
+        assert emitted[event] == set(fields) - {"client"}, event
+
+
+def test_client_is_a_request_field_of_every_event() -> None:
+    assert frozenset({"client"}) == events.REQUEST_FIELDS
+    for event, fields in events.EVENT_FIELDS.items():
+        assert fields >= events.REQUEST_FIELDS, event
+
+
+@pytest.mark.parametrize("client", ["web", "home_screen", "ios", "unknown"])
+def test_the_request_client_rides_the_event(recorder: _Recorder, client: str) -> None:
+    token = events.request_client.set(client)
+    try:
+        events.emit_path_deleted(account_id=ACCOUNT, path_id=PATH)
+    finally:
+        events.request_client.reset(token)
+
+    assert recorder.records == [
+        (
+            "path_deleted",
+            {
+                "account_id": str(ACCOUNT),
+                "path_id": str(PATH),
+                "workflow": "W5",
+                "client": client,
+            },
+        )
+    ]
+
+
+@pytest.mark.anyio
+async def test_a_task_spawned_from_a_request_inherits_its_client(
+    recorder: _Recorder,
+) -> None:
+    """Outline generation runs in a task the request spawned (``TaskRegistry``,
+    ``asyncio.create_task``); its events belong to the client that caused them.
+    Work spawned from outside any request (the reconciler, the job) has none."""
+    registry = TaskRegistry()
+
+    async def background(path_id: uuid.UUID) -> None:
+        events.emit_path_deleted(account_id=ACCOUNT, path_id=path_id)
+
+    async def request() -> list[asyncio.Task[None]]:
+        # What ``dependencies._bind_user_to_request`` does for the request.
+        events.request_client.set("ios")
+        return [
+            registry.spawn(background(PATH)),
+            asyncio.create_task(background(LESSON)),
+        ]
+
+    # Each request runs in its own task, so its binding never leaks out of it.
+    await asyncio.gather(*await asyncio.create_task(request()))
+    # Started from outside any request, like the reconciler's resume tasks.
+    await registry.spawn(background(BEAT))
+
+    clients = {
+        fields["path_id"]: fields.get("client") for _, fields in recorder.records
+    }
+    assert clients == {str(PATH): "ios", str(LESSON): "ios", str(BEAT): None}
+    assert events.request_client.get() is None

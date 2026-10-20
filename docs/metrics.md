@@ -15,6 +15,35 @@ queries / dashboard tiles in Logfire (AL-103).
 
 ## The events (PRD §5.7)
 
+### Client attribution (Home Screen TDD §7)
+
+Every request-caused product event has a common `client` attribute:
+`home_screen` for cookie requests reporting exact
+`X-Aleph-Display-Mode: standalone`, `web` for other cookie requests (including
+missing or invalid mode), `ios` for a verified bearer client mapped to that
+label, and `unknown` for an unmapped bearer client. `OIDC_CLIENT_MAP` accepts
+comma-separated `client-id:label` entries (default `aleph-ios:ios`); malformed
+entries are ignored. The verified token's `azp`, else `client_id`, is used on
+every request, not the cached identity. The cookie sign-in callback records
+`web` because navigation does not carry the API display-mode header.
+
+The `web`/`home_screen` split is **client-reported measurement, never an
+authorization boundary** or a trusted installation count. Request-spawned
+generation tasks inherit the initiating client through a ContextVar. Independent
+job/reconciler work has no `client`; historical events without the field remain
+unattributed rather than being backfilled as web. Account identity is unchanged
+across clients. `EVENT_FIELDS` includes this conditional common field and tests
+anchor both request and independent-job emission.
+
+Home Screen PRD §7 analyses can group the same `lesson_viewed`,
+`lesson_completed`, `path_created` and `brief_read` records by
+`attributes ->> 'client'`: report Home Screen adoption, share of Active days,
+return by first observed client, and client view drift. Preserve account/local
+Day definitions and exclude unattributed job events from client denominators;
+do not infer a device or installation from this hint. Sign-in failure attribution
+is not a new product event in this ticket. Native-only saved queries from the
+parked plan are not imported.
+
 Each event is a Logfire log record whose `span_name` is the event name and whose
 fields are record `attributes`. Every event carries `account_id` and a `workflow`
 tag (§12), plus the ids that apply. The record's own timestamp is the event time.

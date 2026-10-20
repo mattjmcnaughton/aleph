@@ -1,4 +1,5 @@
 import { skipToken } from "@tanstack/react-query";
+import { http, HttpResponse } from "msw";
 import { describe, expect, it, vi } from "vitest";
 import {
   beatDeployReceivedOffsets,
@@ -9,6 +10,7 @@ import {
 } from "../mocks/beats";
 import { configurePaths, seedPath } from "../mocks/paths";
 import { progressReceivedOffsets, progressRequestCount } from "../mocks/progress";
+import { server } from "../mocks/server";
 import {
   ApiError,
   BEATS_LIST_QUERY_KEY,
@@ -25,6 +27,7 @@ import {
   type PathSummary,
   beatQueryKey,
   beatQueryOptions,
+  apiFetch,
   beatsListQueryOptions,
   deployBeat,
   isBeatDetailTerminal,
@@ -40,6 +43,37 @@ import {
   retryBeat,
   updatePathTitle,
 } from "./api";
+
+it.each([
+  { matches: true, legacy: false, standalone: true },
+  { matches: false, legacy: false, standalone: false },
+  { matches: false, legacy: true, standalone: true },
+])(
+  "apiFetch reports zone and display mode (%s) preserving caller headers",
+  async ({ matches, legacy, standalone }) => {
+    const matchMedia = vi
+      .spyOn(window, "matchMedia")
+      .mockReturnValue({ matches } as MediaQueryList);
+    vi.stubGlobal("navigator", Object.create(navigator, { standalone: { value: legacy } }));
+    const expectedZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    let seen: Headers | undefined;
+    server.use(
+      http.get("/api/v1/_headers", ({ request }) => {
+        seen = request.headers;
+        return HttpResponse.json({});
+      }),
+    );
+    try {
+      await apiFetch("/api/v1/_headers", { headers: new Headers({ "X-Caller": "kept" }) });
+      expect(seen?.get("X-Aleph-Time-Zone")).toBe(expectedZone);
+      expect(seen?.get("X-Aleph-Display-Mode")).toBe(standalone ? "standalone" : "browser");
+      expect(seen?.get("X-Caller")).toBe("kept");
+    } finally {
+      matchMedia.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  },
+);
 
 // Terminal-state predicates for the path-view poll (TDD §5.4/§14). These decide
 // when the shared polling helper stops, so they carry real reachable-state risk:
