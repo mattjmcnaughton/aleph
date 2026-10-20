@@ -16,6 +16,7 @@ from aleph.config import Settings
 
 _VALID_PROD = {
     "env": "production",
+    "public_base_url": "https://aleph.example",
     "session_secret_key": "a-real-random-64-char-production-secret",
     "oidc_issuer": "https://tenant.auth0.com",
     "oidc_client_id": "prod-client",

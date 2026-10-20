@@ -22,6 +22,53 @@ These hints grant no authorization and are not OpenAPI parameters. A request's
 `tz_offset_minutes` continues to govern that request's local-day arithmetic;
 the stored zone does not replace it. See [metrics.md](metrics.md) for attribution.
 
+## Web Push Notifications (provisional Home Screen backend)
+
+All five operations below require the usual session cookie or bearer token
+(`401` otherwise). Client subscription controls arrive separately in #268;
+Reminder scheduling and Brief published triggers arrive in #269.
+
+| Method | Path | Request | Response |
+| ------ | ---- | ------- | -------- |
+| GET | `/api/v1/push-config` | — | `200 {vapid_public_key}`; `404` when no VAPID private key is configured |
+| POST | `/api/v1/devices` | `{endpoint, keys: {p256dh, auth}}` | `200 {id}`; atomic endpoint upsert refreshes keys and moves ownership to the registering Account |
+| DELETE | `/api/v1/devices/{id}` | — | `204`, including absent IDs; `404` for another Account's Device |
+| GET | `/api/v1/notification-preferences` | — | `200` preference object below |
+| PUT | `/api/v1/notification-preferences` | preference object | `200` saved preference object |
+
+Preferences are account-wide, not per Device. A missing row reads as
+`{reminder_enabled: false, reminder_hour: 20, path_ready_enabled: true,
+brief_published_enabled: true}`. `reminder_hour` is an integer from 0 to 23;
+invalid values are `422`. PUT omitted fields take the same defaults.
+
+Registration accepts browser `PushSubscription.toJSON()` (extra browser fields
+are ignored). Endpoint length is at most 4096; it must be HTTPS, with no
+credentials, explicit port (including `:443`), fragment, whitespace or backslash.
+Hosts must equal or be a dot-boundary subdomain of `push.apple.com`,
+`fcm.googleapis.com`, `push.services.mozilla.com`, or `notify.windows.com`.
+IP addresses and lookalikes are rejected. Disallowed endpoints return `422`
+with `error.code=push_endpoint_not_allowed`. Keys must be base64url: `p256dh`
+is a valid uncompressed 65-byte P-256 point, `auth` a 16-byte secret. Invalid
+keys return `422 validation_error`. Never publish subscription URLs or keys.
+
+Path ready sends after a winning outline settlement has committed (ready,
+refused or failed), to only that Account's current Devices when enabled.
+`delivered` means **accepted by the push service**, not displayed on a phone.
+404/410 removes only the matching Device registration; other failures do not
+remove it. Sends are best effort, without retries or an outbox. Concurrent
+generation/polls cannot resend one settlement; an explicit failed-path retry
+can notify again. A crash after settlement may lose the Notification. An
+outdated callback is suppressed if its generation fence/status no longer match.
+Delivery holds a bounded per-Device database lock so re-registration/sign-out
+cannot overtake an in-flight old-Account send. Already accepted pushes cannot
+be revoked by sign-out. Push failures never change durable generation status.
+
+The encrypted declarative payload is `{web_push: 8030, notification: {title:
+"aleph", body, navigate, tag, lang: "en"}}`, with a same-site absolute target.
+Only plain copy and an opening target are sent, never lesson or Brief content.
+FastAPI's runtime `/openapi.json` describes these operations; this repository
+has no committed generated contract artifact or active Swift client.
+
 ## Health
 
 | Method | Path | Description |

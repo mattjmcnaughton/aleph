@@ -13,6 +13,7 @@ from aleph.models.beat import Beat
 from aleph.models.beat_research_run import BeatResearchRun
 from aleph.models.brief import Brief, BriefSource
 from aleph.models.conversation import Conversation
+from aleph.models.device import Device
 from aleph.models.enums import (
     BeatResearchState,
     BriefKind,
@@ -28,9 +29,11 @@ from aleph.models.enums import (
 from aleph.models.feature_flags import UserFeatureOverride
 from aleph.models.lesson import Lesson
 from aleph.models.message import Message
+from aleph.models.notification_preferences import NotificationPreferences
 from aleph.models.path import Path
 from aleph.models.path_change import PathChange
 from aleph.models.quick_check import QuickCheck
+from aleph.models.reminder_send import ReminderSend
 from aleph.models.unit import Unit
 from aleph.models.users import User
 
@@ -44,18 +47,21 @@ __all__ = [
     "BriefSource",
     "Conversation",
     "ConversationKind",
+    "Device",
     "Lesson",
     "LessonGenerationState",
     "Level",
     "Message",
     "MessageRole",
     "MessageSource",
+    "NotificationPreferences",
     "Path",
     "PathChange",
     "PathChangeKind",
     "PathChangeStatus",
     "PathStatus",
     "QuickCheck",
+    "ReminderSend",
     "Unit",
     "User",
     "UserFeatureOverride",

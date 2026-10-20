@@ -24,10 +24,13 @@ def restored_live_settings() -> Iterator[Settings]:
     are restored too.
     """
     from aleph.config import settings as live_settings
+    from aleph.services.notifications import notification_service
 
     snapshot = live_settings.model_dump()
+    sender = notification_service.sender
     try:
         yield live_settings
     finally:
         for name, value in snapshot.items():
             setattr(live_settings, name, value)
+        notification_service.sender = sender

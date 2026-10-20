@@ -22,6 +22,7 @@ primary_region = 'ewr'
   # session cookie is forced Secure. It is deliberately committed rather than a
   # secret — forgetting it would silently *disable* those guards.
   ENV = 'production'
+  PUBLIC_BASE_URL = 'https://aleph.mattjmcnaughton.com'
   LOG_LEVEL = 'INFO'
   LOG_FORMAT = 'json'
   # No HOST/PORT: the image's CMD hardcodes `--host 0.0.0.0 --port 8000` and

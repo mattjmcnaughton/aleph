@@ -168,6 +168,7 @@ def test_non_stub_production_config_is_fine_for_new_slots() -> None:
     settings = Settings(
         env="production",
         model_research="anthropic/claude-sonnet-5",
+        public_base_url="https://aleph.example",
         model_brief="anthropic/claude-sonnet-5",
         session_secret_key="a-real-random-production-secret",
         oidc_issuer="https://tenant.auth0.com",

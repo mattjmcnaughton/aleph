@@ -24,8 +24,10 @@ from __future__ import annotations
 
 import asyncio
 import uuid  # noqa: TC003 - pydantic resolves the Shift*Request classes' annotations at class-definition time.
+from dataclasses import asdict
 from typing import TYPE_CHECKING, Annotated
 
+from cryptography.hazmat.primitives.asymmetric import ec
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 from sqlalchemy import func, update
@@ -37,6 +39,8 @@ from aleph.config import MODEL_SLOTS, STUB_MODEL_ID, settings
 from aleph.db import get_session
 from aleph.models import Lesson
 from aleph.services.briefing import briefing_service
+from aleph.services.notifications import notification_service
+from aleph.services.push import InMemoryPushSender, encode_key, public_bytes
 from aleph.services.retrieval import StubRetriever
 
 if TYPE_CHECKING:
@@ -245,6 +249,21 @@ def create_stub_app() -> FastAPI:
 
     app = create_app()
     app.state.retriever = retriever
+    # Enable subscription discovery with a fresh test-only pair. The sender is
+    # always in-memory, even when the orb has live VAPID environment variables.
+    key = ec.generate_private_key(ec.SECP256R1())
+    settings.vapid_private_key = encode_key(
+        key.private_numbers().private_value.to_bytes(32)
+    )
+    settings.vapid_public_key = encode_key(public_bytes(key.public_key()))
+    settings.public_base_url = "http://127.0.0.1:5300"
+    sender = InMemoryPushSender(settings.public_base_url)
+    notification_service.sender = sender
+
+    @app.get("/__e2e__/pushes")
+    async def pushes() -> list[dict]:
+        return [asdict(push) for push in sender.pushes]
+
     # Mounted **only here** — never by ``create_app`` (D11, TDD §11): the
     # production factory has no reference to this module at all, which is the
     # whole guarantee ``tests/unit/test_smoke.py`` pins.

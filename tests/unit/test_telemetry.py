@@ -106,7 +106,9 @@ def test_setup_telemetry_instruments_each_app(monkeypatch) -> None:
         telemetry, "_configure_logfire", lambda: configured.append(True)
     )
     monkeypatch.setattr(
-        telemetry.logfire, "instrument_fastapi", lambda app: instrumented.append(app)
+        telemetry.logfire,
+        "instrument_fastapi",
+        lambda app, **kw: instrumented.append(app),
     )
 
     first, second = FastAPI(), FastAPI()
