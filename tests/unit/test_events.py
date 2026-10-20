@@ -785,6 +785,10 @@ def test_a_failing_shaping_emitter_never_breaks_the_request_path(
 
 
 def _drive_every_emitter() -> None:
+    events.emit_notification_sent(
+        account_id=ACCOUNT, kind="path_ready", outcome="disabled"
+    )
+    events.emit_device_removed(account_id=ACCOUNT, reason="gone")
     events.emit_account_created(account_id=ACCOUNT)
     events.emit_path_created(account_id=ACCOUNT, path_id=PATH, path_level="new_to_it")
     events.emit_outline_generated(

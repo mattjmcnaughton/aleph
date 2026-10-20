@@ -92,6 +92,7 @@ def test_non_stub_production_config_is_fine() -> None:
     settings = Settings(
         env="production",
         model_outline="anthropic/claude-sonnet-5",
+        public_base_url="https://aleph.example",
         session_secret_key="a-real-random-production-secret",
         oidc_issuer="https://tenant.auth0.com",
         oidc_client_id="prod-client",

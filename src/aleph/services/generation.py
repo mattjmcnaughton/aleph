@@ -86,6 +86,7 @@ from aleph.repositories import (
     QuickCheckRepository,
     UnitRepository,
 )
+from aleph.services.notifications import NotificationService, notification_service
 from aleph.services.openrouter import resolve_model
 
 if TYPE_CHECKING:
@@ -269,8 +270,10 @@ class GenerationOrchestrator:
         outline_caps: OutlineCaps | None = None,
         lesson_caps: LessonCaps | None = None,
         model_slot: ModelSlot = contextlib.nullcontext,
+        notifications: NotificationService = notification_service,
     ) -> None:
         self._session_factory = session_factory
+        self._notifications = notifications
         self._spawn = spawn
         self._resolve_model = resolve_model_fn
         self._config = config
@@ -458,7 +461,10 @@ class GenerationOrchestrator:
                 # ``_run_claimed_outline``.
                 logger.exception("outline_task_failed", path_id=str(path_id))
                 with contextlib.suppress(Exception):
-                    await self._mark_outline_failed(path_id, claim.fence)
+                    if await self._mark_outline_failed(path_id, claim.fence):
+                        self._notify_outline(
+                            path_id, claim.account_id, claim.fence, "failed"
+                        )
                 return
 
         if ready:
@@ -514,6 +520,7 @@ class GenerationOrchestrator:
         if isinstance(output, Refusal):
             # A refusal still ran the model (it cost tokens/latency, W7).
             if await self._mark_outline_refused(path_id, fence, output.message):
+                self._notify_outline(path_id, account_id, fence, "refused")
                 events.emit_outline_generated(
                     account_id=account_id,
                     path_id=path_id,
@@ -527,6 +534,7 @@ class GenerationOrchestrator:
 
         ready = await self._persist_outline(path_id, fence, output)
         if ready:
+            self._notify_outline(path_id, account_id, fence, "ready")
             events.emit_outline_generated(
                 account_id=account_id,
                 path_id=path_id,
@@ -550,12 +558,31 @@ class GenerationOrchestrator:
         A lost fence (a stale re-claim already owns the row) is a silent no-op and
         emits nothing, so a real failure is counted exactly once (W8, §5.5)."""
         if await self._mark_outline_failed(path_id, fence):
+            self._notify_outline(path_id, account_id, fence, "failed")
             events.emit_outline_generated(
                 account_id=account_id,
                 path_id=path_id,
                 outcome="failed",
                 duration_ms=_elapsed_ms(started),
             )
+
+    def _notify_outline(
+        self,
+        path_id: uuid.UUID,
+        account_id: uuid.UUID,
+        fence: datetime.datetime,
+        outcome: str,
+    ) -> None:
+        # Only called after the winning settlement committed. Use the lifecycle's
+        # tracked spawn, not an unowned background task. Dispatch failure must not
+        # turn a durable ready/refused outcome into an outline failure.
+        pending = self._notifications.path_ready(path_id, account_id, fence, outcome)
+        try:
+            self._spawn(pending)
+        except Exception:
+            pending.close()
+            with contextlib.suppress(Exception):
+                logger.warning("notification_dispatch_failed")
 
     async def _claim_outline(
         self, path_id: uuid.UUID, *, retry: bool

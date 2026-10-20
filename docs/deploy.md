@@ -589,6 +589,42 @@ something else is holding 8000 (the only port the smoke publishes).
 | OIDC | configured but never contacted (discovery is lazy; the one authenticated check signs its own session cookie) | Auth0 | n/a |
 | `ENV` | `production` — on purpose, so the guards are exercised | `production` | `production` |
 
+## Web Push configuration (provisional; not provisioned by #266)
+
+`PUBLIC_BASE_URL` must be an HTTPS origin when `ENV=production`, even with push
+disabled; `fly.toml` supplies `https://aleph.mattjmcnaughton.com`. This source
+configuration change is not a deployment. The Compose smoke uses a synthetic
+HTTPS origin and never sends push.
+
+`VAPID_PRIVATE_KEY` is optional and **unset by default**. Without it,
+`GET /api/v1/push-config` returns 404 and the Null sender records `disabled`,
+never success and never a network request. Existing generation still works.
+Setting or removing this credential requires separately authorized operations;
+no production secrets or subscriptions have been provisioned in this ticket.
+
+`just vapid-keys` generates a fresh P-256 pair locally and prints
+`VAPID_PRIVATE_KEY` (raw base64url scalar) and `VAPID_PUBLIC_KEY` (uncompressed
+base64url point). **The output is secret material: do not put it in logs,
+screenshots, commits or chat.** The private key also accepts unencrypted PEM.
+`VAPID_PUBLIC_KEY` may be omitted (derived at startup); a supplied mismatch
+fails startup. Retain a stable pair: rotating it requires browser subscriptions
+to be recreated. Never reuse the signing key as the ephemeral ECDH key.
+
+The sender follows [RFC8291](https://www.rfc-editor.org/rfc/rfc8291) (single
+aes128gcm record, rs4096) and [RFC8292](https://www.rfc-editor.org/rfc/rfc8292)
+(ES256, audience=push endpoint origin, subject=PUBLIC_BASE_URL, 12-hour expiry,
+cached per audience until one hour before expiry). TTLs are 3600/21600/86400
+seconds for Path ready/Reminder/Brief published; Topic is the first 24 bytes of
+SHA-256 of the logical tag, base64url encoded (32 characters). Redirects are
+disabled, endpoints are revalidated at send time, ambient HTTP proxy settings
+are ignored, and each network send times out after 10 seconds with no retry.
+Delivery outcomes and gone removals emit credential-free product events.
+
+No job scheduling, live provider delivery, phone display or tap-through is
+verified here. Those remain T0/T7b/T9 and operational acceptance gates. In the
+test-only `scripts/e2e_backend.py` factory the InMemory sender records sends at
+`GET /__e2e__/pushes`; production exposes no e2e routes.
+
 ## Troubleshooting
 
 | Symptom | What to check |
