@@ -643,8 +643,10 @@ test-only `scripts/e2e_backend.py` factory the InMemory sender records sends at
 ## Scheduled machines
 
 Home Screen T8 adds a finite hourly `python -m aleph.jobs.tick` process. It does
-not start HTTP, a reconciler, or detached web tasks. T8 runs the Beat step only;
-T9 adds Reminders and Brief published delivery. Device and operational acceptance
+not start HTTP, a reconciler, or detached web tasks. The steps run Reminders first,
+then Beats, each with its own deadline. Winning durable Brief publications from
+the job, creation or retry notify after commit; Skipped/lost fences never notify.
+Push failures cannot undo publication. Device and operational acceptance
 remain outstanding: no real scheduled Machine was created during implementation.
 
 `deploy/schedules.toml` declares the Machines; `fly.toml` cannot declare schedules.
@@ -700,6 +702,39 @@ flyctl machine run --app <app> --region <primary_region> --restart no \
 Locally, `uv run python -m aleph.jobs.tick` uses configured database and retrieval/
 model credentials; do not run against shared data or live providers as a test.
 The disposable-Postgres integration suite uses fake retrieval/models instead.
+Reminders scan opted-in accounts with Devices and a stored IANA zone in keyset
+pages of 100 (no UTC fallback), comparing the local hour with `>=` using time
+sampled after each account's lock, not a frozen tick-start date. Completion
+dates use the zone's historical rules at each instant, not today's fixed offset.
+An Active day suppresses the Reminder; otherwise its copy reflects the current
+Daily streak, targeting the first available lesson in the existing API path order,
+or Your paths when none is available. Home and Reminders use the same server-owned
+`resume_path` rule; `GET /paths` exposes nullable `resume_path_id` to clients.
+Deploy the server first: a new client against an older response safely omits the
+Continue card rather than inventing a target (the path list still works).
+
+The `(user_id, local_date)` insert-on-conflict claim commits **before** sending to
+Devices. `sent_at` is the attempt/claim timestamp, not proof of delivery. A crash or
+cancellation after commit can lose the day's Reminder; `attempted` remains durable
+and is never retried. Settled outcomes are `delivered` (push-service acceptance,
+not device receipt), `disabled`, `gone` or `error`; any Device error takes precedence
+over another Device's acceptance in the account outcome. Current ownership and
+preferences are rechecked under each Device lock before delivery. No job ledger,
+outbox or network retries are added. Apply additive migration
+`0020_reminder_scan_progress` before running this worker. Its singleton frontier
+commits before each account's eligibility checks and wraps at most once per tick,
+so a repeatedly blocked prefix cannot starve later accounts. As with Beats,
+fairness assumes one active scanner and enough time to commit progress. A crash
+after checkpoint but before eligibility can defer that account until the next
+sweep. Stop/revert the worker before downgrading; the daily attempt rows remain.
+
+Attempt rows currently persist until account deletion (foreign-key cascade), with
+at most one row per eligible account/local date; no automatic retention purge is
+implemented. Confirm this retention and database growth, and configure alerts for
+nonzero tick exits/`job_step_failed` plus notification errors before production
+activation. These are outstanding operational gates, not provisioned monitoring
+or permission to purge data. Push-service acceptance is not phone receipt.
+
 The step deadline is `JOB_STEP_TIMEOUT_SECONDS` (1500). Candidate pages use
 `JOB_BEAT_BATCH_SIZE` (100), claims per tick use `JOB_MAX_BEATS_PER_TICK` (100),
 and generation concurrency uses `MAX_CONCURRENT_GENERATIONS`. Permits are acquired
@@ -721,9 +756,11 @@ scanner also restores its previous cross-tick starvation risk.
 report counts/outcomes (published, skipped, failed, refused, idle, capped,
 not_due, disabled, lost_claim). A timeout, infrastructure failure, or failed
 research produces a nonzero exit; a safety refusal or legitimate Skipped result
-does not. Each step has its own deadline/error boundary, so T9's Reminder failure
+does not. Reminder errors count as failed; disabled sends do not claim delivery.
+Each step has its own deadline/error boundary, so a Reminder failure
 will not conceal the Beat result. Cancellation awaits all child tasks; interrupted
-claims are left for stale recovery. Monitor job exit/logs separately: `--detach`
+Beat claims are left for stale recovery, Reminder claims are never replayed.
+Monitor job exit/logs separately: `--detach`
 means successful recreation is not proof a tick completed successfully.
 
 Semantics checked against the [official machine-run documentation](https://fly.io/docs/machines/flyctl/fly-machine-run/)

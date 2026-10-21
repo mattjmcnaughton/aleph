@@ -761,7 +761,10 @@ export const pathsHandlers = [
     for (const path of store.values()) {
       if (path.pollsRemaining > 0) path.pollsRemaining -= 1;
     }
-    return HttpResponse.json({ paths });
+    return HttpResponse.json({
+      paths,
+      resume_path_id: paths.find((path) => path.next_lesson !== null)?.id ?? null,
+    });
   }),
 
   http.delete(`${API_V1_BASE}/paths/:id`, async ({ params }) => {
