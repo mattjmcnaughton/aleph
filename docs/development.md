@@ -390,3 +390,33 @@ through the actual worker in a controlled browser window. Neither test establish
 real push-service receipt or OS-level taps. Production exposes no test fixture or
 job-trigger routes. Real-iPhone receipt/tap-through and deferred T0, device and
 operational gates remain unaccepted.
+
+### Feature-branch acceptance and handoff (#270)
+
+Implementation PRs target `feature/home-screen-app`, never `main`. Record the
+exact integrated revision and its gate, integration, full Playwright and
+production-image smoke results on #270. A green feature branch is code
+integration evidence, not device acceptance or deployment authorization.
+Counterfactual tests distinguish cancellation from confirmation, configured
+generation concurrency, obsolete notification fences and notification failure
+containment. Controlled clocks prove session expiry and local-day rules; they
+do not establish real elapsed-time use or operating-system delivery.
+
+Before release, the owner must complete and record these checks on the intended
+origin, with the app revision and iOS version:
+
+- Install from Safari; inspect the icon, launch presentation and safe areas.
+- Sign in, force-quit and reopen; verify navigation stays usable without browser
+  controls. Record a week of Home Screen use separately from clock-based tests.
+- Receive Path ready, Reminder and Brief published Notifications and tap each
+  through to authorized content. Include denied permission and recovery guidance.
+
+Operational acceptance needs separate environment/deployment permission. Confirm
+the public origin, push configuration, migration order, scheduled-machine image
+and environment, job cost bounds, attempt-row retention and failure alerts using
+the [deployment runbook](deploy.md#scheduled-machines).
+Live push receipt and scheduled-machine behavior remain unverified here; fake
+Fly CLI proof is excluded by owner decision. Do not treat local model/push fakes
+as provider acceptance. Keep #259 and #270 open until their outstanding human
+and operational criteria are satisfied. Promotion to main, production activation
+and removal of production Flow overrides require a separate approved release plan.
