@@ -16,9 +16,12 @@ const baseURL = process.env.BASE_URL ?? frontendURL;
 // Local runs use the machine's preinstalled Playwright chromium via
 // PW_CHROMIUM_PATH (set by `just test-e2e`) to dodge a browser/library version
 // mismatch; CI installs its own matching browser, so the env is unset there and
-// Playwright uses its managed download.
+// Playwright uses its managed full Chromium download. The default headless shell
+// does not retain service-worker Notifications, which W38/W40 must inspect.
 const executablePath = process.env.PW_CHROMIUM_PATH || undefined;
-const chromiumLaunch = executablePath ? { launchOptions: { executablePath } } : {};
+const chromiumLaunch = executablePath
+  ? { launchOptions: { executablePath } }
+  : { channel: "chromium" };
 
 // The stub backend (scripts/e2e_backend.py): the real API + orchestrator with
 // the deterministic stub model wired into every slot, so the browser suite runs

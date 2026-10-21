@@ -28,12 +28,10 @@ kinds, week-long use, session return and operational job acceptance remain unver
 See the [TDD execution amendment](../tdds/home-screen-app.md#execution-amendment-2026-10-20)
 for the issue mapping and actual implementation dependencies.
 
-**Unresolved, before Notifications UI prep:** §5.4 says install instructions replace
-the toggles in an iPhone Safari tab; TDD §8.8 permits account-wide preferences to be
-edited when the current Device is off. Must an uninstalled iPhone Safari tab show
-only installation instructions, or also editable account-wide preferences (with
-Device enablement unavailable)? Does the latter rule cover `needs_home_screen`,
-not just `off`? No owner choice is recorded; do not silently select either design.
+**Owner-approved clarification (2026-10-21, option 2):** `needs_home_screen` shows
+installation instructions PLUS editable account-wide preferences. Clearly explain
+that this browser cannot receive Notifications yet; Device enablement is unavailable
+until aleph is opened from the Home Screen. Account preferences affect enabled Devices.
 The Reminder toggle/hour and its pre-prompt belong to T9, not T7b.
 
 > **This PRD proposes a cheaper answer to the problem the iOS app PRD set out to solve.** That
@@ -212,8 +210,8 @@ browser.
   work from there."
 - Dismissible with **Not now**; dismissed means hidden for 30 days on that browser. Never shown
   more than once per visit.
-- The same instruction appears in **Notifications settings** in place of the toggles when the
-  learner is in iPhone Safari outside the Home Screen app (§5.4).
+- The same instruction appears in **Notifications settings** alongside editable account
+  preferences when the learner is in iPhone Safari outside the Home Screen app (§5.4).
 
 ### 5.3 Sign-in and staying signed in
 
@@ -251,9 +249,10 @@ browser.
 
 **Permission**
 
-- **Never asked at launch.** The system prompt is shown only after the learner taps **Yes** on a
-  one-line in-app pre-prompt, in one of two moments: turning on the Reminder, or after their first
-  path creation ("Want to know the moment a path is ready?"). iOS requires that tap.
+- **Never asked at launch.** The system prompt is shown only after the learner taps
+  **Enable Notifications** in settings or **Yes** on a one-line in-app pre-prompt:
+  turning on the Reminder, or after their first path creation ("Want to know the
+  moment a path is ready?"). iOS requires that tap.
 - A declined system prompt is respected: Notifications settings shows that they are off for
   aleph and how to turn them on in the system Settings. aleph never prompts again on that Device.
 - There is no quiet (provisional) stage; that is native-only.
@@ -265,6 +264,9 @@ browser.
 - Whether *this* browser or Home Screen app receives Notifications, with a button to turn that on
   (which runs the permission flow) and the states above (needs Home Screen, not supported, blocked
   in Settings).
+- In `needs_home_screen`, show install instructions AND editable account preferences,
+  explaining that this browser cannot receive Notifications yet (owner-approved option 2,
+  2026-10-21). T7b supplies Path ready and Brief published; T9 supplies Reminder controls.
 
 **Devices**
 

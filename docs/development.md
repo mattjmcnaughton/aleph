@@ -348,7 +348,7 @@ has Back home, and a running Flow has End flow. The root error has Back to your
 paths. Sign-in has Continue with the provider; its error now also has Back to
 sign in, which clears the error without browser controls. Shared chrome and
 signed-out errors clear the top safe area; body/sheets clear the home indicator.
-The install journey exercises form/error exits and an empty root worker; the
+The install journey exercises form/error exits and the registered root worker; the
 existing Flow journey exercises lesson-to-receipt navigation.
 
 Desktop Chromium at phone viewport, Safari user-agent/display-mode overrides and
@@ -356,3 +356,29 @@ synthetic safe-area insets are **not a real iPhone**. Real-device install, icon,
 splash, notch/indicator, contained OIDC sign-in, force-quit/reopen and week-long
 use remain unchecked pending authorized hosting and the deferred T0/device gate.
 This work does not establish operational or release acceptance.
+
+### Web Push client (partial #268, provisional feature branch)
+
+`lib/push.ts` owns the fakeable `PushPlatform`, subscription recovery and
+account-scoped Device id convenience storage. The authenticated shell confirms
+granted subscriptions on startup and visible foreground returns, at most once
+per ten minutes after success. Failure remains retryable. It never requests
+permission at launch. The first-path pre-prompt survives navigation; only Yes
+requests permission, and Not now is remembered in this browser. Sign-out attempts
+Device removal and browser unsubscribe before logout, independently best-effort
+and bounded so an unavailable push subsystem cannot prevent logout.
+
+`public/sw.js` is notification-only: no fetch handler, caching or offline mode.
+Vitest executes the shipped worker directly (rather than a second logic copy),
+including strict declarative-payload parsing, same-origin targets and focus/open.
+W38 uses test-runner native-API replacements and the test backend's in-memory
+sender, then dispatches the captured payload to the real registered worker.
+There is no production platform override. This tests display and tap navigation,
+not delivery through Apple/Google/Mozilla/Microsoft push services.
+
+The header links to Notifications settings. Path ready and Brief published account
+preferences remain editable even when this browser needs Home Screen installation,
+is unsupported, off or blocked. Device enablement is separate and requires a
+deliberate tap. Reminder controls/hour and its pre-prompt belong to #269.
+Real-iPhone receipt/tap-through and deferred T0, device and operational gates
+remain unaccepted.

@@ -14,6 +14,7 @@ import {
   retryPath,
 } from "../lib/api";
 import { ModelPicker } from "../components/model-picker";
+import { announcePathCreated } from "../components/push-lifecycle";
 import { Breadcrumbs } from "../components/breadcrumbs";
 import { LevelFieldset } from "../components/level-fieldset";
 import { TeachingStyleField } from "../components/teaching-style-field";
@@ -86,6 +87,7 @@ function NewPath() {
     mutationFn: createPath,
     onSuccess: async (created) => {
       setPathId(created.id);
+      if (user) announcePathCreated(user.id);
       // The switcher's cached list no longer matches the server. Nothing else
       // would correct it: the list is fresh for `staleTime` (30s) so a remount
       // serves it straight from cache, and its poll only runs while a row is

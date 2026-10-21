@@ -53,11 +53,10 @@ may still be established in T7a. Review exact-base readiness: native-branch port
 #248/#250/#253 are relevant prior work but are **not on the T1 baseline**; inspect
 and port deliberately rather than treating native branch behavior as already present.
 
-**Unresolved UI decision for later prep:** PRD §5.4 replaces toggles with install
-instructions in iPhone Safari tabs, while §8.8 below permits account-wide editing
-when a Device is `off`. The owner must clarify whether `needs_home_screen` permits
-editable account-wide preferences alongside install instructions or instructions
-only. No choice is made here; retain this question for T7b/T9 prep/handoff.
+**Owner-approved UI decision (2026-10-21, option 2):** `needs_home_screen` shows
+install instructions alongside editable account-wide preferences, with explicit copy
+that this browser cannot receive Notifications yet. No Device enablement action is
+offered in this state. Reminder controls and pre-prompt remain T9-owned.
 
 > **This document is the implementer's brief.** Where it says **settled**, the owner decided.
 > Where it says **proposed**, the PRD asks the owner to confirm (PRD §11.1). Where it says
@@ -445,7 +444,11 @@ the settings screen's state: `hidden` (no push-config), `needs_home_screen`, `un
 Sections: *This device* (the state from §8.7 with its one action) and *What to send* (Reminder
 toggle and hour, Path ready, Brief published), read and written through the preference routes
 with TanStack Query. The preference toggles are visible and editable even when this device is
-`off`, since they apply to all the learner's Devices. Breadcrumbs back to Your paths.
+`off`, `blocked`, `unsupported` or `needs_home_screen`, since they apply to all the
+learner's Devices. `needs_home_screen` also shows install instructions and explains
+that this browser cannot receive Notifications yet (owner-approved option 2).
+T7b renders Path ready and Brief published; T9 owns Reminder controls and pre-prompt.
+Breadcrumbs back to Your paths.
 
 ### 8.9 Path ready (ticket 7)
 

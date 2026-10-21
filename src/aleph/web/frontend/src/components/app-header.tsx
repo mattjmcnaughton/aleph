@@ -1,10 +1,13 @@
+import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
+import { getPushConfig } from "../lib/api";
 import { AlephLogo } from "./aleph-logo";
 import { useLogout } from "./use-logout";
 
 /** Top chrome for the signed-in shell: brand lockup and sign-out. */
 export function AppHeader() {
   const { signOut, pending } = useLogout();
+  const config = useQuery({ queryKey: ["push-config-menu"], queryFn: getPushConfig });
 
   return (
     <header className="sticky top-0 z-10 box-border h-[var(--app-header-h)] border-b border-divider bg-night/85 pt-[env(safe-area-inset-top)] backdrop-blur">
@@ -13,6 +16,14 @@ export function AppHeader() {
           <AlephLogo />
         </Link>
         <div className="flex items-center gap-3">
+          {config.data ? (
+            <Link
+              to="/settings/notifications"
+              className="inline-flex min-h-11 items-center rounded-md px-2 text-sm text-mist hover:text-porcelain"
+            >
+              Notifications
+            </Link>
+          ) : null}
           <button
             type="button"
             onClick={signOut}
