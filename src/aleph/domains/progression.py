@@ -40,8 +40,23 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Collection, Sequence
     from datetime import datetime
+    from uuid import UUID
+
+
+def resume_path(
+    ordered_path_ids: Sequence[UUID], available_path_ids: Collection[UUID]
+) -> UUID | None:
+    """First path with an available lesson, in the caller's existing order.
+
+    Repository ordering supplies recency; this rule neither sorts nor performs I/O.
+    Empty or exhausted paths have no resume target.
+    """
+    return next(
+        (path_id for path_id in ordered_path_ids if path_id in available_path_ids),
+        None,
+    )
 
 
 class UnlockState(StrEnum):

@@ -39,6 +39,7 @@ from aleph.authz import is_admin
 from aleph.config import settings
 from aleph.db import get_session
 from aleph.dependencies import get_current_user
+from aleph.domains.progression import resume_path
 from aleph.dtos.paths import (
     CreatePathRequest,
     CreatePathResponse,
@@ -254,6 +255,7 @@ async def list_paths(user: CurrentUser, session: Session) -> PathListResponse:
     summaries = await lessons.progress_summaries(path_ids)
     next_lessons = await lessons.next_lessons(path_ids)
     return PathListResponse(
+        resume_path_id=resume_path(path_ids, next_lessons.keys()),
         paths=[
             PathSummaryDTO(
                 id=path.id,
@@ -266,7 +268,7 @@ async def list_paths(user: CurrentUser, session: Session) -> PathListResponse:
                 next_lesson=_next_lesson_dto(next_lessons.get(path.id)),
             )
             for path, effective_status in paths
-        ]
+        ],
     )
 
 

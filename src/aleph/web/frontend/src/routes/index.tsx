@@ -15,7 +15,7 @@ import {
 } from "../lib/api";
 import { ActivityStrip } from "../components/activity-strip";
 import { BeatCard, hasUnreadBriefs } from "../components/beat-card";
-import { ContinueCard, pickResumeTarget } from "../components/continue-card";
+import { ContinueCard } from "../components/continue-card";
 import { FlowDoor } from "../components/flow/flow-door";
 import { ListRow, type RowVariant, RowTitle, RowActions } from "../components/list-row";
 import { type NewMenuItem, NewMenu } from "../components/new-menu";
@@ -211,7 +211,7 @@ function Home() {
   // it shortens the working list too — both halves of the same complaint.
   const activePaths = paths?.filter((path) => !isFinished(path));
   const finishedPaths = paths?.filter(isFinished) ?? [];
-  const resumeTarget = pickResumeTarget(paths);
+  const resumeTarget = paths?.find((path) => path.id === pathsQuery.data?.resume_path_id);
 
   // A Brief waiting is news, so it moves up (mock E): when any Beat has
   // unread Briefs the section renders under the Continue card and Flow door,

@@ -1,4 +1,4 @@
-"""One attempted Reminder per learner-local day (scheduling comes later)."""
+"""One durable Reminder attempt per learner-local day, not a delivery receipt."""
 
 import uuid  # noqa: TC003
 from datetime import date, datetime  # noqa: TC003

@@ -1,6 +1,9 @@
 import { render, screen, waitFor } from "@testing-library/react";
+import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
+import { API_V1_BASE, type PathList } from "../lib/api";
 import { COMPLETE_PATH_UNITS, FRESH_PATH_UNITS, MID_PATH_UNITS, seedPath } from "../mocks/paths";
+import { server } from "../mocks/server";
 import { App } from "./app";
 
 // Home as a **workbench** rather than a shelf (design critique): resuming the
@@ -23,6 +26,36 @@ function itemIds(): (string | null)[] {
 }
 
 describe("Home — resuming work", () => {
+  it.each(["p-first", null, undefined])(
+    "obeys server resume selection %s, not list order",
+    async (selected) => {
+      seedPath({ id: "p-first", topic: "First", level: "new_to_it", units: MID_PATH_UNITS });
+      seedPath({
+        id: "p-second",
+        topic: "Second",
+        level: "new_to_it",
+        units: FRESH_PATH_UNITS,
+        lastActivityAt: "2026-10-20T12:00:00Z",
+      });
+      const listing = (await (await fetch(`${API_V1_BASE}/paths`)).json()) as PathList;
+      expect(listing.paths[0].id).toBe("p-second");
+      server.use(
+        http.get(`${API_V1_BASE}/paths`, () =>
+          HttpResponse.json({ ...listing, resume_path_id: selected }),
+        ),
+      );
+      await gotoHome();
+      await screen.findByTestId("paths-list");
+      if (selected) {
+        const card = await screen.findByTestId("continue-card");
+        expect(card.getAttribute("data-path-id")).toBe(selected);
+        expect(card.getAttribute("href")).toBe("/lessons/l2000000-0000-4000-8000-000000000003");
+      } else {
+        expect(screen.queryByTestId("continue-card")).toBeNull();
+      }
+    },
+  );
+
   it("orders the list by last activity, not by when the path was created", async () => {
     // Seeded oldest-first, so creation order alone would put `p-new` on top.
     seedPath({

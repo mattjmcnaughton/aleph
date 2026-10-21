@@ -12,6 +12,7 @@ as TDD §4 specifies:
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from uuid import UUID
 
 from aleph.domains.progression import (
     CompletionSummary,
@@ -20,10 +21,20 @@ from aleph.domains.progression import (
     available_index,
     derive_unlock_states,
     next_lesson,
+    resume_path,
     summarize_completion,
 )
 
 _DONE = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
+
+
+def test_resume_path_respects_order_and_skips_unavailable() -> None:
+    first, second, third = (UUID(int=i) for i in (1, 2, 3))
+    assert resume_path([first, third, second], {second, third}) == third
+    assert resume_path([first, second], {first, second}) == first
+    assert resume_path([first], {second}) is None
+    assert resume_path([first], set()) is None
+    assert resume_path([], {first}) is None
 
 
 def _lesson(position: int, *, complete: bool = False) -> LessonProgress:

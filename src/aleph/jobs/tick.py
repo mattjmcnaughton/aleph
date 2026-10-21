@@ -11,6 +11,7 @@ from aleph import db
 from aleph.config import settings
 from aleph.logging import configure_logging
 from aleph.services.briefing import BriefingService
+from aleph.services.notifications import notification_service
 from aleph.services.retrieval import ExaRetriever
 from aleph.services.scheduled_beats import run_beats
 
@@ -65,9 +66,9 @@ async def main() -> int:
         return await run_beats(service, config=settings)
 
     try:
-        # Reminder delivery is added by T9 (#269), not a pretend successful step.
         return await run_steps(
-            [("beats", beats)], timeout_seconds=settings.job_step_timeout_seconds
+            [("reminders", notification_service.reminders), ("beats", beats)],
+            timeout_seconds=settings.job_step_timeout_seconds,
         )
     finally:
         await db.dispose_engine()

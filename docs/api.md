@@ -25,8 +25,10 @@ the stored zone does not replace it. See [metrics.md](metrics.md) for attributio
 ## Web Push Notifications (provisional Home Screen backend)
 
 All five operations below require the usual session cookie or bearer token
-(`401` otherwise). Client subscription controls arrive separately in #268;
-Reminder scheduling and Brief published triggers arrive in #269.
+(`401` otherwise). Notifications settings separate account preferences from this
+Device's permission. Reminder scheduling and committed Brief publication use the
+same guarded delivery service; see [deploy.md](deploy.md) for at-most-once attempt
+semantics and operational prerequisites. Real-device acceptance is still pending.
 
 | Method | Path | Request | Response |
 | ------ | ---- | ------- | -------- |
@@ -137,6 +139,15 @@ addressing is by UUID; another learner's path reads as `404` (never `403` — it
 existence is not disclosed). Generation is **trigger + poll** (§5.4/D5): `POST`
 routes return `202` immediately and the client polls `GET /paths/{id}` until the
 status resolves. Nothing blocks on a model call.
+
+`GET /api/v1/paths` also returns **`resume_path_id`**, always present and
+nullable: the UUID of the first path in the returned order with a non-null
+`next_lesson`, or `null` for an empty/exhausted list. The pure
+`domains.progression.resume_path` rule owns this selection for home and Reminder;
+clients look up that ID rather than choosing a path themselves. Existing clients
+can ignore this additive field. A new web client against an older server that
+omits the field shows no Continue card (the path list still works); deploy the
+server first to preserve that affordance during a mixed-version rollout.
 
 | Method | Path | Body | Success | Notes |
 | ------ | ---- | ---- | ------- | ----- |

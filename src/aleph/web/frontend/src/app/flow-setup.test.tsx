@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
-import { API_V1_BASE, type AuthSession } from "../lib/api";
+import { API_V1_BASE, type AuthSession, type PathList } from "../lib/api";
 import { learnerUser } from "../mocks/handlers";
 import { seedLesson } from "../mocks/lessons";
 import { COMPLETE_PATH_UNITS, FRESH_PATH_UNITS, MID_PATH_UNITS, seedPath } from "../mocks/paths";
@@ -79,6 +79,34 @@ function ensureSelected(pathId: string, want: boolean): void {
 }
 
 describe("Flow setup — /flow/new", () => {
+  it.each([
+    [FRESH_ID, "", FRESH_ID],
+    [null, "", MID_ID],
+    [undefined, "", MID_ID],
+    ["missing-path", "", MID_ID],
+    [DONE_ID, "", MID_ID],
+    [FRESH_ID, `?path=${MID_ID}`, MID_ID],
+    [FRESH_ID, `?paths=${MID_ID}&path=${FRESH_ID}`, MID_ID],
+  ])("resolves server selection %s with scope %s", async (resumeId, search, expected) => {
+    useFlowSession();
+    seedThreePaths();
+    const listing = (await (await fetch(`${API_V1_BASE}/paths`)).json()) as PathList;
+    expect(
+      listing.paths.filter((path) => path.next_lesson !== null).map((path) => path.id),
+    ).toEqual([MID_ID, FRESH_ID]);
+    server.use(
+      http.get(`${API_V1_BASE}/paths`, () =>
+        HttpResponse.json({ ...listing, resume_path_id: resumeId }),
+      ),
+    );
+    await gotoSetup(search);
+    await waitFor(() => {
+      expect(screen.getByTestId(`flow-path-${expected}`).getAttribute("aria-pressed")).toBe("true");
+      const other = expected === MID_ID ? FRESH_ID : MID_ID;
+      expect(screen.getByTestId(`flow-path-${other}`).getAttribute("aria-pressed")).toBe("false");
+    });
+  });
+
   it("Start reads 'Pick a path to start' and disables with nothing selected", async () => {
     useFlowSession();
     seedThreePaths();

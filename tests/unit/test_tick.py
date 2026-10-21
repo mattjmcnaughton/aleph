@@ -8,6 +8,26 @@ from aleph.jobs.tick import run_steps
 
 
 @pytest.mark.anyio
+async def test_main_runs_reminders_before_beats(monkeypatch):
+    from aleph.jobs import tick
+
+    calls = []
+
+    async def reminders():
+        calls.append("reminders")
+        return {}
+
+    async def beats(*args, **kwargs):
+        calls.append("beats")
+        return {}
+
+    monkeypatch.setattr(tick.notification_service, "reminders", reminders)
+    monkeypatch.setattr(tick, "run_beats", beats)
+    assert await tick.main() == 0
+    assert calls == ["reminders", "beats"]
+
+
+@pytest.mark.anyio
 @pytest.mark.parametrize("timeout", [False, True])
 async def test_failed_step_does_not_hide_the_next_step(timeout: bool) -> None:
     calls = []

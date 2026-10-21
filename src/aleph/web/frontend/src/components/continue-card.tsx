@@ -12,25 +12,10 @@ import { Link } from "@tanstack/react-router";
 import type { PathSummary } from "../lib/api";
 
 /**
- * The path to resume: the most recently worked one that still has somewhere to
- * go.
- *
- * `GET /paths` is ordered by last activity descending with never-worked paths
- * last, so "the first row with a resume target" *is* the answer and no sorting
- * is repeated client-side. `next_lesson` is null for a finished path, for a
- * refusal, for a failure, and for one whose outline has not landed yet — every
- * case where there is nothing to continue to — so this walks past all of them
- * without needing to know which is which.
- */
-export function pickResumeTarget(paths: PathSummary[] | undefined): PathSummary | undefined {
-  return paths?.find((path) => path.next_lesson !== null);
-}
-
-/**
  * `undefined` renders nothing, the same decoration contract `StreakLine` and
  * `DueTodayCard` hold: a learner with no paths, or none with a resume target,
- * sees no card rather than an empty one. The caller resolves the target with
- * `pickResumeTarget` so this component never sees the whole list.
+ * sees no card rather than an empty one. The caller looks up the server-selected
+ * path so this component never sees the whole list.
  */
 export function ContinueCard({ path }: { path: PathSummary | undefined }) {
   if (path === undefined || path.next_lesson === null) return null;

@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import {
+  type NotificationPreferences,
   getPushConfig,
   notificationPreferencesQueryOptions,
   updateNotificationPreferences,
@@ -10,6 +11,7 @@ import { pushClient, pushState } from "../lib/push";
 
 const buttonClass =
   "min-h-11 rounded-md border border-divider px-4 py-2 text-sm text-porcelain hover:border-teal focus-visible:outline focus-visible:outline-2 focus-visible:outline-teal disabled:opacity-50";
+const hours = Array.from({ length: 24 }, (_, hour) => hour);
 
 export function NotificationSettings({ account }: { account: string }) {
   const queryClient = useQueryClient();
@@ -21,6 +23,7 @@ export function NotificationSettings({ account }: { account: string }) {
   const [saving, setSaving] = useState(false);
   const [enableError, setEnableError] = useState("");
   const [saveError, setSaveError] = useState("");
+  const [reminderPrompt, setReminderPrompt] = useState(false);
   const [permission, setPermission] = useState(pushClient.platform.permission());
   const installation = installState({
     userAgent: navigator.userAgent,
@@ -66,6 +69,46 @@ export function NotificationSettings({ account }: { account: string }) {
     };
   }, [account, key, installation]);
 
+  function enable() {
+    setEnabling(true);
+    setEnableError("");
+    void pushClient
+      .enable(account, key ?? "")
+      .then((enabled) => {
+        setPermission(pushClient.platform.permission());
+        setHasDevice(enabled);
+        setReminderPrompt(false);
+      })
+      .catch(() => setEnableError("Couldn't enable Notifications. Try again."))
+      .finally(() => setEnabling(false));
+  }
+
+  function save(next: NotificationPreferences) {
+    const turnedOn = !preferences.data?.reminder_enabled && next.reminder_enabled;
+    setSaving(true);
+    setSaveError("");
+    void updateNotificationPreferences(next)
+      .then((saved) => {
+        queryClient.setQueryData(options.queryKey, saved);
+        if (!saved.reminder_enabled) setReminderPrompt(false);
+        if (
+          turnedOn &&
+          saved.reminder_enabled &&
+          (installation === "home_screen" || installation === "browser_ok") &&
+          pushClient.platform.permission() === "default"
+        ) {
+          try {
+            if (localStorage.getItem("aleph:reminder-push-dismissed")) return;
+          } catch {
+            // Optional storage must not prevent the deliberate-tap offer.
+          }
+          setReminderPrompt(true);
+        }
+      })
+      .catch(() => setSaveError("Couldn't save preferences. Try again by changing the preference."))
+      .finally(() => setSaving(false));
+  }
+
   if (config.isPending) return <output>Loading Notifications…</output>;
   if (config.isError)
     return (
@@ -106,28 +149,12 @@ export function NotificationSettings({ account }: { account: string }) {
           {state === "off" ? (
             <>
               <p>Notifications are off for this device.</p>
-              <button
-                type="button"
-                className={buttonClass}
-                disabled={enabling}
-                onClick={() => {
-                  setEnabling(true);
-                  setEnableError("");
-                  void pushClient
-                    .enable(account, key ?? "")
-                    .then((enabled) => {
-                      setPermission(pushClient.platform.permission());
-                      setHasDevice(enabled);
-                    })
-                    .catch(() => setEnableError("Couldn't enable Notifications. Try again."))
-                    .finally(() => setEnabling(false));
-                }}
-              >
+              <button type="button" className={buttonClass} disabled={enabling} onClick={enable}>
                 {enabling ? "Enabling…" : "Enable Notifications"}
               </button>
             </>
           ) : null}
-          {enableError ? <p role="alert">{enableError}</p> : null}
+          {enableError && !reminderPrompt ? <p role="alert">{enableError}</p> : null}
         </div>
       </section>
       <section
@@ -155,6 +182,7 @@ export function NotificationSettings({ account }: { account: string }) {
           <div className="mt-3">
             {(
               [
+                ["reminder_enabled", "Reminder"],
                 ["path_ready_enabled", "Path ready"],
                 ["brief_published_enabled", "Brief published"],
               ] as const
@@ -171,21 +199,70 @@ export function NotificationSettings({ account }: { account: string }) {
                   disabled={saving}
                   onChange={(event) => {
                     if (!preferences.data) return;
-                    const next = { ...preferences.data, [field]: event.target.checked };
-                    setSaving(true);
-                    setSaveError("");
-                    void updateNotificationPreferences(next)
-                      .then((saved) => queryClient.setQueryData(options.queryKey, saved))
-                      .catch(() =>
-                        setSaveError(
-                          "Couldn't save preferences. Try again by changing the preference.",
-                        ),
-                      )
-                      .finally(() => setSaving(false));
+                    save({ ...preferences.data, [field]: event.target.checked });
                   }}
                 />
               </label>
             ))}
+            <label className="mt-3 flex min-h-11 items-center justify-between gap-4 text-sm">
+              <span>Reminder hour</span>
+              <select
+                className="min-h-11 rounded-md border border-divider bg-night px-3 text-porcelain"
+                value={preferences.data.reminder_hour}
+                disabled={saving || !preferences.data.reminder_enabled}
+                onChange={(event) => {
+                  if (preferences.data)
+                    save({ ...preferences.data, reminder_hour: Number(event.target.value) });
+                }}
+              >
+                {hours.map((hour) => (
+                  <option key={hour} value={hour}>
+                    {String(hour).padStart(2, "0")}:00
+                  </option>
+                ))}
+              </select>
+            </label>
+            <p className="mt-2 text-sm text-mist">
+              At or after this hour in your local time, unless you've already learned today.
+            </p>
+            {reminderPrompt ? (
+              <section
+                aria-label="Reminder Notifications"
+                className="mt-4 rounded-md border border-teal/40 p-3"
+              >
+                <p className="text-sm">Allow Notifications on this device for your Reminder?</p>
+                {enableError ? (
+                  <p role="alert" className="mt-2 text-sm text-mist">
+                    {enableError}
+                  </p>
+                ) : null}
+                <div className="mt-3 flex gap-3">
+                  <button
+                    type="button"
+                    className={buttonClass}
+                    disabled={enabling}
+                    onClick={enable}
+                  >
+                    Yes
+                  </button>
+                  <button
+                    type="button"
+                    className={buttonClass}
+                    disabled={enabling}
+                    onClick={() => {
+                      setReminderPrompt(false);
+                      try {
+                        localStorage.setItem("aleph:reminder-push-dismissed", "1");
+                      } catch {
+                        // Dismissal still applies to the current prompt without storage.
+                      }
+                    }}
+                  >
+                    Not now
+                  </button>
+                </div>
+              </section>
+            ) : null}
           </div>
         ) : null}
         {saving ? <output>Saving…</output> : null}
