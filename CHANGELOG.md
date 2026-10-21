@@ -1,3 +1,22 @@
+# [1.46.0](https://github.com/mattjmcnaughton/aleph/compare/v1.45.0...v1.46.0) (2026-10-21)
+
+
+### Bug Fixes
+
+* **auth:** renew signed sessions over a configurable 90-day window ([691a441](https://github.com/mattjmcnaughton/aleph/commit/691a441a10286437a4601cd1c8fc36edc1989c04)), closes [#264](https://github.com/mattjmcnaughton/aleph/issues/264)
+* **flags:** enable Flow by default and identify its journey as W34 ([b3ad395](https://github.com/mattjmcnaughton/aleph/commit/b3ad3959d57e1ffd164c43b27718883959736787)), closes [#262](https://github.com/mattjmcnaughton/aleph/issues/262)
+
+
+### Features
+
+* **api:** observe learner time zones and attribute request clients ([83354f3](https://github.com/mattjmcnaughton/aleph/commit/83354f328664827a7eeb8022c3eac8123058c0c5)), closes [#265](https://github.com/mattjmcnaughton/aleph/issues/265)
+* **beats:** schedule bounded research with durable scan progress ([088065e](https://github.com/mattjmcnaughton/aleph/commit/088065e359a9a8d09c1eabceab7ccdd4bd0f12c8)), closes [#267](https://github.com/mattjmcnaughton/aleph/issues/267)
+* **notifications:** deliver local-day Reminders and published Briefs ([dc91844](https://github.com/mattjmcnaughton/aleph/commit/dc918448165517bb634299812df24e1d0c77b25c)), closes [#269](https://github.com/mattjmcnaughton/aleph/issues/269)
+* **push:** add Web Push delivery and Path ready notifications ([c57c19d](https://github.com/mattjmcnaughton/aleph/commit/c57c19d1d385bee5d92d688eb9ad5e94fb8dca40)), closes [#266](https://github.com/mattjmcnaughton/aleph/issues/266)
+* **web:** add confirmed Beat deletion with retry recovery ([8292853](https://github.com/mattjmcnaughton/aleph/commit/8292853bbce003dc67de7d699a499e0e1e33d1a2)), closes [#263](https://github.com/mattjmcnaughton/aleph/issues/263)
+* **web:** add home screen installability ([6f1292f](https://github.com/mattjmcnaughton/aleph/commit/6f1292fed6e3af9fbffd8883a3172032ea904209)), closes [#261](https://github.com/mattjmcnaughton/aleph/issues/261)
+* **web:** add Web Push settings and device lifecycle ([31e9197](https://github.com/mattjmcnaughton/aleph/commit/31e9197e1cfe7dc789713a904fd1c8c0491ee0ec)), closes [#268](https://github.com/mattjmcnaughton/aleph/issues/268)
+
 # [1.45.0](https://github.com/mattjmcnaughton/aleph/compare/v1.44.0...v1.45.0) (2026-10-19)
 
 
