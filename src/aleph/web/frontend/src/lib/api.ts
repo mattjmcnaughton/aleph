@@ -94,6 +94,61 @@ export function apiV1Path(path: `/${string}`): string {
   return `${API_V1_BASE}${path}`;
 }
 
+// --- Notifications ---------------------------------------------------------
+export type NotificationPreferences = {
+  reminder_enabled: boolean;
+  reminder_hour: number;
+  path_ready_enabled: boolean;
+  brief_published_enabled: boolean;
+};
+
+export async function getPushConfig(): Promise<{ vapid_public_key: string } | null> {
+  try {
+    return await apiFetch(apiV1Path("/push-config"));
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) return null;
+    throw error;
+  }
+}
+
+export function registerDevice(
+  subscription: PushSubscriptionJSON,
+  signal?: AbortSignal,
+): Promise<{ id: string }> {
+  return apiFetch(apiV1Path("/devices"), {
+    method: "POST",
+    signal: signal
+      ? AbortSignal.any([signal, AbortSignal.timeout(10000)])
+      : AbortSignal.timeout(10000),
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ endpoint: subscription.endpoint, keys: subscription.keys }),
+  });
+}
+
+export function removeDevice(id: string): Promise<void> {
+  return apiFetch(apiV1Path(`/devices/${encodeURIComponent(id)}`), {
+    method: "DELETE",
+    signal: AbortSignal.timeout(3000),
+  });
+}
+
+export function notificationPreferencesQueryOptions(account: string) {
+  return queryOptions({
+    queryKey: ["notification-preferences", account],
+    queryFn: () => apiFetch<NotificationPreferences>(apiV1Path("/notification-preferences")),
+  });
+}
+
+export function updateNotificationPreferences(
+  preferences: NotificationPreferences,
+): Promise<NotificationPreferences> {
+  return apiFetch(apiV1Path("/notification-preferences"), {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(preferences),
+  });
+}
+
 // --- Session contract -------------------------------------------------------
 //
 // Shape assumed for `GET /api/v1/auth/session` (TDD §6/§7). AL-020/AL-021 (the
