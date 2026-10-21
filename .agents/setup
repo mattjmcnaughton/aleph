@@ -6,6 +6,16 @@ cd "$repo_root"
 download="$(mktemp -d)"
 trap 'rm -rf "$download"' EXIT
 
+# The orb supplies Docker and its apt repository, but not always the plugins
+# required by the production-image smoke test. Do not start a daemon in setup.
+docker_plugins=()
+docker compose version >/dev/null 2>&1 || docker_plugins+=(docker-compose-plugin)
+docker buildx version >/dev/null 2>&1 || docker_plugins+=(docker-buildx-plugin)
+if ((${#docker_plugins[@]})); then
+    sudo apt-get update
+    sudo apt-get install -y --no-install-recommends "${docker_plugins[@]}"
+fi
+
 # Orbs provide curl, tar, xz, npm and uv. Install a private Node rather than
 # relying on the base image's (potentially incompatible) version.
 node_version="$(cat .nvmrc)"
