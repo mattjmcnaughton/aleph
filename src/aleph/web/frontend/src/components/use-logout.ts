@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { type AuthSession, logout } from "../lib/api";
 import { sessionQueryOptions } from "../lib/auth";
+import { pushClient } from "../lib/push";
 
 /**
  * Sign the learner out: end the server session, drop the cached session query,
@@ -12,7 +13,13 @@ export function useLogout(): { signOut: () => void; pending: boolean } {
   const queryClient = useQueryClient();
 
   const mutation = useMutation({
-    mutationFn: logout,
+    mutationFn: async () => {
+      const session = queryClient.getQueryData(sessionQueryOptions.queryKey);
+      if (session?.authenticated && session.user) {
+        await pushClient.cleanup(session.user.id).catch(() => {});
+      }
+      return logout();
+    },
     // `onSettled` runs on both success and failure: even if the server call
     // fails we still tear down the local session and bounce to /login.
     onSettled: () => {
