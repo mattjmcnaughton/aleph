@@ -86,6 +86,7 @@ export const signedOutSession: AuthSession = {
 };
 
 export const handlers = [
+  http.get(`${API_V1_BASE}/push-config`, () => new HttpResponse(null, { status: 404 })),
   http.get(`${API_V1_BASE}/auth/session`, () => HttpResponse.json(authenticatedSession)),
   http.post(AUTH_LOGOUT_PATH, () => new HttpResponse(null, { status: 204 })),
   ...pathsHandlers,
