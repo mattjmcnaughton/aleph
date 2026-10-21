@@ -37,11 +37,13 @@ from sqlalchemy.ext.asyncio import (  # noqa: TC002 - FastAPI resolves annotatio
 
 from aleph.config import MODEL_SLOTS, STUB_MODEL_ID, settings
 from aleph.db import get_session
-from aleph.models import Lesson
+from aleph.models import Lesson, Level
+from aleph.repositories.beats import BeatRepository
 from aleph.services.briefing import briefing_service
 from aleph.services.notifications import notification_service
 from aleph.services.push import InMemoryPushSender, encode_key, public_bytes
 from aleph.services.retrieval import StubRetriever
+from aleph.services.scheduled_beats import run_beats
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -85,6 +87,11 @@ class ResearchGateRequest(BaseModel):
     topic: str
 
 
+class DueBeatRequest(BaseModel):
+    user_id: uuid.UUID
+    topic: str
+
+
 class ShiftRequest(BaseModel):
     """Body for ``POST /__e2e__/shift-completions``: which path, how far back.
 
@@ -107,6 +114,26 @@ class ShiftRequest(BaseModel):
 # below, in ``create_stub_app`` — nothing in ``aleph.app`` imports this module,
 # so the production app builds with no reference to this router at all.
 e2e_router = APIRouter()
+
+
+@e2e_router.post("/__e2e__/due-beat")
+async def due_beat(body: DueBeatRequest, session: Session) -> dict[str, str]:
+    """Seed an idle assignment, never a Brief, so W40 must run the real job."""
+    beat = await BeatRepository(session).create(
+        user_id=body.user_id,
+        topic=body.topic,
+        level=Level.NEW_TO_IT,
+        anchor_weekday=0,
+    )
+    await session.commit()
+    return {"id": str(beat.id)}
+
+
+@e2e_router.post("/__e2e__/run-beats")
+async def scheduled_beats() -> dict[str, int]:
+    """Real scheduled step with this factory's stub models/retriever/sender."""
+    async with asyncio.timeout(settings.job_step_timeout_seconds):
+        return await run_beats(briefing_service, config=settings)
 
 
 @e2e_router.post("/__e2e__/hold-research")

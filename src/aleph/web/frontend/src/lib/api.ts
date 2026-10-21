@@ -342,6 +342,8 @@ export interface NextLesson {
  */
 export interface PathList {
   paths: PathSummary[];
+  /** Server-selected path; missing on older servers means no Continue card. */
+  resume_path_id?: string | null;
 }
 
 /** `POST /api/v1/paths` / `POST /api/v1/paths/{id}/retry` body — `202 {id}`. */

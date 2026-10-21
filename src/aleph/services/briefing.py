@@ -187,6 +187,7 @@ from aleph.models import BeatResearchState
 from aleph.repositories import BeatRepository, BriefRepository, NewSource
 from aleph.repositories.users import UserRepository
 from aleph.services.generation import AGENT_LEVEL, usage_tokens
+from aleph.services.notifications import NotificationService, notification_service
 from aleph.services.openrouter import resolve_model
 from aleph.services.rate_limit import build_daily_rate_limiter
 from aleph.services.retrieval import (
@@ -557,8 +558,10 @@ class BriefingService:
         research_timeout_seconds: float | None = None,
         stale_after_seconds: float | None = None,
         model_slot: ModelSlot = contextlib.nullcontext,
+        notifications: NotificationService = notification_service,
     ) -> None:
         self._session_factory = session_factory
+        self._notifications = notifications
         self._spawn = spawn
         self._resolve_model = resolve_model_fn
         self._config = config
@@ -1404,7 +1407,7 @@ class BriefingService:
             if not marked:
                 await session.rollback()
                 return False
-            await BriefRepository(session).create_published(
+            brief = await BriefRepository(session).create_published(
                 beat_id=beat_id,
                 number=number,
                 published_at=datetime.now(UTC),
@@ -1415,7 +1418,14 @@ class BriefingService:
                 sources=sources,
             )
             await session.commit()
-            return True
+            brief_id = brief.id
+        # Outside the publication transaction. Even an injected notifier failure
+        # must not escape into the research pipeline's persist-stage _fail path.
+        try:
+            await self._notifications.brief_published(brief_id)
+        except Exception:
+            NotificationService._log_failure()
+        return True
 
     async def _persist_skipped(
         self,

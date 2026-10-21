@@ -197,9 +197,13 @@ class PathListResponse(BaseModel):
 
     Wrapped in an object (never a bare top-level array) so the payload can grow
     fields without a breaking shape change.
+
+    ``resume_path_id`` selects the first row with an available lesson, or is
+    ``None`` for an empty/exhausted list. Clients do not repeat this policy.
     """
 
     paths: list[PathSummaryDTO]
+    resume_path_id: UUID | None
 
 
 class LessonSummaryDTO(BaseModel):

@@ -465,6 +465,7 @@ async def test_list_paths_switcher_shape(
 
         listing = (await client.get("/api/v1/paths")).json()
         rows = listing["paths"]
+        assert listing["resume_path_id"] == second_id
         # Neither path has a completion, so both sort in the nulls-last group
         # and the created_at desc tiebreak decides: newest first, as before.
         assert [row["id"] for row in rows] == [second_id, first_id]
@@ -521,13 +522,45 @@ async def test_list_paths_orders_by_last_activity_not_creation(
         completed = await client.post(f"/api/v1/lessons/{first_lesson['id']}/complete")
         assert completed.status_code == 200
 
-        rows = (await client.get("/api/v1/paths")).json()["paths"]
+        listing = (await client.get("/api/v1/paths")).json()
+        rows = listing["paths"]
+        assert listing["resume_path_id"] == old_id
         assert [row["id"] for row in rows] == [old_id, new_id]
         assert rows[0]["last_activity_at"] is not None
         assert rows[1]["last_activity_at"] is None
         # And the resume target advanced past the lesson just completed.
         assert rows[0]["progress"]["total_lessons"] > 1, "needs a second lesson"
         assert rows[0]["next_lesson"]["id"] != first_lesson["id"]
+
+
+@pytest.mark.anyio
+async def test_list_paths_resume_skips_exhausted_and_handles_empty(
+    app: FastAPI, spawn: CollectingSpawn, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async with _client(app) as client:
+        await _sign_in(client, monkeypatch, OWNER)
+        assert (await client.get("/api/v1/paths")).json() == {
+            "paths": [],
+            "resume_path_id": None,
+        }
+        exhausted_id = await _create(client, spawn, "Exhausted", "new_to_it")
+        available_id = await _create(client, spawn, "Available", "new_to_it")
+        await _poll(client, spawn, exhausted_id)
+        await _poll(client, spawn, available_id)
+        for path_id in (exhausted_id, available_id):
+            detail = (await client.get(f"/api/v1/paths/{path_id}")).json()
+            for unit in detail["units"]:
+                for lesson in unit["lessons"]:
+                    response = await client.post(
+                        f"/api/v1/lessons/{lesson['id']}/complete"
+                    )
+                    assert response.status_code == 200
+            listing = (await client.get("/api/v1/paths")).json()
+            if path_id == exhausted_id:
+                assert listing["paths"][0]["id"] == exhausted_id
+                assert listing["resume_path_id"] == available_id
+            else:
+                assert listing["resume_path_id"] is None
 
 
 # --------------------------------------------------------------------------- #

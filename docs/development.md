@@ -357,7 +357,7 @@ splash, notch/indicator, contained OIDC sign-in, force-quit/reopen and week-long
 use remain unchecked pending authorized hosting and the deferred T0/device gate.
 This work does not establish operational or release acceptance.
 
-### Web Push client (partial #268, provisional feature branch)
+### Web Push client (provisional feature branch)
 
 `lib/push.ts` owns the fakeable `PushPlatform`, subscription recovery and
 account-scoped Device id convenience storage. The authenticated shell confirms
@@ -376,9 +376,17 @@ sender, then dispatches the captured payload to the real registered worker.
 There is no production platform override. This tests display and tap navigation,
 not delivery through Apple/Google/Mozilla/Microsoft push services.
 
-The header links to Notifications settings. Path ready and Brief published account
-preferences remain editable even when this browser needs Home Screen installation,
-is unsupported, off or blocked. Device enablement is separate and requires a
-deliberate tap. Reminder controls/hour and its pre-prompt belong to #269.
-Real-iPhone receipt/tap-through and deferred T0, device and operational gates
-remain unaccepted.
+The header links to Notifications settings. Account preferences remain editable
+even when this browser needs Home Screen installation, is unsupported, off or
+blocked. Device enablement is separate and requires a deliberate tap. Turning on
+Reminder saves the account preference first, then offers an optional device
+pre-prompt when permission is still default in a supported browser. Not now is
+remembered per browser. The local-hour selector covers 00:00–23:00.
+
+W39 checks preference persistence without requesting system permission. W40 seeds
+only an idle Beat through a test-only fixture, invokes the real scheduled step
+with stub models/retrieval and an in-memory sender, then opens the generated Brief
+through the actual worker in a controlled browser window. Neither test establishes
+real push-service receipt or OS-level taps. Production exposes no test fixture or
+job-trigger routes. Real-iPhone receipt/tap-through and deferred T0, device and
+operational gates remain unaccepted.

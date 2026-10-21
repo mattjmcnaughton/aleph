@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
 import { beforeEach, expect, it, vi } from "vitest";
 import { API_V1_BASE } from "../lib/api";
@@ -107,4 +107,79 @@ it("a failed foreground check offers recovery by reopening settings without prom
   expect(await screen.findByText("Notifications are on for this device.")).toBeVisible();
   expect(screen.queryByRole("alert")).toBeNull();
   expect(enable).not.toHaveBeenCalled();
+});
+
+it.each([false, true])(
+  "persists Reminder and local hour without a system prompt (Safari=%s)",
+  async (safari) => {
+    localStorage.removeItem("aleph:reminder-push-dismissed");
+    if (safari)
+      vi.spyOn(navigator, "userAgent", "get").mockReturnValue("iPhone Version/18 Safari/605");
+    let saved = { ...preferences, reminder_enabled: false };
+    const enable = vi.spyOn(pushClient, "enable");
+    server.use(
+      http.get(`${API_V1_BASE}/notification-preferences`, () => HttpResponse.json(saved)),
+      http.put(`${API_V1_BASE}/notification-preferences`, async ({ request }) => {
+        saved = (await request.json()) as typeof saved;
+        return HttpResponse.json(saved);
+      }),
+    );
+    const view = setup();
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Reminder" }));
+    await waitFor(() => expect(screen.getByRole("checkbox", { name: "Reminder" })).toBeChecked());
+    expect(enable).not.toHaveBeenCalled();
+    if (safari) {
+      expect(screen.queryByRole("button", { name: "Yes" })).toBeNull();
+    } else {
+      fireEvent.click(await screen.findByRole("button", { name: "Not now" }));
+    }
+    fireEvent.change(screen.getByRole("combobox", { name: "Reminder hour" }), {
+      target: { value: "23" },
+    });
+    await waitFor(() => expect(saved.reminder_hour).toBe(23));
+    expect(saved).toEqual({ ...preferences, reminder_hour: 23 });
+    view.unmount();
+    setup();
+    expect(await screen.findByRole("checkbox", { name: "Reminder" })).toBeChecked();
+    expect(screen.getByRole("combobox", { name: "Reminder hour" })).toHaveValue("23");
+    expect(screen.queryByRole("button", { name: "Yes" })).toBeNull();
+    if (!safari) {
+      const toggle = screen.getByRole("checkbox", { name: "Reminder" });
+      fireEvent.click(toggle);
+      await waitFor(() => expect(toggle).not.toBeChecked());
+      fireEvent.click(toggle);
+      await waitFor(() => expect(toggle).toBeChecked());
+      expect(screen.queryByRole("button", { name: "Yes" })).toBeNull();
+    }
+    expect(enable).not.toHaveBeenCalled();
+    localStorage.removeItem("aleph:reminder-push-dismissed");
+  },
+);
+
+it("Reminder permission errors stay beside the consent action and retry without losing preferences", async () => {
+  localStorage.removeItem("aleph:reminder-push-dismissed");
+  vi.spyOn(pushClient.platform, "permission").mockReturnValue("default");
+  const enable = vi
+    .spyOn(pushClient, "enable")
+    .mockRejectedValueOnce(Error("offline"))
+    .mockResolvedValue(true);
+  server.use(
+    http.get(`${API_V1_BASE}/notification-preferences`, () =>
+      HttpResponse.json({ ...preferences, reminder_enabled: false }),
+    ),
+    http.put(`${API_V1_BASE}/notification-preferences`, async ({ request }) =>
+      HttpResponse.json(await request.json()),
+    ),
+  );
+  setup();
+  fireEvent.click(await screen.findByRole("checkbox", { name: "Reminder" }));
+  const prompt = await screen.findByRole("region", { name: "Reminder Notifications" });
+  expect(enable).not.toHaveBeenCalled();
+  fireEvent.click(within(prompt).getByRole("button", { name: "Yes" }));
+  expect(await within(prompt).findByRole("alert")).toHaveTextContent("Couldn't enable");
+  expect(screen.getByRole("checkbox", { name: "Reminder" })).toBeChecked();
+  fireEvent.click(within(prompt).getByRole("button", { name: "Yes" }));
+  await waitFor(() =>
+    expect(screen.queryByRole("region", { name: "Reminder Notifications" })).toBeNull(),
+  );
 });

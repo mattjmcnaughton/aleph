@@ -3,7 +3,6 @@ import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { type PathSummary, pathsListQueryOptions } from "../lib/api";
 import { Breadcrumbs } from "../components/breadcrumbs";
-import { pickResumeTarget } from "../components/continue-card";
 import { PRIMARY_CTA, StateCard } from "../components/state-card";
 import { Workspace } from "../components/workspace";
 import { useFeatureFlag } from "../lib/feature-flags";
@@ -53,6 +52,7 @@ function FlowSetup() {
   const search = Route.useSearch();
   const pathsQuery = useQuery(pathsListQueryOptions);
   const paths = pathsQuery.data?.paths;
+  const resumePathId = pathsQuery.data?.resume_path_id;
 
   const [length, setLength] = useState<number | null>(() => lengthFromSearch(search.length));
   const [order, setOrder] = useState<FlowOrder>(() => orderFromSearch(search.order));
@@ -82,7 +82,7 @@ function FlowSetup() {
       setSelectedIds([search.path]);
       return;
     }
-    const resume = pickResumeTarget(paths);
+    const resume = paths.find((path) => path.id === resumePathId);
     if (resume && selectablePaths.some((p) => p.id === resume.id)) {
       setSelectedIds([resume.id]);
       return;
@@ -93,7 +93,7 @@ function FlowSetup() {
     // selection exactly once": once it has set state, every later run
     // (triggered by a refetch reshaping `selectablePaths`, say) returns
     // before touching it, so the learner's own picks are never overwritten.
-  }, [paths, selectedIds, selectablePaths, search.paths, search.path]);
+  }, [paths, resumePathId, selectedIds, selectablePaths, search.paths, search.path]);
 
   if (!flowEnabled) {
     return (
