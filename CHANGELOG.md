@@ -1,3 +1,10 @@
+## [1.46.1](https://github.com/mattjmcnaughton/aleph/compare/v1.46.0...v1.46.1) (2026-10-22)
+
+
+### Bug Fixes
+
+* **tutor:** scope conversations to individual lessons ([f223f3f](https://github.com/mattjmcnaughton/aleph/commit/f223f3fb968eb411ddb36aa48c840573067bed00))
+
 # [1.46.0](https://github.com/mattjmcnaughton/aleph/compare/v1.45.0...v1.46.0) (2026-10-21)
 
 
