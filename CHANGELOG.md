@@ -1,3 +1,10 @@
+## [1.46.2](https://github.com/mattjmcnaughton/aleph/compare/v1.46.1...v1.46.2) (2026-10-22)
+
+
+### Bug Fixes
+
+* **tutor:** keep mobile chat controls visible ([035084a](https://github.com/mattjmcnaughton/aleph/commit/035084abdfd2a9e6ce9e99929d13db7786e11883))
+
 ## [1.46.1](https://github.com/mattjmcnaughton/aleph/compare/v1.46.0...v1.46.1) (2026-10-22)
 
 
