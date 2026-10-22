@@ -390,10 +390,8 @@ export async function answerQuickCheck(page: Page, index: number): Promise<Revea
 /**
  * Read the Outcome the Attempt just submitted revealed.
  *
- * Split out of `answerQuickCheck` because how the two taps are *made* is not
- * always a plain click — the tutor journeys reach past an open bottom sheet with
- * `tapAboveRail` — while what the reveal means is the same either way, and
- * should be read in exactly one place.
+ * Shared by callers that submit the Quick check themselves and by
+ * `answerQuickCheck`, so every journey reads the Outcome in exactly one place.
  */
 export async function readReveal(page: Page): Promise<Reveal> {
   const outcomeReveal = page.getByTestId("outcome-reveal");

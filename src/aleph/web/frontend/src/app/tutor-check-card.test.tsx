@@ -345,6 +345,7 @@ describe("Tutor check card — a streamed check", () => {
     await gotoLesson();
     await openRail();
 
+    fireEvent.click(screen.getByRole("button", { name: "Suggested questions" }));
     fireEvent.click(screen.getAllByTestId("tutor-rail-suggestion")[2]);
 
     await screen.findByTestId("tutor-rail-check");

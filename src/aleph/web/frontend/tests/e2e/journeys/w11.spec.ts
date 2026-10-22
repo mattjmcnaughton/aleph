@@ -93,6 +93,7 @@ test.describe("W11 the conversation persists", { tag: "@w11" }, () => {
     await openRail(page);
     await expect(railMessages(page)).toHaveCount(2);
     expect(await threadText(page)).toEqual(secondThread);
+    await page.getByLabel("Tutor options", { exact: true }).click();
     await page.getByTestId("tutor-rail-new-conversation").click();
     await page.getByTestId("tutor-rail-new-conversation-confirm").click();
     await expect(page.getByTestId("tutor-rail-empty")).toBeVisible();

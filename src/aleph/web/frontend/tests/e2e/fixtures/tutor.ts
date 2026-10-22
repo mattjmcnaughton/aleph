@@ -13,24 +13,11 @@
 // 2. **Sentinels live in the question**, and every one of them is stateless: the
 //    stub fires it on every send, so no spec depends on stub state carried
 //    across requests (AL-260's acceptance criterion).
-// 3. **The rail is a bottom sheet at 390x844**, `fixed` over the lower 75% of
-//    the viewport — and the lesson underneath stays fully usable, because `main`
-//    carries a matching 75vh of bottom padding for exactly as long as the rail
-//    is open (`components/workspace.tsx`). So nothing here ever collapses the
-//    sheet to reach a control. What the padding does *not* fix is Playwright's
-//    aim: a click targets an element's **centre**, which a tall control scrolled
-//    to the edge of the visible band can still have under the sheet. That is
-//    `tapAboveRail`'s job — a real click at a real, hit-tested point, never
-//    `force`.
+// 3. **The rail is a near-full-height sheet at 390x844.** Close it before
+//    interacting with the lesson, then reopen it to continue the conversation.
 
 import { type Locator, type Page, expect } from "@playwright/test";
-import {
-  ACTION_TIMEOUT,
-  GENERATION_TIMEOUT,
-  type Reveal,
-  readReveal,
-  waitForSurface,
-} from "./journey";
+import { ACTION_TIMEOUT, GENERATION_TIMEOUT } from "./journey";
 
 /**
  * Sentinels the stub model reads out of the **question** text
@@ -150,6 +137,10 @@ export async function askTutor(page: Page, question: string): Promise<string> {
 /** Tap one of the composer's one-tap asks (PRD §5.3) and wait for the reply. */
 export async function tapSuggestion(page: Page, label: string): Promise<string> {
   const before = await tutorReplies(page).count();
+  const disclosure = page.getByRole("button", { name: "Suggested questions", exact: true });
+  if ((await disclosure.getAttribute("aria-expanded")) !== "true") {
+    await disclosure.click();
+  }
   await page.getByTestId("tutor-rail-suggestion").filter({ hasText: label }).click();
   return settledReply(page, before);
 }
@@ -222,111 +213,6 @@ export async function passageSlice(page: Page): Promise<string> {
  */
 export function quickCheckOptionTexts(page: Page): Promise<string[]> {
   return page.locator('label[for^="quick-check-option-"]').allInnerTexts();
-}
-
-// --- Reaching the lesson under the sheet --------------------------------------
-
-/**
- * Tap a lesson control while the rail is open on a phone — for real, without
- * `force`.
- *
- * At 390x844 the rail is a sheet fixed to the bottom of the viewport (up to 75vh
- * of it, so its top edge sits around y=211 once a turn is in the thread), and a
- * sticky header owns the first ~50px. Between them is the short band a learner
- * actually taps in. `main`'s bottom padding guarantees any control *can* be
- * scrolled into that band; what it cannot do is aim the click, and Playwright
- * aims at an element's **centre** — so a tall control (the Quick check's options
- * are big tap targets) scrolled as far as it goes can have its top in the band
- * and its centre under the sheet.
- *
- * So this scrolls the control into the band and then picks a point *on the
- * control* that lies inside it, and clicks there. Everything Playwright checks
- * for a normal click still applies — visibility, stability, and hit-testing at
- * that point — which is what makes W9's "the lesson still works with the tutor
- * open" a real assertion rather than a synthetic event. If no such point exists
- * the control genuinely cannot be tapped with the rail open, and that is a
- * failure worth seeing, so it throws rather than falling back to `force`.
- */
-export async function tapAboveRail(page: Page, target: Locator): Promise<void> {
-  const header = await page.locator("header").first().boundingBox();
-  // The sheet is what this helper exists to work around, so its absence is a
-  // caller error (the rail is closed — use a plain `click`), not a case to
-  // silently fall back on the whole viewport for.
-  const sheet = await page.getByTestId("tutor-rail-column").boundingBox();
-  if (sheet === null) {
-    throw new Error("tapAboveRail: the rail is not open — tap it directly");
-  }
-  const bandTop = header === null ? 0 : header.y + header.height;
-  const bandBottom = sheet.y;
-
-  await target.evaluate((element) => element.scrollIntoView({ block: "start" }));
-  let box = await boxOf(target);
-  // `block: "start"` aligns the control with the top of the *viewport*, which is
-  // underneath the sticky header — so a short control can land entirely behind
-  // it. Hand back exactly the overlap: the control then starts at the top of the
-  // band rather than above it, and the whole of it is in play.
-  if (box.y < bandTop) {
-    await page.evaluate((by) => window.scrollBy(0, by), box.y - bandTop);
-    box = await boxOf(target);
-  }
-
-  // 8px of clearance from both obstructions, 4px in from the control's own
-  // edges — a click on a boundary pixel is nobody's idea of a tap.
-  const from = Math.max(box.y + 4, bandTop + 8);
-  const to = Math.min(box.y + box.height - 4, bandBottom - 8);
-  if (from > to) {
-    const where = `control ${box.y}..${box.y + box.height}, band ${bandTop}..${bandBottom}`;
-    throw new Error(`tapAboveRail: the control is unreachable with the rail open (${where})`);
-  }
-  await target.click({ position: { x: box.width / 2, y: (from + to) / 2 - box.y } });
-}
-
-/** `boundingBox()`, with "not rendered" turned into a legible failure. */
-async function boxOf(target: Locator): Promise<{ y: number; width: number; height: number }> {
-  const box = await target.boundingBox();
-  if (box === null) {
-    throw new Error("tapAboveRail: the control is not visible");
-  }
-  return box;
-}
-
-/**
- * Submit the Quick check (already answered) and mark the lesson complete, with
- * the rail **open** throughout — the state the journey is actually about.
- *
- * Nothing is collapsed: `main`'s 75vh of bottom clearance while the rail is open
- * (`components/workspace.tsx`) is what makes the tail of the lesson reachable,
- * and every tap here goes through `tapAboveRail` for the aiming reason described
- * there. So "the tutor gates nothing" (TDD §3) is asserted against the layout a
- * learner is actually looking at, rather than against one they had to dismiss
- * the tutor to get to.
- */
-export async function submitAndCompleteWithRailOpen(page: Page): Promise<Reveal> {
-  await tapAboveRail(page, page.getByTestId("quick-check-submit"));
-  const reveal = await readReveal(page);
-  await tapAboveRail(page, page.getByTestId("lesson-complete-button"));
-  await expect(page.getByTestId("lesson-completed")).toBeVisible({ timeout: ACTION_TIMEOUT });
-  return reveal;
-}
-
-/**
- * `backToPath`, aimed past the open sheet — the completed lesson's own "Back to
- * your path", tapped without dismissing the tutor first.
- *
- * `journey.ts`'s `backToPath` clicks plainly, which is fine when the link is the
- * last thing on the page: Playwright's minimal scroll leaves it in the band
- * above the sheet. Since AL-400 it is **not** the last thing — drafting starts
- * when the lesson opens, so by the time a learner marks a lesson complete the
- * drafts block is usually already resolved and renders directly below the
- * completion state (Phase 3 TDD D5/§8). The link then sits mid-document, the
- * minimal scroll puts its centre under the sheet, and the click is intercepted
- * for the whole timeout. `tapAboveRail` is the same aiming fix every other
- * rail-open tap in this file uses, and it still throws rather than falling back
- * to `force`, so an genuinely unreachable link stays a failure worth seeing.
- */
-export async function backToPathAboveRail(page: Page): Promise<void> {
-  await tapAboveRail(page, page.getByTestId("lesson-completed-back"));
-  await waitForSurface(page, "path-rail");
 }
 
 // --- Wire reads ---------------------------------------------------------------

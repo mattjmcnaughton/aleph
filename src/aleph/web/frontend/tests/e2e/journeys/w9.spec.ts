@@ -16,32 +16,29 @@
 // The second half is the one the PRD calls the pass condition: the tutor is
 // **additive**. It gates nothing and writes no Phase 1 state, so the Quick check
 // still takes an answer and the lesson still completes — and the thread is still
-// there afterwards. All of it happens with the rail **open**: on a 390x844 phone
-// that is a sheet over the bottom 75% of the viewport, and `main` carries a
-// matching 75vh of bottom clearance for as long as it is
-// (`components/workspace.tsx`), so every control can be scrolled above the
-// sheet's top edge. `tapAboveRail` is what aims each tap inside the resulting
-// band and hit-tests it there. Nothing is collapsed to reach the lesson.
+// there afterwards. On a phone the learner closes the near-full-height Tutor
+// sheet to work on the lesson, then reopens it to continue the same thread.
 
 import { expect, test } from "@playwright/test";
 import { DEV_STORAGE_STATE } from "../fixtures/auth";
 import {
+  answerQuickCheck,
   createPath,
   expectLessonContent,
   lessonTitle,
+  markComplete,
   openLessonAt,
   quickCheckOptions,
   uniqueTopic,
 } from "../fixtures/journey";
 import {
   askTutor,
+  closeRail,
   lastReply,
   learnerMessages,
   openRail,
   passageSlice,
   replyBody,
-  submitAndCompleteWithRailOpen,
-  tapAboveRail,
   tapSuggestion,
   tutorReplies,
 } from "../fixtures/tutor";
@@ -91,26 +88,23 @@ test.describe("W9 ask about this lesson", { tag: "@w9" }, () => {
     expect(reply).not.toContain("**");
 
     // --- the tutor is additive ----------------------------------------------
-    // The lesson is live *behind* the open sheet, and stays that way to the end:
-    // answering the Quick check, submitting it and marking the lesson complete
-    // all happen with the rail on screen. No tutor state gates any of them, and
-    // the Attempt the tutor sat beside is the learner's own.
+    // Close Tutor to answer the Quick check and complete the lesson. No tutor
+    // state gates either action; the Attempt remains the learner's own.
     await expect(page.getByTestId("tutor-rail")).toBeVisible();
+    await closeRail(page);
     const optionCount = await quickCheckOptions(page).count();
     expect(optionCount).toBeGreaterThanOrEqual(3);
-    await tapAboveRail(page, page.locator('label[for="quick-check-option-0"]'));
+    const outcome = await answerQuickCheck(page, 0);
     await expect(quickCheckOptions(page).nth(0)).toBeChecked();
-    await expect(page.getByTestId("tutor-rail")).toBeVisible();
-
-    const outcome = await submitAndCompleteWithRailOpen(page);
+    await markComplete(page);
     expect(outcome.correctIndex).toBeGreaterThanOrEqual(0);
     await expect(page.getByTestId("lesson-completed")).toBeVisible();
 
-    // ...and the thread survived all of it, without ever having been dismissed:
+    // ...and reopening shows the thread survived all of it:
     // the conversation and the lesson are separate stores (TDD §3), and
     // completing a lesson invalidates the `["paths", …]` prefix, which a
     // conversation is deliberately not under.
-    await expect(page.getByTestId("tutor-rail")).toBeVisible();
+    await openRail(page);
     await expect(tutorReplies(page)).toHaveCount(1);
     expect(await lastReply(page)).toBe(reply);
     // The tutor is still there on a completed lesson, and still answering.

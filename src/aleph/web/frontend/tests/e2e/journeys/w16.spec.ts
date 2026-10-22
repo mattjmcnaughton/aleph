@@ -22,8 +22,10 @@
 import { expect, test } from "@playwright/test";
 import { DEV_STORAGE_STATE } from "../fixtures/auth";
 import {
+  answerQuickCheck,
   createPath,
   expectLessonContent,
+  markComplete,
   openLessonAt,
   quickCheckOptions,
   uniqueTopic,
@@ -34,12 +36,12 @@ import {
   LESSON_ERROR_FALSE_CLAIM,
   LESSON_ERROR_FALSE_VALUE,
   askTutor,
+  closeRail,
   fetchLesson,
   openLessonId,
   openRail,
   quickCheckOptionTexts,
-  submitAndCompleteWithRailOpen,
-  tapAboveRail,
+  replyText,
 } from "../fixtures/tutor";
 
 test.use({ storageState: DEV_STORAGE_STATE });
@@ -87,6 +89,7 @@ test.describe("W16 a wrong lesson is corrected", { tag: "@w16" }, () => {
     // Byte-identical passage and the same options, in the same order: the tutor
     // writes no Phase 1 state, so the correction lives in the conversation and
     // nowhere else (TDD §3).
+    await closeRail(page);
     const passageAfter = (await page.getByTestId("lesson-read-passage").innerText()).trim();
     expect(passageAfter).toBe(passageBefore);
     expect(await quickCheckOptionTexts(page)).toEqual(optionsBefore);
@@ -99,15 +102,16 @@ test.describe("W16 a wrong lesson is corrected", { tag: "@w16" }, () => {
     // Answering the way the tutor said the check expects — the passage's figure,
     // not the true one — is what the check marks correct. That tension is the
     // point of W16, and it is left standing rather than resolved by the tutor.
-    // Still with the rail open, like W9: the tutor gates nothing, so nothing is
-    // dismissed to get to the end of the lesson.
+    // With Tutor closed, the lesson remains independently completable.
     const keyedIndex = optionsBefore.indexOf(LESSON_ERROR_FALSE_VALUE);
-    await tapAboveRail(page, page.locator(`label[for="quick-check-option-${keyedIndex}"]`));
-    const outcome = await submitAndCompleteWithRailOpen(page);
+    const outcome = await answerQuickCheck(page, keyedIndex);
+    await markComplete(page);
     expect(outcome.outcome).toBe("correct");
     expect(outcome.correctIndex).toBe(keyedIndex);
     await expect(quickCheckOptions(page).nth(keyedIndex)).toHaveAttribute("data-correct", "true");
     await expect(page.getByTestId("lesson-completed")).toBeVisible();
+    await openRail(page);
+    expect(await replyText(page, 0)).toBe(reply);
   });
 
   test("a healthy lesson gets no correction", async ({ page }) => {

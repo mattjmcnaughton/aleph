@@ -20,11 +20,19 @@
 
 import { expect, test } from "@playwright/test";
 import { DEV_STORAGE_STATE } from "../fixtures/auth";
-import { ACTION_TIMEOUT, createPath, openLessonAt, uniqueTopic } from "../fixtures/journey";
+import {
+  ACTION_TIMEOUT,
+  answerQuickCheck,
+  createPath,
+  markComplete,
+  openLessonAt,
+  uniqueTopic,
+} from "../fixtures/journey";
 import {
   FORCE_TUTOR_FAILURE,
   TUTOR_UPSTREAM_FAILURE_COPY,
   askTutor,
+  closeRail,
   fetchConversation,
   learnerMessages,
   openLessonId,
@@ -32,8 +40,6 @@ import {
   passageSlice,
   railMessages,
   replyText,
-  submitAndCompleteWithRailOpen,
-  tapAboveRail,
   tutorReplies,
 } from "../fixtures/tutor";
 
@@ -97,11 +103,14 @@ test.describe("W14 a failed reply is recoverable", { tag: "@w14" }, () => {
     // --- and the lesson never knew ------------------------------------------
     // No tutor state gates completion (PRD release criteria): the Quick check
     // and mark complete work exactly as they would have.
-    // With the rail still open, like W9 — nothing is dismissed to reach the end
-    // of the lesson.
-    await tapAboveRail(page, page.locator('label[for="quick-check-option-0"]'));
-    await submitAndCompleteWithRailOpen(page);
+    // Close the phone's Tutor sheet to work on the lesson, as in W9.
+    await closeRail(page);
+    await answerQuickCheck(page, 0);
+    await markComplete(page);
     await expect(page.getByTestId("lesson-completed")).toBeVisible();
+    await openRail(page);
+    await expect(tutorReplies(page)).toHaveCount(1);
+    expect(await replyText(page, 0)).toBe(reply);
   });
 
   test("a failed turn leaves an existing thread exactly as it was", async ({ page }) => {

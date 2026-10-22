@@ -15,6 +15,7 @@
 // **Iris is the tutor** (PRD §5.10): teal stays the path's accent, iris marks
 // every tutor-owned affordance here.
 
+import { useState } from "react";
 import { AlephGlyph } from "../aleph-logo";
 import { handleComposerKeyDown } from "../../lib/composer-keys";
 import { Markdown } from "../markdown";
@@ -71,6 +72,7 @@ export function TutorRail({ tutor }: { tutor: TutorRailState }) {
   // the bottom of it — so on a thread taller than the rail, a question shown
   // the instant it is sent would still be shown off screen.
   const thread = useThreadScroll(live);
+  const [suggestionsOpen, setSuggestionsOpen] = useState(false);
 
   return (
     <section data-testid="tutor-rail" aria-label="Tutor" className="flex min-h-0 flex-1 flex-col">
@@ -84,160 +86,194 @@ export function TutorRail({ tutor }: { tutor: TutorRailState }) {
         // thread announces itself; `polite` because a stream that interrupted
         // the learner mid-sentence on every delta would be unusable.
         aria-live="polite"
-        className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4"
+        className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
       >
-        {/* New conversation failed. Its own notice rather than the reply's error
+        <div className="space-y-6 px-5 py-6">
+          {/* New conversation failed. Its own notice rather than the reply's error
             card below: nothing was sent, so there is no question to try again —
             the only honest offer is to clear it again. */}
-        {tutor.clearError ? (
-          <p
-            data-testid="tutor-rail-clear-error"
-            role="alert"
-            className="rounded-md border border-danger-border/60 bg-danger-bg px-4 py-3 text-sm leading-6 text-porcelain"
-          >
-            {tutor.clearError}
-          </p>
-        ) : null}
+          {tutor.clearError ? (
+            <p
+              data-testid="tutor-rail-clear-error"
+              role="alert"
+              className="rounded-md border border-danger-border/60 bg-danger-bg px-4 py-3 text-sm leading-6 text-porcelain"
+            >
+              {tutor.clearError}
+            </p>
+          ) : null}
 
-        {empty ? <EmptyState lessonTitle={tutor.lessonTitle} /> : null}
+          {empty ? <EmptyState tutor={tutor} /> : null}
 
-        {tutor.messages.map((message) => (
-          <MessageBubble key={message.id} message={message} tutor={tutor} />
-        ))}
+          {tutor.messages.map((message) => (
+            <MessageBubble key={message.id} message={message} tutor={tutor} />
+          ))}
 
-        {/* The live turn, in the order it happens. The question is the same
+          {/* The live turn, in the order it happens. The question is the same
             bubble the settled message renders, so the handover to the cached
             thread changes nothing on screen. */}
-        {tutor.pendingQuestion !== null ? (
-          <LearnerBubble testid="tutor-rail-pending" content={tutor.pendingQuestion} />
-        ) : null}
+          {tutor.pendingQuestion !== null ? (
+            <LearnerBubble testid="tutor-rail-pending" content={tutor.pendingQuestion} />
+          ) : null}
 
-        {tutor.thinking ? <Thinking /> : null}
+          {tutor.thinking ? <Thinking /> : null}
 
-        {tutor.streamingText !== "" ? (
-          <div className="flex gap-2.5">
-            <TutorGlyph size="2xs" />
-            <Markdown
-              testid="tutor-rail-streaming"
-              className="min-w-0 flex-1 text-sm [&_p]:text-sm [&_p]:leading-6"
+          {tutor.streamingText !== "" ? (
+            <div>
+              <Markdown
+                testid="tutor-rail-streaming"
+                className="min-w-0 text-base [&_p]:text-base [&_p]:leading-7"
+              >
+                {tutor.streamingText}
+              </Markdown>
+            </div>
+          ) : null}
+
+          {tutor.status === "failed" && tutor.errorMessage ? (
+            <div
+              data-testid="tutor-rail-error"
+              role="alert"
+              className="rounded-md border border-danger-border/60 bg-danger-bg px-4 py-3 text-sm leading-6 text-porcelain"
             >
-              {tutor.streamingText}
-            </Markdown>
-          </div>
-        ) : null}
-
-        {tutor.status === "failed" && tutor.errorMessage ? (
-          <div
-            data-testid="tutor-rail-error"
-            role="alert"
-            className="rounded-md border border-danger-border/60 bg-danger-bg px-4 py-3 text-sm leading-6 text-porcelain"
-          >
-            <p className="font-semibold text-danger">{tutor.errorMessage}</p>
-            {/* Literal, not reassurance: a failed reply puts the question back
+              <p className="font-semibold text-danger">{tutor.errorMessage}</p>
+              {/* Literal, not reassurance: a failed reply puts the question back
                 in the composer below (the same restore stop does), so the
                 learner can edit it or send it again by hand. */}
-            <p className="mt-1 text-mist">Your question is still here.</p>
-            <button
-              type="button"
-              data-testid="tutor-rail-retry"
-              onClick={tutor.retry}
-              className="mt-3 inline-flex items-center justify-center rounded-md border border-iris/60 px-3 py-2 text-xs font-semibold text-porcelain transition-colors hover:border-iris hover:bg-iris/10"
-            >
-              Try again
-            </button>
-          </div>
-        ) : null}
+              <p className="mt-1 text-mist">Your question is still here.</p>
+              <button
+                type="button"
+                data-testid="tutor-rail-retry"
+                onClick={tutor.retry}
+                className="mt-3 inline-flex items-center justify-center rounded-md border border-iris/60 px-3 py-2 text-xs font-semibold text-porcelain transition-colors hover:border-iris hover:bg-iris/10"
+              >
+                Try again
+              </button>
+            </div>
+          ) : null}
+        </div>
       </div>
 
-      <Composer tutor={tutor} />
+      {suggestionsOpen && tutor.status !== "streaming" ? (
+        <div className="mx-4 min-h-0 max-h-48 overflow-y-auto overscroll-contain rounded-xl border border-divider bg-surface">
+          {TUTOR_SUGGESTIONS.map((suggestion) => (
+            <button
+              key={suggestion}
+              type="button"
+              data-testid="tutor-rail-suggestion"
+              onClick={() => {
+                setSuggestionsOpen(false);
+                tutor.send(suggestion, "suggestion");
+              }}
+              className="min-h-11 w-full rounded-lg px-3 py-2 text-left text-sm text-porcelain hover:bg-elevated"
+            >
+              {suggestion}
+            </button>
+          ))}
+        </div>
+      ) : null}
+      <Composer
+        tutor={tutor}
+        suggestionsOpen={suggestionsOpen}
+        toggleSuggestions={() => setSuggestionsOpen(!suggestionsOpen)}
+      />
     </section>
   );
 }
 
-// --- Header: handle, title + scope, new conversation, close, admin picker ----
+// --- Header: title, full-width scope, secondary actions and close ------------
 
 function RailHeader({ tutor }: { tutor: TutorRailState }) {
   return (
-    <div data-testid="tutor-rail-header" className="border-b border-divider px-4 pb-3 pt-1 lg:pt-3">
-      {/* The sheet's grab handle (phone only): the visual cue that this is a
-          sheet over the lesson, and a tap on it dismisses. The pill is 4px
-          tall, so the button around it is the tap target, not the pill.
-          Hidden from AT and skipped by the tab order on purpose — the × below
-          is the accessible close, and this is a second way to reach the same
-          action, not a second control to announce. */}
-      <button
-        type="button"
-        data-testid="tutor-rail-handle"
-        aria-hidden="true"
-        tabIndex={-1}
-        onClick={tutor.closeRail}
-        className="mx-auto mb-1 block px-6 py-2 lg:hidden"
-      >
-        <span className="block h-1 w-9 rounded-full bg-divider" />
-      </button>
-
-      <div className="flex flex-wrap items-center gap-2">
+    <div
+      data-testid="tutor-rail-header"
+      className="relative z-10 shrink-0 border-b border-divider px-5 pb-3 pt-3"
+    >
+      <div className="grid grid-cols-[auto_1fr_auto_auto] items-center gap-x-2 gap-y-2">
         <TutorGlyph />
-        <span className="mr-auto min-w-0 flex-1">
-          <span className="block text-sm font-semibold leading-5 text-porcelain">Tutor</span>
-          {/* The scope statement, told once, as the surface's subtitle: what the
-              tutor can see is the lesson, and the lesson is named where the
-              surface is named. */}
-          <span
-            data-testid="tutor-rail-context-chip"
-            title={tutor.lessonTitle}
-            className="flex items-start gap-1.5 text-xs leading-4 text-mist"
+        <span className="text-base font-semibold text-porcelain">Tutor</span>
+        <details
+          className="relative"
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              event.currentTarget.open = false;
+              event.currentTarget.querySelector("summary")?.focus();
+            }
+          }}
+        >
+          <summary
+            aria-label="Tutor options"
+            className="grid h-11 w-11 cursor-pointer list-none place-items-center rounded-lg text-xl text-mist hover:bg-surface focus-visible:outline focus-visible:outline-iris [&::-webkit-details-marker]:hidden"
           >
-            <span
-              aria-hidden="true"
-              className="mt-[5px] h-1.5 w-1.5 shrink-0 rounded-full bg-iris"
+            <span aria-hidden="true">⋯</span>
+          </summary>
+          <div className="absolute right-0 top-full mt-2 w-56 rounded-lg border border-divider bg-surface p-2 shadow-lg">
+            <button
+              type="button"
+              data-testid="tutor-rail-new-conversation"
+              onClick={(event) => {
+                event.currentTarget.closest("details")?.removeAttribute("open");
+                tutor.askNewConversation();
+              }}
+              className="min-h-11 w-full rounded-md px-3 text-left text-sm text-porcelain hover:bg-elevated"
+            >
+              New conversation
+            </button>
+            <TutorModelPicker
+              isAdmin={tutor.isAdmin}
+              allowlist={tutor.modelAllowlist}
+              value={tutor.model}
+              onChange={tutor.setModel}
             />
-            {/* Two lines before clipping: the scope statement is the point of
-                the line (PRD §5.2), and one line clipped the PRD's own example
-                title. `title` carries the whole thing for a hover. */}
-            <span className="line-clamp-2">
-              Reading · <span className="text-porcelain">{tutor.lessonTitle}</span>
-            </span>
-          </span>
-        </span>
-
-        {tutor.confirmingNew ? null : (
-          <button
-            type="button"
-            data-testid="tutor-rail-new-conversation"
-            onClick={tutor.askNewConversation}
-            title="New conversation"
-            className="shrink-0 rounded-md border border-divider px-2.5 py-1.5 text-xs text-mist transition-colors hover:border-iris/50 hover:text-porcelain"
-          >
-            New conversation
-          </button>
-        )}
+          </div>
+        </details>
 
         <button
           type="button"
           data-testid="tutor-rail-collapse"
           onClick={tutor.closeRail}
           aria-label="Close the tutor"
-          title="Close the tutor"
-          className="grid h-7 w-7 shrink-0 place-items-center rounded-md border border-divider text-mist transition-colors hover:border-iris/50 hover:text-porcelain"
+          title="Back to lesson"
+          className="grid h-11 w-11 place-items-center rounded-lg text-mist transition-colors hover:bg-surface hover:text-porcelain focus-visible:outline focus-visible:outline-iris"
         >
-          <span aria-hidden="true" className="text-sm leading-none">
-            ×
-          </span>
+          <svg
+            aria-hidden="true"
+            width="22"
+            height="22"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+          >
+            <path d="m6 6 12 12M18 6 6 18" />
+          </svg>
         </button>
+
+        <span
+          data-testid="tutor-rail-context-chip"
+          title={tutor.lessonTitle}
+          className="col-span-4 flex items-start gap-2 text-sm leading-5 text-mist"
+        >
+          <span aria-hidden="true" className="mt-[5px] h-1.5 w-1.5 shrink-0 rounded-full bg-iris" />
+          {/* Two lines before clipping: the scope statement is the point of
+                the line (PRD §5.2), and one line clipped the PRD's own example
+                title. `title` carries the whole thing for a hover. */}
+          <span className="line-clamp-2">
+            Reading · <span className="text-porcelain">{tutor.lessonTitle}</span>
+          </span>
+        </span>
 
         {tutor.confirmingNew ? (
           // Confirm in place, like the switcher's delete: clearing a thread is
           // destructive and not undoable, and it must never sit under one tap.
           // It takes its own row (`basis-full`) under the title row, so the ×
           // keeps its corner and the tab order runs top to bottom.
-          <span className="flex basis-full items-center justify-end gap-2">
+          <span className="col-span-4 flex flex-wrap items-center justify-end gap-2">
             <span className="text-xs text-mist">Clear this conversation?</span>
             <button
               type="button"
               data-testid="tutor-rail-new-conversation-confirm"
               onClick={tutor.confirmNewConversation}
-              className="rounded-md border border-danger-border/60 bg-danger-bg px-2.5 py-1.5 text-xs font-semibold text-danger transition-colors hover:border-danger"
+              className="min-h-11 rounded-md border border-danger-border/60 bg-danger-bg px-3 text-sm font-semibold text-danger transition-colors hover:border-danger"
             >
               Clear
             </button>
@@ -245,26 +281,12 @@ function RailHeader({ tutor }: { tutor: TutorRailState }) {
               type="button"
               data-testid="tutor-rail-new-conversation-cancel"
               onClick={tutor.cancelNewConversation}
-              className="rounded-md border border-divider px-2.5 py-1.5 text-xs text-mist transition-colors hover:text-porcelain"
+              className="min-h-11 rounded-md border border-divider px-3 text-sm text-mist transition-colors hover:text-porcelain"
             >
               Keep
             </button>
           </span>
         ) : null}
-
-        {/* The admin picker gets a row of its own rather than a share of the
-            title row: on a phone it is the widest thing in the header, and
-            letting it wrap the row is what pushed the × out of its corner.
-            `empty:hidden` because the picker renders nothing for a non-admin,
-            and an empty wrapper would still cost the row gap. */}
-        <span className="basis-full empty:hidden">
-          <TutorModelPicker
-            isAdmin={tutor.isAdmin}
-            allowlist={tutor.modelAllowlist}
-            value={tutor.model}
-            onChange={tutor.setModel}
-          />
-        </span>
       </div>
     </div>
   );
@@ -282,7 +304,7 @@ function RailHeader({ tutor }: { tutor: TutorRailState }) {
 function LearnerBubble({ testid, content }: { testid: string; content: string }) {
   return (
     <div data-testid={testid} data-role="learner" className="flex justify-end">
-      <p className="max-w-[85%] whitespace-pre-wrap rounded-lg border border-divider bg-surface px-3 py-2 text-sm leading-6 text-porcelain">
+      <p className="max-w-[90%] whitespace-pre-wrap break-words rounded-2xl bg-surface px-4 py-3 text-base leading-7 text-porcelain">
         {content}
       </p>
     </div>
@@ -340,13 +362,12 @@ function MessageBubble({
       // A posed Tutor check rides the cached message, so it survives a collapse,
       // a reopen, and a page revisit — and so does the answer written onto it.
       data-tutor-check={message.tutor_check ? "true" : undefined}
-      className="flex gap-2.5"
+      className="min-w-0"
     >
-      <TutorGlyph size="2xs" />
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0">
         {/* Generated prose goes through the one renderer, always (the security
             boundary — no second pipeline, no `dangerouslySetInnerHTML`). */}
-        <Markdown className="text-sm [&_p]:text-sm [&_p]:leading-6">{message.content}</Markdown>
+        <Markdown className="text-base [&_p]:text-base [&_p]:leading-7">{message.content}</Markdown>
         {/* The card is part of the reply, under it — a Tutor check is posed
          *in* the conversation (PRD §5.5), not in a surface beside it. */}
         {message.tutor_check ? (
@@ -368,58 +389,66 @@ function MessageBubble({
  * presenting a bare composer — the scope statement is the whole point, because
  * a learner who doesn't know the tutor has the passage won't ask about it.
  */
-function EmptyState({ lessonTitle }: { lessonTitle: string }) {
+function EmptyState({ tutor }: { tutor: TutorRailState }) {
   return (
-    <div data-testid="tutor-rail-empty" className="rounded-lg border border-divider bg-surface p-4">
-      <p className="text-sm font-semibold text-porcelain">I can see this lesson.</p>
-      <p className="mt-2 text-sm leading-6 text-mist">
-        The Read passage and Quick check for <span className="text-porcelain">{lessonTitle}</span>,
-        your answer to it once you've made one, and the names of every unit and lesson on this path.
-        Ask me anything about it.
+    <div data-testid="tutor-rail-empty" className="py-6">
+      <p className="text-xl font-semibold text-porcelain">What would you like to unpack?</p>
+      <p className="mt-3 text-base leading-7 text-mist">
+        Ask about this lesson’s Read passage or Quick check.
       </p>
+      <div className="mt-6 grid gap-3">
+        {[TUTOR_SUGGESTIONS[0], TUTOR_SUGGESTIONS[3]].map((suggestion) => (
+          <button
+            key={suggestion}
+            type="button"
+            onClick={() => tutor.send(suggestion, "suggestion")}
+            className="min-h-12 rounded-xl border border-divider px-4 py-3 text-left text-sm text-porcelain transition-colors hover:border-iris hover:bg-surface"
+          >
+            {suggestion}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
 
 // --- Composer: suggestions, textarea, send/stop -------------------------------
 
-function Composer({ tutor }: { tutor: TutorRailState }) {
+function Composer({
+  tutor,
+  suggestionsOpen,
+  toggleSuggestions,
+}: {
+  tutor: TutorRailState;
+  suggestionsOpen: boolean;
+  toggleSuggestions: () => void;
+}) {
   const streaming = tutor.status === "streaming";
 
   return (
     // `pb-[max(...)]`: the sheet ends at the physical bottom of a phone, so the
     // composer pads by the home-indicator inset where there is one (and by its
     // ordinary 12px where there isn't). Needs `viewport-fit=cover` in index.html.
-    <div className="border-t border-divider px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
-      {/* Suggestions sit with the composer so they are offered in the empty
-          state and again after a reply settles (PRD §5.3) — never mid-stream,
-          when tapping one could only queue a send the server would 409. One
-          row that scrolls sideways, not a wrap: on a phone two rows of chips
-          were a quarter of the sheet, on every reply. The docked column has
-          vertical room and a mouse instead of a thumb, so there it wraps. */}
-      {streaming ? null : (
-        <div className="-mx-4 mb-3 flex gap-2 overflow-x-auto px-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden lg:flex-wrap lg:overflow-visible">
-          {TUTOR_SUGGESTIONS.map((suggestion) => (
-            <button
-              key={suggestion}
-              type="button"
-              data-testid="tutor-rail-suggestion"
-              onClick={() => tutor.send(suggestion, "suggestion")}
-              className="shrink-0 whitespace-nowrap rounded-full border border-divider px-3 py-1.5 text-xs text-mist transition-colors hover:border-iris/50 hover:text-porcelain"
-            >
-              {suggestion}
-            </button>
-          ))}
-        </div>
-      )}
-
+    <div className="shrink-0 border-t border-divider px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
       <form
-        className="flex items-stretch gap-2"
+        className="flex items-end gap-1 rounded-2xl border border-divider bg-surface p-1.5 focus-within:border-iris"
         onSubmit={(event) => {
           event.preventDefault();
           tutor.send(tutor.draft, "typed");
         }}
       >
+        {streaming ? null : (
+          <button
+            type="button"
+            aria-label="Suggested questions"
+            aria-expanded={suggestionsOpen}
+            title="Suggested questions"
+            onClick={toggleSuggestions}
+            className="grid h-11 w-11 shrink-0 place-items-center rounded-xl text-xl text-mist hover:bg-elevated focus-visible:outline focus-visible:outline-iris"
+          >
+            <span aria-hidden="true">{suggestionsOpen ? "−" : "+"}</span>
+          </button>
+        )}
         <textarea
           data-testid="tutor-rail-input"
           aria-label="Ask about this lesson"
@@ -433,11 +462,11 @@ function Composer({ tutor }: { tutor: TutorRailState }) {
           maxLength={TUTOR_MESSAGE_MAX_LENGTH}
           placeholder="Ask about this lesson…"
           // One row until the question needs more: `field-sizing: content`
-          // grows the box with its text (to `max-h-40`, then it scrolls), so
+          // grows the box with its text (then it scrolls), so
           // the multi-line question Shift+Enter exists for (`composer-keys.ts`)
           // is not edited through a one-line window. Browsers without it keep
           // the one row and scroll inside it.
-          className="min-w-0 flex-1 resize-none [field-sizing:content] max-h-40 rounded-md border border-divider bg-surface px-3 py-2 text-sm leading-6 text-porcelain placeholder:text-slate focus:border-iris focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+          className="min-h-11 min-w-0 flex-1 resize-none [field-sizing:content] max-h-[min(8rem,calc(var(--tutor-viewport-height,100dvh)*0.2))] bg-transparent px-1 py-2.5 text-base leading-6 text-porcelain placeholder:text-mist focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
         />
         {streaming ? (
           // Stop is the *only* control in flight: it aborts the request, and
@@ -446,7 +475,7 @@ function Composer({ tutor }: { tutor: TutorRailState }) {
             type="button"
             data-testid="tutor-rail-stop"
             onClick={tutor.stop}
-            className="inline-flex shrink-0 items-center justify-center rounded-md border border-divider px-4 text-sm font-semibold text-porcelain transition-colors hover:border-iris/50"
+            className="inline-flex h-11 shrink-0 items-center justify-center rounded-xl border border-divider px-3 text-sm font-semibold text-porcelain transition-colors hover:border-iris/50"
           >
             Stop
           </button>
@@ -454,10 +483,23 @@ function Composer({ tutor }: { tutor: TutorRailState }) {
           <button
             type="submit"
             data-testid="tutor-rail-send"
+            aria-label="Ask"
             disabled={tutor.draft.trim() === ""}
-            className="inline-flex shrink-0 items-center justify-center rounded-md bg-iris px-4 text-sm font-semibold text-night transition-colors hover:bg-iris-400 disabled:cursor-not-allowed disabled:opacity-50"
+            className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-iris text-night transition-colors hover:bg-iris-400 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            Ask
+            <svg
+              aria-hidden="true"
+              width="22"
+              height="22"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M12 19V5m-6 6 6-6 6 6" />
+            </svg>
           </button>
         )}
       </form>
