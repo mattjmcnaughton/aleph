@@ -35,6 +35,15 @@
 }
 
 @layer components {
+  @media (max-width: 1023px) {
+    .tutor-sheet {
+      --tutor-top-gap: max(12px, env(safe-area-inset-top, 0px));
+      top: calc(var(--tutor-viewport-top, 0px) + var(--tutor-top-gap));
+      height: calc(var(--tutor-viewport-height, 100dvh) - var(--tutor-top-gap));
+      bottom: auto;
+    }
+  }
+
   /* Uppercase mono section kicker, e.g. "NEW PATH" / "YOUR PATHS" in the mocks. */
   .kicker {
     @apply font-mono text-[11px] font-medium uppercase tracking-kicker text-mist;

@@ -218,6 +218,7 @@ test.describe("W12 a Tutor check does not touch progress", { tag: "@w12" }, () =
     await expect(page.getByTestId("tutor-rail-send")).toHaveCount(0);
     await expect(page.getByTestId("tutor-rail-input")).toBeDisabled();
     await expect(page.getByTestId("tutor-rail-suggestion")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Suggested questions" })).toHaveCount(0);
     const followUps = page.getByTestId("tutor-rail-check-follow-up");
     await expect(followUps).not.toHaveCount(0);
     for (let index = 0; index < (await followUps.count()); index += 1) {
@@ -230,7 +231,9 @@ test.describe("W12 a Tutor check does not touch progress", { tag: "@w12" }, () =
     await expect(tutorReplies(page)).toHaveCount(before + 1, { timeout: ACTION_TIMEOUT * 2 });
     await expect(page.getByTestId("tutor-rail-send")).toBeVisible();
     await expect(page.getByTestId("tutor-rail-input")).toBeEnabled();
-    await expect(page.getByTestId("tutor-rail-suggestion")).not.toHaveCount(0);
+    await page.getByRole("button", { name: "Suggested questions" }).click();
+    await expect(page.getByTestId("tutor-rail-suggestion")).toHaveCount(4);
+    await page.getByRole("button", { name: "Suggested questions" }).click();
     await page.unroute(sendRoute);
 
     // The follow-up is an ordinary send down the ordinary path, so it is usable

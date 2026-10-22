@@ -18,19 +18,24 @@
 
 import { expect, test } from "@playwright/test";
 import { DEV_STORAGE_STATE } from "../fixtures/auth";
-import { createPath, openLessonAt, uniqueTopic } from "../fixtures/journey";
+import {
+  answerQuickCheck,
+  createPath,
+  markComplete,
+  openLessonAt,
+  uniqueTopic,
+} from "../fixtures/journey";
 import {
   FORCE_TUTOR_REFUSAL,
   TUTOR_REFUSAL_REPLY,
   askTutor,
+  closeRail,
   fetchConversation,
   learnerMessages,
   openLessonId,
   openRail,
   passageSlice,
   replyText,
-  submitAndCompleteWithRailOpen,
-  tapAboveRail,
   tutorReplies,
 } from "../fixtures/tutor";
 
@@ -80,11 +85,14 @@ test.describe("W15 an unsafe ask is refused gracefully", { tag: "@w15" }, () => 
     await expect(tutorReplies(page)).toHaveCount(2);
 
     // --- and the app is untouched --------------------------------------------
-    // With the rail still open, like W9 — nothing is dismissed to reach the end
-    // of the lesson.
-    await tapAboveRail(page, page.locator('label[for="quick-check-option-0"]'));
-    await submitAndCompleteWithRailOpen(page);
+    // Close the phone's Tutor sheet to work on the lesson, as in W9.
+    await closeRail(page);
+    await answerQuickCheck(page, 0);
+    await markComplete(page);
     await expect(page.getByTestId("lesson-completed")).toBeVisible();
+    await openRail(page);
+    await expect(tutorReplies(page)).toHaveCount(2);
+    expect(await replyText(page, 1)).toBe(next);
 
     // The refusal survives a reload like any other turn — there is nothing
     // special about it in the store either.

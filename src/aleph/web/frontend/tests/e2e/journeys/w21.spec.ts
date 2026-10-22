@@ -65,15 +65,14 @@ import {
 } from "../fixtures/shaping";
 import {
   askTutor,
-  backToPathAboveRail,
+  closeRail,
   fetchConversation,
   fetchLesson,
   openLessonId,
   openRail,
   passageSlice,
   railMessages,
-  submitAndCompleteWithRailOpen,
-  tapAboveRail,
+  replyText,
 } from "../fixtures/tutor";
 
 test.use({ storageState: DEV_STORAGE_STATE });
@@ -134,15 +133,15 @@ test.describe("W21 shaping is never on the critical path", { tag: "@w21" }, () =
     await expect(page.getByTestId("shaping-rail-proposal")).toHaveCount(0);
     await expect(page.getByTestId("path-rail-ghost")).toHaveCount(0);
 
-    // Read → Attempt → complete, with the rail open the whole way (W9's posture:
-    // nothing is dismissed to reach the end of the lesson).
-    await tapAboveRail(page, page.locator('label[for="quick-check-option-0"]'));
-    await submitAndCompleteWithRailOpen(page);
-    // Aimed past the sheet like every other tap in this stretch: the rail stays
-    // open through the whole loop (W9's posture), and since AL-400 the drafts
-    // block renders below the completion state by the time we get here, so the
-    // "Back to your path" link is no longer the last thing on the page.
-    await backToPathAboveRail(page);
+    // Close Tutor for Read → Attempt → complete, then reopen the same thread.
+    await closeRail(page);
+    await answerQuickCheck(page, 0);
+    await markComplete(page);
+    await openRail(page);
+    await expect(railMessages(page)).toHaveCount(2);
+    expect(await replyText(page, 0)).toBe(reply);
+    await closeRail(page);
+    await backToPath(page);
 
     // --- and shaping wrote nothing while the learner worked ------------------
     await expectProgressInPlace(page.getByTestId("path-progress"), 2, total);

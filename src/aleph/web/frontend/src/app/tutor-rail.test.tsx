@@ -202,41 +202,19 @@ describe("Tutor rail — one tree, two CSS presentations (D12)", () => {
     expect(screen.getAllByTestId("tutor-rail")).toHaveLength(1);
   });
 
-  it("[AL-260] gives the lesson bottom clearance below `lg` for as long as the rail is open", async () => {
-    useSession(flagOnSession);
-    seedReadyLesson();
-    await gotoLesson();
-    const main = await screen.findByTestId("lesson-view");
-
-    // Closed: the ordinary page — nothing sits over its tail to make room for.
-    expect(main.className).not.toMatch(/pb-\[75vh\]/);
-
-    await openRail();
-
-    // Open: 75vh of bottom padding, the sheet's own cap, so the tail of the
-    // lesson (the Quick check's submit, "Mark complete") can be scrolled clear
-    // of it. Cancelled at `lg`, where the rail is a column beside `main` and
-    // covers nothing.
-    expect(main.className).toMatch(/pb-\[75vh\]/);
-    expect(main.className).toMatch(/lg:pb-10/);
-
-    // ...and it leaves with the rail, rather than being a permanent hole at the
-    // bottom of every lesson.
-    fireEvent.click(screen.getByTestId("tutor-rail-collapse"));
-    await waitFor(() => expect(screen.queryByTestId("tutor-rail")).toBeNull());
-    expect(screen.getByTestId("lesson-view").className).not.toMatch(/pb-\[75vh\]/);
-  });
-
-  it("the sheet's grab handle closes the rail like the × does", async () => {
+  it("secondary actions stay behind Tutor options and Escape returns to the disclosure", async () => {
     useSession(flagOnSession);
     seedReadyLesson();
     await gotoLesson();
     await openRail();
 
-    fireEvent.click(screen.getByTestId("tutor-rail-handle"));
-
-    await waitFor(() => expect(screen.queryByTestId("tutor-rail")).toBeNull());
-    expect(screen.getByTestId("tutor-rail-mark")).toBeTruthy();
+    const options = screen.getByLabelText("Tutor options");
+    expect(screen.getByTestId("tutor-rail-new-conversation")).not.toBeVisible();
+    fireEvent.click(options);
+    expect(screen.getByTestId("tutor-rail-new-conversation")).toBeVisible();
+    fireEvent.keyDown(options, { key: "Escape" });
+    expect(screen.getByTestId("tutor-rail-new-conversation")).not.toBeVisible();
+    expect(options).toHaveFocus();
   });
 
   it("[AL-230] collapse closes the rail and restores the mark (shared open state)", async () => {
@@ -263,8 +241,11 @@ describe("Tutor rail — empty state, chip and suggestions", () => {
     const empty = await screen.findByTestId("tutor-rail-empty");
     expect(empty.textContent).toMatch(/read passage/i);
     expect(empty.textContent).toMatch(/quick check/i);
-    expect(empty.textContent).toMatch(/generic constraints/i);
+    expect(screen.getByTestId("tutor-rail-context-chip").textContent).toMatch(
+      /generic constraints/i,
+    );
 
+    fireEvent.click(screen.getByRole("button", { name: "Suggested questions" }));
     const suggestions = screen.getAllByTestId("tutor-rail-suggestion").map((b) => b.textContent);
     expect(suggestions).toEqual([
       "Explain this simpler",
@@ -291,6 +272,7 @@ describe("Tutor rail — empty state, chip and suggestions", () => {
     await gotoLesson();
     await openRail();
 
+    fireEvent.click(screen.getByRole("button", { name: "Suggested questions" }));
     fireEvent.click(screen.getAllByTestId("tutor-rail-suggestion")[1]);
 
     await waitFor(() => expect(tutorSendBodies()).toHaveLength(1));

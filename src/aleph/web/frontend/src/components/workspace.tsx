@@ -1,9 +1,8 @@
 // The desktop shell (Turn 2, docs/architecture.md — Frontend). Desktop is added
-// with CSS only, at Tailwind's `lg` breakpoint (1024px): no `matchMedia`, no JS
-// viewport state, no width-conditional rendering. Below `lg` every class here
-// falls back to exactly what shipped before this file existed — a phone gets
-// the same single `max-w-[480px]` column, unchanged. `lg:` utilities widen
-// `main` and add a `sidebar` beside it when the caller has one.
+// with CSS at Tailwind's `lg` breakpoint (1024px), without width-conditional
+// rendering. VisualViewport bounds the mobile Tutor during keyboard resize/pan;
+// desktop continues to use the same docked column. `lg:` utilities widen `main`
+// and add a `sidebar` beside it when the caller has one.
 //
 // The desktop-only markup (the `<aside>`, and anything a route hides with
 // `hidden lg:…`) is present in the DOM at every width — jsdom has no CSS, so
@@ -17,7 +16,7 @@
 // the offset it sticks under is `--app-header-h` (`index.css`), not a value
 // read from the DOM.
 
-import type { ReactNode } from "react";
+import { type ReactNode, useEffect, useRef } from "react";
 
 /** Per-route content cap at `lg`, straight from the mock (#2a/#2b/#2c). */
 const WIDTH_CAP = {
@@ -30,18 +29,9 @@ const WIDTH_CAP = {
 } as const;
 
 /**
- * Room to scroll the tail of `main` out from under the open rail.
- *
- * Below `lg` the rail is a sheet `fixed` over the bottom of the viewport, up to
- * `max-h-[75vh]` of it — so without this the last things on the page (on a
- * lesson: the Quick check's submit and "Mark complete") sit under the sheet at
- * maximum scroll, with nothing left to scroll into. Matching the sheet's own cap
- * is what guarantees every control can be brought above its top edge. At `lg`
- * the rail is a docked column beside `main` and covers nothing, so the padding
- * goes straight back to the route's ordinary `py-10`.
- *
- * Still CSS only (D12): this is conditional on the rail being **open**, which is
- * real shared state, and never on the viewport's width.
+ * Shaping retains its 75vh sheet and room to scroll the path above it.
+ * The focused Tutor is closed to return to the lesson, so it needs no extra
+ * document height (which would move the reading position near the page end).
  */
 const RAIL_CLEARANCE = "pb-[75vh] lg:pb-10";
 
@@ -72,8 +62,7 @@ export function Workspace({
    * tree, two CSS presentations: no `matchMedia`, no width-conditional
    * rendering.
    *
-   * Occupying this slot also gives `main` its bottom clearance below `lg`
-   * (`RAIL_CLEARANCE`), so the sheet never strands the tail of the page.
+   * Shaping gets bottom clearance below `lg`; the focused lesson Tutor does not.
    *
    * **The slot is the rail grammar, not one rail** (Phase 2B D14). The path
    * route mounts the *shaping* rail through the very same slot, which is the
@@ -90,6 +79,29 @@ export function Workspace({
   railTestid?: string;
   children: ReactNode;
 }) {
+  const railRef = useRef<HTMLElement>(null);
+  const focusedTutor = width === "lesson" && Boolean(tutorRail);
+
+  // Mobile keyboards may pan/shrink the visual viewport without changing vh.
+  // CSS still selects sheet vs desktop column; these values only bound the sheet
+  // to the visible area so neither the close control nor composer scrolls away.
+  useEffect(() => {
+    const rail = railRef.current;
+    const viewport = window.visualViewport;
+    if (!focusedTutor || !rail || !viewport) return;
+    const update = () => {
+      rail.style.setProperty("--tutor-viewport-height", `${viewport.height}px`);
+      rail.style.setProperty("--tutor-viewport-top", `${viewport.offsetTop}px`);
+    };
+    update();
+    viewport.addEventListener("resize", update);
+    viewport.addEventListener("scroll", update);
+    return () => {
+      viewport.removeEventListener("resize", update);
+      viewport.removeEventListener("scroll", update);
+    };
+  }, [focusedTutor]);
+
   return (
     <div className="lg:flex lg:items-stretch lg:min-h-[calc(100dvh-var(--app-header-h))]">
       {sidebar ? (
@@ -104,7 +116,7 @@ export function Workspace({
       <main
         data-testid={testid}
         className={`mx-auto w-full max-w-[480px] px-4 py-8 lg:mx-0 lg:max-w-none lg:flex-1 lg:px-10 lg:py-10 ${
-          tutorRail ? RAIL_CLEARANCE : ""
+          tutorRail && !focusedTutor ? RAIL_CLEARANCE : ""
         }`}
       >
         <div className={`mx-auto w-full ${WIDTH_CAP[width]}`}>{children}</div>
@@ -112,9 +124,10 @@ export function Workspace({
 
       {tutorRail ? (
         <aside
+          ref={railRef}
           data-testid={railTestid}
-          // Below `lg`: a sheet anchored to the bottom of the viewport, capped
-          // so the lesson stays visible behind it (the PRD's chosen entry).
+          // Below `lg`: focused Tutor fills the visible viewport minus a small
+          // top inset; shaping retains its shorter bottom sheet.
           //
           // At `lg`: sticky beneath the app header, one viewport tall minus the
           // header — rather than a plain flex sibling stretched to `main`'s full
@@ -133,7 +146,7 @@ export function Workspace({
           // real screen (the thread scrolls inside itself), it just keeps a
           // viewport too short to hold the header and composer from spilling
           // the rail's chrome across the lesson.
-          className="fixed inset-x-0 bottom-0 z-40 flex max-h-[75vh] flex-col rounded-t-lg border-t border-divider bg-night shadow-lg lg:sticky lg:top-[var(--app-header-h)] lg:bottom-auto lg:z-auto lg:h-[calc(100dvh-var(--app-header-h))] lg:max-h-none lg:w-[400px] lg:shrink-0 lg:self-start lg:overflow-hidden lg:rounded-none lg:border-l lg:border-t-0 lg:shadow-none"
+          className={`fixed inset-x-0 bottom-0 z-40 flex flex-col rounded-t-lg border-t border-divider bg-night shadow-lg ${focusedTutor ? "tutor-sheet overflow-hidden" : "max-h-[75vh]"} lg:sticky lg:top-[var(--app-header-h)] lg:bottom-auto lg:z-auto lg:h-[calc(100dvh-var(--app-header-h))] lg:max-h-none lg:w-[400px] lg:shrink-0 lg:self-start lg:overflow-hidden lg:rounded-none lg:border-l lg:border-t-0 lg:shadow-none`}
         >
           {tutorRail}
         </aside>
