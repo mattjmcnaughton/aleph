@@ -164,6 +164,7 @@ test.describe("W21 shaping is never on the critical path", { tag: "@w21" }, () =
     // --- the lesson thread ----------------------------------------------------
     await openLessonAt(page, 0);
     await expectLessonContent(page);
+    const lessonId = await openLessonId(page);
     await openRail(page);
     await askTutor(page, LESSON_QUESTION);
     await expect(railMessages(page)).toHaveCount(2);
@@ -183,7 +184,7 @@ test.describe("W21 shaping is never on the critical path", { tag: "@w21" }, () =
     await expect(shapingReplies(page)).toHaveCount(1);
     await expect(page.getByTestId("shaping-rail-messages")).not.toContainText(LESSON_QUESTION);
 
-    const lessonThread = await fetchConversation(page, pathId);
+    const lessonThread = await fetchConversation(page, lessonId);
     const shapingThread = await fetchShapingConversation(page, pathId);
     expect(lessonThread.messages).toHaveLength(2);
     expect(shapingThread.messages).toHaveLength(2);
@@ -208,7 +209,7 @@ test.describe("W21 shaping is never on the critical path", { tag: "@w21" }, () =
 
     // The lesson thread is exactly where the learner left it — on the wire, and
     // on the surface that owns it.
-    expect(await fetchConversation(page, pathId)).toEqual(lessonThread);
+    expect(await fetchConversation(page, lessonId)).toEqual(lessonThread);
     // The shaping rail is a sheet over the path on a phone, so it is collapsed
     // before a rail row is tapped — the same move a learner makes.
     await closeShapingRail(page);

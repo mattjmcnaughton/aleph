@@ -27,6 +27,7 @@ import {
   askTutor,
   fetchConversation,
   learnerMessages,
+  openLessonId,
   openRail,
   passageSlice,
   railMessages,
@@ -42,8 +43,9 @@ test.describe("W14 a failed reply is recoverable", { tag: "@w14" }, () => {
   test("the failure is legible, the question is kept, and the lesson is untouched", async ({
     page,
   }) => {
-    const pathId = await createPath(page, uniqueTopic("Tectonics"));
+    await createPath(page, uniqueTopic("Tectonics"));
     await openLessonAt(page, 0);
+    const lessonId = await openLessonId(page);
     const slice = await passageSlice(page);
     await openRail(page);
 
@@ -71,7 +73,7 @@ test.describe("W14 a failed reply is recoverable", { tag: "@w14" }, () => {
     await expect(railMessages(page)).toHaveCount(0);
 
     // --- nothing was persisted (a turn exists whole or not at all, D2) -------
-    const conversation = await fetchConversation(page, pathId);
+    const conversation = await fetchConversation(page, lessonId);
     expect(conversation.messages).toEqual([]);
 
     // --- retrying is a real round trip ---------------------------------------
@@ -103,13 +105,14 @@ test.describe("W14 a failed reply is recoverable", { tag: "@w14" }, () => {
   });
 
   test("a failed turn leaves an existing thread exactly as it was", async ({ page }) => {
-    const pathId = await createPath(page, uniqueTopic("Cave systems"));
+    await createPath(page, uniqueTopic("Cave systems"));
     await openLessonAt(page, 0);
+    const lessonId = await openLessonId(page);
     await openRail(page);
 
     // A settled turn first, so the failure has something it could damage.
     const reply = await askTutor(page, "What is this lesson for?");
-    const before = await fetchConversation(page, pathId);
+    const before = await fetchConversation(page, lessonId);
     expect(before.messages).toHaveLength(2);
 
     await page.getByTestId("tutor-rail-input").fill(`${FORCE_TUTOR_FAILURE} and then what?`);
@@ -121,7 +124,7 @@ test.describe("W14 a failed reply is recoverable", { tag: "@w14" }, () => {
     // the client could be out of step with (`useTutorRail`, invariant 2).
     await expect(railMessages(page)).toHaveCount(2);
     expect(await replyText(page, 0)).toBe(reply);
-    expect(await fetchConversation(page, pathId)).toEqual(before);
+    expect(await fetchConversation(page, lessonId)).toEqual(before);
 
     // ...and it is still there after a reload, which is the server's own answer.
     await page.reload();

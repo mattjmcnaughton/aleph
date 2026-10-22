@@ -198,7 +198,7 @@ async def _record_turns(path_id: uuid.UUID, lesson_id: uuid.UUID, count: int) ->
     async with db.async_session() as session:
         repository = ConversationRepository(session)
         conversation, _created = await repository.upsert_for_path(
-            path_id, kind=ConversationKind.LESSON
+            path_id, kind=ConversationKind.LESSON, lesson_id=lesson_id
         )
         for index in range(1, count + 1):
             await repository.insert_turn(
@@ -421,6 +421,8 @@ async def test_history_carries_the_configured_window_oldest_first(
     _user_id, path_id, lesson_id = await _arrange()
     monkeypatch.setattr(settings, "tutor_context_turns", 3)
     await _record_turns(path_id, lesson_id, count=5)
+    # A newer turn in another lesson must neither enter nor crowd out this window.
+    await _record_turns(path_id, await _lesson_id_at(path_id, 1), count=1)
 
     async with db.async_session() as session:
         context = await assemble_lesson_context(
@@ -438,8 +440,8 @@ async def test_history_carries_the_configured_window_oldest_first(
 
 
 @pytest.mark.anyio
-async def test_turns_recorded_under_another_lesson_are_carried() -> None:
-    """The conversation is *path*-scoped: history spans the path's lessons."""
+async def test_turns_recorded_under_another_lesson_are_excluded() -> None:
+    """A lesson's model history must not include another lesson's turns."""
     _user_id, path_id, lesson_id = await _arrange()
     await _record_turns(path_id, await _lesson_id_at(path_id, 1), count=1)
 
@@ -448,7 +450,7 @@ async def test_turns_recorded_under_another_lesson_are_carried() -> None:
             session, path=await _owned_path(session, path_id), lesson_id=lesson_id
         )
 
-    assert _texts(context) == ["question 1", "reply 1"]
+    assert _texts(context) == []
 
 
 @pytest.mark.anyio
@@ -457,7 +459,7 @@ async def test_a_prior_tutor_check_rides_as_text_with_the_learners_answer() -> N
     async with db.async_session() as session:
         repository = ConversationRepository(session)
         conversation, _created = await repository.upsert_for_path(
-            path_id, kind=ConversationKind.LESSON
+            path_id, kind=ConversationKind.LESSON, lesson_id=lesson_id
         )
         await repository.insert_turn(
             conversation_id=conversation.id,

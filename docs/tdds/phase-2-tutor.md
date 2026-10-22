@@ -1,5 +1,18 @@
 # TDD — Phase 2: The tutor (in-lesson)
 
+> **Scope amendment (2026-10-22):** The original path-wide storage and W11
+> contract below are superseded. Migration `0021_lesson_conversations` removes
+> old lesson chats and adds `conversations.lesson_id`; a kind/nullability check
+> and `UNIQUE NULLS NOT DISTINCT (path_id, kind, lesson_id)` enforce one tutor
+> thread per lesson and one shaping thread per path. GET/DELETE use
+> `/lessons/{lesson_id}/conversation`; POST retains its path URL and required
+> lesson ID. Context history and tutor reservations use the lesson identity.
+> The client keys its chat cache and mounted lesson state by lesson ID. The
+> latest-N-turn window is unchanged. Upgrade and downgrade discard lesson
+> chats, never shaping history. Old servers cannot use the new schema: rollout
+> requires replacing them, and existing clients must reload. No deployment is
+> authorized by this amendment.
+
 **Status:** Draft · **Owner:** solo builder · **Companion to:** [Phase 2 PRD](../prds/phase-2-tutor.md)
 **References:** [`roadmap.md`](../roadmap.md) · [`CONTEXT.md`](../CONTEXT.md) · [Phase 1 TDD](phase-1-path-generation.md) · mock: [phase-2 tutor](../mocks/aleph-phase-2-tutor.html)
 **Pattern sources:** [`mattjmcnaughton/habagou`](https://github.com/mattjmcnaughton/habagou) (reference implementation — its conversational practice agent, ADR 0011, is this feature's closest precedent; this TDD deliberately departs from it on transport, §5.4)

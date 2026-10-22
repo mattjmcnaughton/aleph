@@ -133,7 +133,7 @@ async def _arrange_shaped_path() -> tuple[uuid.UUID, uuid.UUID, uuid.UUID]:
     async with db.async_session() as session:
         user = await create_user(session)
         path, lesson = await _build_path_with_lesson(session, user=user)
-        in_lesson = Conversation(path_id=path.id)
+        in_lesson = Conversation(path_id=path.id, lesson_id=lesson.id)
         shaping = Conversation(path_id=path.id, kind=ConversationKind.SHAPING)
         session.add_all([in_lesson, shaping])
         await session.flush()
@@ -169,8 +169,8 @@ async def test_a_conversation_defaults_to_the_lesson_kind() -> None:
     """A row written the 2A way is a ``lesson`` thread — the backfill's shape."""
     async with db.async_session() as session:
         user = await create_user(session)
-        path, _lesson = await _build_path_with_lesson(session, user=user)
-        session.add(Conversation(path_id=path.id))
+        path, lesson = await _build_path_with_lesson(session, user=user)
+        session.add(Conversation(path_id=path.id, lesson_id=lesson.id))
         await session.commit()
 
     async with db.async_session() as session:
@@ -182,10 +182,12 @@ async def test_a_conversation_defaults_to_the_lesson_kind() -> None:
 async def test_a_path_may_hold_one_thread_of_each_kind() -> None:
     async with db.async_session() as session:
         user = await create_user(session)
-        path, _lesson = await _build_path_with_lesson(session, user=user)
+        path, lesson = await _build_path_with_lesson(session, user=user)
         session.add_all(
             [
-                Conversation(path_id=path.id, kind=ConversationKind.LESSON),
+                Conversation(
+                    path_id=path.id, kind=ConversationKind.LESSON, lesson_id=lesson.id
+                ),
                 Conversation(path_id=path.id, kind=ConversationKind.SHAPING),
             ]
         )
@@ -210,11 +212,19 @@ async def test_a_duplicate_thread_of_one_kind_is_still_rejected(
     """Widening the constraint did not weaken it: a thread cannot fork."""
     async with db.async_session() as session:
         user = await create_user(session)
-        path, _lesson = await _build_path_with_lesson(session, user=user)
+        path, lesson = await _build_path_with_lesson(session, user=user)
         session.add_all(
             [
-                Conversation(path_id=path.id, kind=kind),
-                Conversation(path_id=path.id, kind=kind),
+                Conversation(
+                    path_id=path.id,
+                    kind=kind,
+                    lesson_id=lesson.id if kind is ConversationKind.LESSON else None,
+                ),
+                Conversation(
+                    path_id=path.id,
+                    kind=kind,
+                    lesson_id=lesson.id if kind is ConversationKind.LESSON else None,
+                ),
             ]
         )
         with pytest.raises(IntegrityError):
@@ -326,7 +336,7 @@ async def test_shaping_columns_carry_no_check_constraints() -> None:
         path, lesson = await _build_path_with_lesson(session, user=user)
         # A proposal on a *lesson*-thread learner row: nonsense the application
         # forbids and the database has no opinion about.
-        conversation = Conversation(path_id=path.id)
+        conversation = Conversation(path_id=path.id, lesson_id=lesson.id)
         session.add(conversation)
         await session.flush()
         session.add(

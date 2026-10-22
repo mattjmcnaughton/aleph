@@ -311,7 +311,7 @@ class TutorTurnService:
                 session, path_id=path.id, lesson_id=lesson_id
             )
             try:
-                reservation = self._replies.reserve(path.id)
+                reservation = self._replies.reserve(lesson_id)
             except ConversationBusyError as exc:
                 raise _conflict(
                     "a reply is already in flight on this conversation"
@@ -623,7 +623,7 @@ class TutorTurnService:
             async with self._session_factory() as session:
                 repository = ConversationRepository(session)
                 conversation, created = await repository.upsert_for_path(
-                    turn.path_id, kind=ConversationKind.LESSON
+                    turn.path_id, kind=ConversationKind.LESSON, lesson_id=turn.lesson_id
                 )
                 learner, tutor = await repository.insert_turn(
                     conversation_id=conversation.id,
@@ -638,7 +638,7 @@ class TutorTurnService:
             # After the commit, so the event never claims a conversation a
             # rolled-back transaction did not leave behind. ``created`` is the
             # lazy upsert's own answer, which is what makes this fire exactly
-            # once per path rather than once per first-turn-shaped request.
+            # once per lesson rather than once per first-turn-shaped request.
             if created:
                 events.emit_tutor_conversation_started(
                     account_id=turn.account_id,

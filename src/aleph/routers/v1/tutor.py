@@ -82,6 +82,7 @@ from aleph.models import (  # noqa: TC001 - FastAPI resolves annotations.
     User,
 )
 from aleph.repositories import ConversationRepository
+from aleph.routers.v1.lessons import OwnedLesson  # noqa: TC001 - FastAPI dependency.
 from aleph.routers.v1.paths import (  # noqa: TC001 - FastAPI resolves annotations.
     OwnedPath,
     validate_model_override,
@@ -291,13 +292,15 @@ async def send_message(
     )
 
 
-@router.get("/paths/{path_id}/conversation")
-async def get_conversation(path: OwnedPath, session: Session) -> ConversationResponse:
-    """The path's whole thread, oldest first (§6).
+@router.get("/lessons/{lesson_id}/conversation")
+async def get_conversation(
+    lesson: OwnedLesson, session: Session
+) -> ConversationResponse:
+    """The lesson's whole thread, oldest first.
 
-    Ownership via ``OwnedPath`` (``404`` otherwise). A path with no conversation
+    Ownership via ``OwnedLesson`` (``404`` otherwise). A lesson with no conversation
     yet is ``200`` with an empty list, not ``404``: the row is created lazily on
-    the first completed turn (TDD §4), so an untouched path and a cleared one
+    the first completed turn (TDD §4), so an untouched lesson and a cleared one
     read identically — which is exactly what "new conversation" should leave
     behind.
 
@@ -306,16 +309,18 @@ async def get_conversation(path: OwnedPath, session: Session) -> ConversationRes
     phase (an accepted risk, TDD §14).
     """
     thread = await ConversationRepository(session).load_thread(
-        path.id, kind=ConversationKind.LESSON
+        lesson.path_id, kind=ConversationKind.LESSON, lesson_id=lesson.id
     )
     return ConversationResponse(messages=[_message_dto(entry) for entry in thread])
 
 
-@router.delete("/paths/{path_id}/conversation", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_conversation(path: OwnedPath, session: Session) -> Response:
+@router.delete(
+    "/lessons/{lesson_id}/conversation", status_code=status.HTTP_204_NO_CONTENT
+)
+async def delete_conversation(lesson: OwnedLesson, session: Session) -> Response:
     """**New conversation**: drop the thread (PRD §5.8) → ``204``, idempotent.
 
-    Ownership via ``OwnedPath`` (``404`` otherwise). Deleting the conversation
+    Ownership via ``OwnedLesson`` (``404`` otherwise). Deleting the conversation
     row cascades its messages; the path, its lessons, and every scrap of Phase 1
     state are untouched (TDD §3). Clearing an already-empty thread is ``204``
     too — the affordance is one tap, retries and double taps must not read as
@@ -327,7 +332,7 @@ async def delete_conversation(path: OwnedPath, session: Session) -> Response:
     to do here.
     """
     await ConversationRepository(session).delete_for_path(
-        path.id, kind=ConversationKind.LESSON
+        lesson.path_id, kind=ConversationKind.LESSON, lesson_id=lesson.id
     )
     await session.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

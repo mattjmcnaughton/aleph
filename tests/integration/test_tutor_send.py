@@ -40,10 +40,13 @@ from aleph.domains.answer_order import shuffle_options
 from aleph.models import (
     Attempt,
     Conversation,
+    Lesson,
+    LessonGenerationState,
     Message,
     MessageRole,
     MessageSource,
     Path,
+    QuickCheck,
     User,
 )
 from aleph.services import tutor as tutor_service
@@ -121,7 +124,7 @@ async def test_full_turn_round_trip_streams_and_persists_the_pair(
     assert QUESTION in wire.text
 
     done = wire.only("done")
-    thread = await _thread(path_id)
+    thread = await _thread(path_id, lesson_id)
     assert [message.position for message in thread] == [1, 2, 3, 4]
     learner, tutor = thread[2], thread[3]
     assert str(learner.id) == done["learner_message_id"]
@@ -167,7 +170,7 @@ async def test_suggestion_source_is_recorded_on_the_learner_row(
         )
 
     assert wire.names[-1] == "done", wire.names
-    thread = await _thread(path_id)
+    thread = await _thread(path_id, lesson_id)
     assert thread[0].source is MessageSource.SUGGESTION
 
 
@@ -230,7 +233,7 @@ async def test_failed_reply_then_retry_succeeds(
 
     assert attempts() == 2
     assert retried.names[-1] == "done", retried.names
-    thread = await _thread(path_id)
+    thread = await _thread(path_id, lesson_id)
     assert [message.position for message in thread] == [1, 2]
     assert thread[0].content == QUESTION
 
@@ -349,7 +352,7 @@ async def test_concurrent_send_on_one_conversation_is_409_pre_stream(
     assert conflict.json()["error"]["code"] == "conflict"
     assert wire.names[-1] == "done", wire.names
     # Exactly one turn: the rejected send wrote nothing.
-    thread = await _thread(path_id)
+    thread = await _thread(path_id, lesson_id)
     assert [message.content for message in thread][0] == QUESTION
     assert len(thread) == 2
 
@@ -382,7 +385,7 @@ async def test_distinct_conversations_proceed_under_the_semaphore(
     monkeypatch: pytest.MonkeyPatch,
     tutor_flag_enabled: None,
 ) -> None:
-    """Two paths, one permit: both replies land — they queue, they do not fail.
+    """Two lessons on one path, one permit: both queue rather than conflict.
 
     The per-conversation lock is *per conversation*; the semaphore is what
     bounds the aggregate, and bounding is not refusing.
@@ -395,17 +398,41 @@ async def test_distinct_conversations_proceed_under_the_semaphore(
     async with _client(app) as client:
         user_id = await _sign_in(client, monkeypatch, OWNER)
         first_path, first_lesson = await _seed_path(user_id, topic="Rust ownership")
-        second_path, second_lesson = await _seed_path(user_id, topic="Go channels")
+        async with db.async_session() as session:
+            first = await session.get(Lesson, first_lesson)
+            assert first is not None
+            second = Lesson(
+                path_id=first_path,
+                unit_id=first.unit_id,
+                position_in_path=2,
+                position_in_unit=2,
+                title="Borrowing",
+                generation_state=LessonGenerationState.GENERATED,
+                read_passage="A borrow does not transfer ownership.",
+            )
+            session.add(second)
+            await session.flush()
+            session.add(
+                QuickCheck(
+                    lesson_id=second.id,
+                    stem="Does a borrow transfer ownership?",
+                    options=["Yes", "No"],
+                    correct_index=1,
+                    explanation="The owner remains unchanged.",
+                )
+            )
+            await session.commit()
+            second_lesson = second.id
 
         wires = await asyncio.gather(
             _send(client, _send_url(first_path), _body(first_lesson)),
-            _send(client, _send_url(second_path), _body(second_lesson)),
+            _send(client, _send_url(first_path), _body(second_lesson)),
         )
 
     for wire in wires:
         assert wire.names[-1] == "done", wire.names
-    assert len(await _thread(first_path)) == 2
-    assert len(await _thread(second_path)) == 2
+    assert len(await _thread(first_path, first_lesson)) == 2
+    assert len(await _thread(first_path, second_lesson)) == 2
 
 
 @pytest.mark.anyio
@@ -502,7 +529,7 @@ async def test_a_never_started_stream_still_frees_the_conversation(
         response = await _route_response(
             session, path=path, user=user, lesson_id=lesson_id
         )
-    assert service._replies.in_flight == frozenset({path_id}), (
+    assert service._replies.in_flight == frozenset({lesson_id}), (
         "admission claims the conversation before a response object exists"
     )
 
@@ -633,7 +660,7 @@ async def test_posed_tutor_check_rides_the_wire_and_the_persisted_row(
     # The check is delivered *before* the reply text it accompanies.
     assert wire.names.index("tutor_check") < wire.names.index("delta")
 
-    thread = await _thread(path_id)
+    thread = await _thread(path_id, lesson_id)
     assert thread[1].tutor_check == {**expected, "answered_index": None}
     assert thread[0].tutor_check is None
     assert await _count(Attempt) == 0

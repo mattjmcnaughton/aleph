@@ -77,6 +77,7 @@ async def _enum_types(database_url: str) -> set[str]:
 LATER_COLUMNS: dict[str, set[str]] = {
     "paths": {"teaching_style"},  # 0015_path_teaching_style
     "users": {"time_zone", "time_zone_seen_at"},  # 0017_user_time_zone
+    "conversations": {"lesson_id"},  # 0021_lesson_conversations
 }
 
 
@@ -452,6 +453,7 @@ def test_shaping_migration_swaps_the_conversation_uniqueness(
 ) -> None:
     """``UNIQUE (path_id)`` becomes ``UNIQUE (path_id, kind)`` — swapped, not added."""
     database_url = isolated_database
+    run_alembic(database_url, SHAPING_HEAD, downgrade=True)
 
     at_head = asyncio.run(_unique_constraint_columns(database_url, "conversations"))
     assert "uq_conversations_path" not in at_head
@@ -482,7 +484,7 @@ def test_earlier_tables_keep_their_columns_through_the_shaping_reversal(
     # downgrade dropped a column it should have kept", which is exactly the
     # regression this test exists to catch.
     added = {
-        "conversations": {"kind"},
+        "conversations": {"kind", "lesson_id"},
         "messages": {"proposal"},
         "lessons": {"revision_instruction"},
         "paths": {"title", "guidance", "teaching_style"},
@@ -619,6 +621,7 @@ def test_the_message_lesson_step_reverses_by_dropping_shaping_messages(
     """
     database_url = isolated_database
 
+    run_alembic(database_url, MESSAGE_LESSON_HEAD, downgrade=True)
     asyncio.run(_seed_both_threads(database_url))
     assert asyncio.run(_count(database_url, "messages")) == 2
 
@@ -1845,3 +1848,68 @@ def test_time_zone_migration_nullable_and_reversible(isolated_database: str) -> 
     }
     run_alembic(database_url, "0017_user_time_zone")
     assert asyncio.run(_columns(database_url, "users")) == at_head
+
+
+async def _retained_conversation_rows(database_url: str) -> dict[str, list[str]]:
+    """Snapshot shaping history and Changes, including ids and payloads."""
+    connection = await connect(database_url)
+    try:
+        return {
+            "conversations": [
+                row["value"]
+                for row in await connection.fetch(
+                    "SELECT (to_jsonb(c) - 'lesson_id')::text AS value "
+                    "FROM conversations c WHERE kind = 'shaping' ORDER BY id"
+                )
+            ],
+            "messages": [
+                row["value"]
+                for row in await connection.fetch(
+                    "SELECT to_jsonb(m)::text AS value FROM messages m "
+                    "JOIN conversations c ON c.id = m.conversation_id "
+                    "WHERE c.kind = 'shaping' ORDER BY m.id"
+                )
+            ],
+            "changes": [
+                row["value"]
+                for row in await connection.fetch(
+                    "SELECT to_jsonb(c)::text AS value FROM path_changes c ORDER BY id"
+                )
+            ],
+        }
+    finally:
+        await connection.close()
+
+
+def test_lesson_conversation_migration_discards_old_tutor_history_only(
+    isolated_database: str,
+) -> None:
+    database_url = isolated_database
+    run_alembic(database_url, "0020_reminder_scan_progress", downgrade=True)
+    asyncio.run(_seed_both_threads(database_url))
+    path_id, message_id = asyncio.run(_seed_proposal_message(database_url))
+    asyncio.run(
+        _insert_change(
+            database_url, path_id=path_id, message_id=message_id, status="applied"
+        )
+    )
+    before = asyncio.run(_retained_conversation_rows(database_url))
+    assert {key: len(rows) for key, rows in before.items()} == {
+        "conversations": 2,
+        "messages": 2,
+        "changes": 1,
+    }
+    assert asyncio.run(_count(database_url, "messages")) == 3
+
+    run_alembic(database_url, "0021_lesson_conversations")
+
+    assert asyncio.run(_conversation_kinds(database_url)) == ["shaping", "shaping"]
+    assert asyncio.run(_count(database_url, "messages")) == 2
+    assert asyncio.run(_retained_conversation_rows(database_url)) == before
+    assert "lesson_id" in asyncio.run(_columns(database_url, "conversations"))
+
+    run_alembic(database_url, "0020_reminder_scan_progress", downgrade=True)
+    assert "lesson_id" not in asyncio.run(_columns(database_url, "conversations"))
+    assert asyncio.run(_retained_conversation_rows(database_url)) == before
+    run_alembic(database_url, "0021_lesson_conversations")
+    assert asyncio.run(_retained_conversation_rows(database_url)) == before

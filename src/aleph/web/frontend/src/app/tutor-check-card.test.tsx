@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { HttpResponse, http } from "msw";
+import { http, HttpResponse } from "msw";
 import { describe, expect, it } from "vitest";
 import { API_V1_BASE, type AuthSession } from "../lib/api";
 import type { TutorCheck } from "../lib/tutor-stream";
@@ -64,7 +64,7 @@ function useSession(session: AuthSession) {
 function seedThreadWithCheck(check: TutorCheck) {
   seedPath({ id: PATH_ID, topic: "TypeScript", level: "some_experience" });
   seedLesson({ id: LESSON_ID, path_id: PATH_ID, title: "Generic constraints" });
-  seedConversation(PATH_ID, [
+  seedConversation(LESSON_ID, [
     { role: "learner", content: "Quiz me on this" },
     {
       id: CHECK_MESSAGE_ID,

@@ -2,7 +2,7 @@
 
 The invariants AL-200 must guarantee (Phase 2 TDD §4 / D3):
 
-* **One conversation per path is a DB constraint** — ``UNIQUE (path_id)``, so a
+* **One conversation per lesson is a DB constraint** — scope uniqueness, so a
   second insert fails loudly rather than forking the thread.
 * **``position`` is the thread's total order** — ``UNIQUE (conversation_id,
   position)`` makes a collision loud, never a silent reorder.
@@ -24,6 +24,7 @@ from sqlalchemy.exc import IntegrityError
 from aleph import db
 from aleph.models import (
     Conversation,
+    ConversationKind,
     Lesson,
     LessonGenerationState,
     Level,
@@ -94,7 +95,7 @@ async def test_conversation_and_messages_round_trip() -> None:
     async with db.async_session() as session:
         user = await create_user(session)
         path, lesson = await _build_path_with_lesson(session, user=user)
-        conversation = Conversation(path_id=path.id)
+        conversation = Conversation(path_id=path.id, lesson_id=lesson.id)
         session.add(conversation)
         session.add_all(_turn(conversation, lesson))
         await session.commit()
@@ -121,11 +122,16 @@ async def test_conversation_and_messages_round_trip() -> None:
 
 
 @pytest.mark.anyio
-async def test_second_conversation_for_same_path_rejected() -> None:
+async def test_second_conversation_for_same_lesson_rejected() -> None:
     async with db.async_session() as session:
         user = await create_user(session)
-        path, _lesson = await _build_path_with_lesson(session, user=user)
-        session.add_all([Conversation(path_id=path.id), Conversation(path_id=path.id)])
+        path, lesson = await _build_path_with_lesson(session, user=user)
+        session.add_all(
+            [
+                Conversation(path_id=path.id, lesson_id=lesson.id),
+                Conversation(path_id=path.id, lesson_id=lesson.id),
+            ]
+        )
         with pytest.raises(IntegrityError):
             await session.commit()
 
@@ -135,7 +141,7 @@ async def test_duplicate_message_position_rejected() -> None:
     async with db.async_session() as session:
         user = await create_user(session)
         path, lesson = await _build_path_with_lesson(session, user=user)
-        conversation = Conversation(path_id=path.id)
+        conversation = Conversation(path_id=path.id, lesson_id=lesson.id)
         session.add(conversation)
         session.add_all(_turn(conversation, lesson))
         session.add(
@@ -165,8 +171,10 @@ async def test_same_position_in_a_different_conversation_is_allowed() -> None:
             position_in_unit=1,
             title="Who pays",
         )
-        conversation_a = Conversation(path_id=path_a.id)
-        conversation_b = Conversation(path=path_b)
+        conversation_a = Conversation(path_id=path_a.id, lesson_id=lesson_a.id)
+        session.add_all([path_b, unit_b, lesson_b])
+        await session.flush()
+        conversation_b = Conversation(path=path_b, lesson_id=lesson_b.id)
         session.add_all([path_b, unit_b, lesson_b, conversation_a, conversation_b])
         await session.flush()
         session.add_all(_turn(conversation_a, lesson_a))
@@ -182,7 +190,7 @@ async def test_deleting_conversation_cascades_messages() -> None:
     async with db.async_session() as session:
         user = await create_user(session)
         path, lesson = await _build_path_with_lesson(session, user=user)
-        conversation = Conversation(path_id=path.id)
+        conversation = Conversation(path_id=path.id, lesson_id=lesson.id)
         session.add(conversation)
         session.add_all(_turn(conversation, lesson))
         await session.commit()
@@ -209,7 +217,7 @@ async def test_deleting_path_cascades_conversation_and_messages() -> None:
     async with db.async_session() as session:
         user = await create_user(session)
         path, lesson = await _build_path_with_lesson(session, user=user)
-        conversation = Conversation(path_id=path.id)
+        conversation = Conversation(path_id=path.id, lesson_id=lesson.id)
         session.add(conversation)
         session.add_all(_turn(conversation, lesson))
         await session.commit()
@@ -231,7 +239,7 @@ async def test_deleting_lesson_cascades_its_messages() -> None:
     async with db.async_session() as session:
         user = await create_user(session)
         path, lesson = await _build_path_with_lesson(session, user=user)
-        conversation = Conversation(path_id=path.id)
+        conversation = Conversation(path_id=path.id, lesson_id=lesson.id)
         session.add(conversation)
         session.add_all(_turn(conversation, lesson))
         await session.commit()
@@ -243,8 +251,8 @@ async def test_deleting_lesson_cascades_its_messages() -> None:
 
     async with db.async_session() as session:
         assert await session.scalar(select(func.count()).select_from(Message)) == 0
-        # The conversation itself survives losing one lesson's messages.
-        assert await session.scalar(select(func.count()).select_from(Conversation)) == 1
+        # The lesson owns the conversation as well as its messages.
+        assert await session.scalar(select(func.count()).select_from(Conversation)) == 0
 
 
 @pytest.mark.anyio
@@ -259,7 +267,7 @@ async def test_tutor_check_round_trips_including_null_and_answered_index() -> No
     async with db.async_session() as session:
         user = await create_user(session)
         path, lesson = await _build_path_with_lesson(session, user=user)
-        conversation = Conversation(path_id=path.id)
+        conversation = Conversation(path_id=path.id, lesson_id=lesson.id)
         session.add(conversation)
         session.add_all(_turn(conversation, lesson, tutor_check=check))
         await session.commit()
@@ -297,7 +305,7 @@ async def test_message_enums_store_their_string_values() -> None:
     async with db.async_session() as session:
         user = await create_user(session)
         path, lesson = await _build_path_with_lesson(session, user=user)
-        conversation = Conversation(path_id=path.id)
+        conversation = Conversation(path_id=path.id, lesson_id=lesson.id)
         session.add(conversation)
         learner, tutor = _turn(conversation, lesson)
         learner.source = MessageSource.SUGGESTION
@@ -320,7 +328,7 @@ async def test_role_columns_carry_no_check_constraints() -> None:
     async with db.async_session() as session:
         user = await create_user(session)
         path, lesson = await _build_path_with_lesson(session, user=user)
-        conversation = Conversation(path_id=path.id)
+        conversation = Conversation(path_id=path.id, lesson_id=lesson.id)
         session.add(conversation)
         session.add(
             Message(
@@ -345,3 +353,23 @@ async def test_role_columns_carry_no_check_constraints() -> None:
             )
         ).scalars()
         assert list(constraints) == []
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("kind", [ConversationKind.LESSON, ConversationKind.SHAPING])
+async def test_conversation_kind_requires_the_correct_lesson_scope(
+    kind: ConversationKind,
+) -> None:
+    async with db.async_session() as session:
+        user = await create_user(session)
+        path, lesson = await _build_path_with_lesson(session, user=user)
+        session.add(
+            Conversation(
+                path_id=path.id,
+                kind=kind,
+                lesson_id=None if kind is ConversationKind.LESSON else lesson.id,
+            )
+        )
+        with pytest.raises(IntegrityError) as error:
+            await session.commit()
+        assert "ck_conversations_scope" in str(error.value)

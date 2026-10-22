@@ -19,9 +19,7 @@ import type { TutorCheck } from "./tutor-stream";
 export type TutorRole = "learner" | "tutor";
 
 /**
- * One message in the thread. There is **one conversation per path**, so
- * `lesson_id`/`lesson_title` — the lesson the message was asked in — vary down a
- * single thread (PRD §5.8; Phase 2B renders them as dividers).
+ * One message in a lesson's thread. Every message belongs to that lesson.
  *
  * Note the payload carries no `position`: the array order **is** the order.
  */
@@ -36,23 +34,23 @@ export interface ConversationMessage {
   created_at: string;
 }
 
-/** `GET /api/v1/paths/{id}/conversation` — object-wrapped, oldest first. */
+/** `GET /api/v1/lessons/{id}/conversation` — object-wrapped, oldest first. */
 export interface Conversation {
   messages: ConversationMessage[];
 }
 
-/** The whole thread for a path. `200 {messages: []}` when none exists yet. */
-export function getConversation(pathId: string): Promise<Conversation> {
-  return apiFetch<Conversation>(apiV1Path(`/paths/${pathId}/conversation`));
+/** The whole thread for a lesson. `200 {messages: []}` when none exists yet. */
+export function getConversation(lessonId: string): Promise<Conversation> {
+  return apiFetch<Conversation>(apiV1Path(`/lessons/${lessonId}/conversation`));
 }
 
 /**
- * **New conversation** (PRD §5.8): drop the thread for this path. `204` and
+ * **New conversation**: drop the thread for this lesson. `204` and
  * idempotent; cascades to its messages; touches no Phase 1 state. Destructive
  * and not undoable — the caller MUST confirm first, like `deletePath`.
  */
-export function clearConversation(pathId: string): Promise<void> {
-  return apiFetch<void>(apiV1Path(`/paths/${pathId}/conversation`), { method: "DELETE" });
+export function clearConversation(lessonId: string): Promise<void> {
+  return apiFetch<void>(apiV1Path(`/lessons/${lessonId}/conversation`), { method: "DELETE" });
 }
 
 /**
@@ -79,13 +77,13 @@ export function answerTutorCheck(messageId: string, selectedIndex: number): Prom
 }
 
 /**
- * TanStack query key for one path's thread. The `"tutor"` head is its own
+ * TanStack query key for one lesson's thread. The `"tutor"` head is its own
  * namespace rather than a branch of `["paths", …]`: lesson completion
  * invalidates that whole prefix (`PATHS_QUERY_PREFIX`), and a conversation has
  * no business being refetched because a lesson was marked complete.
  */
-export function conversationQueryKey(pathId: string): readonly ["tutor", "conversation", string] {
-  return ["tutor", "conversation", pathId] as const;
+export function conversationQueryKey(lessonId: string): readonly ["tutor", "conversation", string] {
+  return ["tutor", "conversation", lessonId] as const;
 }
 
 /**
@@ -94,9 +92,9 @@ export function conversationQueryKey(pathId: string): readonly ["tutor", "conver
  * rendered (flag off, or a lesson with no generated content): the query idles on
  * `skipToken` and the gated surface costs no request at all.
  */
-export function conversationQueryOptions(pathId: string | null) {
+export function conversationQueryOptions(lessonId: string | null) {
   return queryOptions({
-    queryKey: conversationQueryKey(pathId ?? "idle"),
-    queryFn: pathId === null ? skipToken : () => getConversation(pathId),
+    queryKey: conversationQueryKey(lessonId ?? "idle"),
+    queryFn: lessonId === null ? skipToken : () => getConversation(lessonId),
   });
 }

@@ -303,7 +303,9 @@ async def test_a_refusal_resolves_as_a_success(
     completed = assert_event(capfire, events.TUTOR_REPLY_COMPLETED)
     assert (completed["outcome"], completed["success"]) == ("success", True)
     assert completed["workflow"] == "W9", "a refusal is not a failure workflow"
-    assert len(await _thread(path_id)) == 2, "a refusal is a real, persisted turn"
+    assert len(await _thread(path_id, lesson_id)) == 2, (
+        "a refusal is a real, persisted turn"
+    )
 
 
 @pytest.mark.anyio
@@ -414,7 +416,7 @@ async def test_a_posed_check_is_shown_and_then_answered(
             _body(lesson_id, content=f"{FORCE_TUTOR_CHECK} quiz me on this"),
         )
         assert wire.names[-1] == "done", wire.names
-        message_id, correct_index = await _posed_check(path_id)
+        message_id, correct_index = await _posed_check(path_id, lesson_id)
 
         answered = await client.post(
             f"/api/v1/messages/{message_id}/tutor-check-answer",
@@ -463,7 +465,7 @@ async def test_a_re_answer_re_emits_tagged_as_not_the_first(
             _body(lesson_id, content=f"{FORCE_TUTOR_CHECK} quiz me on this"),
         )
         assert wire.names[-1] == "done", wire.names
-        message_id, correct_index = await _posed_check(path_id)
+        message_id, correct_index = await _posed_check(path_id, lesson_id)
         wrong_index = 0 if correct_index != 0 else 1
         url = f"/api/v1/messages/{message_id}/tutor-check-answer"
 
@@ -487,9 +489,11 @@ async def test_a_re_answer_re_emits_tagged_as_not_the_first(
     )
 
 
-async def _posed_check(path_id: uuid.UUID) -> tuple[uuid.UUID, int]:
+async def _posed_check(
+    path_id: uuid.UUID, lesson_id: uuid.UUID
+) -> tuple[uuid.UUID, int]:
     """The tutor message carrying a Tutor check, and that check's correct index."""
-    thread = await _thread(path_id)
+    thread = await _thread(path_id, lesson_id)
     message = next(entry for entry in thread if entry.tutor_check is not None)
     check = message.tutor_check
     assert check is not None

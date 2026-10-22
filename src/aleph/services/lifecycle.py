@@ -117,7 +117,7 @@ class ConversationBusyError(RuntimeError):
 class ReplyReservation:
     """One claim on one conversation — the receipt :meth:`reserve` hands back.
 
-    **Why a token and not the ``path_id``.** Release has to be idempotent (the
+    **Why a token and not the scope ID.** Release has to be idempotent (the
     frame that owns it may run after a failure, a timeout, or a disconnect), and
     an idempotent *keyed* release is unsafe: between one reply's release and a
     late second release for the same key, a new request can legitimately reserve
@@ -127,12 +127,12 @@ class ReplyReservation:
     the conversation's current holder, so a late or duplicated release is a
     genuine no-op rather than a silent theft.
 
-    Identity, not value, is what distinguishes two successive claims on one path
-    (``eq=False``): two reservations for the same ``path_id`` are different
+    Identity, not value, is what distinguishes two successive claims on one scope
+    (``eq=False``): two reservations for the same ``scope_id`` are different
     objects and the limiter compares them with ``is``.
     """
 
-    path_id: uuid.UUID
+    scope_id: uuid.UUID
 
 
 class TutorReplyLimiter:
@@ -149,8 +149,8 @@ class TutorReplyLimiter:
     class, same pool; different conversations, different locks.
 
     **The reservation** is one in-flight reply per conversation, keyed by
-    ``path_id`` (a conversation is one-per-path and created lazily, so the path
-    is the stable identity — there may be no conversation row yet). It is what
+    lesson ID for tutoring and path ID for shaping. These scopes are stable
+    even before a conversation is created on its first completed turn. It is what
     makes D2's position assignment race-free in practice: two concurrent sends
     can never compute the same ``max(position)``, so
     ``uq_messages_conversation_position`` stays a loud backstop rather than a
@@ -223,10 +223,10 @@ class TutorReplyLimiter:
 
     @property
     def in_flight(self) -> frozenset[uuid.UUID]:
-        """The conversations (by path id) with a reply in flight right now."""
+        """Lesson IDs (tutor) or path IDs (shaping) with a reply in flight."""
         return frozenset(self._in_flight)
 
-    def reserve(self, path_id: uuid.UUID) -> ReplyReservation:
+    def reserve(self, scope_id: uuid.UUID) -> ReplyReservation:
         """Claim the conversation, or raise :class:`ConversationBusyError`.
 
         Atomic by construction: the check and the insert happen with no
@@ -236,12 +236,12 @@ class TutorReplyLimiter:
         Returns the claim's :class:`ReplyReservation` — the only thing
         :meth:`release` accepts.
         """
-        if path_id in self._in_flight:
+        if scope_id in self._in_flight:
             raise ConversationBusyError(
-                f"a tutor reply is already in flight for path {path_id}"
+                f"a reply is already in flight for scope {scope_id}"
             )
-        reservation = ReplyReservation(path_id=path_id)
-        self._in_flight[path_id] = reservation
+        reservation = ReplyReservation(scope_id=scope_id)
+        self._in_flight[scope_id] = reservation
         return reservation
 
     def release(self, reservation: ReplyReservation) -> None:
@@ -253,8 +253,8 @@ class TutorReplyLimiter:
         forgiving and unable to raise: the caller is a ``finally``, and a double
         release must never turn a failed reply into a 500.
         """
-        if self._in_flight.get(reservation.path_id) is reservation:
-            del self._in_flight[reservation.path_id]
+        if self._in_flight.get(reservation.scope_id) is reservation:
+            del self._in_flight[reservation.scope_id]
 
 
 class TaskRegistry:

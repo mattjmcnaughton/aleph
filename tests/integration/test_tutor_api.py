@@ -165,7 +165,7 @@ async def _seed_turn(
     async with db.async_session() as session:
         repository = ConversationRepository(session)
         conversation, _created = await repository.upsert_for_path(
-            path_id, kind=ConversationKind.LESSON
+            path_id, kind=ConversationKind.LESSON, lesson_id=lesson_id
         )
         learner, tutor = await repository.insert_turn(
             conversation_id=conversation.id,
@@ -196,8 +196,8 @@ async def _count(model: type[Any]) -> int:
         return await session.scalar(select(func.count()).select_from(model)) or 0
 
 
-def _conversation_url(path_id: uuid.UUID | str) -> str:
-    return f"/api/v1/paths/{path_id}/conversation"
+def _conversation_url(lesson_id: uuid.UUID | str) -> str:
+    return f"/api/v1/lessons/{lesson_id}/conversation"
 
 
 def _answer_url(message_id: uuid.UUID | str) -> str:
@@ -225,8 +225,8 @@ async def test_flag_off_hides_every_tutor_route(
             path_id=path_id, lesson_id=lesson_id, tutor_check=dict(TUTOR_CHECK)
         )
 
-        get = await client.get(_conversation_url(path_id))
-        delete = await client.delete(_conversation_url(path_id))
+        get = await client.get(_conversation_url(lesson_id))
+        delete = await client.delete(_conversation_url(lesson_id))
         answer = await client.post(_answer_url(tutor_id), json={"selected_index": 1})
 
     for response in (get, delete, answer):
@@ -247,7 +247,7 @@ async def test_flag_on_serves_the_conversation(
         path_id, lesson_id, _title = await _seed_path(user_id)
         await _seed_turn(path_id=path_id, lesson_id=lesson_id)
 
-        response = await client.get(_conversation_url(path_id))
+        response = await client.get(_conversation_url(lesson_id))
 
     assert response.status_code == 200, response.text
     assert len(response.json()["messages"]) == 2
@@ -276,9 +276,9 @@ async def test_admin_resolves_the_flag_on_with_defaults_untouched(
 
     async with _client(app) as client:
         user_id = await _sign_in(client, monkeypatch, ADMIN)
-        path_id, _lesson_id, _title = await _seed_path(user_id)
+        _path_id, lesson_id, _title = await _seed_path(user_id)
 
-        response = await client.get(_conversation_url(path_id))
+        response = await client.get(_conversation_url(lesson_id))
 
     assert response.status_code == 200, response.text
     assert not settings.feature_flag_defaults
@@ -292,16 +292,16 @@ async def test_anonymous_requests_get_401_not_404(app: FastAPI) -> None:
     caller never reaches flag resolution and is told to sign in rather than that
     the route does not exist.
     """
-    path_id = uuid.uuid4()
+    lesson_id = uuid.uuid4()
     async with _client(app) as client:
-        response = await client.get(_conversation_url(path_id))
+        response = await client.get(_conversation_url(lesson_id))
 
     assert response.status_code == 401, response.text
     assert response.json()["error"]["code"] == "unauthenticated"
 
 
 # --------------------------------------------------------------------------- #
-# GET /paths/{id}/conversation
+# GET /lessons/{id}/conversation
 # --------------------------------------------------------------------------- #
 
 
@@ -317,9 +317,9 @@ async def test_empty_thread_is_200_with_no_messages(
     """
     async with _client(app) as client:
         user_id = await _sign_in(client, monkeypatch, OWNER)
-        path_id, _lesson_id, _title = await _seed_path(user_id)
+        _path_id, lesson_id, _title = await _seed_path(user_id)
 
-        response = await client.get(_conversation_url(path_id))
+        response = await client.get(_conversation_url(lesson_id))
 
     assert response.status_code == 200, response.text
     assert response.json() == {"messages": []}
@@ -345,7 +345,7 @@ async def test_thread_shape_carries_lesson_title_and_full_check(
             path_id=path_id, lesson_id=lesson_id, tutor_check=dict(TUTOR_CHECK)
         )
 
-        response = await client.get(_conversation_url(path_id))
+        response = await client.get(_conversation_url(lesson_id))
 
     assert response.status_code == 200, response.text
     messages = response.json()["messages"]
@@ -366,14 +366,10 @@ async def test_thread_shape_carries_lesson_title_and_full_check(
 
 @pytest.mark.anyio
 @pytest.mark.workflow("W11")
-async def test_thread_spans_lessons_in_position_order(
+async def test_threads_are_isolated_and_clearing_one_preserves_the_other(
     app: FastAPI, monkeypatch: pytest.MonkeyPatch, tutor_flag_enabled: None
 ) -> None:
-    """One conversation per path, not per lesson (PRD §5.8).
-
-    A question asked in one lesson is still in the thread from the next, tagged
-    with the lesson it was asked in.
-    """
+    """Returning to a lesson restores only its own durable messages."""
     async with _client(app) as client:
         user_id = await _sign_in(client, monkeypatch, OWNER)
         path_id, first_lesson_id, _title = await _seed_path(user_id)
@@ -402,19 +398,31 @@ async def test_thread_spans_lessons_in_position_order(
             path_id=path_id, lesson_id=second_lesson_id, learner_content="second lesson"
         )
 
-        response = await client.get(_conversation_url(path_id))
-
-    messages = response.json()["messages"]
-    assert [message["content"] for message in messages][::2] == [
-        "first lesson",
-        "second lesson",
-    ]
-    assert messages[2]["lesson_id"] == str(second_lesson_id)
-    assert messages[2]["lesson_title"] == second_title
+        first = await client.get(_conversation_url(first_lesson_id))
+        second = await client.get(_conversation_url(second_lesson_id))
+        restored = await client.get(_conversation_url(first_lesson_id))
+        assert first.status_code == second.status_code == restored.status_code == 200
+        assert restored.json() == first.json()
+        assert [m["content"] for m in first.json()["messages"]][::2] == ["first lesson"]
+        messages = second.json()["messages"]
+        assert [m["content"] for m in messages][::2] == ["second lesson"]
+        assert all(m["lesson_id"] == str(second_lesson_id) for m in messages)
+        assert all(m["lesson_title"] == second_title for m in messages)
+        deleted = await client.delete(_conversation_url(first_lesson_id))
+        assert deleted.status_code == 204
+        assert (await client.get(_conversation_url(first_lesson_id))).json() == {
+            "messages": []
+        }
+        assert (
+            await client.get(_conversation_url(second_lesson_id))
+        ).json() == second.json()
+        for method in (client.get, client.delete):
+            removed = await method(f"/api/v1/paths/{path_id}/conversation")
+            assert removed.status_code == 404
 
 
 # --------------------------------------------------------------------------- #
-# DELETE /paths/{id}/conversation  ("new conversation", PRD §5.8)
+# DELETE /lessons/{id}/conversation  ("new conversation")
 # --------------------------------------------------------------------------- #
 
 
@@ -433,9 +441,9 @@ async def test_delete_clears_the_thread_and_is_idempotent(
         path_id, lesson_id, _title = await _seed_path(user_id)
         await _seed_turn(path_id=path_id, lesson_id=lesson_id)
 
-        first = await client.delete(_conversation_url(path_id))
-        second = await client.delete(_conversation_url(path_id))
-        after = await client.get(_conversation_url(path_id))
+        first = await client.delete(_conversation_url(lesson_id))
+        second = await client.delete(_conversation_url(lesson_id))
+        after = await client.get(_conversation_url(lesson_id))
 
     assert first.status_code == 204, first.text
     assert second.status_code == 204, second.text
@@ -455,7 +463,7 @@ async def test_delete_leaves_the_path_and_its_lessons_intact(
         path_id, lesson_id, _title = await _seed_path(user_id)
         await _seed_turn(path_id=path_id, lesson_id=lesson_id)
 
-        response = await client.delete(_conversation_url(path_id))
+        response = await client.delete(_conversation_url(lesson_id))
 
     assert response.status_code == 204, response.text
     assert await _count(Path) == 1
@@ -510,7 +518,7 @@ async def test_check_answer_writes_answered_index_and_creates_no_attempt(
         )
 
         response = await client.post(_answer_url(tutor_id), json={"selected_index": 2})
-        thread = await client.get(_conversation_url(path_id))
+        thread = await client.get(_conversation_url(lesson_id))
 
     assert response.status_code == 204, response.text
     assert await _stored_check(tutor_id) == {**TUTOR_CHECK, "answered_index": 2}
@@ -607,8 +615,8 @@ async def test_another_accounts_path_and_message_are_404(
         )
 
         await _sign_in(client, monkeypatch, OTHER)
-        get = await client.get(_conversation_url(path_id))
-        delete = await client.delete(_conversation_url(path_id))
+        get = await client.get(_conversation_url(lesson_id))
+        delete = await client.delete(_conversation_url(lesson_id))
         answer = await client.post(_answer_url(tutor_id), json={"selected_index": 1})
 
     for response in (get, delete, answer):

@@ -1,11 +1,11 @@
-"""Conversation ORM model (CONTEXT.md: the persisted thread, one per path)."""
+"""Persisted tutor threads: one per lesson, or one shaping thread per path."""
 
 from __future__ import annotations
 
 import uuid  # noqa: TC003 - SQLAlchemy resolves mapped annotations at runtime.
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Enum, ForeignKey, UniqueConstraint, Uuid
+from sqlalchemy import CheckConstraint, Enum, ForeignKey, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from aleph.db import Base
@@ -18,15 +18,10 @@ if TYPE_CHECKING:
 
 
 class Conversation(Base, UUIDAuditMixin):
-    """The tutor's persisted thread for one path, of one **kind**.
+    """A lesson's tutor thread or a path's **Shaping conversation**.
 
-    **One per path per kind** is a database constraint, not a convention
-    (``uq_conversations_path_kind``): the row is created lazily, in the same
-    transaction as the first completed turn (Phase 2 TDD §4/D2), and a second
-    insert for the same ``(path, kind)`` fails loudly rather than forking the
-    thread. Phase 2B widened that constraint from ``UNIQUE (path_id)`` (D3) so a
-    path can carry both its in-lesson thread and its **Shaping conversation** —
-    two threads, never two of either.
+    The database enforces one conversation per scope. Lesson threads require
+    a lesson; shaping threads have none. Rows are created with the first turn.
 
     The row carries no state, no status and no generation columns on purpose: a
     tutor reply is request-scoped, so there is nothing to recover and nothing to
@@ -38,18 +33,30 @@ class Conversation(Base, UUIDAuditMixin):
     """
 
     __tablename__ = "conversations"
-    # Named explicitly so the model's constraint matches the migration's
-    # ``uq_conversations_path_kind``; a column-level ``unique=True`` would
-    # autogenerate ``conversations_path_id_key`` instead, silently diverging
-    # from the migration.
     __table_args__ = (
-        UniqueConstraint("path_id", "kind", name="uq_conversations_path_kind"),
+        UniqueConstraint(
+            "path_id",
+            "kind",
+            "lesson_id",
+            name="uq_conversations_scope",
+            postgresql_nulls_not_distinct=True,
+        ),
+        CheckConstraint(
+            "(kind = 'lesson' AND lesson_id IS NOT NULL) OR "
+            "(kind = 'shaping' AND lesson_id IS NULL)",
+            name="ck_conversations_scope",
+        ),
     )
 
     path_id: Mapped[uuid.UUID] = mapped_column(
         Uuid,
         ForeignKey("paths.id", ondelete="CASCADE"),
         nullable=False,
+    )
+    lesson_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid,
+        ForeignKey("lessons.id", ondelete="CASCADE"),
+        nullable=True,
     )
     # Defaulted in the database as well as in Python: the 2B migration adds the
     # column with ``DEFAULT 'lesson'``, which is what backfills every existing

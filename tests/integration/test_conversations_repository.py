@@ -46,6 +46,26 @@ from aleph.repositories import ConversationRepository
 
 from .conftest import create_user, wait_until_lock_waiters
 
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "method", ["get_for_path", "upsert_for_path", "load_thread", "delete_for_path"]
+)
+@pytest.mark.parametrize(
+    "kind,lesson_id",
+    [(ConversationKind.LESSON, None), (ConversationKind.SHAPING, uuid.uuid4())],
+)
+async def test_invalid_scope_is_an_error_not_an_empty_thread(
+    method: str, kind: ConversationKind, lesson_id: uuid.UUID | None
+) -> None:
+    async with db.async_session() as session:
+        repository = ConversationRepository(session)
+        with pytest.raises(ValueError, match="lesson_id"):
+            await getattr(repository, method)(
+                uuid.uuid4(), kind=kind, lesson_id=lesson_id
+            )
+
+
 TUTOR_CHECK = {
     "stem": "Which binding owns the String?",
     "options": ["The first", "The second", "Neither"],
@@ -107,7 +127,7 @@ async def _insert_turn(
 ) -> tuple[Message, Message]:
     repository = ConversationRepository(session)
     conversation, _created = await repository.upsert_for_path(
-        path_id, kind=ConversationKind.LESSON
+        path_id, kind=ConversationKind.LESSON, lesson_id=lesson_id
     )
     return await repository.insert_turn(
         conversation_id=conversation.id,
@@ -126,11 +146,11 @@ async def _insert_turn(
 
 @pytest.mark.anyio
 async def test_upsert_creates_once_then_reuses_the_same_conversation() -> None:
-    _user_id, path_id, _lesson_id = await _arrange_path_and_lesson()
+    _user_id, path_id, lesson_id = await _arrange_path_and_lesson()
 
     async with db.async_session() as session:
         conversation, created = await ConversationRepository(session).upsert_for_path(
-            path_id, kind=ConversationKind.LESSON
+            path_id, kind=ConversationKind.LESSON, lesson_id=lesson_id
         )
         await session.commit()
         first_id = conversation.id
@@ -138,7 +158,7 @@ async def test_upsert_creates_once_then_reuses_the_same_conversation() -> None:
 
     async with db.async_session() as session:
         conversation, created = await ConversationRepository(session).upsert_for_path(
-            path_id, kind=ConversationKind.LESSON
+            path_id, kind=ConversationKind.LESSON, lesson_id=lesson_id
         )
         await session.commit()
         assert conversation.id == first_id
@@ -150,12 +170,12 @@ async def test_upsert_creates_once_then_reuses_the_same_conversation() -> None:
 
 @pytest.mark.anyio
 async def test_get_for_path_returns_none_before_the_first_turn() -> None:
-    _user_id, path_id, _lesson_id = await _arrange_path_and_lesson()
+    _user_id, path_id, lesson_id = await _arrange_path_and_lesson()
 
     async with db.async_session() as session:
         assert (
             await ConversationRepository(session).get_for_path(
-                path_id, kind=ConversationKind.LESSON
+                path_id, kind=ConversationKind.LESSON, lesson_id=lesson_id
             )
             is None
         )
@@ -164,13 +184,15 @@ async def test_get_for_path_returns_none_before_the_first_turn() -> None:
 @pytest.mark.anyio
 async def test_concurrent_upsert_yields_exactly_one_conversation() -> None:
     """Two sessions racing to create the thread: one row, both get it."""
-    _user_id, path_id, _lesson_id = await _arrange_path_and_lesson()
+    _user_id, path_id, lesson_id = await _arrange_path_and_lesson()
 
     async def upsert() -> bool:
         async with db.async_session() as session:
             _conversation, created = await ConversationRepository(
                 session
-            ).upsert_for_path(path_id, kind=ConversationKind.LESSON)
+            ).upsert_for_path(
+                path_id, kind=ConversationKind.LESSON, lesson_id=lesson_id
+            )
             await session.commit()
             return created
 
@@ -260,7 +282,7 @@ async def test_concurrent_turn_inserts_collide_loudly_never_reorder() -> None:
     _user_id, path_id, lesson_id = await _arrange_path_and_lesson()
     async with db.async_session() as session:
         conversation, _created = await ConversationRepository(session).upsert_for_path(
-            path_id, kind=ConversationKind.LESSON
+            path_id, kind=ConversationKind.LESSON, lesson_id=lesson_id
         )
         await session.commit()
         conversation_id = conversation.id
@@ -350,12 +372,10 @@ async def test_insert_turn_records_the_lesson_the_question_was_asked_in() -> Non
                 await session.execute(select(Message).order_by(Message.position))
             ).scalars()
         )
-    assert [m.lesson_id for m in messages] == [
-        lesson_id,
-        lesson_id,
-        second_lesson_id,
-        second_lesson_id,
-    ]
+    assert {m.lesson_id for m in messages} == {lesson_id, second_lesson_id}
+    assert len(messages) == 4
+    assert sorted(m.position for m in messages) == [1, 1, 2, 2]
+    assert len({m.conversation_id for m in messages}) == 2
 
 
 # --------------------------------------------------------------------------- #
@@ -393,28 +413,26 @@ async def test_load_thread_returns_position_order_with_lesson_titles() -> None:
 
     async with db.async_session() as session:
         thread = await ConversationRepository(session).load_thread(
-            path_id, kind=ConversationKind.LESSON
+            path_id, kind=ConversationKind.LESSON, lesson_id=second_lesson_id
         )
 
-    assert [entry.message.position for entry in thread] == [1, 2, 3, 4]
+    assert [entry.message.position for entry in thread] == [1, 2]
     assert [entry.lesson_title for entry in thread] == [
-        "What ownership is",
-        "What ownership is",
         "Borrowing",
         "Borrowing",
     ]
-    assert thread[3].message.tutor_check == TUTOR_CHECK
+    assert thread[1].message.tutor_check == TUTOR_CHECK
     assert thread[0].message.role is MessageRole.LEARNER
 
 
 @pytest.mark.anyio
 async def test_load_thread_is_empty_when_no_conversation_exists() -> None:
-    _user_id, path_id, _lesson_id = await _arrange_path_and_lesson()
+    _user_id, path_id, lesson_id = await _arrange_path_and_lesson()
 
     async with db.async_session() as session:
         assert (
             await ConversationRepository(session).load_thread(
-                path_id, kind=ConversationKind.LESSON
+                path_id, kind=ConversationKind.LESSON, lesson_id=lesson_id
             )
             == []
         )
@@ -449,13 +467,17 @@ async def test_load_thread_is_scoped_to_its_path() -> None:
     async with db.async_session() as session:
         repository = ConversationRepository(session)
         assert (
-            len(await repository.load_thread(path_id, kind=ConversationKind.LESSON))
+            len(
+                await repository.load_thread(
+                    path_id, kind=ConversationKind.LESSON, lesson_id=lesson_id
+                )
+            )
             == 2
         )
         assert [
             entry.message.content
             for entry in await repository.load_thread(
-                other_path_id, kind=ConversationKind.LESSON
+                other_path_id, kind=ConversationKind.LESSON, lesson_id=other_lesson_id
             )
         ] == ["Who pays for what?", "Payers vary."]
 
@@ -475,7 +497,7 @@ async def test_delete_for_path_drops_thread_and_is_idempotent() -> None:
     async with db.async_session() as session:
         assert (
             await ConversationRepository(session).delete_for_path(
-                path_id, kind=ConversationKind.LESSON
+                path_id, kind=ConversationKind.LESSON, lesson_id=lesson_id
             )
             is True
         )
@@ -491,7 +513,7 @@ async def test_delete_for_path_drops_thread_and_is_idempotent() -> None:
     async with db.async_session() as session:
         assert (
             await ConversationRepository(session).delete_for_path(
-                path_id, kind=ConversationKind.LESSON
+                path_id, kind=ConversationKind.LESSON, lesson_id=lesson_id
             )
             is False
         )
@@ -506,14 +528,14 @@ async def test_next_turn_after_delete_starts_a_fresh_thread_at_position_one() ->
         await session.commit()
     async with db.async_session() as session:
         await ConversationRepository(session).delete_for_path(
-            path_id, kind=ConversationKind.LESSON
+            path_id, kind=ConversationKind.LESSON, lesson_id=lesson_id
         )
         await session.commit()
 
     async with db.async_session() as session:
         repository = ConversationRepository(session)
         conversation, created = await repository.upsert_for_path(
-            path_id, kind=ConversationKind.LESSON
+            path_id, kind=ConversationKind.LESSON, lesson_id=lesson_id
         )
         learner, tutor = await repository.insert_turn(
             conversation_id=conversation.id,

@@ -365,6 +365,7 @@ async def test_tutor_reservation_is_reusable_after_release() -> None:
     path = uuid.uuid4()
 
     first = limiter.reserve(path)
+    assert first.scope_id == path
     limiter.release(first)
     second = limiter.reserve(path)
 

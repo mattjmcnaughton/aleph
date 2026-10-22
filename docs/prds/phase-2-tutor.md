@@ -1,5 +1,14 @@
 # PRD — Phase 2: The tutor (in-lesson)
 
+> **Scope amendment (2026-10-22):** Lesson chats now belong to individual
+> lessons, not paths. Revisiting a lesson restores its own thread; navigating
+> to another lesson opens a separate thread. Clearing affects only that lesson.
+> Existing lesson-chat history need not be preserved. Shaping remains one
+> conversation per path. This supersedes the path-wide conversation statements
+> and W11 expectations below; [CONTEXT.md](../CONTEXT.md) and
+> [the API reference](../api.md#tutor-apiv1-al-220al-221-phase-2-tdd-546) describe
+> the current contract.
+
 **Status:** Draft · **Owner:** solo builder · **Roadmap item:** [Phase 2](../roadmap.md#phase-2--the-tutor)
 **References:** [`README.md`](../../README.md) · [`roadmap.md`](../roadmap.md) · [`CONTEXT.md`](../CONTEXT.md) (ubiquitous language) · [Phase 1 PRD](phase-1-path-generation.md) · mock: [phase-2 tutor](../mocks/aleph-phase-2-tutor.html)
 

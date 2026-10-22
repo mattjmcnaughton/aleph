@@ -221,7 +221,7 @@ async def _seed_lesson_turn(*, path_id: uuid.UUID, lesson_id: uuid.UUID) -> None
     async with db.async_session() as session:
         repository = ConversationRepository(session)
         conversation, _created = await repository.upsert_for_path(
-            path_id, kind=ConversationKind.LESSON
+            path_id, kind=ConversationKind.LESSON, lesson_id=lesson_id
         )
         await repository.insert_turn(
             conversation_id=conversation.id,
@@ -246,12 +246,15 @@ def _body(content: str = ASK, **extra: Any) -> dict[str, Any]:
 
 
 async def _thread(
-    path_id: uuid.UUID, *, kind: ConversationKind = ConversationKind.SHAPING
+    path_id: uuid.UUID,
+    *,
+    kind: ConversationKind = ConversationKind.SHAPING,
+    lesson_id: uuid.UUID | None = None,
 ) -> list[Message]:
     async with db.async_session() as session:
         return [
             entry.message
             for entry in await ConversationRepository(session).load_thread(
-                path_id, kind=kind
+                path_id, kind=kind, lesson_id=lesson_id
             )
         ]

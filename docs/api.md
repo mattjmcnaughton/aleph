@@ -316,9 +316,16 @@ and the gate now only fires for an account with an explicit `off`.
 | Method | Path | Body | Success | Notes |
 | ------ | ---- | ---- | ------- | ----- |
 | `POST` | `/api/v1/paths/{id}/conversation/messages` | `{lesson_id, content, source?, model?}` | `200 text/event-stream` | **Send a turn** and stream the reply (§5.4). `content` ≤ 2000 chars; `source` is `typed` (default) or `suggestion` — a suggestion sends as if typed. `model` is the **admin-only per-message model override**: `403 forbidden` for a non-admin (checked *before* the allowlist, so a non-admin never learns its shape), `422 validation_error` off the shared `MODEL_ALLOWLIST`, resolved per request and **persisted nowhere**. Pre-stream failures are ordinary JSON error envelopes: `401`, `404` (path not the caller's, or the lesson not on this path), `409 conflict` (the lesson has no generated content — lesson scope is empty until a Read passage exists; or a reply is already in flight on this conversation), `422`, `429 rate_limited` (the tutor daily cap, `RATE_LIMIT_TUTOR_MESSAGES_PER_DAY` — **disabled at its default of 0**, so `429` is unreachable on the default configuration; admins are exempt regardless). **SSE starts only once the turn is admitted**, so a `200` means the turn is running, not that it succeeded. |
-| `GET` | `/api/v1/paths/{id}/conversation` | — | `200 {messages: [...]}` | The path's whole thread, oldest first. Each message: `{id, role, content, lesson_id, lesson_title, tutor_check, created_at}`. **`200` with an empty list when no conversation exists** (the row is created lazily on the first completed turn) — never `404`. There is one conversation **per path**, not per lesson, so `lesson_id`/`lesson_title` (the lesson the message was asked in, PRD §5.8) vary down a single thread. **Unpaginated this phase** (accepted risk, TDD §14). |
-| `DELETE` | `/api/v1/paths/{id}/conversation` | — | `204` | **New conversation** (PRD §5.8): drops the conversation row; `ON DELETE CASCADE` removes its messages. **Idempotent** — clearing an already-empty thread is still `204`. Touches no Phase 1 state (the path and its lessons are untouched). Never refunds quota (D8 — the tutor cap is disabled at its default of 0, so there are no usage rows to refund). |
+| `GET` | `/api/v1/lessons/{id}/conversation` | — | `200 {messages: [...]}` | The lesson's whole thread, oldest first. Each message: `{id, role, content, lesson_id, lesson_title, tutor_check, created_at}`. **`200` with an empty list when no conversation exists** (created lazily on the first completed turn). One conversation **per lesson**; other lessons' messages are neither returned nor carried to the model. Unknown or unowned lesson: `404`. Unpaginated. |
+| `DELETE` | `/api/v1/lessons/{id}/conversation` | — | `204` | **New conversation**: deletes only this lesson's conversation and its messages. **Idempotent**; other lessons, shaping, progress and content are untouched. Unknown or unowned lesson: `404`. Never refunds quota (the tutor cap defaults to 0). |
 | `POST` | `/api/v1/messages/{id}/tutor-check-answer` | `{selected_index}` | `204` | Records the learner's choice into the message's Tutor check as `answered_index`, so a revisit renders the revealed card. Ownership walks message → conversation → path → user (`404` otherwise). A message with **no** Tutor check is `409 conflict`; a `selected_index` outside the stored `options` is `422 validation_error`. Answering twice **overwrites** (a Tutor check is not graded, so there is no first-wins rule to protect). **Creates no Attempt** and changes no lesson, progression, or Attempt-derived metric (PRD §5.5 / W12). |
+
+The former path-level GET/DELETE conversation endpoints are removed. Sending
+still names the owned path and a required `lesson_id`; persistence, carried
+history (latest 10 turns by default), and in-flight exclusion are lesson-scoped.
+Migration `0021_lesson_conversations` discards existing lesson-chat history;
+shaping conversations and Change history remain intact. Old clients must reload
+the updated web client. Downgrading also discards lesson chats, not shaping.
 
 ### The send endpoint's event stream (§5.4)
 
@@ -386,10 +393,11 @@ tutor's launch was AL-270, shaping's AL-370). Both are now launched and default
 on; shaping spent 2B's build-out dark behind this key while admins dogfooded it —
 see [*Launching a flagged phase*](deploy.md#launching-a-flagged-phase-al-270--al-370).
 
-**Two threads, one path.** A path carries at most one conversation of each kind
-(`UNIQUE (path_id, kind)`). The routes below reach only the `shaping` one, and
-2A's `/paths/{id}/conversation` routes reach only the `lesson` one — neither
-rail ever shows the other's turns, and clearing one leaves the other untouched.
+**One shaping thread per path, one tutor thread per lesson.** The routes below
+reach only the path's `shaping` conversation. Tutor reads and clears use
+`/lessons/{id}/conversation`; neither rail shows the other's turns, and clearing
+one leaves the others untouched. The database enforces exact scope uniqueness,
+including a single null-lesson shaping conversation per path.
 Shaping messages are **path-level**, so they carry no `lesson_id`/`lesson_title`
 at all (the column is `NULL`; migration `0006`).
 

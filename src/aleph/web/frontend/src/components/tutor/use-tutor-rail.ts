@@ -200,7 +200,7 @@ export function useTutorRail({
 
   // `skipToken` when the entry point is not rendered: a gated-off surface costs
   // no request at all, which is what makes shipping dark actually dark.
-  const conversationQuery = useQuery(conversationQueryOptions(enabled ? pathId : null));
+  const conversationQuery = useQuery(conversationQueryOptions(enabled ? lessonId : null));
   const messages = conversationQuery.data?.messages ?? [];
 
   const appendTurn = useCallback(
@@ -211,7 +211,7 @@ export function useTutorRail({
       check: TutorCheck | null,
     ) => {
       if (pathId === null) return;
-      const key = conversationQueryKey(pathId);
+      const key = conversationQueryKey(lessonId);
       // Cancel first for the same reason the lesson view does before folding in
       // an Attempt: a GET that started before this turn would resolve without it
       // and briefly un-append the reply the learner just watched arrive.
@@ -285,7 +285,7 @@ export function useTutorRail({
   const answerCheck = useCallback(
     async (messageId: string, selectedIndex: number) => {
       if (pathId === null) return;
-      const key = conversationQueryKey(pathId);
+      const key = conversationQueryKey(lessonId);
       await queryClient.cancelQueries({ queryKey: key });
       // Local first-wins: a second tap racing through the awaited cancel must
       // not overwrite (and re-POST) an answer the learner already saw revealed.
@@ -308,7 +308,7 @@ export function useTutorRail({
       );
       recordAnswer({ messageId, selectedIndex });
     },
-    [pathId, queryClient, recordAnswer],
+    [pathId, lessonId, queryClient, recordAnswer],
   );
 
   /**
@@ -427,8 +427,7 @@ export function useTutorRail({
   useEffect(() => () => endStream("discard"), [endStream]);
 
   const clearMutation = useMutation({
-    // The id is the mutation's variable, never `pathId ?? ""` — that spelling
-    // can issue `DELETE /paths//conversation`, which is a different route.
+    // Capture the lesson being cleared, including for a late response.
     mutationFn: (id: string) => clearConversation(id),
     // Only the cache. Every piece of local state this clear touches is reset
     // synchronously in `confirmNewConversation`, before the request goes out —
@@ -473,7 +472,6 @@ export function useTutorRail({
     cancelNewConversation: () => setConfirmingNew(false),
     confirmNewConversation: () => {
       setConfirmingNew(false);
-      // Never `pathId ?? ""`: that spelling issues `DELETE /paths//conversation`.
       if (pathId === null) return;
       // Stop first, always. The `DELETE` empties the thread, and a stream still
       // running would append its turn onto the emptied thread when it settled —
@@ -487,7 +485,7 @@ export function useTutorRail({
       setErrorMessage(null);
       setClearError(null);
       pendingRef.current = null;
-      clearMutation.mutate(pathId);
+      clearMutation.mutate(lessonId);
     },
     clearError,
 
