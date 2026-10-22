@@ -1,6 +1,6 @@
 import { notifyManager } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { HttpResponse, http } from "msw";
+import { http, HttpResponse } from "msw";
 import { afterEach, describe, expect, it } from "vitest";
 import { API_V1_BASE, type AuthSession } from "../lib/api";
 import { adminSession, learnerUser } from "../mocks/handlers";
@@ -365,7 +365,7 @@ describe("Tutor rail — the live turn (PRD §5.6)", () => {
     useSession(flagOnSession);
     configureTutor({ hang: true, replyDeltas: [] });
     seedReadyLesson();
-    seedConversation(PATH_ID, [
+    seedConversation(LESSON_ID, [
       { role: "learner", content: "Explain this simpler" },
       { role: "tutor", content: "Think of it as a promise." },
     ]);
@@ -623,10 +623,98 @@ describe("Tutor rail — Shift+Enter sends", () => {
 });
 
 describe("Tutor rail — the thread", () => {
-  it("[AL-230] restores the path's existing thread when the rail opens", async () => {
+  it.each(["draft", "in-flight"] as const)(
+    "same-route lesson navigation does not carry %s state into another lesson",
+    async (state) => {
+      useSession(flagOnSession);
+      const secondId = "les-tutor-second";
+      const lessons = [LESSON_ID, secondId].map((id, index) => ({
+        id,
+        title: index === 0 ? "Generic constraints" : "Indexed access",
+        position_in_path: index + 1,
+        generation_state: "generated" as const,
+        unlock_state: "available" as const,
+      }));
+      seedPath({
+        id: PATH_ID,
+        topic: "TypeScript",
+        level: "some_experience",
+        units: [{ id: "unit-tutor", title: "Types", lessons }],
+      });
+      for (const lesson of lessons) {
+        seedLesson({ ...lesson, path_id: PATH_ID });
+      }
+      seedConversation(LESSON_ID, [{ role: "tutor", content: "First lesson history" }]);
+      configureTutor({ hang: true, replyDeltas: ["Unfinished answer"] });
+      await gotoLesson();
+      await openRail();
+      await screen.findByText("First lesson history");
+
+      if (state === "draft") {
+        fireEvent.change(composer(), { target: { value: "Only for the first lesson" } });
+      } else {
+        ask("Only for the first lesson");
+        await screen.findByTestId("tutor-rail-streaming");
+      }
+
+      fireEvent.click(screen.getByTestId("lesson-nav-next"));
+      await waitFor(() => expect(screen.getByTestId("lesson-view-id").textContent).toBe(secondId));
+      await openRail();
+      await screen.findByTestId("tutor-rail-empty");
+      expect(composer().value).toBe("");
+      expect(composer().disabled).toBe(false);
+      expect(messages()).toHaveLength(0);
+      expect(screen.queryByTestId("tutor-rail-pending")).toBeNull();
+      expect(screen.queryByTestId("tutor-rail-streaming")).toBeNull();
+
+      if (state === "in-flight") {
+        await waitFor(() => expect(tutorAbortedSendCount()).toBe(1));
+        finishTutorStream();
+      }
+      configureTutor({ hang: false, replyDeltas: ["Second lesson answer"] });
+      ask("A question about the second lesson");
+      await waitFor(() => expect(messages()).toHaveLength(2));
+      expect(tutorSendBodies()[tutorSendBodies().length - 1].lesson_id).toBe(secondId);
+      expect(messages()[1]).toHaveTextContent("Second lesson answer");
+
+      fireEvent.click(screen.getByTestId("lesson-nav-prev"));
+      await waitFor(() => expect(screen.getByTestId("lesson-view-id").textContent).toBe(LESSON_ID));
+      await openRail();
+      await screen.findByText("First lesson history");
+      expect(messages()).toHaveLength(1);
+      expect(composer().value).toBe("");
+    },
+  );
+
+  it("reads the current lesson's conversation rather than the path's", async () => {
     useSession(flagOnSession);
     seedReadyLesson();
-    seedConversation(PATH_ID, [
+    server.use(
+      http.get(`${API_V1_BASE}/lessons/${LESSON_ID}/conversation`, () =>
+        HttpResponse.json({
+          messages: [
+            {
+              id: "lesson-message",
+              role: "learner",
+              content: "Only this lesson",
+              lesson_id: LESSON_ID,
+              lesson_title: "Generic constraints",
+              tutor_check: null,
+              created_at: "2026-07-30T12:00:00Z",
+            },
+          ],
+        }),
+      ),
+    );
+    await gotoLesson();
+    await openRail();
+    expect(await screen.findByText("Only this lesson")).toBeInTheDocument();
+  });
+
+  it("[AL-230] restores the lesson's existing thread when the rail opens", async () => {
+    useSession(flagOnSession);
+    seedReadyLesson();
+    seedConversation(LESSON_ID, [
       { role: "learner", content: "Explain this simpler" },
       { role: "tutor", content: "Think of `<T>` as a blank." },
     ]);
@@ -640,7 +728,7 @@ describe("Tutor rail — the thread", () => {
   it("[AL-230] renders tutor replies through the Markdown component", async () => {
     useSession(flagOnSession);
     seedReadyLesson();
-    seedConversation(PATH_ID, [
+    seedConversation(LESSON_ID, [
       { role: "tutor", content: "A constraint is a **promise** about the blank." },
     ]);
     await gotoLesson();
@@ -684,7 +772,7 @@ describe("Tutor rail — the thread", () => {
   it("[AL-230] new conversation confirms first, then clears the thread", async () => {
     useSession(flagOnSession);
     seedReadyLesson();
-    seedConversation(PATH_ID, [
+    seedConversation(LESSON_ID, [
       { role: "learner", content: "Explain this simpler" },
       { role: "tutor", content: "Think of it as a promise." },
     ]);
@@ -712,7 +800,7 @@ describe("Tutor rail — the thread", () => {
     useSession(flagOnSession);
     configureTutor({ hang: true, replyDeltas: ["Think of "] });
     seedReadyLesson();
-    seedConversation(PATH_ID, [
+    seedConversation(LESSON_ID, [
       { role: "learner", content: "Explain this simpler" },
       { role: "tutor", content: "Think of it as a promise." },
     ]);
@@ -756,7 +844,7 @@ describe("Tutor rail — the thread", () => {
   it("[AL-230] surfaces a failed clear instead of pretending the thread is gone", async () => {
     useSession(flagOnSession);
     seedReadyLesson();
-    seedConversation(PATH_ID, [
+    seedConversation(LESSON_ID, [
       { role: "learner", content: "Explain this simpler" },
       { role: "tutor", content: "Think of it as a promise." },
     ]);
@@ -765,7 +853,7 @@ describe("Tutor rail — the thread", () => {
     await waitFor(() => expect(messages()).toHaveLength(2));
 
     server.use(
-      http.delete(`${API_V1_BASE}/paths/:pathId/conversation`, () =>
+      http.delete(`${API_V1_BASE}/lessons/:lessonId/conversation`, () =>
         HttpResponse.json(
           { error: { code: "internal_error", message: "Something went wrong." } },
           { status: 500 },

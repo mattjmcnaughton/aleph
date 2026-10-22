@@ -65,9 +65,7 @@ class MessageDTO(BaseModel):
     """One message in the thread — learner or tutor (§6).
 
     ``lesson_id`` + ``lesson_title`` are **the lesson the message was asked in**
-    (PRD §5.8), which is what lets a revisited thread show where each turn
-    happened and what 2B renders its lesson dividers from. The conversation is
-    per *path*, not per lesson, so these vary down a single thread.
+    and are the same throughout this lesson-scoped conversation.
 
     ``tutor_check`` is non-null only on a tutor message that posed one. The
     learner-row ``source`` (typed vs suggestion) is deliberately **not** on the
@@ -85,15 +83,15 @@ class MessageDTO(BaseModel):
 
 
 class ConversationResponse(BaseModel):
-    """``GET /api/v1/paths/{id}/conversation`` body — the whole thread.
+    """``GET /api/v1/lessons/{id}/conversation`` body — the whole thread.
 
     Object-wrapped (never a bare array) like every other list payload, so the
     response can gain fields without a breaking change. Messages are in
     ``position`` order, oldest first.
 
-    A path with no conversation yet answers ``200`` with an empty list, not
+    A lesson with no conversation yet answers ``200`` with an empty list, not
     ``404``: the row is created lazily on the first completed turn (TDD §4), so
-    "no thread yet" is the opening state of every path rather than a missing
+    "no thread yet" is the opening state of every lesson rather than a missing
     resource. **Unpaginated this phase** — an accepted risk (TDD §14): a long
     thread is a whole-payload read.
     """

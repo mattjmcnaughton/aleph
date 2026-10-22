@@ -2,10 +2,9 @@
 //
 // Two halves, and they fail for different reasons, so they are two tests:
 //
-// 1. **Across lessons.** There is one conversation per *path*, not per lesson
-//    (TDD §3), so completing a lesson and moving to the next one must find the
-//    same thread — with the rail's scope chip now naming the new lesson, because
-//    what the tutor can *see* moves even though the thread does not.
+// 1. **Across lessons.** Each lesson owns its thread. Moving to another lesson
+//    shows a separate conversation; returning restores the first one. Clearing
+//    the second lesson must not erase the first lesson's history.
 // 2. **Across sessions.** The thread lives on the server, not in this browser.
 //    The session is torn down the way W2 tears it down — app cookie *and*
 //    Keycloak's SSO cookie — so signing back in is a real credential round trip
@@ -41,9 +40,10 @@ import {
 test.use({ storageState: DEV_STORAGE_STATE });
 
 test.describe("W11 the conversation persists", { tag: "@w11" }, () => {
-  test("the thread survives completing a lesson and moving to the next", async ({ page }) => {
+  test("each lesson restores its own thread and clearing B leaves A intact", async ({ page }) => {
     await createPath(page, uniqueTopic("Bridge cables"));
     await openLessonAt(page, 0);
+    const firstUrl = page.url();
     const firstTitle = await lessonTitle(page);
     await openRail(page);
 
@@ -67,19 +67,47 @@ test.describe("W11 the conversation persists", { tag: "@w11" }, () => {
     const secondTitle = await lessonTitle(page);
     expect(secondTitle).not.toBe(firstTitle);
 
-    // One conversation per path: the same thread, on a different lesson.
+    // A new lesson has no copy of the first lesson's chat.
     await openRail(page);
-    expect(await threadText(page)).toEqual(thread);
-    // ...and the scope moved with the learner, even though the thread did not.
+    await expect(page.getByTestId("tutor-rail-empty")).toBeVisible();
+    await expect(railMessages(page)).toHaveCount(0);
     await expect(page.getByTestId("tutor-rail-context-chip")).toContainText(secondTitle);
 
-    // A new turn continues that same thread and is grounded in the *new*
-    // lesson's passage — the conversation carries over, the context does not.
+    // The second lesson gets its own grounded turn.
+    const secondUrl = page.url();
     const slice = await passageSlice(page);
     const reply = await askTutor(page, "And what is this one about?");
     expect(reply).toContain(slice);
-    await expect(learnerMessages(page)).toHaveCount(2);
-    await expect(tutorReplies(page)).toHaveCount(2);
+    await expect(learnerMessages(page)).toHaveCount(1);
+    await expect(tutorReplies(page)).toHaveCount(1);
+    const secondThread = await threadText(page);
+
+    await page.goto(firstUrl);
+    await expect(page.getByTestId("lesson-read-passage")).toBeVisible();
+    await openRail(page);
+    await expect(railMessages(page)).toHaveCount(2);
+    expect(await threadText(page)).toEqual(thread);
+
+    await page.goto(secondUrl);
+    await expect(page.getByTestId("lesson-read-passage")).toBeVisible();
+    await openRail(page);
+    await expect(railMessages(page)).toHaveCount(2);
+    expect(await threadText(page)).toEqual(secondThread);
+    await page.getByTestId("tutor-rail-new-conversation").click();
+    await page.getByTestId("tutor-rail-new-conversation-confirm").click();
+    await expect(page.getByTestId("tutor-rail-empty")).toBeVisible();
+
+    await page.goto(firstUrl);
+    await expect(page.getByTestId("lesson-read-passage")).toBeVisible();
+    await openRail(page);
+    await expect(railMessages(page)).toHaveCount(2);
+    expect(await threadText(page)).toEqual(thread);
+
+    await page.goto(secondUrl);
+    await expect(page.getByTestId("lesson-read-passage")).toBeVisible();
+    await openRail(page);
+    await expect(page.getByTestId("tutor-rail-empty")).toBeVisible();
+    await expect(railMessages(page)).toHaveCount(0);
   });
 
   test("the thread survives signing out, reloading and signing back in", async ({ page }) => {

@@ -85,7 +85,7 @@ this document for what is deferred.
 | --- | --- |
 | **Tutor** | The context-aware chat that knows where the learner is. In lesson scope it reads the path and speaks about it, changing nothing; in the **Shaping conversation** (Phase 2B) it may change path *structure*, and only through an applied **Proposal** — never progress, never silently. ("Tutor" names the feature and the assistant's turn in a conversation — the product has no separate assistant persona name.) |
 | **Rail** | The tutor's surface: a docked right column on desktop, a sheet over the lesson on a phone. One surface, two presentations — not two features. Unqualified, "the rail" means this. The path view's units-and-lessons list is the **path rail** and the desktop left column is the **Sidebar** — three surfaces, three names (the code keeps them apart as `tutor-rail`, `path-rail`, `Sidebar`). |
-| **Conversation** | The persisted thread of messages, **one per path** (not per lesson). Survives moving between lessons and between sessions; deleted with its path. |
+| **Conversation** | The persisted tutor thread of messages, **one per lesson**. Returning to a lesson restores its conversation across sessions; other lessons have separate conversations. Deleted with its lesson or path. |
 | **Message** | A single utterance in a conversation — learner or tutor — recording the **lesson it was asked in**, and optionally a **Tutor check**. |
 | **Turn** | One learner Message and the tutor Message it produced, as a unit. Turns persist atomically — a turn exists whole or not at all — and are what the tutor's carried-context window counts (Phase 2 TDD §5.2). Two Messages make one Turn; avoid "turn" for a single message. |
 | **Scope** | What the tutor can see for a turn. **Lesson scope** (Phase 2): the current lesson's Read passage, Quick check, the learner's Attempt, plus the Path digest. **Path scope** (deferred with the Q&A slice): every unit and lesson with progress, but never a lesson's body. **Shaping scope** (Phase 2B) is defined in the Shaping table below. |
@@ -106,7 +106,7 @@ Phase 2B vocabulary — the tutor that changes the path, on instruction only. Sp
 | --- | --- |
 | **Shape your path** | The flow: a conversation on the path view that ends in learner-approved edits to the path's structure. (The roadmap's name for the Turn 3 mock; the learner-initiated half is Phase 2B, the system-proposed half stays Phase 4.) |
 | **Shaping rail** | The tutor's surface on the **path view** — same rail grammar (docked column / sheet), its own thread (the code keeps it apart as `shaping-rail`, beside `tutor-rail` and `path-rail`). Unqualified, "the rail" still means the in-lesson tutor surface. |
-| **Shaping conversation** | The second persisted thread per path (conversation kind `shaping`), separate from the in-lesson thread. The in-lesson rail never shows it, and vice versa. |
+| **Shaping conversation** | The path's persisted thread for shaping, **one per path**, separate from every lesson's Conversation. The in-lesson rail never shows it, and vice versa. |
 | **Shaping scope** | What the tutor sees in a shaping conversation: topic, level, the Path digest, each attempted lesson's **Outcome**, and the Change history. Never a lesson's body. |
 | **Proposal** | The tutor's structured, validated edit plan, rendered as a card in the thread: one or more **Additions**/**Revisions**, each with rationale and cost ("adds 2 lessons ≈ 10 min"). Data, not prose — the payload is what applies. Where it stands (*pending* / *applied* / *undone* / *superseded*) is derived from the Changes, never stored; "Not now" only dismisses the card in the client, and a reload brings a pending Proposal back. |
 | **Addition** | An edit that inserts new lessons (optionally as a new unit) **at or after the learner's first non-engaged position**. The only way a path grows. Added lessons are ordinary `ungenerated` lessons — Phase 1 machinery generates them. |
@@ -191,7 +191,9 @@ phase:
   T0 and device/operational acceptance remain outstanding; see the
   [execution amendment](prds/home-screen-app.md#execution-amendment-2026-10-20).
 - **Tutor** in **lesson scope** — the in-lesson rail, its **Suggestions**, its **Tutor check**, one
-  **Conversation** per path, and streamed replies: **shipped and launched (Phase 2)** — AL-270
+  **Conversation** per lesson, and streamed replies. Lesson-scoped conversations replace
+  Phase 2's original path-wide thread; existing lesson-chat history is not preserved.
+  The tutor surface is **shipped and launched (Phase 2)** — AL-270
   flipped the `tutor` flag's global default on, so every learner sees it. Everything in "The
   tutor" above is built except where a row says otherwise.
 - **Shape your path, learner-initiated** — the shaping rail, Proposals, Additions, Revisions,

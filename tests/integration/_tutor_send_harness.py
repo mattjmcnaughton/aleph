@@ -219,7 +219,7 @@ async def _seed_turn(*, path_id: uuid.UUID, lesson_id: uuid.UUID) -> None:
     async with db.async_session() as session:
         repository = ConversationRepository(session)
         conversation, _created = await repository.upsert_for_path(
-            path_id, kind=ConversationKind.LESSON
+            path_id, kind=ConversationKind.LESSON, lesson_id=lesson_id
         )
         await repository.insert_turn(
             conversation_id=conversation.id,
@@ -315,12 +315,12 @@ async def _count(model: type[Any]) -> int:
         return await session.scalar(select(func.count()).select_from(model)) or 0
 
 
-async def _thread(path_id: uuid.UUID) -> list[Message]:
+async def _thread(path_id: uuid.UUID, lesson_id: uuid.UUID) -> list[Message]:
     async with db.async_session() as session:
         return [
             entry.message
             for entry in await ConversationRepository(session).load_thread(
-                path_id, kind=ConversationKind.LESSON
+                path_id, kind=ConversationKind.LESSON, lesson_id=lesson_id
             )
         ]
 

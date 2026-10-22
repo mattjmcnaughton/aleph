@@ -7,15 +7,9 @@ all (D2). There is no state machine and no stale recovery to support: a tutor
 reply is request-scoped, so a stream that dies persists nothing and there is
 nothing to reclaim.
 
-**Every conversation query names a kind** (Phase 2B TDD D3). A path carries two
-threads — its in-lesson thread and its **Shaping conversation** — and a query
-that did not say which would quietly serve one rail the other's turns, the one
-thing PRD §5.8 forbids. So ``kind`` is *required* and keyword-only on every
-thread query: a default would demote the rule to a docstring, letting a shaping
-caller that forgot it read or clear the lesson thread instead — silently, and
-with a clean type-check. Phase 2A's call sites pass
-:attr:`~aleph.models.ConversationKind.LESSON` explicitly and the in-lesson tutor
-stays bit-identical (W21).
+Every query names a kind and selects an exact lesson scope. Tutor callers pass
+``lesson_id``; shaping callers leave it null. A missing lesson never widens a
+query to all lesson conversations on the path.
 
 :meth:`ConversationRepository.insert_turn` takes no kind: it is handed a
 ``conversation_id``, which already names one thread.
@@ -45,6 +39,14 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from aleph.models import MessageSource
+
+
+def _validate_scope(kind: ConversationKind, lesson_id: uuid.UUID | None) -> None:
+    """Invalid scope must not masquerade as an empty or successfully cleared chat."""
+    if (kind is ConversationKind.LESSON) != (lesson_id is not None):
+        raise ValueError(
+            "lesson_id is required for lesson chats and forbidden for shaping"
+        )
 
 
 @dataclass(frozen=True)
@@ -115,15 +117,19 @@ class ConversationRepository:
         path_id: uuid.UUID,
         *,
         kind: ConversationKind,
+        lesson_id: uuid.UUID | None = None,
     ) -> Conversation | None:
         """The path's conversation of ``kind``, or ``None`` before its first turn.
 
         Scoped to one kind, never "whichever thread exists": the other thread's
         presence must be invisible from here (D3).
         """
+        _validate_scope(kind, lesson_id)
         result = await self.session.execute(
             select(Conversation).where(
-                Conversation.path_id == path_id, Conversation.kind == kind
+                Conversation.path_id == path_id,
+                Conversation.kind == kind,
+                Conversation.lesson_id == lesson_id,
             )
         )
         return result.scalar_one_or_none()
@@ -133,6 +139,7 @@ class ConversationRepository:
         path_id: uuid.UUID,
         *,
         kind: ConversationKind,
+        lesson_id: uuid.UUID | None = None,
     ) -> tuple[Conversation, bool]:
         """Get the path's conversation of ``kind``, creating it on the first turn.
 
@@ -140,7 +147,7 @@ class ConversationRepository:
         emit ``tutor_conversation_started`` / ``shaping_conversation_started``
         exactly once (§5.5) — including when two sends race: the ``ON CONFLICT
         DO NOTHING`` means the loser inserts nothing, reports ``created=False``
-        and still receives the winner's row, so ``UNIQUE (path_id, kind)`` is
+        and still receives the winner's row, so the unique scope constraint is
         never violated by the normal path (it stays a loud backstop for a
         genuinely duplicated insert).
 
@@ -148,15 +155,16 @@ class ConversationRepository:
         isolation level): under REPEATABLE READ the re-read would run against a
         snapshot older than the winner's commit and find nothing.
         """
+        _validate_scope(kind, lesson_id)
         result = await self.session.execute(
             insert(Conversation)
-            .values(path_id=path_id, kind=kind)
-            .on_conflict_do_nothing(constraint="uq_conversations_path_kind")
+            .values(path_id=path_id, kind=kind, lesson_id=lesson_id)
+            .on_conflict_do_nothing(constraint="uq_conversations_scope")
             .returning(Conversation.id)
         )
         created = result.scalar_one_or_none() is not None
 
-        conversation = await self.get_for_path(path_id, kind=kind)
+        conversation = await self.get_for_path(path_id, kind=kind, lesson_id=lesson_id)
         if conversation is None:  # pragma: no cover - unreachable under READ COMMITTED
             raise RuntimeError(
                 f"{kind.value} conversation for path {path_id} disappeared"
@@ -168,6 +176,7 @@ class ConversationRepository:
         path_id: uuid.UUID,
         *,
         kind: ConversationKind,
+        lesson_id: uuid.UUID | None = None,
     ) -> list[ThreadMessage]:
         """The thread's messages in ``position`` order, each with its lesson title.
 
@@ -182,11 +191,16 @@ class ConversationRepository:
         thread's rows all have a lesson, so this returns exactly what the inner
         join returned for them, row for row and title for title (W21).
         """
+        _validate_scope(kind, lesson_id)
         result = await self.session.execute(
             select(Message, Lesson.title)
             .join(Conversation, Message.conversation_id == Conversation.id)
             .outerjoin(Lesson, Message.lesson_id == Lesson.id)
-            .where(Conversation.path_id == path_id, Conversation.kind == kind)
+            .where(
+                Conversation.path_id == path_id,
+                Conversation.kind == kind,
+                Conversation.lesson_id == lesson_id,
+            )
             .order_by(Message.position)
         )
         return [
@@ -263,6 +277,7 @@ class ConversationRepository:
         path_id: uuid.UUID,
         *,
         kind: ConversationKind,
+        lesson_id: uuid.UUID | None = None,
     ) -> bool:
         """Drop one of the path's threads ("new conversation", PRD §5.8).
 
@@ -276,9 +291,12 @@ class ConversationRepository:
         the path and its ``message_id`` is ``ON DELETE SET NULL`` (D3), so the
         cascade nulls the reference and keeps every row.
         """
+        _validate_scope(kind, lesson_id)
         result = await self.session.execute(
             delete(Conversation).where(
-                Conversation.path_id == path_id, Conversation.kind == kind
+                Conversation.path_id == path_id,
+                Conversation.kind == kind,
+                Conversation.lesson_id == lesson_id,
             )
         )
         return affected_rows(result) > 0

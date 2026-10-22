@@ -215,7 +215,11 @@ async def _record_turns(
     """
     async with db.async_session() as session:
         repository = ConversationRepository(session)
-        conversation, _created = await repository.upsert_for_path(path_id, kind=kind)
+        conversation, _created = await repository.upsert_for_path(
+            path_id,
+            kind=kind,
+            lesson_id=lesson_id if kind is ConversationKind.LESSON else None,
+        )
         tutor_ids: list[uuid.UUID] = []
         for index in range(1, count + 1):
             _learner, tutor = await repository.insert_turn(

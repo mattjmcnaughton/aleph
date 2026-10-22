@@ -339,16 +339,16 @@ async function fetchJson<T>(page: Page, apiPath: string): Promise<T> {
 }
 
 /**
- * The thread straight off `GET /paths/{id}/conversation`, bypassing the rendered
+ * The thread straight off `GET /lessons/{id}/conversation`, bypassing the rendered
  * rail. The DOM can only speak for what was rendered; W13's leak assertion has
  * to speak for what was *delivered* (the same reason W6 reads the lesson payload
  * at the wire).
  */
 export function fetchConversation(
   page: Page,
-  pathId: string,
+  lessonId: string,
 ): Promise<{ messages: { role: string; content: string }[] }> {
-  return fetchJson(page, `/paths/${pathId}/conversation`);
+  return fetchJson(page, `/lessons/${lessonId}/conversation`);
 }
 
 /** A lesson's full payload off the wire (W12/W16's bit-identical comparison). */

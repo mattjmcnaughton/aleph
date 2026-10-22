@@ -255,8 +255,7 @@ def build_message_history(
 ) -> list[ModelMessage]:
     """The most recent ``turns`` turns of ``messages`` as pydantic-ai history.
 
-    ``messages`` is the whole stored thread in ``position`` order (a path's
-    conversation spans its lessons — see ``ConversationRepository.load_thread``).
+    ``messages`` is the lesson's stored thread in ``position`` order.
     It is paired into turns, the last ``turns`` are kept **oldest-first**, and
     the rest are dropped (D6 — nothing is summarized, and nothing stands in for
     a dropped turn).
@@ -364,7 +363,7 @@ async def assemble_lesson_context(
         quick_check_id=quick_check.id, user_id=path.user_id
     )
     thread = await ConversationRepository(session).load_thread(
-        path.id, kind=ConversationKind.LESSON
+        path.id, kind=ConversationKind.LESSON, lesson_id=lesson_id
     )
 
     deps = TutorDeps(

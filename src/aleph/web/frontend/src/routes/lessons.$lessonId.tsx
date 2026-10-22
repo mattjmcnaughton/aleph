@@ -102,6 +102,12 @@ function isFlowAdvanceScreen(flow: FlowRecord, lessonId: string): boolean {
 
 function LessonView() {
   const { lessonId } = Route.useParams();
+  // A lesson owns its chat and transient reading state. Parameter-only
+  // navigation must unmount the old stream and composer before opening another.
+  return <LessonContent key={lessonId} lessonId={lessonId} />;
+}
+
+function LessonContent({ lessonId }: { lessonId: string }) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
 

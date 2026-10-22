@@ -209,7 +209,7 @@ async def test_admin_model_override_routes_the_reply_and_persists_nothing(
         assert path is not None
         assert path.model_outline is None
         assert path.model_lesson is None
-    thread = await _thread(path_id)
+    thread = await _thread(path_id, lesson_id)
     assert not any(override in (message.content or "") for message in thread)
 
 

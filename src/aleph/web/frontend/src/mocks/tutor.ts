@@ -50,7 +50,7 @@ const defaultConfig: TutorConfig = {
 
 let config: TutorConfig = { ...defaultConfig };
 
-/** path id -> the thread, oldest first. Absent = no conversation row yet. */
+/** lesson id -> the thread, oldest first. Absent = no conversation row yet. */
 const store = new Map<string, ConversationMessage[]>();
 
 /** Every send body the fake received, in order — asserted on directly. */
@@ -137,15 +137,15 @@ export interface SeedMessageInput {
   tutor_check?: TutorCheck | null;
 }
 
-/** Pre-populate a path's thread (a returning learner, PRD §5.8). */
-export function seedConversation(pathId: string, messages: SeedMessageInput[]): void {
+/** Pre-populate a lesson's thread for a returning learner. */
+export function seedConversation(lessonId: string, messages: SeedMessageInput[]): void {
   store.set(
-    pathId,
+    lessonId,
     messages.map((message, index) => ({
       id: message.id ?? `msg-${index}`,
       role: message.role,
       content: message.content,
-      lesson_id: message.lesson_id ?? "seeded-lesson",
+      lesson_id: message.lesson_id ?? lessonId,
       lesson_title: message.lesson_title ?? "Generic constraints",
       tutor_check: message.tutor_check ?? null,
       created_at: "2026-07-30T12:00:00Z",
@@ -164,12 +164,8 @@ export function frame(event: string, data: unknown): string {
   return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
 }
 
-function persistTurn(
-  pathId: string,
-  body: SendTutorMessageInput,
-  ids: { learner: string; tutor: string },
-): void {
-  const thread = store.get(pathId) ?? [];
+function persistTurn(body: SendTutorMessageInput, ids: { learner: string; tutor: string }): void {
+  const thread = store.get(body.lesson_id) ?? [];
   const now = new Date().toISOString();
   thread.push(
     {
@@ -191,19 +187,19 @@ function persistTurn(
       created_at: now,
     },
   );
-  store.set(pathId, thread);
+  store.set(body.lesson_id, thread);
 }
 
 export const tutorHandlers = [
-  http.get(`${API_V1_BASE}/paths/:pathId/conversation`, ({ params }) => {
+  http.get(`${API_V1_BASE}/lessons/:lessonId/conversation`, ({ params }) => {
     readCount += 1;
     // Lazily created: an absent row is an empty thread, never a 404.
-    return HttpResponse.json({ messages: store.get(params.pathId as string) ?? [] });
+    return HttpResponse.json({ messages: store.get(params.lessonId as string) ?? [] });
   }),
 
-  http.delete(`${API_V1_BASE}/paths/:pathId/conversation`, ({ params }) => {
+  http.delete(`${API_V1_BASE}/lessons/:lessonId/conversation`, ({ params }) => {
     clearCount += 1;
-    store.delete(params.pathId as string);
+    store.delete(params.lessonId as string);
     return new HttpResponse(null, { status: 204 });
   }),
 
@@ -237,8 +233,7 @@ export const tutorHandlers = [
     },
   ),
 
-  http.post(`${API_V1_BASE}/paths/:pathId/conversation/messages`, async ({ params, request }) => {
-    const pathId = params.pathId as string;
+  http.post(`${API_V1_BASE}/paths/:pathId/conversation/messages`, async ({ request }) => {
     const body = (await request.json()) as SendTutorMessageInput;
     sentBodies.push(body);
 
@@ -271,7 +266,7 @@ export const tutorHandlers = [
             // Terminal failure persists nothing — the store is untouched (D2).
             controller.enqueue(encoder.encode(frame("error", config.failWith)));
           } else {
-            persistTurn(pathId, body, turnIds);
+            persistTurn(body, turnIds);
             controller.enqueue(
               encoder.encode(
                 frame("done", {

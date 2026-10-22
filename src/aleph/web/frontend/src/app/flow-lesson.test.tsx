@@ -177,7 +177,8 @@ describe("Lesson route in a flow", () => {
 
     fireEvent.click(screen.getByTestId("flow-advance-go"));
 
-    expect((await screen.findByTestId("lesson-view-id")).textContent).toBe(B[0]);
+    // The previous lesson also has this test ID while navigation is pending.
+    await waitFor(() => expect(screen.getByTestId("lesson-view-id").textContent).toBe(B[0]));
     expect(readFlow()?.current).toEqual({ lessonId: B[0], pathId: PATH_B });
   });
 

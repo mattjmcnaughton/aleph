@@ -278,7 +278,7 @@ async def _make_turn(
     """Commit one whole turn (learner + tutor rows) onto ``path``'s thread."""
     repository = ConversationRepository(session)
     conversation, _created = await repository.upsert_for_path(
-        path.id, kind=ConversationKind.LESSON
+        path.id, kind=ConversationKind.LESSON, lesson_id=lesson.id
     )
     learner, tutor = await repository.insert_turn(
         conversation_id=conversation.id,
@@ -375,7 +375,7 @@ async def test_clearing_the_thread_refunds_tutor_quota() -> None:
             await limiter.check_tutor_message(user_id=user.id, is_admin=False)
 
         await ConversationRepository(session).delete_for_path(
-            path.id, kind=ConversationKind.LESSON
+            path.id, kind=ConversationKind.LESSON, lesson_id=lesson.id
         )
         await session.flush()
 

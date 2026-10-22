@@ -1,5 +1,11 @@
 # TDD — Phase 2B: Shape your path (learner-initiated)
 
+> **Scope amendment (2026-10-22):** Shaping remains one thread per path.
+> Lesson tutor chats are now one per lesson, not the second path-wide thread
+> described below. The [Phase 2 scope amendment](phase-2-tutor.md) supersedes
+> the shared conversation uniqueness constraint; shaping endpoints, history,
+> proposals and Apply/Undo behavior are unchanged.
+
 **Status:** Draft · **Owner:** solo builder · **Companion to:** [Phase 2B PRD](../prds/phase-2b-shape-your-path.md)
 **References:** [`roadmap.md`](../roadmap.md) · [`CONTEXT.md`](../CONTEXT.md) · [Phase 1 TDD](phase-1-path-generation.md) · [Phase 2 TDD](phase-2-tutor.md) · mock: [phase-2 tutor, Turn 3](../mocks/aleph-phase-2-tutor.html)
 

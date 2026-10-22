@@ -25,6 +25,7 @@ import {
   askTutor,
   fetchConversation,
   learnerMessages,
+  openLessonId,
   openRail,
   passageSlice,
   replyText,
@@ -39,8 +40,9 @@ test.describe("W15 an unsafe ask is refused gracefully", { tag: "@w15" }, () => 
   test("the refusal reads as a boundary, not a failure, and the app carries on", async ({
     page,
   }) => {
-    const pathId = await createPath(page, uniqueTopic("Reef ecology"));
+    await createPath(page, uniqueTopic("Reef ecology"));
     await openLessonAt(page, 0);
+    const lessonId = await openLessonId(page);
     const slice = await passageSlice(page);
     await openRail(page);
 
@@ -65,7 +67,7 @@ test.describe("W15 an unsafe ask is refused gracefully", { tag: "@w15" }, () => 
     await expect(tutorReplies(page)).toHaveCount(1);
 
     // And a real, persisted turn — unlike a failure, which persists nothing.
-    const conversation = await fetchConversation(page, pathId);
+    const conversation = await fetchConversation(page, lessonId);
     expect(conversation.messages).toHaveLength(2);
     expect(conversation.messages[1].content).toBe(TUTOR_REFUSAL_REPLY);
 

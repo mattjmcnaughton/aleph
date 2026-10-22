@@ -376,7 +376,9 @@ async def test_clearing_the_shaping_thread_leaves_the_in_lesson_one(
         response = await client.delete(_conversation_url(path_id))
 
     assert response.status_code == 204, response.text
-    lesson_thread = await _thread(path_id, kind=ConversationKind.LESSON)
+    lesson_thread = await _thread(
+        path_id, kind=ConversationKind.LESSON, lesson_id=lessons[0]
+    )
     assert [message.content for message in lesson_thread] == [
         "A question about this lesson",
         "An answer about this lesson",
@@ -399,10 +401,12 @@ async def test_clearing_the_in_lesson_thread_leaves_the_shaping_one(
         await _seed_lesson_turn(path_id=path_id, lesson_id=lessons[0])
         await _seed_shaping_turn(path_id=path_id)
 
-        response = await client.delete(f"/api/v1/paths/{path_id}/conversation")
+        response = await client.delete(f"/api/v1/lessons/{lessons[0]}/conversation")
 
     assert response.status_code == 204, response.text
-    assert await _thread(path_id, kind=ConversationKind.LESSON) == []
+    assert (
+        await _thread(path_id, kind=ConversationKind.LESSON, lesson_id=lessons[0]) == []
+    )
     assert len(await _thread(path_id)) == 2
 
 

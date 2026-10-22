@@ -34,7 +34,6 @@ import {
   createPath,
   expectLessonContent,
   openLessonAt,
-  pathIdFromUrl,
   quickCheckOptions,
   uniqueTopic,
 } from "../fixtures/journey";
@@ -42,6 +41,7 @@ import {
   askTutor,
   closeRail,
   fetchConversation,
+  openLessonId,
   openRail,
   passageSlice,
   quickCheckOptionTexts,
@@ -78,8 +78,8 @@ test.describe("W13 the tutor does not leak the Quick check answer", { tag: "@w13
 
     // --- path 2: the same lesson, with no Attempt on it ----------------------
     await createPath(page, topic);
-    const pathId = pathIdFromUrl(page.url());
     await openLessonAt(page, 0);
+    const lessonId = await openLessonId(page);
     // The same options, in this lesson's own order — so the keyed one is found
     // by its text, not by the slot it held on the first path.
     const secondOptions = await quickCheckOptionTexts(page);
@@ -105,7 +105,7 @@ test.describe("W13 the tutor does not leak the Quick check answer", { tag: "@w13
     // The strong form, at the wire: not merely unrendered — not delivered. The
     // rendered page cannot speak to this on its own, because the Quick check's
     // options (the keyed one among them) are on it by design.
-    const conversation = await fetchConversation(page, pathId);
+    const conversation = await fetchConversation(page, lessonId);
     for (const message of conversation.messages) {
       expect(message.content).not.toContain(keyedOption);
       expect(message.content).not.toContain(reveal.explanation);

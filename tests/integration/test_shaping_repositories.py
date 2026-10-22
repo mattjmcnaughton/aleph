@@ -271,21 +271,21 @@ async def test_list_for_path_includes_undone_changes() -> None:
 
 @pytest.mark.anyio
 async def test_a_path_carries_one_conversation_of_each_kind() -> None:
-    path_id, _lesson_id = await _arrange_path()
+    path_id, lesson_id = await _arrange_path()
 
     async with db.async_session() as session:
         repository = ConversationRepository(session)
         lesson_thread, lesson_created = await repository.upsert_for_path(
-            path_id, kind=ConversationKind.LESSON
+            path_id, kind=ConversationKind.LESSON, lesson_id=lesson_id
         )
         shaping_thread, shaping_created = await repository.upsert_for_path(
             path_id, kind=ConversationKind.SHAPING
         )
         await session.commit()
-        lesson_id, shaping_id = lesson_thread.id, shaping_thread.id
+        lesson_thread_id, shaping_id = lesson_thread.id, shaping_thread.id
 
     assert (lesson_created, shaping_created) == (True, True)
-    assert lesson_id != shaping_id
+    assert lesson_thread_id != shaping_id
 
     async with db.async_session() as session:
         assert await session.scalar(select(func.count()).select_from(Conversation)) == 2
@@ -294,11 +294,11 @@ async def test_a_path_carries_one_conversation_of_each_kind() -> None:
 @pytest.mark.anyio
 async def test_upsert_persists_the_kind_it_was_asked_for() -> None:
     """The row is stamped with the caller's kind — 2A's callers name ``lesson``."""
-    path_id, _lesson_id = await _arrange_path()
+    path_id, lesson_id = await _arrange_path()
 
     async with db.async_session() as session:
         conversation, _created = await ConversationRepository(session).upsert_for_path(
-            path_id, kind=ConversationKind.LESSON
+            path_id, kind=ConversationKind.LESSON, lesson_id=lesson_id
         )
         await session.commit()
         assert conversation.kind is ConversationKind.LESSON
@@ -326,7 +326,7 @@ async def test_upsert_of_the_same_kind_reuses_the_row() -> None:
 
 @pytest.mark.anyio
 async def test_get_for_path_is_kind_scoped() -> None:
-    path_id, _lesson_id = await _arrange_path()
+    path_id, lesson_id = await _arrange_path()
     async with db.async_session() as session:
         await ConversationRepository(session).upsert_for_path(
             path_id, kind=ConversationKind.SHAPING
@@ -338,7 +338,10 @@ async def test_get_for_path_is_kind_scoped() -> None:
         # The shaping thread exists; the in-lesson one does not — asking for the
         # wrong kind must not hand back the other thread.
         assert (
-            await repository.get_for_path(path_id, kind=ConversationKind.LESSON) is None
+            await repository.get_for_path(
+                path_id, kind=ConversationKind.LESSON, lesson_id=lesson_id
+            )
+            is None
         )
         shaping = await repository.get_for_path(path_id, kind=ConversationKind.SHAPING)
         assert shaping is not None
@@ -353,7 +356,7 @@ async def test_load_thread_is_kind_scoped() -> None:
     async with db.async_session() as session:
         repository = ConversationRepository(session)
         lesson_thread, _ = await repository.upsert_for_path(
-            path_id, kind=ConversationKind.LESSON
+            path_id, kind=ConversationKind.LESSON, lesson_id=lesson_id
         )
         await repository.insert_turn(
             conversation_id=lesson_thread.id,
@@ -377,7 +380,9 @@ async def test_load_thread_is_kind_scoped() -> None:
 
     async with db.async_session() as session:
         repository = ConversationRepository(session)
-        in_lesson = await repository.load_thread(path_id, kind=ConversationKind.LESSON)
+        in_lesson = await repository.load_thread(
+            path_id, kind=ConversationKind.LESSON, lesson_id=lesson_id
+        )
         shaping = await repository.load_thread(path_id, kind=ConversationKind.SHAPING)
 
     assert [entry.message.content for entry in in_lesson] == [
@@ -400,7 +405,11 @@ async def test_delete_for_path_drops_only_the_named_kind() -> None:
     async with db.async_session() as session:
         repository = ConversationRepository(session)
         for kind in (ConversationKind.LESSON, ConversationKind.SHAPING):
-            conversation, _ = await repository.upsert_for_path(path_id, kind=kind)
+            conversation, _ = await repository.upsert_for_path(
+                path_id,
+                kind=kind,
+                lesson_id=lesson_id if kind is ConversationKind.LESSON else None,
+            )
             await repository.insert_turn(
                 conversation_id=conversation.id,
                 lesson_id=lesson_id,
@@ -421,7 +430,9 @@ async def test_delete_for_path_drops_only_the_named_kind() -> None:
     async with db.async_session() as session:
         repository = ConversationRepository(session)
         assert (
-            await repository.get_for_path(path_id, kind=ConversationKind.LESSON)
+            await repository.get_for_path(
+                path_id, kind=ConversationKind.LESSON, lesson_id=lesson_id
+            )
             is not None
         )
         assert (
@@ -430,7 +441,11 @@ async def test_delete_for_path_drops_only_the_named_kind() -> None:
         )
         # Only the shaping thread's messages went with it.
         assert (
-            len(await repository.load_thread(path_id, kind=ConversationKind.LESSON))
+            len(
+                await repository.load_thread(
+                    path_id, kind=ConversationKind.LESSON, lesson_id=lesson_id
+                )
+            )
             == 2
         )
         # Idempotent: a second clear is a no-op, not an error (§6, 204 either way).
@@ -577,7 +592,7 @@ async def test_a_message_row_carries_no_proposal_by_default() -> None:
     async with db.async_session() as session:
         repository = ConversationRepository(session)
         conversation, _ = await repository.upsert_for_path(
-            path_id, kind=ConversationKind.LESSON
+            path_id, kind=ConversationKind.LESSON, lesson_id=lesson_id
         )
         await repository.insert_turn(
             conversation_id=conversation.id,
@@ -644,7 +659,7 @@ async def test_an_in_lesson_turn_still_resolves_its_lesson_title() -> None:
     async with db.async_session() as session:
         repository = ConversationRepository(session)
         conversation, _created = await repository.upsert_for_path(
-            path_id, kind=ConversationKind.LESSON
+            path_id, kind=ConversationKind.LESSON, lesson_id=lesson_id
         )
         await repository.insert_turn(
             conversation_id=conversation.id,
@@ -657,7 +672,7 @@ async def test_an_in_lesson_turn_still_resolves_its_lesson_title() -> None:
 
     async with db.async_session() as session:
         thread = await ConversationRepository(session).load_thread(
-            path_id, kind=ConversationKind.LESSON
+            path_id, kind=ConversationKind.LESSON, lesson_id=lesson_id
         )
 
     assert [entry.lesson_title for entry in thread] == [

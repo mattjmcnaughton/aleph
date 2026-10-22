@@ -1,7 +1,7 @@
 """Every conversation query must *name* its kind (Phase 2B TDD D3).
 
-A path carries two threads — its in-lesson thread and its **Shaping
-conversation** — and :mod:`aleph.repositories.conversations` says every query
+A path carries lesson threads and its **Shaping conversation** — and
+:mod:`aleph.repositories.conversations` says every query
 names which. A default would make that a docstring rather than a rule: a
 shaping caller that forgot ``kind`` would silently read and clear the *lesson*
 thread, which is the wrong-thread bug PRD §5.8 forbids, and it would type-check.

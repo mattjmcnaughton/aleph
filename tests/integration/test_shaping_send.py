@@ -142,7 +142,7 @@ async def test_first_turn_creates_the_shaping_conversation_lazily(
     """No conversation row exists until a reply settles (§5.5), and it is *shaping*."""
     async with _client(app) as client:
         user_id = await _sign_in(client, monkeypatch, OWNER)
-        path_id, _lessons = await _seed_path(user_id)
+        path_id, lessons = await _seed_path(user_id)
         assert await _count(Conversation) == 0
 
         wire = await _send(client, _send_url(path_id), _body())
@@ -150,7 +150,9 @@ async def test_first_turn_creates_the_shaping_conversation_lazily(
     assert wire.names[-1] == "done", wire.names
     assert await _count(Conversation) == 1
     assert await _count(Message) == 2
-    assert await _thread(path_id, kind=ConversationKind.LESSON) == []
+    assert (
+        await _thread(path_id, kind=ConversationKind.LESSON, lesson_id=lessons[0]) == []
+    )
 
 
 @pytest.mark.anyio
@@ -406,7 +408,9 @@ async def test_the_two_threads_are_isolated_on_one_path(
     assert wire.names[-1] == "done", wire.names
     assert await _count(Conversation) == 2, "one thread of each kind"
 
-    lesson_thread = await _thread(path_id, kind=ConversationKind.LESSON)
+    lesson_thread = await _thread(
+        path_id, kind=ConversationKind.LESSON, lesson_id=lessons[0]
+    )
     assert [message.position for message in lesson_thread] == [1, 2]
     assert [message.lesson_id for message in lesson_thread] == [lessons[0], lessons[0]]
     assert lesson_thread[0].content == "A question about this lesson"
@@ -440,10 +444,10 @@ async def test_the_in_lesson_thread_reads_identically_after_a_shaping_turn(
         path_id, lessons = await _seed_path(user_id)
         await _seed_lesson_turn(path_id=path_id, lesson_id=lessons[0])
         # Both flags: the 2A surface has its own, and the two fixtures compose.
-        before = await client.get(f"/api/v1/paths/{path_id}/conversation")
+        before = await client.get(f"/api/v1/lessons/{lessons[0]}/conversation")
 
         wire = await _send(client, _send_url(path_id), _body())
-        after = await client.get(f"/api/v1/paths/{path_id}/conversation")
+        after = await client.get(f"/api/v1/lessons/{lessons[0]}/conversation")
 
     assert wire.names[-1] == "done", wire.names
     assert before.status_code == 200, before.text
