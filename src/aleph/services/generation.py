@@ -400,16 +400,19 @@ class GenerationOrchestrator:
                 model_lesson=model_lesson,
             )
             await session.commit()
-            path_id = path.id
 
+        self.dispatch_created_path(path)
+        return path
+
+    def dispatch_created_path(self, path: Path) -> None:
+        """Publish and dispatch only after the caller commits creation."""
         # The path exists and is committed (W1, PRD §5.7). The onboarding Level is
         # stamped (as ``path_level``) for segmentation; the path-count-per-account
         # this feeds is the breadth metric's numerator.
         events.emit_path_created(
-            account_id=user_id, path_id=path_id, path_level=level.value
+            account_id=path.user_id, path_id=path.id, path_level=path.level.value
         )
-        self._spawn(self.run_outline_task(path_id))
-        return path
+        self._spawn(self.run_outline_task(path.id))
 
     # -- outline task ------------------------------------------------------- #
 
