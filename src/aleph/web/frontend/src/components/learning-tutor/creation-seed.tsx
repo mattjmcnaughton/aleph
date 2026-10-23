@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import type { ReactNode } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { ApiError, type Level } from "../../lib/api";
 import { sessionQueryOptions } from "../../lib/auth";
 import {
@@ -17,6 +17,8 @@ export interface RecommendationSeed {
   guidance: string;
   revision: number;
   account: string;
+  beginCreation: () => void;
+  rejectCreation: () => void;
 }
 
 /** Ordinary onboarding never queries the Tutor. A supplied ID never falls back. */
@@ -49,15 +51,64 @@ function OwnedSeed({
 }) {
   const draft = useQuery(learningDraftOptions(account, id));
   const state = useQuery(learningStateOptions(account));
-  if (draft.isError || state.isError)
-    return <SeedError message={learningError(draft.error ?? state.error)} />;
+  const [admitted, setAdmitted] = useState<RecommendationSeed | null>(null);
+  const [submitted, setSubmitted] = useState(false);
+  const card = draft.data;
+  const valid =
+    card?.status === "active" &&
+    card.kind === kind &&
+    Boolean(card.topic) &&
+    ["new_to_it", "some_experience", "work_in_it"].includes(card.level ?? "");
+  useEffect(() => {
+    if (
+      admitted ||
+      !valid ||
+      !card ||
+      !state.data ||
+      draft.isError ||
+      state.isError ||
+      !draft.isFetchedAfterMount ||
+      !state.isFetchedAfterMount
+    )
+      return;
+    setAdmitted({
+      id,
+      account,
+      revision: state.data.revision,
+      topic: card.topic as string,
+      level: card.level as Level,
+      guidance: card.guidance ?? "",
+      beginCreation: () => setSubmitted(true),
+      rejectCreation: () => setSubmitted(false),
+    });
+  }, [
+    admitted,
+    valid,
+    card,
+    state.data,
+    draft.isError,
+    state.isError,
+    draft.isFetchedAfterMount,
+    state.isFetchedAfterMount,
+    id,
+    account,
+  ]);
+  const error = draft.error ?? state.error;
+  // A background transport failure must not destroy the form/mutation owning
+  // edits or a response-loss receipt. Authoritative rejection still closes it.
+  if (error && (!admitted || !uncertainCreation(error)))
+    return <SeedError message={learningError(error)} />;
+  // Acceptance is the expected result of this form's POST, not a new admission.
+  // Keep its uncertain receipt or path-generation poll alive until it navigates.
+  if (admitted && submitted && card?.status === "accepted" && card.target_available)
+    return <>{children(admitted)}</>;
   if (!draft.data || !state.data || !draft.isFetchedAfterMount || !state.isFetchedAfterMount)
     return (
       <main className="mx-auto max-w-[480px] px-4 py-8" aria-live="polite">
         Loading recommendation…
       </main>
     );
-  const card = draft.data;
+  if (!card) return null;
   if (card.status === "accepted")
     return (
       <main className="mx-auto max-w-[480px] px-4 py-8">
@@ -89,18 +140,7 @@ function OwnedSeed({
     !["new_to_it", "some_experience", "work_in_it"].includes(card.level ?? "")
   )
     return <SeedError message="This recommendation is no longer available for creation." />;
-  return (
-    <>
-      {children({
-        id,
-        account,
-        revision: state.data.revision,
-        topic: card.topic,
-        level: card.level as Level,
-        guidance: card.guidance ?? "",
-      })}
-    </>
-  );
+  return admitted ? <>{children({ ...admitted, revision: state.data.revision })}</> : null;
 }
 
 function SeedError({ message }: { message: string }) {

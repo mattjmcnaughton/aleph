@@ -90,7 +90,8 @@ function DeployAnalyst({ seed }: { seed?: RecommendationSeed }) {
         return;
       navigate({ to: "/beats/$beatId", params: { beatId: created.id }, replace: true });
     },
-    onError: () => {
+    onError: (error) => {
+      if (!uncertainCreation(error)) seed?.rejectCreation();
       if (seed && queryClient.getQueryData(sessionQueryOptions.queryKey)?.user?.id === seed.account)
         void queryClient.invalidateQueries({ queryKey: [...LEARNING_KEY, seed.account, "state"] });
     },
@@ -132,6 +133,7 @@ function DeployAnalyst({ seed }: { seed?: RecommendationSeed }) {
     )
       return;
     const trimmedGuidance = guidance.trim();
+    seed?.beginCreation();
     createMutation.mutate({
       topic: topic.trim(),
       level,

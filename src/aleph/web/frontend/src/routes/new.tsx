@@ -120,6 +120,7 @@ function NewPath({ seed }: { seed?: RecommendationSeed }) {
       await queryClient.invalidateQueries({ queryKey: PATHS_LIST_QUERY_KEY });
     },
     onError: (error, variables) => {
+      if (!uncertainCreation(error)) seed?.rejectCreation();
       if (seed && queryClient.getQueryData(sessionQueryOptions.queryKey)?.user?.id === seed.account)
         void queryClient.invalidateQueries({ queryKey: [...LEARNING_KEY, seed.account, "state"] });
       // A rejected model id says the cached session's allowlist is stale — it
@@ -170,6 +171,7 @@ function NewPath({ seed }: { seed?: RecommendationSeed }) {
       (seed && uncertainCreation(createMutation.error))
     )
       return;
+    seed?.beginCreation();
     createMutation.mutate({
       ...buildCreatePathInput({ topic, level, guidance, teachingStyle, modelOutline, modelLesson }),
       ...(seed

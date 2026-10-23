@@ -62,6 +62,7 @@ function TutorPage({ account }: { account: string }) {
 function FocusEditor({ tutor }: { tutor: LearningTutor }) {
   const saved = tutor.state.data?.focus ?? "";
   const [draft, setDraft] = useState<string | null>(null);
+  const editVersion = useRef(0);
   return (
     <aside className="rounded-lg border border-divider bg-surface p-5">
       <label htmlFor="learning-focus" className="kicker">
@@ -77,16 +78,20 @@ function FocusEditor({ tutor }: { tutor: LearningTutor }) {
         rows={5}
         maxLength={2000}
         value={draft ?? saved}
-        onChange={(event) => setDraft(event.target.value)}
+        onChange={(event) => {
+          editVersion.current++;
+          setDraft(event.target.value);
+        }}
       />
       <button
         type="button"
         className={`mt-3 ${LT_BUTTON}`}
         disabled={tutor.change.isPending}
         onClick={async () => {
+          const submittedVersion = editVersion.current;
           try {
             await tutor.change.mutateAsync({ kind: "focus", text: draft ?? saved });
-            setDraft(null);
+            if (editVersion.current === submittedVersion) setDraft(null);
           } catch {
             /* Keep the unsaved edit. */
           }
@@ -110,6 +115,8 @@ function LearningConversation({
   const analyst = useFeatureFlag("analyst");
   const initialInput = tutor.uncertain?.kind === "turn" ? tutor.uncertain.content : "";
   const [text, setText] = useState(initialInput);
+  const editVersion = useRef(0);
+  const submitted = useRef<{ version: number; content: string; previousId?: string } | null>(null);
   const [confirm, setConfirm] = useState(false);
   const input = useRef<HTMLTextAreaElement>(null);
   const keep = useRef<HTMLButtonElement>(null);
@@ -128,6 +135,21 @@ function LearningConversation({
   useEffect(() => {
     if (confirm) keep.current?.focus();
   }, [confirm]);
+  useEffect(() => {
+    const row = tutor.operation.data;
+    const sent = submitted.current;
+    if (
+      row?.status === "succeeded" &&
+      row.kind === "turn" &&
+      sent &&
+      row.id !== sent.previousId &&
+      row.id === tutor.send.data?.id &&
+      row.input?.content === sent.content
+    ) {
+      if (editVersion.current === sent.version) setText("");
+      submitted.current = null;
+    }
+  }, [tutor.operation.data, tutor.send.data]);
   useEffect(() => {
     const row = tutor.operation.data;
     if (
@@ -155,8 +177,14 @@ function LearningConversation({
     tutor.operation.data?.output ?? state.history.items[0]?.output ?? state.latest_refresh?.output;
   const omitted = latest?.omitted;
   function send() {
-    if (text.trim() && !tutor.busy && !tutor.uncertain && (!recommendation || selected))
+    if (text.trim() && !tutor.busy && !tutor.uncertain && (!recommendation || selected)) {
+      submitted.current = {
+        version: editVersion.current,
+        content: text.trim(),
+        previousId: tutor.send.data?.id,
+      };
       void tutor.start(text.trim(), selected?.id);
+    }
   }
   return (
     <section className="min-w-0" aria-label="Learning conversation">
@@ -261,7 +289,10 @@ function LearningConversation({
           maxLength={2000}
           className={LT_FIELD}
           value={text}
-          onChange={(event) => setText(event.target.value)}
+          onChange={(event) => {
+            editVersion.current++;
+            setText(event.target.value);
+          }}
           onKeyDown={(event) => handleComposerKeyDown(event, send)}
         />
         <div className="mt-2 flex items-center justify-between gap-3">
