@@ -32,8 +32,7 @@ honoured.
 Public surface consumed by the API tickets (AL-050/051) and the reconciler
 (AL-041):
 
-* :meth:`create_path` — insert ``pending``, spawn the outline task, return the
-  row (the 202 source).
+* :meth:`dispatch_created_path` — spawn the outline after creation commits.
 * :meth:`run_outline_task` — the spawned/idempotent outline driver.
 * :meth:`ensure_generated_through` / :meth:`ensure_prefetch_window` — the serial
   per-path prefetch drivers (also what a poll triggers).
@@ -352,57 +351,7 @@ class GenerationOrchestrator:
     def _lessons(self, session: AsyncSession) -> LessonRepository:
         return LessonRepository(session, stale_after_seconds=self._stale)
 
-    # -- path creation (POST /paths → 202) --------------------------------- #
-
-    async def create_path(
-        self,
-        *,
-        user_id: uuid.UUID,
-        topic: str,
-        level: Level,
-        guidance: str | None = None,
-        teaching_style: str | None = None,
-        model_outline: str | None = None,
-        model_lesson: str | None = None,
-    ) -> Path:
-        """Insert the path (``pending``), spawn the outline task, return the row.
-
-        The caller (AL-050) turns the returned row into a ``202 {id}`` and
-        returns immediately while the outline generates in the background. The
-        spawn goes through the injected seam (AL-041 wraps it).
-
-        ``guidance`` is the learner's optional Guidance (CONTEXT.md): a second
-        generation input alongside ``topic``/``level``. **Persisted on the row**
-        (not carried in memory to the spawned task) for the same reason the
-        model overrides are — the DB-driven resume/reconcile (§5.4/D6) must
-        re-run the outline with it, not with a blank guidance the in-memory-only
-        version would lose across a crash/restart.
-
-        ``teaching_style`` is the learner's optional Teaching style
-        (CONTEXT.md). It is stored on the row and read by lesson generation
-        only; the outline never sees it.
-
-        ``model_outline``/``model_lesson`` are an admin's picker overrides
-        (AL-052, §5.3): already validated (admin-only, allowlist-bound) at the
-        route. They are **persisted on the row** — not carried in memory to the
-        spawned task — so the DB-driven resume/reconcile (§5.4/D6) re-generates
-        with the chosen model rather than the config default. ``None`` falls back
-        to the configured slot at model-resolution time.
-        """
-        async with self._session_factory() as session:
-            path = await self._paths(session).create(
-                user_id=user_id,
-                topic=topic,
-                level=level,
-                guidance=guidance,
-                teaching_style=teaching_style,
-                model_outline=model_outline,
-                model_lesson=model_lesson,
-            )
-            await session.commit()
-
-        self.dispatch_created_path(path)
-        return path
+    # -- postcommit dispatch (POST /paths → 202) ---------------------------- #
 
     def dispatch_created_path(self, path: Path) -> None:
         """Publish and dispatch only after the caller commits creation."""

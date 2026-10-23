@@ -25,6 +25,7 @@ a new Beat idle when exhausted, but explicitly rejects a retry with 429.
 
 from __future__ import annotations
 
+from contextlib import suppress
 from datetime import UTC, date, datetime, timedelta
 from typing import Annotated
 from uuid import UUID  # noqa: TC003 - FastAPI resolves route-param annotations.
@@ -243,11 +244,13 @@ async def deploy_beat(
             local_today=_local_today(tz_offset_minutes),
             is_admin=admin,
         )
-    entries = (
-        await BriefRepository(session).list_for_beat(beat.id)
-        if body.learning_recommendation_id is not None
-        else []
-    )
+    # Creation has committed and beat is a detached snapshot. Enrich a replay
+    # when possible, but a read outage must not invite another ordinary create.
+    # As with initial creation, the client polls GET for authoritative entries.
+    entries = []
+    if body.learning_recommendation_id is not None:
+        with suppress(Exception):
+            entries = await BriefRepository(session).list_for_beat(beat.id)
     return _beat_detail_dto(beat, entries=entries)
 
 

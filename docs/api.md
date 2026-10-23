@@ -1148,8 +1148,13 @@ Ownership and feature gates still apply on replay. Ordinary creation is not newl
 idempotent.
 
 Creation/acceptance events and dispatch occur only after commit. A known dispatch
-failure returns the committed target and marks target generation retryable failed
-(without overwriting a concurrent claim). Path polling/reconciliation recovers a
+failure returns the committed target and attempts to mark generation retryable
+failed (without overwriting a concurrent claim). If failure recording also loses
+the database, the original pending/idle/stale target remains recoverable. Beat
+POST enrichment is best effort: on a postcommit read outage its response retains
+the committed snapshot and may omit entries; poll GET for authoritative generation
+state and entries. A 202 never claims generation completed. Precommit failures
+still reject creation. Path polling/reconciliation recovers a
 pending target after process loss; the scheduled Beat job recovers a never-run
 idle Beat or stale research claim. No new queue or automatic recreation exists.
 `learning_recommendation_accepted` carries only account ID, recommendation ID,

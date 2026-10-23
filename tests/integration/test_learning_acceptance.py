@@ -404,3 +404,148 @@ async def test_state_writer_fk_insert_does_not_deadlock_acceptance(dispatch):
         writer.add(operation(user.id))
         await asyncio.wait_for(writer.commit(), 5)
         assert (await accepting).status_code == 202
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("kind", ["path", "beat"])
+@pytest.mark.parametrize("recommended", [False, True])
+@pytest.mark.parametrize("failure", ["write", "commit"])
+async def test_committed_creation_survives_failed_failure_recording(
+    kind, recommended, failure, dispatch, monkeypatch
+):
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from aleph.repositories import BeatRepository, PathRepository
+
+    user, card_id, body = await setup(kind)
+    if not recommended:
+        body = {k: v for k, v in body.items() if not k.startswith("learning_")}
+
+    def fail_spawn(coroutine):
+        raise RuntimeError("dispatch failed")
+
+    async def fail_initial(*args, **kwargs):
+        raise RuntimeError("initial dispatch failed before claim")
+
+    monkeypatch.setattr(generation_orchestrator, "_spawn", fail_spawn)
+    monkeypatch.setattr(briefing_service, "trigger_initial", fail_initial)
+    if failure == "write":
+
+        async def fail_write(self, target_id):
+            # Real rollback expires the identity map, not just a fake exception.
+            await self.session.rollback()
+            raise RuntimeError("failure recording write unavailable")
+
+        monkeypatch.setattr(
+            PathRepository if kind == "path" else BeatRepository,
+            "mark_dispatch_failed"
+            if kind == "path"
+            else "mark_initial_dispatch_failed",
+            fail_write,
+        )
+    else:
+        real_commit = AsyncSession.commit
+
+        async def fail_second_commit(self):
+            self.info["commits"] = self.info.get("commits", 0) + 1
+            if self.info["commits"] == 2:
+                await self.rollback()
+                raise RuntimeError("failure recording commit unavailable")
+            await real_commit(self)
+
+        monkeypatch.setattr(AsyncSession, "commit", fail_second_commit)
+
+    async with client(user) as http:
+        result = await http.post(f"/api/v1/{kind}s", json=body)
+        assert result.status_code == 202, result.text
+        target_id = UUID(result.json()["id"])
+    async with db.async_session() as session:
+        model = Path if kind == "path" else Beat
+        target = await session.get(model, target_id)
+        assert target is not None
+        assert await session.scalar(select(func.count()).select_from(model)) == 1
+        if isinstance(target, Path):
+            assert target.status.value == "pending"
+        else:
+            assert target.research_state.value == "idle"
+            assert result.json()["research_state"] == "idle"
+        receipt = await session.get(LearningRecommendation, card_id)
+        assert receipt is not None
+        assert receipt.status == ("accepted" if recommended else "active")
+        if recommended:
+            assert (receipt.accepted_path_id or receipt.accepted_beat_id) == target_id
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("kind", ["path", "beat"])
+@pytest.mark.parametrize("recommended", [False, True])
+async def test_creation_commit_failure_is_not_reported_as_success(
+    kind, recommended, dispatch, monkeypatch
+):
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    user, card_id, body = await setup(kind)
+    if not recommended:
+        body = {k: v for k, v in body.items() if not k.startswith("learning_")}
+
+    async def fail_commit(self):
+        await self.rollback()
+        raise RuntimeError("creation commit unavailable")
+
+    monkeypatch.setattr(AsyncSession, "commit", fail_commit)
+    async with client(user) as http:
+        with pytest.raises(RuntimeError, match="creation commit unavailable"):
+            await http.post(f"/api/v1/{kind}s", json=body)
+    async with db.async_session() as session:
+        model = Path if kind == "path" else Beat
+        assert await session.scalar(select(func.count()).select_from(model)) == 0
+        receipt = await session.get(LearningRecommendation, card_id)
+        assert receipt is not None and receipt.status == "active"
+    assert not dispatch.pending
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("recommended", [False, True])
+@pytest.mark.parametrize("failure", ["refresh", "entries"])
+async def test_committed_beat_survives_postcommit_read_failure(
+    recommended, failure, dispatch, monkeypatch
+):
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from aleph.repositories import BriefRepository
+
+    user, card_id, body = await setup("beat")
+    if not recommended:
+        body = {k: v for k, v in body.items() if not k.startswith("learning_")}
+    if failure == "refresh":
+        real_get = AsyncSession.get
+
+        async def fail_refresh(self, entity, ident, **kwargs):
+            if entity is Beat and kwargs.get("populate_existing"):
+                await self.rollback()
+                raise RuntimeError("postcommit refresh unavailable")
+            return await real_get(self, entity, ident, **kwargs)
+
+        monkeypatch.setattr(AsyncSession, "get", fail_refresh)
+    else:
+
+        async def fail_entries(self, *args, **kwargs):
+            await self.session.rollback()
+            raise RuntimeError("postcommit entries unavailable")
+
+        monkeypatch.setattr(BriefRepository, "list_for_beat", fail_entries)
+
+    async with client(user) as http:
+        result = await http.post("/api/v1/beats", json=body)
+        assert result.status_code == 202, result.text
+        target_id = UUID(result.json()["id"])
+        assert result.json()["research_state"] in {"idle", "researching"}
+    async with db.async_session() as session:
+        target = await session.get(Beat, target_id)
+        assert target is not None and target.research_state.value == "researching"
+        assert await session.scalar(select(func.count()).select_from(Beat)) == 1
+        receipt = await session.get(LearningRecommendation, card_id)
+        assert receipt is not None
+        assert receipt.status == ("accepted" if recommended else "active")
+        if recommended:
+            assert receipt.accepted_beat_id == target_id
