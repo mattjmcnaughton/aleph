@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, feature/home-screen-app]
+    branches: [main, feature/home-screen-app, mattjmcnaughton/tutor]
   pull_request:
-    branches: [main, feature/home-screen-app]
+    branches: [main, feature/home-screen-app, mattjmcnaughton/tutor]
 
 # Cancel superseded runs on the same ref so a rapid push sequence does not queue
 # redundant CI.
