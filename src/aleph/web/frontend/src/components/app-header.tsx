@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { getPushConfig } from "../lib/api";
+import { useFeatureFlag } from "../lib/feature-flags";
 import { AlephLogo } from "./aleph-logo";
 import { useLogout } from "./use-logout";
 
@@ -8,6 +9,7 @@ import { useLogout } from "./use-logout";
 export function AppHeader() {
   const { signOut, pending } = useLogout();
   const config = useQuery({ queryKey: ["push-config-menu"], queryFn: getPushConfig });
+  const learningTutor = useFeatureFlag("learning_tutor");
 
   return (
     <header className="sticky top-0 z-10 box-border h-[var(--app-header-h)] border-b border-divider bg-night/85 pt-[env(safe-area-inset-top)] backdrop-blur">
@@ -15,7 +17,15 @@ export function AppHeader() {
         <Link to="/" aria-label="Aleph home" className="inline-flex shrink-0">
           <AlephLogo />
         </Link>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-1 lg:gap-3">
+          {learningTutor && (
+            <Link
+              to="/tutor"
+              className="inline-flex min-h-11 items-center rounded-md px-2 text-sm text-mist hover:text-porcelain"
+            >
+              Tutor
+            </Link>
+          )}
           {config.data ? (
             <Link
               to="/settings/notifications"

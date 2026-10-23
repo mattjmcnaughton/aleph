@@ -37,8 +37,9 @@ from sqlalchemy.ext.asyncio import (  # noqa: TC002 - FastAPI resolves annotatio
 
 from aleph.config import MODEL_SLOTS, STUB_MODEL_ID, settings
 from aleph.db import get_session
-from aleph.models import Lesson, Level
+from aleph.models import Lesson, Level, User
 from aleph.repositories.beats import BeatRepository
+from aleph.repositories.feature_flags import FeatureFlagRepository
 from aleph.services.briefing import briefing_service
 from aleph.services.notifications import notification_service
 from aleph.services.push import InMemoryPushSender, encode_key, public_bytes
@@ -114,6 +115,44 @@ class ShiftRequest(BaseModel):
 # below, in ``create_stub_app`` — nothing in ``aleph.app`` imports this module,
 # so the production app builds with no reference to this router at all.
 e2e_router = APIRouter()
+
+
+class LearningAccountRequest(BaseModel):
+    """Fresh synthetic account per journey; never change a shared learner."""
+
+    learning_tutor: bool = True
+    analyst: bool = True
+
+
+@e2e_router.post("/__e2e__/learning-account")
+async def learning_account(
+    body: LearningAccountRequest, request: Request, session: Session
+) -> dict[str, str]:
+    """Only mounted by the stub factory, with its normal signed session cookie.
+
+    W41-W43 exercise application authorization, not OIDC (covered by auth.setup).
+    Unique accounts isolate focus, dismissal history and fixed provider Topics.
+    """
+    identity = str(uuid.uuid4())
+    user = User(
+        issuer="https://synthetic.invalid/lt4",
+        subject=identity,
+        username=f"lt4-{identity}",
+        display_name="Synthetic Learner",
+        email=None,
+    )
+    session.add(user)
+    await session.flush()
+    flags = FeatureFlagRepository(session)
+    for key, enabled in (
+        ("learning_tutor", body.learning_tutor),
+        ("analyst", body.analyst),
+    ):
+        await flags.set_override(user_id=user.id, flag_key=key, enabled=enabled)
+    await session.commit()
+    request.session.clear()
+    request.session["user_id"] = str(user.id)
+    return {"id": str(user.id)}
 
 
 @e2e_router.post("/__e2e__/due-beat")

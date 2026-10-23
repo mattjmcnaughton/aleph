@@ -3,6 +3,7 @@ import { Link, createFileRoute } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { AlephGlyph } from "../components/aleph-logo";
 import { InstallCard } from "../components/install-card";
+import { HomeTutor } from "../components/learning-tutor/home";
 import {
   type PathStatus,
   type PathStreak,
@@ -409,6 +410,7 @@ function Home() {
           {beatsPromoted ? null : beatsSection}
         </div>
       </div>
+      <HomeTutor />
     </Workspace>
   );
 }

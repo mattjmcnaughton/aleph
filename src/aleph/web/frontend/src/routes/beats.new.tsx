@@ -14,17 +14,37 @@ import { PRIMARY_CTA, StateCard } from "../components/state-card";
 import { ANCHOR_WEEKDAYS, DEFAULT_ANCHOR_WEEKDAY } from "../lib/beats";
 import { useFeatureFlag } from "../lib/feature-flags";
 import { GUIDANCE_MAX_LENGTH, TOPIC_MAX_LENGTH, canSubmitTopic } from "../lib/onboarding";
+import {
+  CreationNotice,
+  CreationSeed,
+  type RecommendationSeed,
+  uncertainCreation,
+} from "../components/learning-tutor/creation-seed";
+import { LEARNING_KEY } from "../lib/learning-tutor";
+import { sessionQueryOptions } from "../lib/auth";
 
 export const Route = createFileRoute("/beats/new")({
   // `?topic=` seeds the field, exactly as on `/new` — the door the
   // path-complete card offers ("Follow it as a Beat", AL-420) carries the
   // finished path's Topic across. Standing orders are frozen at deployment,
   // but not until then: this is an editable initial value.
-  validateSearch: (search: Record<string, unknown>): { topic?: string } => ({
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): { topic?: string; recommendation?: string } => ({
     topic: typeof search.topic === "string" ? search.topic : undefined,
+    recommendation: typeof search.recommendation === "string" ? search.recommendation : undefined,
   }),
-  component: DeployAnalyst,
+  component: DeployAnalystRoute,
 });
+
+function DeployAnalystRoute() {
+  const search = Route.useSearch();
+  return (
+    <CreationSeed id={search.recommendation} kind="beat">
+      {(seed) => <DeployAnalyst key={seed?.id ?? "ordinary"} seed={seed} />}
+    </CreationSeed>
+  );
+}
 
 // Deploying an analyst (PRD §3, TDD §8): `routes/new.tsx`'s grammar with one
 // field added — Topic, Level (the existing three-way control, verbatim),
@@ -40,20 +60,24 @@ export const Route = createFileRoute("/beats/new")({
 // Whatever state that first claim landed in — researching, or occasionally
 // already idle/failed/refused — is rendered on `routes/beats.$beatId.tsx`,
 // which is where this route always navigates on success either way.
-function DeployAnalyst() {
+function DeployAnalyst({ seed }: { seed?: RecommendationSeed }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const analystEnabled = useFeatureFlag("analyst");
   const search = Route.useSearch();
 
-  const [topic, setTopic] = useState(search.topic ?? "");
-  const [level, setLevel] = useState<Level>("new_to_it");
+  const [topic, setTopic] = useState(seed?.topic ?? search.topic ?? "");
+  const [level, setLevel] = useState<Level>(seed?.level ?? "new_to_it");
   const [anchorWeekday, setAnchorWeekday] = useState(DEFAULT_ANCHOR_WEEKDAY);
-  const [guidance, setGuidance] = useState("");
+  const [guidance, setGuidance] = useState(seed?.guidance ?? "");
 
   const createMutation = useMutation({
     mutationFn: deployBeat,
     onSuccess: async (created) => {
+      if (seed && queryClient.getQueryData(sessionQueryOptions.queryKey)?.user?.id !== seed.account)
+        return;
+      if (seed)
+        void queryClient.invalidateQueries({ queryKey: [...LEARNING_KEY, seed.account, "state"] });
       // Seed the poll cache with the real `202` body — it already reflects
       // the claim (TDD D15) — so the Beat view's first render never shows a
       // stale `idle` while its own poll's first fetch is still in flight.
@@ -62,7 +86,13 @@ function DeployAnalyst() {
       // for the identical reason `routes/new.tsx` invalidates
       // `PATHS_LIST_QUERY_KEY` on a fresh path.
       await queryClient.invalidateQueries({ queryKey: BEATS_LIST_QUERY_KEY });
+      if (seed && queryClient.getQueryData(sessionQueryOptions.queryKey)?.user?.id !== seed.account)
+        return;
       navigate({ to: "/beats/$beatId", params: { beatId: created.id }, replace: true });
+    },
+    onError: () => {
+      if (seed && queryClient.getQueryData(sessionQueryOptions.queryKey)?.user?.id === seed.account)
+        void queryClient.invalidateQueries({ queryKey: [...LEARNING_KEY, seed.account, "state"] });
     },
   });
 
@@ -94,19 +124,50 @@ function DeployAnalyst() {
 
   function onSubmit(event: React.FormEvent) {
     event.preventDefault();
-    if (!analystEnabled || !canSubmitTopic(topic)) return;
+    if (
+      !analystEnabled ||
+      !canSubmitTopic(topic) ||
+      createMutation.isPending ||
+      (seed && uncertainCreation(createMutation.error))
+    )
+      return;
     const trimmedGuidance = guidance.trim();
     createMutation.mutate({
       topic: topic.trim(),
       level,
       anchor_weekday: anchorWeekday,
       ...(trimmedGuidance ? { guidance: trimmedGuidance } : {}),
+      ...(seed
+        ? { learning_recommendation_id: seed.id, learning_tutor_revision: seed.revision }
+        : {}),
     });
   }
 
   return (
     <main className="mx-auto w-full max-w-[480px] px-4 py-8">
       <Breadcrumbs current="Deploy analyst" root="Your beats" />
+
+      {seed && (
+        <>
+          <p className="mb-3 text-sm text-mist">
+            Suggested starting point — choose your Anchor day and edit anything before deploying.
+          </p>
+          <Link
+            to="/tutor"
+            search={{ recommendation: seed.id }}
+            className="inline-flex min-h-11 items-center text-sm text-teal"
+          >
+            Cancel exploration
+          </Link>
+          <CreationNotice
+            error={createMutation.error}
+            recovering={createMutation.isPending}
+            recover={() => {
+              if (createMutation.variables) createMutation.mutate(createMutation.variables);
+            }}
+          />
+        </>
+      )}
 
       <p className="kicker">New beat</p>
       <h1 className="mt-2 text-3xl font-semibold leading-tight tracking-tight">
@@ -198,7 +259,11 @@ function DeployAnalyst() {
 
         <button
           type="submit"
-          disabled={!canSubmitTopic(topic) || createMutation.isPending}
+          disabled={
+            !canSubmitTopic(topic) ||
+            createMutation.isPending ||
+            Boolean(seed && uncertainCreation(createMutation.error))
+          }
           className={`mt-8 ${PRIMARY_CTA}`}
         >
           {createMutation.isPending ? "Deploying…" : "Deploy analyst"}
