@@ -35,6 +35,7 @@ afterthought.
 | **5 — Momentum** | 🟡 In progress — streaks shipped **and launched**; goal ring and daily minutes unbuilt | streaks: [PRD](prds/phase-5-streaks.md) · [TDD](tdds/phase-5-streaks.md) |
 | **6 — The analyst** | ✅ Shipped & launched (`analyst` flag on) — a second pillar beside paths, not a deepening of one | [PRD](prds/phase-6-analyst.md) · [TDD](tdds/phase-6-analyst.md) |
 | **Flow** | Default on in this feature branch, unshipped; `flow` remains a kill switch | [TDD](tdds/flow.md) · [mock](mocks/aleph-flow-mode.html) |
+| **Account-wide Tutor** | Unshipped feature-branch experiment; state/storage slice only, default off including admins | [PRD](prds/learning-tutor.md) · [TDD](tdds/learning-tutor.md) · [tickets](plans/learning-tutor-tickets.md) |
 | **Home Screen app** | Accepted for provisional feature-branch implementation; not shipped, T0 deferred to end | [PRD](prds/home-screen-app.md) · [TDD](tdds/home-screen-app.md) |
 | **Native iOS app** | Conditionally parked; historical reference/fallback, not active delivery | [parked PRD](prds/ios-app.md) · [parked TDD](tdds/ios-app.md) |
 | **Beyond** | ⬜ Unscoped, sequenced against real usage | — |

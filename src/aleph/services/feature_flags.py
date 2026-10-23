@@ -53,6 +53,10 @@ actually sees. Nothing about the machinery changed, and the dark posture above i
 still exactly how the next phase ships: register the flag ``False``, add it to
 :data:`ADMIN_DEFAULT_FLAGS`, flip it here at launch.
 
+The Account-wide Tutor experiment is deliberately stricter: ``learning_tutor``
+defaults off and is absent from :data:`ADMIN_DEFAULT_FLAGS`. Admins, like learners,
+must explicitly opt in; implementing its storage/API does not enable it.
+
 A launched flag is still a **kill switch**: ``FEATURE_FLAG_DEFAULTS=tutor:off``
 outranks this module's defaults with no code deploy, and reaches admins too (step
 2 above), which is what makes it usable mid-incident.
@@ -116,6 +120,8 @@ class FeatureFlag(StrEnum):
     # sheet, the flow bar and the receipt render at all. Its own key, for the
     # same reason every flag above is independent of the others.
     FLOW = "flow"
+    # Explicit opt-in only, including admins; independent of the lesson Tutor.
+    LEARNING_TUTOR = "learning_tutor"
 
 
 # Code defaults per flag. Every FeatureFlag member gets an entry here; a flag
@@ -144,6 +150,7 @@ FLAG_DEFAULTS: dict[FeatureFlag, bool] = {
     # FEATURE_FLAG_DEFAULTS=flow:off still closes it for learners and admins
     # unless a per-user override wins. Production configuration is unchanged.
     FeatureFlag.FLOW: True,
+    FeatureFlag.LEARNING_TUTOR: False,
 }
 
 
