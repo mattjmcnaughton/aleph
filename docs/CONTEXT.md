@@ -99,8 +99,10 @@ this document for what is deferred.
 
 ## Account-wide Tutor
 
-Adopted for the feature-branch experiment, **unshipped**. The state API exists;
-generation, acceptance and learner presentation remain later slices.
+Adopted for the feature-branch experiment, **unshipped and default off**, including
+admins. Learning conversations, recommendations and their web journeys are
+implemented on the feature branch; this is not a claim of live quality or release
+acceptance. See the [opt-in/disable runbook](deploy.md#account-wide-tutor-opt-in-and-disable-runbook-lt6).
 [PRD](prds/learning-tutor.md) · [TDD](tdds/learning-tutor.md).
 
 | Term | Meaning |
