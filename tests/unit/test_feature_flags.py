@@ -199,12 +199,12 @@ async def test_flow_kill_switch_and_per_user_override(
     assert (await disabled.resolve_for_user(user))["flow"] is False
 
 
-def test_the_registry_is_exactly_the_five_phase_flags() -> None:
+def test_the_registry_includes_the_dark_learning_tutor() -> None:
     # The whole registry in one assertion: a flag added to the enum but missed by
     # ``FLAG_DEFAULTS`` does not exist as far as resolution is concerned, and
     # would silently resolve off everywhere.
     assert feature_flags.known_flag_keys() == frozenset(
-        {"tutor", "shaping", "streaks", "analyst", "flow"}
+        {"tutor", "shaping", "streaks", "analyst", "flow", "learning_tutor"}
     )
 
 

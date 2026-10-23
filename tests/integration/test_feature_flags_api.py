@@ -18,7 +18,7 @@ Auth is the real cookie flow with a stubbed OIDC code exchange (mirroring
 ``test_auth_api`` / ``test_paths_api``), so the admin gate is genuine — admin
 status is derived from the email domain (``authz.is_admin``), never stored.
 
-**All five registered flags default on in this feature branch** — ``tutor``
+**The five earlier flags default on in this feature branch** — ``tutor``
 (AL-270), ``shaping`` (AL-370), Phase 5's ``streaks`` (D7),
 Phase 6's ``analyst`` (D12), and unshipped ``flow`` (#262) — which would make most
 of the resolution machinery below untestable — a flag that is on for everyone
@@ -27,12 +27,10 @@ or a `404` gate. So ``dark_flag_defaults`` (autouse) puts every code default
 back to ``False`` for this module: every test here is about the machinery,
 and the machinery's interesting case is a dark flag. The launched defaults
 get their own test, ``test_launched_flags_reach_a_plain_learner``, which opts
-back out via ``monkeypatch.undo()``. With no flag left genuinely dark in the
-registry, ``dark_flag_defaults`` is what actually exercises the admin-baseline
-path here, standing in for the dark phase the machinery is built for rather
-than reading it off a real one.
+back out via ``monkeypatch.undo()``. ``learning_tutor`` is now genuinely dark,
+including for admins: it deliberately does not use the admin-baseline path.
 
-Every resolved map and every admin listing below carries all five keys (the
+Every resolved map and every admin listing below carries all six keys (the
 session/list surfaces the whole registry, not just the flags a given test is
 about), which is what proves a further flag joining the registry never widens
 what a plain learner sees.
@@ -174,6 +172,7 @@ def _resolved(
         STREAKS: streaks,
         ANALYST: analyst,
         FLOW: flow,
+        "learning_tutor": False,
     }
 
 
@@ -230,6 +229,7 @@ async def test_admin_lists_every_registered_flag(
             "flags": [
                 _flag_row(ANALYST, enabled_default=False),
                 _flag_row(FLOW, enabled_default=False),
+                _flag_row("learning_tutor", enabled_default=False),
                 _flag_row(SHAPING, enabled_default=False),
                 _flag_row(STREAKS, enabled_default=False),
                 _flag_row(TUTOR, enabled_default=False),
@@ -345,6 +345,7 @@ async def test_dark_flags_resolve_on_for_admins(
         assert listed == [
             _flag_row(ANALYST, enabled_default=False),
             _flag_row(FLOW, enabled_default=False),
+            _flag_row("learning_tutor", enabled_default=False),
             _flag_row(SHAPING, enabled_default=False),
             _flag_row(STREAKS, enabled_default=False),
             _flag_row(TUTOR, enabled_default=False),
@@ -378,6 +379,7 @@ async def test_override_flips_a_learner_on_and_clears_idempotently(
         assert (await admin.get(FLAGS_URL)).json()["flags"] == [
             _flag_row(ANALYST, enabled_default=False),
             _flag_row(FLOW, enabled_default=False),
+            _flag_row("learning_tutor", enabled_default=False),
             _flag_row(SHAPING, enabled_default=False),
             _flag_row(STREAKS, enabled_default=False),
             _flag_row(TUTOR, enabled_default=False, override_count=1),
@@ -433,6 +435,7 @@ async def test_settings_default_flips_the_flag_without_a_deploy(
         assert (await admin.get(FLAGS_URL)).json()["flags"] == [
             _flag_row(ANALYST, enabled_default=False),
             _flag_row(FLOW, enabled_default=False),
+            _flag_row("learning_tutor", enabled_default=False),
             _flag_row(SHAPING, enabled_default=False),
             _flag_row(STREAKS, enabled_default=False),
             _flag_row(TUTOR, enabled_default=True),

@@ -34,7 +34,12 @@ export const learnerUser: AuthUser = {
   // (`routers/v1/beats.py`'s own `require_analyst_enabled`, and its Phase
   // 2/5/3 twins) rather than inheriting an accident of whatever the backend
   // default happens to be this week.
-  feature_flags: { tutor: false, streaks: false, analyst: false },
+  feature_flags: {
+    tutor: false,
+    streaks: false,
+    analyst: false,
+    learning_tutor: false,
+  },
 };
 
 export const authenticatedSession: AuthSession = {
@@ -59,7 +64,7 @@ export const adminUser: AuthUser = {
   is_admin: true,
   model_allowlist: [...ADMIN_MODEL_ALLOWLIST],
   // Admins dogfood the tutor before launch (ADMIN_DEFAULT_FLAGS, AL-203).
-  feature_flags: { tutor: true },
+  feature_flags: { tutor: true, learning_tutor: false },
 };
 
 export const adminSession: AuthSession = {

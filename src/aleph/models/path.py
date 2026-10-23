@@ -31,7 +31,10 @@ class Path(Base, UUIDAuditMixin):
     """
 
     __tablename__ = "paths"
-    __table_args__ = (Index("ix_paths_user_id", "user_id"),)
+    __table_args__ = (
+        Index("ix_paths_user_id", "user_id"),
+        Index("uq_paths_user_id_id", "user_id", "id", unique=True),
+    )
 
     user_id: Mapped[uuid.UUID] = mapped_column(
         Uuid,

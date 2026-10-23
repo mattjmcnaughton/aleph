@@ -951,6 +951,7 @@ costs no extra request. The frontend reads it through `useFeatureFlag(key)`
 | `shaping` | **on** | on (redundantly, as above) | Phase 2B shaping — the shaping rail, its API and its stream, and the apply/undo endpoints. Same history on its own key (epic #114, adopted convention 1): dark through 2B's build-out, **launched at AL-370**. Independent of `tutor`, so either can be killed without disturbing the other. |
 | `streaks` | **on** | on (redundantly, as above) | Phase 5 streaks — `GET /progress/summary` and everything under it (see [Progress](#progress-apiv1-phase-5-tdd-546)). Same history again on its own key (TDD D7): dark at `off` through the slice's build-out while admins dogfooded it, then **launched** by flipping this code default on, exactly as AL-270/AL-370 did. Kill it with `FEATURE_FLAG_DEFAULTS=streaks:off`. |
 | `analyst` | **on** | on (redundantly, as above) | Phase 6 — every route under [Analyst](#analyst-apiv1-al-522-issue-172-phase-6-tdd-6) (Beats, Briefs). Shipped dark at `off` through build-out while admins dogfooded it, then launched by flipping its code default on. Kill it without a code deploy with `FEATURE_FLAG_DEFAULTS=analyst:off`. |
+| `learning_tutor` | **off** | off (not in admin defaults) | Unshipped Account-wide Tutor state API. Explicit opt-in required for learners and admins; no generation or acceptance endpoint yet. |
 
 **Operating it.** `FEATURE_FLAG_DEFAULTS` is a comma-separated list of
 `key:on` / `key:off` entries (`FEATURE_FLAG_DEFAULTS="tutor:on"`). Malformed and
@@ -961,3 +962,79 @@ the admin baseline does **not** — an entry here is the last word for everyone
 without an override.
 No product events are emitted for admin flag ops (structlog only): these are
 operator actions, not learner behaviour, and PRD §5.7's event set is unchanged.
+
+## Account-wide Tutor state (LT-1, unshipped)
+
+`learning_tutor` is registered **off for learners and admins**, deliberately absent
+from the admin baseline. Explicit opt-in uses the existing override API. All
+routes below require authentication and the flag; unavailable features and unowned
+identifiers return `404` (`401` when signed out). No live enablement is implied.
+Setting the default off does not override a per-user on override.
+
+Prefix: `/api/v1/learning-tutor`. **This is the implemented state subset only**:
+there is no operation POST, model call, acceptance action, or learner UI yet.
+
+| Method and suffix | Request | Response |
+| --- | --- | --- |
+| `GET /` | — | State |
+| `PUT /focus` | `{focus: string|null, revision: integer >= 0}` | State |
+| `DELETE /conversation?revision=N` | Current revision | State |
+| `GET /history?before=UUID` | Optional page cursor | `{items: Operation[], before: UUID|null}` |
+| `GET /operations/{id}` | Owned operation ID | Operation receipt |
+| `GET /recommendations?status=dismissed&before=UUID` | Required status, optional cursor | `{items: Recommendation[], before: UUID|null}` |
+| `GET /recommendations/{id}` | Owned recommendation ID | Recommendation |
+| `PUT /recommendations/{id}/decision` | `{decision: "dismiss"|"restore", revision}` | State |
+
+State fields: `focus`, `revision`, `focus_version`, `epoch`, `recommendations`
+(live active cards), `latest_refresh` (receipt or null), `current_operation_id`
+(unexpired running receipt or null), and `history` (latest page). Empty state is
+valid: null focus, zero versions/epoch, empty lists, null receipt/cursors. GETs
+never write or generate work. Focus is bounded at 2,000 characters, trimmed, with
+blank normalized to null. An unchanged normalized focus is a no-op; a changed
+focus increments both revision and focus_version. Clear increments epoch and
+revision, preserves focus and created targets, removes unaccepted recommendations
+and redacts accepted payloads and operation text. IDs, hashes, usage and acceptance
+target/time receipts survive; deleting the account cascades all three tables.
+
+Every mutation checks the observed revision under a database state-row lock;
+stale tabs get `409`, `error.code="conflict"`, `error.details.reason="stale_state"`.
+Other decision reasons are `recommendation_unavailable` and
+`recommendation_capacity`. No partial decision commits. Restore checks the
+three-card cap and exact normalized Topics against active cards and owned targets.
+Identity uses Unicode NFKC, casefold and collapsed whitespace, separately per kind.
+Effectively stale active rows are superseded under the lock before capacity and
+duplicate checks. Missing evidence sources or changed focus/epoch make unaccepted
+cards stale: lists omit them and direct reads/decisions reject them with `409`.
+Beat cards are omitted/unavailable while `analyst` is off.
+
+Recommendation fields: `id`, `kind` (`path|beat`), `status`
+(`active|dismissed|superseded|accepted`), `topic`, `level`, `guidance`, `description`,
+`rationale`, `evidence`, `created_at`, `accepted_at`, `target_id`, `target_available`.
+Text/evidence are nullable for cleared accepted receipts. A deleted accepted target
+leaves `status=accepted`, `target_id=null`, `target_available=false`; GET is still
+200, not permission to recreate it. Acceptance/replay HTTP behavior belongs to LT-3.
+Evidence entries have `kind` (`path|beat|brief|focus|message`), an `id` only for
+the first three, and optional nonnegative `completed_lessons`, `published_briefs`,
+`read_briefs`, `observed_at`. No arbitrary text or source bodies are accepted there.
+
+Operation fields: `id`, `epoch`, `kind` (`turn|refresh`), `status`
+(`running|succeeded|failed`), `error_code`, `input`, `output`, `started_at`,
+`finished_at`, `cleared`. Expired running receipts read as failed/interrupted using
+the database clock without writing. Cleared receipts have null input/output/error.
+Input/output are JSON objects; their generation schema/admission is LT-2, not an
+implemented writable API. History contains whole successful turns only, never
+refreshes or failures, restricted to the current epoch. Pages are newest first,
+up to 20 records, using a UUID cursor for the last scanned row with timestamp/UUID
+ordering; dismissed pages may be shorter after stale/flag filtering. Continue
+while `before` is non-null. Foreign or cleared-epoch cursors return 404.
+
+Dependent implementation seams: `LearningTutorRepository.lock_state` performs
+race-safe lazy creation and locking; repository methods never commit.
+`replay(user_id, epoch, request_id)` is an owned receipt lookup, not admission:
+LT-2 must check epoch first, then replay/hash before rejecting an old revision.
+`LearningTutorService.add_recommendation` takes a validated `RecommendationDraft`
+and acquires the state lock; it checks exclusion, sources and capacity, flushes but
+does not commit or bump revision. LT-2 owns atomic whole-result settlement and
+the revision bump. LT-3 must lock users, then Tutor state, then recommendation,
+and atomically insert its target plus acceptance receipt. Composite owner FKs
+protect operation/target links; target deletion nulls only the target reference.

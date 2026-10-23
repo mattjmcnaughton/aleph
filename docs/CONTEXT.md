@@ -97,6 +97,19 @@ this document for what is deferred.
 | **Grounded** | The property that a tutor reply is anchored in the current lesson's Read passage and does not contradict it. The behavior ships now; as an eval rubric item it lands with the post-launch tutor evals. |
 | **Contradiction handling** | The tutor's behavior on a **checkable factual error** in a lesson: correct it, attribute the difference plainly, and say what the Quick check expects (Phase 2 PRD §5.7b). Nothing is regenerated or mutated. Incomplete is not wrong — a level-scoped simplification is never flagged. (A machine-readable *flag event* was cut from Phase 2; the behavior lives in reply text only.) |
 
+## Account-wide Tutor
+
+Adopted for the feature-branch experiment, **unshipped**. The state API exists;
+generation, acceptance and learner presentation remain later slices.
+[PRD](prds/learning-tutor.md) · [TDD](tdds/learning-tutor.md).
+
+| Term | Meaning |
+| --- | --- |
+| **Account-wide Tutor** | The Tutor helping a learner reason across their paths and Beats. The same persona, with broader scope. |
+| **Learning conversation** | The account's persisted conversation with the Account-wide Tutor, independent of lesson and Shaping conversations. |
+| **Learning focus** | Optional text the learner explicitly saves about what they want to understand. Not an inferred profile, a path's Guidance, or its Teaching style. |
+| **Learning recommendation** | A Tutor-proposed new path or Beat with a reason grounded in the learner's available context, awaiting the learner's decision. Not a lesson-rail Suggestion or a shaping Proposal; accepting one creates a new path or Beat, rather than applying a Change. |
+
 ## Shaping (Phase 2B)
 
 Phase 2B vocabulary — the tutor that changes the path, on instruction only. Spec:

@@ -58,6 +58,7 @@ class Beat(Base, UUIDAuditMixin):
     __tablename__ = "beats"
     __table_args__ = (
         Index("ix_beats_user_id", "user_id"),
+        Index("uq_beats_user_id_id", "user_id", "id", unique=True),
         # Python's Monday == 0 (CONTEXT.md: Anchor day), enforced at the
         # storage layer so an out-of-range weekday can never be written no
         # matter what validation a service does or skips.

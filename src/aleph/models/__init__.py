@@ -28,6 +28,11 @@ from aleph.models.enums import (
     PathStatus,
 )
 from aleph.models.feature_flags import UserFeatureOverride
+from aleph.models.learning_tutor import (
+    LearningRecommendation,
+    LearningTutorOperation,
+    LearningTutorState,
+)
 from aleph.models.lesson import Lesson
 from aleph.models.message import Message
 from aleph.models.notification_preferences import NotificationPreferences
@@ -51,6 +56,9 @@ __all__ = [
     "Conversation",
     "ConversationKind",
     "Device",
+    "LearningRecommendation",
+    "LearningTutorOperation",
+    "LearningTutorState",
     "Lesson",
     "LessonGenerationState",
     "Level",
