@@ -6,14 +6,9 @@ import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from sqlalchemy import func, select
-
 from aleph.agents.learning_tutor import LearningTutorDeps
 from aleph.domains.learning_recommendations import normalize_topic
 from aleph.dtos.learning_tutor import EvidenceReference
-from aleph.models import Beat, Brief, Lesson, Path
-from aleph.models.learning_tutor import LearningRecommendation as Card
-from aleph.models.learning_tutor import LearningTutorOperation as Operation
 from aleph.repositories.learning_tutor import LearningTutorRepository
 
 if TYPE_CHECKING:
@@ -22,6 +17,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from aleph.dtos.learning_tutor import OperationRequest
+    from aleph.models.learning_tutor import LearningRecommendation as Card
     from aleph.models.learning_tutor import LearningTutorState
 
 
@@ -33,7 +29,6 @@ def serialize(value: dict) -> str:
 class LearningContext:
     deps: LearningTutorDeps
     evidence: dict[str, EvidenceReference]
-    targets: dict[str, EvidenceReference]
     omitted: dict[str, int]
     needs_context: bool
 
@@ -111,67 +106,13 @@ async def assemble_context(
         ):
             omitted["turns"] += len(turns[:10]) - index - 1
             break
-    total_turns = (
-        await session.scalar(
-            select(func.count())
-            .select_from(Operation)
-            .where(
-                Operation.user_id == user_id,
-                Operation.epoch == state.epoch,
-                Operation.kind == "turn",
-                Operation.status == "succeeded",
-                Operation.cleared_at.is_(None),
-            )
-        )
-        or 0
-    )
+    total_turns = await repo.context_turn_count(user_id, state.epoch)
     omitted["turns"] += max(0, total_turns - 10)
 
-    progress = (
-        select(
-            Lesson.path_id,
-            func.count(Lesson.completed_at).label("completed"),
-            func.max(Lesson.completed_at).label("latest"),
-        )
-        .group_by(Lesson.path_id)
-        .subquery()
-    )
-    paths = (
-        await session.execute(
-            select(
-                Path.id,
-                Path.topic,
-                Path.level,
-                Path.guidance,
-                progress.c.completed,
-                progress.c.latest,
-            )
-            .outerjoin(progress, progress.c.path_id == Path.id)
-            .where(Path.user_id == user_id)
-            .order_by(
-                progress.c.latest.desc().nullslast(),
-                Path.created_at.desc(),
-                Path.id.desc(),
-            )
-            .limit(12)
-        )
-    ).all()
-    total_paths = (
-        await session.scalar(
-            select(func.count()).select_from(Path).where(Path.user_id == user_id)
-        )
-        or 0
-    )
+    paths, total_paths = await repo.context_paths(user_id)
     omitted["paths"] += max(0, total_paths - len(paths))
     for row in paths:
-        next_lesson = (
-            await session.execute(
-                select(Lesson.id, Lesson.title)
-                .where(Lesson.path_id == row.id, Lesson.completed_at.is_(None))
-                .order_by(Lesson.position_in_path)
-                .limit(1)
-            )
-        ).first()
+        next_lesson = await repo.context_next_lesson(user_id, row.id)
         append(
             "paths",
             dict(
@@ -194,44 +135,7 @@ async def assemble_context(
 
     total_beats = 0
     if analyst_enabled:
-        activity = (
-            select(
-                Brief.beat_id,
-                func.count(Brief.id).label("published"),
-                func.count(Brief.read_at).label("read"),
-                func.max(Brief.read_at).label("latest"),
-            )
-            .where(Brief.kind == "published")
-            .group_by(Brief.beat_id)
-            .subquery()
-        )
-        beats = (
-            await session.execute(
-                select(
-                    Beat.id,
-                    Beat.topic,
-                    Beat.level,
-                    Beat.guidance,
-                    activity.c.published,
-                    activity.c.read,
-                    activity.c.latest,
-                )
-                .outerjoin(activity, activity.c.beat_id == Beat.id)
-                .where(Beat.user_id == user_id)
-                .order_by(
-                    activity.c.latest.desc().nullslast(),
-                    Beat.created_at.desc(),
-                    Beat.id.desc(),
-                )
-                .limit(8)
-            )
-        ).all()
-        total_beats = (
-            await session.scalar(
-                select(func.count()).select_from(Beat).where(Beat.user_id == user_id)
-            )
-            or 0
-        )
+        beats, total_beats = await repo.context_beats(user_id)
         omitted["beats"] += max(0, total_beats - len(beats))
         for row in beats:
             included = append(
@@ -254,14 +158,7 @@ async def assemble_context(
             )
             if not included:
                 continue
-            briefs = (
-                await session.execute(
-                    select(Brief.id, Brief.title, Brief.published_on, Brief.read_at)
-                    .where(Brief.beat_id == row.id, Brief.kind == "published")
-                    .order_by(Brief.published_on.desc(), Brief.id.desc())
-                    .limit(2)
-                )
-            ).all()
+            briefs = await repo.context_briefs(user_id, row.id)
             omitted["briefs"] += max(0, (row.published or 0) - len(briefs))
             for brief in briefs:
                 append(
@@ -279,18 +176,21 @@ async def assemble_context(
     for card in [*active, *dismissed[:20]]:
         if card.kind == "beat" and not analyst_enabled:
             continue
-        append("recommendations", selected_payload(card) or {})
-    total_dismissed = (
-        await session.scalar(
-            select(func.count())
-            .select_from(Card)
-            .where(
-                Card.user_id == user_id,
-                Card.status == "dismissed",
-            )
-        )
-        or 0
-    )
+        references = [
+            EvidenceReference.model_validate(raw) for raw in card.evidence or []
+        ]
+        if (
+            card.epoch != state.epoch
+            or card.focus_version != state.focus_version
+            or not all([await repo.source_exists(user_id, ref) for ref in references])
+        ):
+            omitted["recommendations"] += 1
+            continue
+        if append("recommendations", selected_payload(card) or {}):
+            # Even prose can rely on excerpts whose sources missed the sample.
+            for index, ref in enumerate(references):
+                evidence[f"card:{card.id}:{index}"] = ref
+    total_dismissed = await repo.dismissed_count(user_id)
     omitted["recommendations"] += max(0, total_dismissed - 20)
     # Complete exclusion is a validator input, not a truncated prompt excerpt.
     excluded = set()
@@ -300,16 +200,7 @@ async def assemble_context(
             for topic in await repo.target_topics(user_id, kind)
         )
     excluded.update(
-        (kind, topic)
-        for kind, topic in (
-            await session.execute(
-                select(Card.kind, Card.normalized_topic).where(
-                    Card.user_id == user_id,
-                    Card.status.in_(["active", "dismissed"]),
-                    Card.normalized_topic.is_not(None),
-                )
-            )
-        ).all()
+        (kind, topic) for kind, topic in await repo.excluded_card_topics(user_id)
     )
     deps = LearningTutorDeps(
         context=serialize(data),
@@ -324,7 +215,6 @@ async def assemble_context(
     return LearningContext(
         deps,
         evidence,
-        targets,
         omitted,
         not state.focus and not total_paths and not total_beats,
     )

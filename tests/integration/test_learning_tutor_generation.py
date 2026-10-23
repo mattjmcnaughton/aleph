@@ -255,6 +255,11 @@ async def test_invalid_output_and_provider_error_are_not_empty_success():
             assert receipt.error_code == (
                 "invalid_output" if invalid else "provider_failed"
             )
+            row = await session.get(LearningTutorOperation, result.id)
+            assert row is not None
+            assert (row.input_tokens, row.output_tokens) == (
+                (1, 1) if invalid else (0, 0)
+            )
 
 
 def draft(topic="New direction", evidence="focus", kind="path"):
@@ -266,6 +271,98 @@ def draft(topic="New direction", evidence="focus", kind="path"):
         rationale="Matches your context",
         evidence_keys=[evidence],
     )
+
+
+@pytest.mark.anyio
+async def test_card_only_evidence_fences_prose_and_stale_dismissal_is_omitted():
+    user = await account()
+    pending, contexts = [], []
+    started, release = asyncio.Event(), asyncio.Event()
+
+    async def provider(deps):
+        contexts.append(json.loads(deps.context))
+        started.set()
+        await release.wait()
+        return LearningTutorOutput(reply="Advice based on previous cards"), 3, 4
+
+    runtime = LearningTutorGeneration(provider=provider, spawn=pending.append)
+    async with db.async_session() as session:
+        source = Path(user_id=user.id, topic="Unsampled", level=Level.NEW_TO_IT)
+        session.add(source)
+        await session.commit()
+        session.add_all(
+            [
+                Path(user_id=user.id, topic=f"Recent {i}", level=Level.NEW_TO_IT)
+                for i in range(12)
+            ]
+        )
+        excerpt = card(user.id, status="dismissed")
+        excerpt.evidence = [{"kind": "path", "id": str(source.id)}]
+        session.add(excerpt)
+        obsolete = card(user.id, topic="Obsolete focus", status="dismissed")
+        obsolete.focus_version = 99
+        session.add(obsolete)
+        await session.commit()
+        request = OperationRequest(
+            request_id=uuid.uuid4(),
+            revision=0,
+            epoch=0,
+            kind="turn",
+            content="Interest",
+        )
+        result = await runtime.admit(LearningTutorService(session, user), request)
+    task = asyncio.create_task(pending.pop())
+    await started.wait()
+    async with db.async_session() as session:
+        await session.execute(delete(Path).where(Path.id == source.id))
+        await session.commit()
+    release.set()
+    await task
+    assert all(p["topic"] != "Unsampled" for p in contexts[0]["paths"])
+    assert [c["id"] for c in contexts[0]["recommendations"]] == [str(excerpt.id)]
+    assert contexts[0]["recommendations"][0]["evidence"][0]["id"] == str(source.id)
+    async with db.async_session() as session:
+        receipt = await LearningTutorService(session, user).operation(result.id)
+        assert receipt.status == "failed" and receipt.error_code == "context_changed"
+        assert receipt.output is None
+        await runtime.admit(
+            LearningTutorService(session, user),
+            request.model_copy(update={"request_id": uuid.uuid4()}),
+        )
+    await pending.pop()
+    assert contexts[1]["recommendations"] == []
+
+
+@pytest.mark.anyio
+async def test_expired_receipt_retains_late_usage_without_resurrection():
+    user = await account()
+    pending = []
+    runtime = LearningTutorGeneration(provider=FakeProvider(), spawn=pending.append)
+    request = OperationRequest(
+        request_id=uuid.uuid4(), revision=0, epoch=0, kind="turn", content="Interest"
+    )
+    async with db.async_session() as session:
+        first = await runtime.admit(LearningTutorService(session, user), request)
+        row = await session.get(LearningTutorOperation, first.id)
+        assert row is not None
+        row.expires_at = row.started_at - timedelta(seconds=1)
+        row.input_tokens = 12
+        await session.commit()
+        await runtime.admit(
+            LearningTutorService(session, user),
+            request.model_copy(update={"request_id": uuid.uuid4()}),
+        )
+    await pending.pop(0)
+    await pending.pop(0)
+    async with db.async_session() as session:
+        row = await session.get(LearningTutorOperation, first.id)
+        assert row is not None
+        assert (row.status, row.error_code, row.output) == (
+            "failed",
+            "interrupted",
+            None,
+        )
+        assert (row.input_tokens, row.output_tokens) == (12, 9)
 
 
 @pytest.mark.anyio
@@ -461,7 +558,8 @@ async def test_http_cold_validation_default_off_and_observational_interaction():
 
 
 @pytest.mark.anyio
-async def test_real_stub_provider_publishes_grounded_card():
+@pytest.mark.parametrize("invalid", [False, True])
+async def test_real_stub_provider_publishes_grounded_card(invalid):
     user = await account()
     pending = []
     runtime = LearningTutorGeneration(
@@ -475,13 +573,21 @@ async def test_real_stub_provider_publishes_grounded_card():
                 revision=0,
                 epoch=0,
                 kind="turn",
-                content="[lt-path] Electricity",
+                content="[lt-invalid]" if invalid else "[lt-path] Electricity",
             ),
         )
     await pending.pop()
     async with db.async_session() as session:
         service = LearningTutorService(session, user)
         receipt = await service.operation(result.id)
+        row = await session.get(LearningTutorOperation, result.id)
+        assert row is not None
+        assert row.input_tokens > 0 and row.output_tokens > 0
+        await session.rollback()
+        if invalid:
+            assert receipt.status == "failed" and receipt.error_code == "invalid_output"
+            assert receipt.output is None
+            return
         assert receipt.status == "succeeded"
         state = await service.read()
         assert len(state.recommendations) == 1

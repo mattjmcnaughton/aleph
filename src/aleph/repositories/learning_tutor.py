@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import delete, func, select, tuple_, update
 from sqlalchemy.dialects.postgresql import insert
 
-from aleph.models import Beat, Brief, Path
+from aleph.models import Beat, Brief, Lesson, Path
 from aleph.models.learning_tutor import LearningRecommendation as Card
 from aleph.models.learning_tutor import LearningTutorOperation as Operation
 from aleph.models.learning_tutor import LearningTutorState as State
@@ -28,6 +28,152 @@ if TYPE_CHECKING:
 class LearningTutorRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
+
+    async def context_turn_count(self, user_id: UUID, epoch: int) -> int:
+        return (
+            await self.session.scalar(
+                select(func.count())
+                .select_from(Operation)
+                .where(
+                    Operation.user_id == user_id,
+                    Operation.epoch == epoch,
+                    Operation.kind == "turn",
+                    Operation.status == "succeeded",
+                    Operation.cleared_at.is_(None),
+                )
+            )
+            or 0
+        )
+
+    async def context_paths(self, user_id: UUID):
+        progress = (
+            select(
+                Lesson.path_id,
+                func.count(Lesson.completed_at).label("completed"),
+                func.max(Lesson.completed_at).label("latest"),
+            )
+            .group_by(Lesson.path_id)
+            .subquery()
+        )
+        rows = (
+            await self.session.execute(
+                select(
+                    Path.id,
+                    Path.topic,
+                    Path.level,
+                    Path.guidance,
+                    progress.c.completed,
+                    progress.c.latest,
+                )
+                .outerjoin(progress, progress.c.path_id == Path.id)
+                .where(Path.user_id == user_id)
+                .order_by(
+                    progress.c.latest.desc().nullslast(),
+                    Path.created_at.desc(),
+                    Path.id.desc(),
+                )
+                .limit(12)
+            )
+        ).all()
+        total = (
+            await self.session.scalar(
+                select(func.count()).select_from(Path).where(Path.user_id == user_id)
+            )
+            or 0
+        )
+        return rows, total
+
+    async def context_next_lesson(self, user_id: UUID, path_id: UUID):
+        return (
+            await self.session.execute(
+                select(Lesson.id, Lesson.title)
+                .join(Path, Path.id == Lesson.path_id)
+                .where(
+                    Path.user_id == user_id,
+                    Lesson.path_id == path_id,
+                    Lesson.completed_at.is_(None),
+                )
+                .order_by(Lesson.position_in_path)
+                .limit(1)
+            )
+        ).first()
+
+    async def context_beats(self, user_id: UUID):
+        activity = (
+            select(
+                Brief.beat_id,
+                func.count(Brief.id).label("published"),
+                func.count(Brief.read_at).label("read"),
+                func.max(Brief.read_at).label("latest"),
+            )
+            .where(Brief.kind == "published")
+            .group_by(Brief.beat_id)
+            .subquery()
+        )
+        rows = (
+            await self.session.execute(
+                select(
+                    Beat.id,
+                    Beat.topic,
+                    Beat.level,
+                    Beat.guidance,
+                    activity.c.published,
+                    activity.c.read,
+                    activity.c.latest,
+                )
+                .outerjoin(activity, activity.c.beat_id == Beat.id)
+                .where(Beat.user_id == user_id)
+                .order_by(
+                    activity.c.latest.desc().nullslast(),
+                    Beat.created_at.desc(),
+                    Beat.id.desc(),
+                )
+                .limit(8)
+            )
+        ).all()
+        total = (
+            await self.session.scalar(
+                select(func.count()).select_from(Beat).where(Beat.user_id == user_id)
+            )
+            or 0
+        )
+        return rows, total
+
+    async def context_briefs(self, user_id: UUID, beat_id: UUID):
+        return (
+            await self.session.execute(
+                select(Brief.id, Brief.title, Brief.published_on, Brief.read_at)
+                .join(Beat, Beat.id == Brief.beat_id)
+                .where(
+                    Beat.user_id == user_id,
+                    Brief.beat_id == beat_id,
+                    Brief.kind == "published",
+                )
+                .order_by(Brief.published_on.desc(), Brief.id.desc())
+                .limit(2)
+            )
+        ).all()
+
+    async def dismissed_count(self, user_id: UUID) -> int:
+        return (
+            await self.session.scalar(
+                select(func.count())
+                .select_from(Card)
+                .where(Card.user_id == user_id, Card.status == "dismissed")
+            )
+            or 0
+        )
+
+    async def excluded_card_topics(self, user_id: UUID):
+        return (
+            await self.session.execute(
+                select(Card.kind, Card.normalized_topic).where(
+                    Card.user_id == user_id,
+                    Card.status.in_(["active", "dismissed"]),
+                    Card.normalized_topic.is_not(None),
+                )
+            )
+        ).all()
 
     async def now(self) -> datetime:
         return (await self.session.execute(select(func.clock_timestamp()))).scalar_one()

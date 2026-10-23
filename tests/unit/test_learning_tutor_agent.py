@@ -1,5 +1,6 @@
 """Closed output vocabulary and the total serialized context boundary."""
 
+import asyncio
 from dataclasses import replace
 from uuid import uuid4
 
@@ -16,6 +17,23 @@ from aleph.agents.learning_tutor import (
     output_violation,
 )
 from aleph.services.stub_model import build_stub_model
+
+
+@pytest.mark.anyio
+async def test_stub_delay_is_async_and_owned_by_the_provider():
+    deps = LearningTutorDeps(
+        context='{"kind":"turn","content":"[lt-delay] [lt-path]",'
+        '"evidence_keys":["message"]}',
+        kind="turn",
+        evidence_keys=("message",),
+    )
+    task = asyncio.create_task(
+        build_learning_tutor_agent().run("Respond", deps=deps, model=build_stub_model())
+    )
+    await asyncio.sleep(0.05)
+    assert not task.done()
+    result = await task
+    assert len(result.output.recommendations) == 1
 
 
 def test_turn_requires_reply_and_known_evidence():
