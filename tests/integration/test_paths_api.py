@@ -20,6 +20,7 @@ PRD → test → trace. The ``workflow`` marker is not yet registered in
 
 from __future__ import annotations
 
+import inspect
 import uuid
 from typing import TYPE_CHECKING
 
@@ -321,7 +322,7 @@ def _fail_first_outline_resolver() -> Callable[[str], Model]:
     assert stub_respond is not None, "the stub model is built from a callback"
     outline_calls = 0
 
-    def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+    async def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
         nonlocal outline_calls
         # The outline agent's union registers a tool carrying ``units``; the
         # lesson agent's does not (the stub dispatches on the same property).
@@ -334,6 +335,8 @@ def _fail_first_outline_resolver() -> Callable[[str], Model]:
             if outline_calls == 1:
                 raise StubModelForcedError("transient outline failure (first call)")
         response = stub_respond(messages, info)
+        if inspect.isawaitable(response):
+            response = await response
         assert isinstance(response, ModelResponse)
         return response
 
