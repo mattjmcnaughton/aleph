@@ -278,7 +278,10 @@ Tests are organized by type (see [`ci.md`](ci.md) for the CI job that runs each)
   (W10 is reserved for the deferred selection-to-quote), shaping's
   `@w17`..`@w21`, streaks' `@w22`/`@w23`, and the analyst's `@w29`/`@w31`
   (W30/W32/W33 are integration cases instead, PRD §7.1), and Flow's `@w34` — and they sign in for
-  real. The journeys run in the `mobile-390x844` project; the `desktop` project
+  real. Account-wide Tutor `@w41`..`@w43` instead use isolated synthetic accounts
+  via a test-only helper; [CI journey notes](ci.md#the-journeys-al-090-al-260-al-360)
+  describe their scope and the deliberate isolation exception.
+  The journeys run in the `mobile-390x844` project; the `desktop` project
   runs the non-journey specs. See [`ci.md`](ci.md).
 - `tests/external/` — live-provider contract tests, opt-in via `just test-external`.
 

@@ -1,7 +1,10 @@
 # TDD — Account-wide Tutor and learning recommendations
 
 **Status:** Accepted implementation baseline for the feature-branch experiment,
-2026-10-23; not implemented or approved for release. **Product:** [PRD](../prds/learning-tutor.md).
+2026-10-23; implemented on the integration branch, default off and not approved
+for release. Live quality/calibration and production migration lock safety remain
+UNPROVEN; see the [runbook](../deploy.md#account-wide-tutor-opt-in-and-disable-runbook-lt6).
+**Product:** [PRD](../prds/learning-tutor.md).
 **Execution:** [ticket drafts](../plans/learning-tutor-tickets.md).
 Read [CONSTITUTION.md](../../CONSTITUTION.md), [CONTEXT.md](../CONTEXT.md), and
 [architecture.md](../architecture.md) before implementation. Proposed module and
@@ -9,7 +12,9 @@ field names below are deliberate seams, not claims that those files exist.
 
 ## 1. Existing contracts and design decisions
 
-Source inspected on this checkout; future workers must recheck their exact base.
+The table records pre-implementation contracts and the intended changes, not a
+description of today's integrated code. Future workers must recheck their exact
+base. The implemented API is documented in [api.md](../api.md#account-wide-tutor-state-lt-1-unshipped).
 
 | Existing contract | Consequence for this feature |
 | --- | --- |

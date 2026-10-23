@@ -64,8 +64,9 @@ prototype's simplified library and placeholder Read passage/Brief.
 
 ## 3. Proposed language
 
-These additions remain proposed until adopted into `docs/CONTEXT.md` by LT-1.
-Existing definitions are not silently changed by this PRD.
+These additions were adopted into `docs/CONTEXT.md` by LT-1 for the unshipped
+experiment. That glossary remains authoritative; the proposal below records
+the intended meanings without silently changing existing definitions.
 
 | Term | Proposed meaning |
 | --- | --- |

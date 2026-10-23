@@ -153,7 +153,7 @@ own matching browser, so that local branch is skipped.
 
 ## The journeys (AL-090, AL-260, AL-360)
 
-`tests/e2e/journeys/` holds one spec per browser workflow, with tags through `@w34`
+`tests/e2e/journeys/` holds browser workflow specs, with tags through `@w43`
 (Playwright tag annotations — `pnpm exec playwright test --grep @w3` runs one).
 They drive the SPA the way a learner does: real sign-in, real server, real
 Postgres, stub model. The conventions below were set by Phase 1's `@w1`..`@w8`
@@ -161,6 +161,18 @@ and hold for the tutor's (`@w9`, `@w11`..`@w16`), shaping's (`@w17`..`@w21`),
 streaks' (`@w22`, `@w23`) and the analyst's (`@w29`, `@w31` — W30/W32/W33 are
 integration cases instead, PRD §7.1) and Flow's (`@w34`)
 journeys too.
+
+**Account-wide Tutor (LT4/LT6):** `journeys/w41-w43.spec.ts` maps `@w41` to
+Learning conversation/focus, whole-turn reload, dismissal/restore and clear;
+`@w42` to recommendation discussion and edited Beat/path acceptance; `@w43` to
+Tutor-off ordinary form availability and analyst-off Beat entry rejection.
+W43 does not submit ordinary creation; existing creation journeys and integration
+tests cover that regression. These are synthetic stub journeys, not live model
+quality or real-device acceptance. They intentionally use fresh isolated accounts
+from the **test-only** `/__e2e__/learning-account` helper instead of sharing the
+OIDC dev account: fixed stub Topics, account-wide history and clear would otherwise
+interfere across journeys. This is an exception to the auth/isolation conventions
+below, not a production authentication route or a new workflow catalog.
 
 - **Auth is real, not injected.** `auth.setup.ts` drives `/auth/login` → the
   realm's login form → `/auth/callback` and saves the resulting cookie as

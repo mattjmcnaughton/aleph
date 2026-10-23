@@ -481,6 +481,156 @@ what leaves admins on). An admin who still needs to dogfood takes a per-user
 override — `PUT /api/v1/admin/feature-flags/shaping/users/{user_id}` — which
 wins over everything.
 
+## Account-wide Tutor opt-in and disable runbook (LT6)
+
+**Unshipped, default off, including admins.** This is an operator procedure for
+a separately approved experiment, not permission to execute it. Feature-branch
+integration does not authorize a main merge, deployment, shared-data migration,
+live model spend, or per-user/global enablement. Unlike the older phases above,
+`learning_tutor` is deliberately absent from `ADMIN_DEFAULT_FLAGS`. Do not use
+their global-default launch recipe for this experiment.
+
+### Before any dogfood enablement
+
+1. Record the reviewed candidate revision, green required CI, combined gate,
+   integration/E2E and offline eval results, and outstanding findings. Follow
+   [PRD P1–P6](prds/learning-tutor.md#4-journeys-and-acceptance), not just a happy
+   creation journey. Offline smoke (`just evals --learning-tutor --smoke --judge`)
+   uses synthetic providers and is plumbing evidence, not content quality.
+2. **Production migration blocker remains open:**
+   `alembic/versions/0022_learning_tutor.py` builds `uq_paths_user_id_id` and
+   `uq_beats_user_id_id` with ordinary `CREATE INDEX` on existing tables, not
+   `CREATE INDEX CONCURRENTLY`. These builds can block writes. A disposable
+   upgrade check does not establish a production lock-duration budget. Before
+   any production migration, obtain a separately reviewed operational plan and
+   acceptable lock/traffic evidence (or a reviewed migration change). Default-off
+   exposure does not protect ordinary path/Beat writes from migration locks.
+3. **Live quality, human calibration and judge agreement remain UNPROVEN.**
+   Before wider enablement, separately authorize and perform the live evaluation
+   in [evals.md](evals.md#account-wide-tutor---learning-tutor-lt5): at least 20
+   curated cases, at least 90% whole-case pass, no grounding/privacy/safety
+   failures, and human inspection of every failure. Calibrate the new rubric
+   before claiming agreement. Neither scripted smoke nor a browser recording
+   clears this gate. No real-device acceptance is implied.
+4. Obtain explicit rollout and spend approval naming designated account IDs,
+   environment, model, operator, budget/stop conditions and two-week review date.
+   Review examples only under appropriate consent/access; never place real
+   learner content or credentials in test artifacts, tickets or logs. Production
+   reporting access is a separate authorization, not granted by this runbook.
+
+### Configure limits, then opt in designated accounts only
+
+The settings are read at process startup. Apply any approved configuration through
+the environment's normal change/restart process and verify every serving replica;
+editing a local env file does not reconfigure a running service.
+
+| Setting | Current default | Operational meaning |
+| --- | --- | --- |
+| `MODEL_LEARNING_TUTOR` | `openai/gpt-5.6-luna` | Dedicated model slot resolved through OpenRouter; not a per-message admin override. `stub` is for local synthetic tests and is forbidden in production. |
+| `RATE_LIMIT_LEARNING_TUTOR_PER_DAY` | `30` | Combined admitted turns and refreshes per account per UTC day. `0` disables this cap; admins are exempt. Do not mistake admin dogfooding for a quota test. |
+| `MAX_CONCURRENT_LEARNING_TUTOR_OPERATIONS` | `2` | Separate process-local execution semaphore (at least 1), not a fleet-wide cost cap. One running operation per account is enforced durably across replicas. |
+| `LEARNING_TUTOR_TIMEOUT` | `90` seconds | Positive, at most 90; total execution deadline includes semaphore wait. Database-clock lease is fixed at 120 seconds. |
+
+Context is bounded to 40,000 dynamic characters, focus/input to 2,000 each, reply
+to 6,000; refresh yields at most three cards and a turn at most one. Invalid model
+output allows one validation retry before visible failure. These are not token
+or dollar ceilings. Recommendation acceptance also invokes the existing path/Beat
+generation pipeline and its model settings/costs; Tutor admission quota does not
+bound that downstream spend. Inspect approved provider-side budget controls too.
+
+Use an authenticated admin session with the existing
+[feature-flag API](api.md#feature-flags-admin-apiv1admin-al-203). The following are
+HTTP request templates, **not commands executed by LT6**; replace `{user_id}` only
+with an approved account ID. Never paste session cookies into evidence.
+
+```text
+GET /api/v1/admin/feature-flags
+PUT /api/v1/admin/feature-flags/learning_tutor/users/{user_id}
+Content-Type: application/json
+
+{"enabled": true}
+```
+
+The list returns effective global defaults and override counts, not account IDs.
+Retain an access-controlled opt-in roster; ensure `learning_tutor`'s effective
+global default stays false. An admin needs the same explicit override as a learner.
+As each designated account, revalidate `GET /api/v1/auth/session` and confirm
+`user.feature_flags.learning_tutor=true`. Home and `/tutor` should expose the
+surface, and `GET /api/v1/learning-tutor/` should read state without model work.
+Unselected learner/admin accounts must still resolve false and receive 404 on the
+Tutor API. `analyst` independently gates Beat context/cards/acceptance; do not
+change `tutor`, `shaping` or `analyst` merely to enable the Account-wide Tutor.
+
+### Observe failures, quotas and the two-week experiment
+
+- Only an explicit send/refresh admits Tutor work. POST returns 202 for running
+  work or 200 for a terminal receipt; poll the returned operation. Cold refresh
+  is `needs_context` with no model admission. Valid empty `completed` is success,
+  unlike `provider_failed`, `invalid_output`, `timed_out`, `interrupted`,
+  `context_changed` or `feature_disabled`. Preserve old cards on failed refresh.
+- A 429 means the daily admission cap; wait until the next UTC day. Failed
+  admitted work counts, including invalid model output; pre-admission input
+  validation failures, cold refresh and same-request replay do not. Clear does
+  not refund quota. For uncertain HTTP delivery retain the
+  request UUID/body; a failed operation needs an explicit new request/current
+  revision, never automatic paid replay. A 409 requires recovery/revalidation,
+  not blindly resubmitting a changed body.
+- Use `queries/logfire/learning_tutor_operations.sql` for observed terminal
+  outcomes, duration, admissions and tokens; `learning_tutor_interactions.sql`
+  for shown/explore/discuss and dismiss/restore. Events are best effort, not a
+  complete billing ledger. Missing events or unknown interrupted usage are not
+  zero cost. Reconcile recent durable operation IDs/status/admission/tokens
+  without selecting input/output text; cleared receipts can be pruned after
+  30 days on later admission. Follow [metrics.md](metrics.md#account-wide-tutor-lt5-receipts-first-observations-second)
+  for query scope, denominators and ID-only acceptance reconciliation.
+- At the two-week review, inspect approved examples and counts: displayed,
+  explored, discussed, dismissed and accepted recommendations; seven-day path
+  lesson completion; fourteen-day published Brief reads; duration, failures and
+  usage per successful operation/observed acceptance. Use the PostgreSQL durable
+  receipt queries for authoritative acceptance/follow-through, not event counts
+  alone. Pin `:as_of` and cohort filters consistently. Later acceptances will
+  still be immature at day 14: report pending separately, never as failure.
+  Deleted targets are unknown, not zero activity; cleared receipts still count.
+- Record **continue, revise or stop**, with evidence limitations. A small cohort
+  does not establish statistical uplift; acceptance alone is not learning. There
+  is no automatic global flip. Any wider rollout or further paid evaluation
+  requires its own approval and the outstanding quality gates.
+
+### Disable exposure without deleting learner data
+
+Under separate operator authorization, stop new opt-ins and perform **both**:
+
+1. Ensure the deployed settings default includes `learning_tutor:off`, preserving
+   all unrelated `FEATURE_FLAG_DEFAULTS` entries. Apply/restart consistently on
+   every replica. The code default is already false, but explicitly verify the
+   effective default using the admin list; settings can override code.
+2. Inventory **all explicit user-on overrides**, not just the initial roster.
+   The admin list's count includes off overrides and cannot enumerate users. With
+   authorized read-only database access, this ID-only inventory matches the ORM:
+
+   ```sql
+   SELECT user_id
+   FROM user_feature_overrides
+   WHERE flag_key = 'learning_tutor' AND enabled = TRUE
+   ORDER BY user_id;
+   ```
+
+   For every returned account, use the admin API to PUT `{"enabled": false}` to
+   `/api/v1/admin/feature-flags/learning_tutor/users/{user_id}` (200). Alternatively,
+   DELETE that same URL (204) **after verifying the default is off**, which restores
+   default resolution. A settings-off entry alone does not defeat user-on.
+   Recheck the inventory, defaults and affected learner/admin sessions; Tutor API
+   reads and recommendation-bearing creation must reject with 404, while ordinary
+   creation and already-created targets retain their normal independent gates.
+
+Disabling fences publication at settlement, but cannot un-send/refund an in-flight
+provider request or guarantee immediate cancellation. Already admitted cost can
+still arrive. This switch is not a database purge or a global stop for ordinary
+path/Beat generation. Keep Learning focus, conversation/usage/acceptance receipts
+and created targets intact. If code rollback is needed, deploy separately approved
+compatible code while retaining the additive schema; **do not run a destructive
+Alembic downgrade, clear conversations, or delete targets as rollback**.
+
 ## Logfire saved queries (import checklist)
 
 [`queries/logfire/`](../queries/logfire) is the source of truth for the PRD §7

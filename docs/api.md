@@ -951,7 +951,7 @@ costs no extra request. The frontend reads it through `useFeatureFlag(key)`
 | `shaping` | **on** | on (redundantly, as above) | Phase 2B shaping — the shaping rail, its API and its stream, and the apply/undo endpoints. Same history on its own key (epic #114, adopted convention 1): dark through 2B's build-out, **launched at AL-370**. Independent of `tutor`, so either can be killed without disturbing the other. |
 | `streaks` | **on** | on (redundantly, as above) | Phase 5 streaks — `GET /progress/summary` and everything under it (see [Progress](#progress-apiv1-phase-5-tdd-546)). Same history again on its own key (TDD D7): dark at `off` through the slice's build-out while admins dogfooded it, then **launched** by flipping this code default on, exactly as AL-270/AL-370 did. Kill it with `FEATURE_FLAG_DEFAULTS=streaks:off`. |
 | `analyst` | **on** | on (redundantly, as above) | Phase 6 — every route under [Analyst](#analyst-apiv1-al-522-issue-172-phase-6-tdd-6) (Beats, Briefs). Shipped dark at `off` through build-out while admins dogfooded it, then launched by flipping its code default on. Kill it without a code deploy with `FEATURE_FLAG_DEFAULTS=analyst:off`. |
-| `learning_tutor` | **off** | off (not in admin defaults) | Unshipped Account-wide Tutor state API. Explicit opt-in required for learners and admins; no generation or acceptance endpoint yet. |
+| `learning_tutor` | **off** | off (not in admin defaults) | Unshipped Account-wide Tutor experiment: state, explicit generation, recommendation acceptance and web surfaces. Explicit opt-in required for learners and admins. |
 
 **Operating it.** `FEATURE_FLAG_DEFAULTS` is a comma-separated list of
 `key:on` / `key:off` entries (`FEATURE_FLAG_DEFAULTS="tutor:on"`). Malformed and
@@ -972,7 +972,10 @@ identifiers return `404` (`401` when signed out). No live enablement is implied.
 Setting the default off does not override a per-user on override.
 
 Prefix: `/api/v1/learning-tutor`. State and explicit generation are implemented;
-acceptance and learner presentation remain later slices. GET never starts work.
+recommendation acceptance through ordinary creation and the Home/`/tutor` web
+surfaces are also implemented on the feature branch. GET never starts work.
+Operational approvals and outstanding quality/migration gates are in the
+[opt-in/disable runbook](deploy.md#account-wide-tutor-opt-in-and-disable-runbook-lt6).
 
 | Method and suffix | Request | Response |
 | --- | --- | --- |
@@ -1090,6 +1093,11 @@ Expired GETs expose interrupted without writes; next admission materializes expi
 No automatic rebilling/retry, scheduler or broker is added. Flag-off fences
 publication but cannot un-send or refund an in-flight provider request. No live
 enablement, paid evaluation or deployment is authorized by this implementation.
+
+The web Learning conversation renders model replies with automatic resources
+disabled: Markdown images become alt text and Mermaid fences remain inert code.
+Safe user-click links and validated existing-work navigation remain available;
+ordinary lesson Markdown behavior is unchanged.
 
 ### Synthetic provider and event contracts (LT-4/LT-5)
 
