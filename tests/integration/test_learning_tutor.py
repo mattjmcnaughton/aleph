@@ -135,7 +135,8 @@ async def test_dark_gate_and_empty_read_only_state(admin):
         state = response.json()
         assert (state["focus"], state["revision"], state["epoch"]) == (None, 0, 0)
         assert state["recommendations"] == state["history"]["items"] == []
-        assert (await http.post(URL + "/operations", json={})).status_code == 404
+        # LT-2 exposes explicit admission; invalid input still allocates no state.
+        assert (await http.post(URL + "/operations", json={})).status_code == 422
     async with db.async_session() as session:
         assert (
             await session.scalar(select(func.count()).select_from(LearningTutorState))

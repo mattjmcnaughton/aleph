@@ -200,6 +200,7 @@ def create_stub_app() -> FastAPI:
     settings.rate_limit_lesson_generations_per_day = 0
     settings.rate_limit_tutor_messages_per_day = 0
     settings.rate_limit_shaping_messages_per_day = 0
+    settings.rate_limit_learning_tutor_per_day = 0
     # Phase 6 (ticket AL-560): the arrival drain's own daily cap (D14) — same
     # "0 disables it" convention as every rate limit above. **The reason is
     # not concurrent projects sharing a user**. W29/W31 run in the

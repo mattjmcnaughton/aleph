@@ -1,11 +1,12 @@
-"""Authenticated, dark-gated Learning Tutor state API (LT-1 only)."""
+"""Authenticated, dark-gated Learning Tutor state and trigger/poll API."""
 
 from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from aleph import events
 from aleph.db import get_session
 from aleph.dependencies import get_current_user
 from aleph.domains.learning_recommendations import RecommendationConflict
@@ -13,14 +14,21 @@ from aleph.dtos.learning_tutor import (
     DecisionRequest,
     FocusRequest,
     HistoryPage,
+    InteractionRequest,
     LearningTutorStateDTO,
     OperationDTO,
+    OperationRequest,
     RecommendationDTO,
     RecommendationPage,
 )
 from aleph.models import User
 from aleph.services.feature_flags import FeatureFlag, FeatureFlagService
 from aleph.services.learning_tutor import LearningTutorService, LearningTutorUnavailable
+from aleph.services.learning_tutor_generation import (
+    LearningTutorBusy,
+    LearningTutorQuotaExceeded,
+    learning_tutor_generation,
+)
 
 CurrentUser = Annotated[User, Depends(get_current_user)]
 Session = Annotated[AsyncSession, Depends(get_session)]
@@ -42,6 +50,19 @@ async def service(user: CurrentUser, session: Session):
         yield LearningTutorService(session, user)
     except LearningTutorUnavailable:
         raise HTTPException(404, "not found") from None
+    except LearningTutorQuotaExceeded:
+        raise HTTPException(
+            429, "Today's Tutor limit reached; try again tomorrow."
+        ) from None
+    except LearningTutorBusy as exc:
+        raise HTTPException(
+            409,
+            {
+                "reason": "operation_in_progress",
+                "operation_id": str(exc.operation_id),
+                "message": "A Tutor operation is already running.",
+            },
+        ) from None
     except RecommendationConflict as exc:
         raise HTTPException(
             409,
@@ -87,6 +108,15 @@ async def operation(operation_id: UUID, service: Service) -> OperationDTO:
     return await service.operation(operation_id)
 
 
+@router.post("/operations")
+async def start_operation(
+    body: OperationRequest, service: Service, response: Response
+) -> OperationDTO:
+    result = await learning_tutor_generation.admit(service, body)
+    response.status_code = 202 if result.status == "running" else 200
+    return result
+
+
 @router.get("/recommendations")
 async def recommendations(
     service: Service, status: Literal["dismissed"], before: UUID | None = None
@@ -107,4 +137,21 @@ async def decision(
 ) -> LearningTutorStateDTO:
     return await service.decide(
         recommendation_id, body.decision, revision=body.revision
+    )
+
+
+@router.post("/recommendations/{recommendation_id}/interactions", status_code=204)
+async def interaction(
+    recommendation_id: UUID,
+    body: InteractionRequest,
+    service: Service,
+) -> None:
+    # Observational, never a decision mutation. The read validates current access.
+    await service.recommendation(recommendation_id)
+    events.emit_learning_recommendation_interacted(
+        account_id=service.user.id,
+        recommendation_id=recommendation_id,
+        interaction=body.interaction,
+        surface=body.surface,
+        session_id=body.session_id,
     )

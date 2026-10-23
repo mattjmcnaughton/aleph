@@ -876,6 +876,14 @@ def _stub_respond(messages: Sequence[ModelMessage], info: AgentInfo) -> ModelRes
     text = _user_text(messages)
     topic = clean_topic(text) or "the topic"
 
+    learning_tool = _tool_with(info.output_tools, "recommendations")
+    if learning_tool is not None:
+        instructions = info.instructions or ""
+        context = json.loads(instructions[instructions.index('{"kind":') :])
+        return ModelResponse(
+            parts=[ToolCallPart(learning_tool.name, build_stub_learning_tutor(context))]
+        )
+
     lesson_tool = _tool_with(info.output_tools, "read_passage")
     outline_tool = _tool_with(info.output_tools, "units")
     refusal_tool = _tool_with(info.output_tools, "message")
@@ -1263,6 +1271,50 @@ def _read_first_shapeable_lesson_id(prompt: str) -> str:
             "[force-proposal-revise] could not be honoured"
         )
     return match.group(1)
+
+
+def build_stub_learning_tutor(context: dict) -> dict:
+    """Synthetic LT-2 cases; sentinels inspect only current input/focus."""
+    text = context.get("content") or context.get("focus") or ""
+    if "[lt-failure]" in text:
+        raise StubModelForcedError("forced Learning Tutor provider failure")
+    reply = "Continue your learning, or tell me what you want to explore."
+    result = dict(
+        reply=reply if context["kind"] == "turn" else None,
+        existing_work=[],
+        recommendations=[],
+        replacement=None,
+    )
+    if "[lt-existing]" in text:
+        for group, kind in (("paths", "path"), ("beats", "beat")):
+            if context[group]:
+                result["existing_work"] = [
+                    dict(
+                        kind=kind,
+                        supplied_target_key=context[group][0]["supplied_target_key"],
+                    )
+                ]
+                break
+    elif "[lt-path]" in text or "[lt-beat]" in text or "[lt-invalid]" in text:
+        keys = context["evidence_keys"] or [
+            record["evidence_key"]
+            for group in ("paths", "beats")
+            for record in context[group]
+        ]
+        result["recommendations"] = [
+            dict(
+                kind="beat" if "[lt-beat]" in text else "path",
+                topic="Synthetic energy developments"
+                if "[lt-beat]" in text
+                else "Synthetic electricity foundations",
+                level="new_to_it",
+                guidance=None,
+                description="Explore the subject you asked about.",
+                rationale="This direction relates to your supplied learning context.",
+                evidence_keys=["fabricated" if "[lt-invalid]" in text else keys[0]],
+            )
+        ]
+    return result
 
 
 def _last_user_text(messages: Sequence[ModelMessage]) -> str:

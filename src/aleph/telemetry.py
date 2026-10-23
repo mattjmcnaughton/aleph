@@ -37,7 +37,8 @@ def _request_attributes(
     # Drop both at the boundary before dependency AND root spans are populated;
     # retain ordinary HTTP metadata and other routes' diagnostic attributes.
     route = request.scope.get("route")
-    if getattr(route, "path", None) == "/api/v1/devices":
+    path = getattr(route, "path", "") or ""
+    if path == "/api/v1/devices" or path.startswith("/api/v1/learning-tutor"):
         return {}
     return attributes
 

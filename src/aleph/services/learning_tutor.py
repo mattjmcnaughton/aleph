@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from aleph import events
 from aleph.domains.learning_recommendations import (
     MAX_ACTIVE,
     RecommendationConflict,
@@ -59,6 +60,24 @@ def operation_dto(row: LearningTutorOperation, now: datetime) -> OperationDTO:
             finished_at=row.expires_at if expired else row.finished_at,
             cleared=cleared,
         )
+    )
+
+
+def emit_operation_completed(row: LearningTutorOperation) -> None:
+    """Call only after the terminal receipt commit, never on replay or GET."""
+    if row.finished_at is None:
+        return
+    events.emit_learning_tutor_operation_completed(
+        account_id=row.user_id,
+        operation_id=row.id,
+        kind=row.kind,
+        outcome=row.error_code or (row.output or {}).get("outcome", "interrupted"),
+        duration_ms=max(
+            0, int((row.finished_at - row.started_at).total_seconds() * 1000)
+        ),
+        input_tokens=row.input_tokens,
+        output_tokens=row.output_tokens,
+        model_admitted=row.model_admitted,
     )
 
 
@@ -274,11 +293,14 @@ class LearningTutorService:
 
     async def clear(self, *, revision: int) -> LearningTutorStateDTO:
         state = await self.checked_state(revision)
+        running = await self.repository.running(self.user.id)
         await self.repository.clear(self.user.id, await self.repository.now())
         state.epoch += 1
         state.revision += 1
         state.last_refresh_operation_id = None
         await self.session.commit()
+        if running:
+            emit_operation_completed(running)
         return await self.read()
 
     async def decide(
@@ -320,6 +342,11 @@ class LearningTutorService:
         )
         state.revision += 1
         await self.session.commit()
+        events.emit_learning_recommendation_decided(
+            account_id=self.user.id,
+            recommendation_id=recommendation_id,
+            decision=decision,
+        )
         return await self.read()
 
     async def add_recommendation(

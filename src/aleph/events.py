@@ -79,6 +79,10 @@ BEAT_DEPLOYED = "beat_deployed"
 BRIEF_RESEARCH_COMPLETED = "brief_research_completed"
 BRIEF_READ = "brief_read"
 
+LEARNING_TUTOR_OPERATION_COMPLETED = "learning_tutor_operation_completed"
+LEARNING_RECOMMENDATION_INTERACTED = "learning_recommendation_interacted"
+LEARNING_RECOMMENDATION_DECIDED = "learning_recommendation_decided"
+
 # --- workflow tags (§12 shared vocabulary: PRD workflow → test → trace) ------- #
 
 _W_FIRST_PATH = "W1"  # new learner, first path, first lesson (the magic moment)
@@ -142,6 +146,37 @@ REQUEST_FIELDS: frozenset[str] = frozenset({"client"})
 
 # Each event's own fields; :data:`EVENT_FIELDS` adds :data:`REQUEST_FIELDS`.
 _EVENT_OWN_FIELDS: dict[str, frozenset[str]] = {
+    LEARNING_TUTOR_OPERATION_COMPLETED: frozenset(
+        {
+            "account_id",
+            "operation_id",
+            "kind",
+            "outcome",
+            "duration_ms",
+            "input_tokens",
+            "output_tokens",
+            "model_admitted",
+            "workflow",
+        }
+    ),
+    LEARNING_RECOMMENDATION_INTERACTED: frozenset(
+        {
+            "account_id",
+            "recommendation_id",
+            "interaction",
+            "surface",
+            "session_id",
+            "workflow",
+        }
+    ),
+    LEARNING_RECOMMENDATION_DECIDED: frozenset(
+        {
+            "account_id",
+            "recommendation_id",
+            "decision",
+            "workflow",
+        }
+    ),
     NOTIFICATION_SENT: frozenset({"account_id", "kind", "outcome", "workflow"}),
     DEVICE_REMOVED: frozenset({"account_id", "reason", "workflow"}),
     ACCOUNT_CREATED: frozenset({"account_id", "workflow"}),
@@ -379,6 +414,67 @@ def _emit_guarded(event: str, **fields: object) -> None:
 
 
 # --- account -----------------------------------------------------------------  #
+
+
+def emit_learning_tutor_operation_completed(
+    *,
+    account_id: uuid.UUID,
+    operation_id: uuid.UUID,
+    kind: str,
+    outcome: str,
+    duration_ms: int,
+    input_tokens: int,
+    output_tokens: int,
+    model_admitted: bool,
+) -> None:
+    """Durable terminal transition only; never prompt, reply, focus or model errors."""
+    _emit_guarded(
+        LEARNING_TUTOR_OPERATION_COMPLETED,
+        account_id=str(account_id),
+        operation_id=str(operation_id),
+        kind=kind,
+        outcome=outcome,
+        duration_ms=duration_ms,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        model_admitted=model_admitted,
+        workflow="learning_tutor",
+    )
+
+
+def emit_learning_recommendation_interacted(
+    *,
+    account_id: uuid.UUID,
+    recommendation_id: uuid.UUID,
+    interaction: str,
+    surface: str,
+    session_id: uuid.UUID,
+) -> None:
+    """Observational only; consumers deduplicate shown by card/surface/session."""
+    _emit_guarded(
+        LEARNING_RECOMMENDATION_INTERACTED,
+        account_id=str(account_id),
+        recommendation_id=str(recommendation_id),
+        interaction=interaction,
+        surface=surface,
+        session_id=str(session_id),
+        workflow="learning_tutor",
+    )
+
+
+def emit_learning_recommendation_decided(
+    *,
+    account_id: uuid.UUID,
+    recommendation_id: uuid.UUID,
+    decision: str,
+) -> None:
+    _emit_guarded(
+        LEARNING_RECOMMENDATION_DECIDED,
+        account_id=str(account_id),
+        recommendation_id=str(recommendation_id),
+        decision=decision,
+        workflow="learning_tutor",
+    )
 
 
 def emit_notification_sent(*, account_id: uuid.UUID, kind: str, outcome: str) -> None:

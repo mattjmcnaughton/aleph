@@ -1,4 +1,4 @@
-"""Learning Tutor state API. Generation admission is deliberately not exposed yet."""
+"""Learning Tutor state, durable generation and observational interaction API."""
 
 from datetime import datetime
 from typing import Annotated, Literal
@@ -6,6 +6,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
+from aleph.creation_inputs import GuidanceStr, TopicStr
 from aleph.domains.learning_recommendations import (
     Decision,
     Kind,
@@ -13,6 +14,31 @@ from aleph.domains.learning_recommendations import (
 )
 
 Revision = Annotated[int, Field(ge=0)]
+
+
+class OperationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    request_id: UUID
+    revision: Revision
+    epoch: Revision
+    kind: Literal["turn", "refresh"]
+    content: (
+        Annotated[
+            str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)
+        ]
+        | None
+    ) = None
+    recommendation_id: UUID | None = None
+
+    @model_validator(mode="after")
+    def operation_shape(self) -> "OperationRequest":
+        if self.kind == "turn" and self.content is None:
+            raise ValueError("turn requires content")
+        if self.kind == "refresh" and (
+            self.content is not None or self.recommendation_id is not None
+        ):
+            raise ValueError("refresh cannot contain content or recommendation")
+        return self
 
 
 class EvidenceReference(BaseModel):
@@ -38,16 +64,9 @@ class RecommendationDraft(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
     kind: Kind
-    topic: Annotated[
-        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)
-    ]
+    topic: TopicStr
     level: Literal["new_to_it", "some_experience", "work_in_it"]
-    guidance: (
-        Annotated[
-            str, StringConstraints(strip_whitespace=True, min_length=1, max_length=4000)
-        ]
-        | None
-    ) = None
+    guidance: GuidanceStr | None = None
     description: str = Field(min_length=1, max_length=300)
     rationale: str = Field(min_length=1, max_length=600)
     evidence: list[EvidenceReference] = Field(min_length=1, max_length=3)
@@ -63,6 +82,13 @@ class DecisionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     decision: Decision
     revision: Revision
+
+
+class InteractionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    interaction: Literal["shown", "explore", "discuss"]
+    surface: Literal["home", "tutor"]
+    session_id: UUID
 
 
 class RecommendationDTO(BaseModel):

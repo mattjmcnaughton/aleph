@@ -27,6 +27,7 @@ MODEL_SLOTS: tuple[str, ...] = (
     "model_shaper",
     "model_research",
     "model_brief",
+    "model_learning_tutor",
 )
 
 
@@ -419,6 +420,11 @@ class Settings(BaseSettings):
     # override it per message (never persisted, §5.3); the override rides the
     # same shared ``model_allowlist``.
     model_tutor: str = "openai/gpt-5.6-luna"
+
+    model_learning_tutor: str = "openai/gpt-5.6-luna"
+    learning_tutor_timeout: int = Field(default=90, gt=0, le=90)
+    max_concurrent_learning_tutor_operations: int = Field(default=2, ge=1)
+    rate_limit_learning_tutor_per_day: int = Field(default=30, ge=0)
 
     # Carried-history window in *turns* (a learner message + its tutor reply, as
     # a unit), most recent first, dropped rather than summarized (D6). Bounded
