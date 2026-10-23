@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from contextlib import suppress
 from typing import TYPE_CHECKING
 
 from aleph import events
@@ -141,6 +142,7 @@ async def create_path(
     if replay is not None:
         assert isinstance(replay, Path)
         await session.commit()
+        session.expunge(replay)
         return replay
     await build_daily_rate_limiter(session).check_path_creation(
         user_id=user.id, is_admin=is_admin
@@ -156,13 +158,17 @@ async def create_path(
     )
     await accept_created(session, state, row, path, body)
     await session.commit()
+    # Preserve the committed response across rollback/expiration if dispatch or
+    # recording its failure loses the DB. Precommit errors are never contained.
+    session.expunge(path)
     emit_acceptance(row, path)
     try:
         generation_orchestrator.dispatch_created_path(path)
     except Exception:
         # Creation is durable. Never tell the caller it did not happen.
-        await PathRepository(session).mark_dispatch_failed(path.id)
-        await session.commit()
+        with suppress(Exception):
+            await PathRepository(session).mark_dispatch_failed(path.id)
+            await session.commit()
     return path
 
 
@@ -178,6 +184,7 @@ async def create_beat(
     if replay is not None:
         assert isinstance(replay, Beat)
         await session.commit()
+        session.expunge(replay)
         return replay
     await build_daily_rate_limiter(session).check_beat_creation(
         user_id=user.id, is_admin=is_admin
@@ -193,6 +200,7 @@ async def create_beat(
     )
     await accept_created(session, state, row, beat, body)
     await session.commit()
+    session.expunge(beat)
     emit_acceptance(row, beat)
     events.emit_beat_deployed(
         account_id=user.id,
@@ -206,10 +214,17 @@ async def create_beat(
             beat.id, user_id=user.id, local_today=local_today, is_admin=is_admin
         )
     except Exception:
-        # trigger_initial fences failures after claiming. A failure before the
-        # claim becomes explicitly retryable without undoing its receipt.
-        await BeatRepository(session).mark_initial_dispatch_failed(beat.id)
-        await session.commit()
+        # Best effort only: if recording also fails, the committed idle/stale
+        # target still has the scheduled-job recovery path, not a new target.
+        with suppress(Exception):
+            await BeatRepository(session).mark_initial_dispatch_failed(beat.id)
+            await session.commit()
     # A concurrent explicit deletion may follow the commit. Do not turn that
-    # successful creation into a refresh exception; replay will report 410.
-    return await session.get(Beat, beat.id, populate_existing=True) or beat
+    # success or a read outage into failed creation. The detached snapshot says
+    # idle (not completed research); subsequent GET is authoritative.
+    with suppress(Exception):
+        current = await session.get(Beat, beat.id, populate_existing=True)
+        if current is not None:
+            session.expunge(current)
+            return current
+    return beat

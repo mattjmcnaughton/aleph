@@ -1177,10 +1177,9 @@ def emit_beat_deployed(
     """A learner deployed a Beat (W29) — Beat survival's own denominator and
     the deployment-mix datum (TDD §9).
 
-    Fires from ``routers/v1/beats.py::deploy_beat`` after the Beat row is
-    created and committed and the arrival drain has claimed and spawned its
-    first research run — the ``path_created`` precedent (``services/
-    generation.py::create_path``), one workload over: the analogous "the row
+    Fires from ``services/creation.py::create_beat`` after the Beat row is
+    created and committed, before its first research dispatch — the
+    ``path_created`` precedent, one workload over: the analogous "the row
     exists, committed" moment for a Beat's own creation. The Level rides as
     ``beat_level``, **not** ``level`` — ``path_created``'s ``path_level``
     reason applies verbatim: structlog's ``add_log_level`` processor owns the
@@ -1190,7 +1189,7 @@ def emit_beat_deployed(
     axis.
 
     Routed through :func:`_emit_guarded`: it runs in the request path, after
-    the Beat already exists and the drain has already spawned its first run
+    the Beat already exists
     — a raising sink must not turn an already-deployed Beat into a ``500``
     the learner would read as "nothing happened" (the ``change_applied``
     argument, one surface over).

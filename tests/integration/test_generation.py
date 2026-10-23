@@ -364,6 +364,15 @@ async def _seed_path_with_lessons(
 # --------------------------------------------------------------------------- #
 
 
+async def seed_and_dispatch(orch: GenerationOrchestrator, **inputs: Any) -> Path:
+    """Seed generation's input; HTTP/canonical-service tests own creation policy."""
+    async with db.async_session() as session:
+        path = await PathRepository(session).create(**inputs)
+        await session.commit()
+    orch.dispatch_created_path(path)
+    return path
+
+
 @pytest.mark.anyio
 async def test_create_path_generates_outline_and_prefetch_window() -> None:
     orch, spawn = make_orchestrator(resolve_model_fn=stub_resolver(), prefetch_n=2)
@@ -372,8 +381,8 @@ async def test_create_path_generates_outline_and_prefetch_window() -> None:
         await session.commit()
         user_id = user.id
 
-    path = await orch.create_path(
-        user_id=user_id, topic="Rust ownership", level=Level.SOME_EXPERIENCE
+    path = await seed_and_dispatch(
+        orch, user_id=user_id, topic="Rust ownership", level=Level.SOME_EXPERIENCE
     )
     path_id = path.id
     assert path.status is PathStatus.PENDING  # 202 is returned before generation
@@ -425,8 +434,8 @@ async def test_persisted_quick_check_options_are_reordered_not_taken_as_keyed() 
         await session.commit()
         user_id = user.id
 
-    path = await orch.create_path(
-        user_id=user_id, topic="Rust ownership", level=Level.SOME_EXPERIENCE
+    path = await seed_and_dispatch(
+        orch, user_id=user_id, topic="Rust ownership", level=Level.SOME_EXPERIENCE
     )
     await spawn.drain()
 
@@ -473,7 +482,8 @@ async def test_create_path_with_guidance_persists_and_reaches_outline_prompt() -
         user_id = user.id
 
     guidance = "Focus on hands-on examples; skip the theoretical history."
-    path = await orch.create_path(
+    path = await seed_and_dispatch(
+        orch,
         user_id=user_id,
         topic="Rust ownership",
         level=Level.SOME_EXPERIENCE,
@@ -503,8 +513,8 @@ async def test_create_path_without_guidance_persists_none() -> None:
         await session.commit()
         user_id = user.id
 
-    path = await orch.create_path(
-        user_id=user_id, topic="Rust ownership", level=Level.SOME_EXPERIENCE
+    path = await seed_and_dispatch(
+        orch, user_id=user_id, topic="Rust ownership", level=Level.SOME_EXPERIENCE
     )
     await spawn.drain()
 
@@ -525,7 +535,8 @@ async def test_refusal_marks_refused_with_message_and_no_units() -> None:
         await session.commit()
         user_id = user.id
 
-    path = await orch.create_path(
+    path = await seed_and_dispatch(
+        orch,
         user_id=user_id,
         topic="Please help [force-refusal] with this",
         level=Level.NEW_TO_IT,
@@ -552,8 +563,11 @@ async def test_outline_failure_marks_failed_no_units() -> None:
         await session.commit()
         user_id = user.id
 
-    path = await orch.create_path(
-        user_id=user_id, topic="[force-outline-failure] topic", level=Level.NEW_TO_IT
+    path = await seed_and_dispatch(
+        orch,
+        user_id=user_id,
+        topic="[force-outline-failure] topic",
+        level=Level.NEW_TO_IT,
     )
     await spawn.drain()
 
@@ -575,8 +589,8 @@ async def test_ordering_invariant_under_interleaved_polls() -> None:
         await session.commit()
         user_id = user.id
 
-    path = await orch.create_path(
-        user_id=user_id, topic="Distributed systems", level=Level.WORK_IN_IT
+    path = await seed_and_dispatch(
+        orch, user_id=user_id, topic="Distributed systems", level=Level.WORK_IN_IT
     )
     await spawn.drain()  # outline ready; prefetch_n=0 so ~1 lesson generated
     path_id = path.id
@@ -632,8 +646,8 @@ async def test_failed_lesson_stops_chain_then_retry_resumes() -> None:
         user_id = user.id
 
     topic = f"Kubernetes {force_lesson_failure(2)}"
-    path = await fail_orch.create_path(
-        user_id=user_id, topic=topic, level=Level.SOME_EXPERIENCE
+    path = await seed_and_dispatch(
+        fail_orch, user_id=user_id, topic=topic, level=Level.SOME_EXPERIENCE
     )
     await fail_spawn.drain()
     path_id = path.id
@@ -681,8 +695,8 @@ async def test_lesson_timeout_marks_failed_not_stuck_generating() -> None:
         await session.commit()
         user_id = user.id
 
-    path = await orch.create_path(
-        user_id=user_id, topic="Slow topic", level=Level.NEW_TO_IT
+    path = await seed_and_dispatch(
+        orch, user_id=user_id, topic="Slow topic", level=Level.NEW_TO_IT
     )
     await (
         spawn.drain()
@@ -845,8 +859,8 @@ async def test_lesson_persist_failure_records_failed_not_stuck_generating(
         await session.commit()
         user_id = user.id
 
-    path = await orch.create_path(
-        user_id=user_id, topic="Persist boom", level=Level.NEW_TO_IT
+    path = await seed_and_dispatch(
+        orch, user_id=user_id, topic="Persist boom", level=Level.NEW_TO_IT
     )
     await spawn.drain()  # must not raise: the handler swallows and records failed
 
@@ -869,8 +883,8 @@ async def test_poll_path_returns_snapshot_and_triggers_resume() -> None:
         await session.commit()
         user_id = user.id
 
-    path = await orch.create_path(
-        user_id=user_id, topic="Poll topic", level=Level.SOME_EXPERIENCE
+    path = await seed_and_dispatch(
+        orch, user_id=user_id, topic="Poll topic", level=Level.SOME_EXPERIENCE
     )
     await spawn.drain()
 
@@ -893,7 +907,8 @@ async def test_poll_path_snapshot_carries_refusal_message() -> None:
         await session.commit()
         user_id = user.id
 
-    path = await orch.create_path(
+    path = await seed_and_dispatch(
+        orch,
         user_id=user_id,
         topic="Please help [force-refusal] here",
         level=Level.NEW_TO_IT,
