@@ -1014,7 +1014,7 @@ Recommendation fields: `id`, `kind` (`path|beat`), `status`
 `rationale`, `evidence`, `created_at`, `accepted_at`, `target_id`, `target_available`.
 Text/evidence are nullable for cleared accepted receipts. A deleted accepted target
 leaves `status=accepted`, `target_id=null`, `target_available=false`; GET is still
-200, not permission to recreate it. Acceptance/replay HTTP behavior belongs to LT-3.
+200, not permission to recreate it. Final creation replay returns 410 in that case.
 Evidence entries have `kind` (`path|beat|brief|focus|message`), an `id` only for
 the first three, and optional nonnegative `completed_lessons`, `published_briefs`,
 `read_briefs`, `observed_at`. No arbitrary text or source bodies are accepted there.
@@ -1036,8 +1036,8 @@ Admission checks epoch first, then replay/hash before rejecting an old revision.
 `LearningTutorService.add_recommendation` takes a validated `RecommendationDraft`
 and acquires the state lock; it checks exclusion, sources and capacity, flushes but
 does not commit or bump revision. LT-2 owns atomic whole-result settlement and
-the revision bump. LT-3 must lock users, then Tutor state, then recommendation,
-and atomically insert its target plus acceptance receipt. Composite owner FKs
+the revision bump. Creation locks users, then Tutor state, then recommendation,
+and atomically inserts its target plus acceptance receipt. Composite owner FKs
 protect operation/target links; target deletion nulls only the target reference.
 
 ### Explicit generation (LT-2)
@@ -1112,5 +1112,46 @@ best-effort and receipts remain authoritative. No prompt/reply/focus/card text i
 logged; this agent disables automatic content instrumentation and its HTTP routes
 drop request/validation attributes. Interaction pings authenticate and revalidate
 the card but never mutate it. Clients must deduplicate `shown` per card/surface/
-session; metric queries should also deduplicate those keys. Acceptance events and
-target creation remain LT-3-owned; no acceptance event is emitted here.
+session; metric queries should also deduplicate those keys.
+
+### Final recommendation acceptance (LT-3)
+
+Existing `POST /api/v1/paths` and `POST /api/v1/beats` accept optional paired
+`learning_recommendation_id` (UUID) and `learning_tutor_revision` (nonnegative
+integer). Both must be non-null or both absent/null; a partial pair is 422.
+Ordinary creation without either field is unchanged. No chat/interaction endpoint
+creates a target. Responses retain `202 {id}` for paths and `202 BeatDetail` for
+Beats; generation completion is still a separate outcome.
+
+The edited, validated creation fields are authoritative, not the card's original
+Topic/Level/Guidance. Existing Teaching style, Anchor day, model-picker policy and
+limits apply. Recommendation creation additionally verifies the Tutor flag,
+ownership, matching kind, active/nonstale card and revision; Beat creation always
+requires analyst. Feature-off/unowned is 404; stale revision is 409 `stale_state`,
+unavailable kind/status/evidence/focus is 409 `recommendation_unavailable`.
+
+Acceptance and target insertion commit atomically, with one revision increment.
+Ordinary and recommended creation serialize cap checks using an account row lock.
+Evidence rows are separately locked through commit against deletion; account
+locking alone does not protect source deletion. An accepted card disappears from
+active reads. Clear redacts its text but preserves the acceptance receipt.
+
+Repeat the same creation payload to recover a lost response: accepted replay is
+resolved before revision/cap checks and returns the original target without another
+dispatch, acceptance event or quota charge. A SHA-256 of canonical JSON stores
+only normalized creation fields, including explicit model overrides and defaults.
+DTO trimming applies; case and interior whitespace remain meaningful. The hash
+excludes recommendation identity, transient revision and time-zone query offset.
+Changed payload returns 409 `request_reused`; deleted target returns 410 with
+`error.details.reason=accepted_target_deleted`, never a replacement target.
+Ownership and feature gates still apply on replay. Ordinary creation is not newly
+idempotent.
+
+Creation/acceptance events and dispatch occur only after commit. A known dispatch
+failure returns the committed target and marks target generation retryable failed
+(without overwriting a concurrent claim). Path polling/reconciliation recovers a
+pending target after process loss; the scheduled Beat job recovers a never-run
+idle Beat or stale research claim. No new queue or automatic recreation exists.
+`learning_recommendation_accepted` carries only account ID, recommendation ID,
+target_kind, target_id, workflow and optional client. It emits once after first
+acceptance, not replay; the durable receipt, not best-effort telemetry, is authority.

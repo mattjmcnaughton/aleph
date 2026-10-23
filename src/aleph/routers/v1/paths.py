@@ -24,6 +24,7 @@ not reconstructed.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Annotated
 from uuid import UUID  # noqa: TC003 - FastAPI resolves route-param annotations.
@@ -39,6 +40,7 @@ from aleph.authz import is_admin
 from aleph.config import settings
 from aleph.db import get_session
 from aleph.dependencies import get_current_user
+from aleph.domains.learning_recommendations import RecommendationConflict
 from aleph.domains.progression import resume_path
 from aleph.dtos.paths import (
     CreatePathRequest,
@@ -63,6 +65,7 @@ from aleph.repositories import (
 )
 from aleph.services import creation
 from aleph.services.generation import generation_orchestrator
+from aleph.services.learning_tutor import LearningTutorUnavailable
 from aleph.services.paths_read import load_path_detail
 from aleph.services.rate_limit import build_daily_rate_limiter
 
@@ -74,6 +77,27 @@ router = APIRouter(prefix="/api/v1", tags=["paths"])
 
 CurrentUser = Annotated[User, Depends(get_current_user)]
 Session = Annotated[AsyncSession, Depends(get_session)]
+
+
+@contextmanager
+def creation_errors():
+    """Shared HTTP translation for the two creation endpoints."""
+    try:
+        yield
+    except LearningTutorUnavailable:
+        raise HTTPException(404, "not found") from None
+    except creation.AcceptedTargetDeleted:
+        raise HTTPException(
+            410,
+            {
+                "reason": "accepted_target_deleted",
+                "message": "Accepted target deleted.",
+            },
+        ) from None
+    except RecommendationConflict as exc:
+        raise HTTPException(
+            409, {"reason": str(exc), "message": "Learning recommendation changed."}
+        ) from None
 
 
 @dataclass(frozen=True)
@@ -216,7 +240,8 @@ async def create_path(
     """
     admin = is_admin(user, settings)
     resolve_model_overrides(body, is_admin=admin, allowed=settings.allowlist_ids)
-    path = await creation.create_path(session, user, body, is_admin=admin)
+    with creation_errors():
+        path = await creation.create_path(session, user, body, is_admin=admin)
     return CreatePathResponse(id=path.id)
 
 

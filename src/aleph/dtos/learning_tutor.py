@@ -16,6 +16,21 @@ from aleph.domains.learning_recommendations import (
 Revision = Annotated[int, Field(ge=0)]
 
 
+class RecommendationCreationRequest(BaseModel):
+    """Optional acceptance identity on the existing final creation requests."""
+
+    learning_recommendation_id: UUID | None = None
+    learning_tutor_revision: Revision | None = None
+
+    @model_validator(mode="after")
+    def acceptance_pair(self) -> "RecommendationCreationRequest":
+        if (self.learning_recommendation_id is None) != (
+            self.learning_tutor_revision is None
+        ):
+            raise ValueError("recommendation ID and Tutor revision require each other")
+        return self
+
+
 class OperationRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     request_id: UUID

@@ -342,6 +342,14 @@ class PathRepository:
         )
         return result.scalar_one_or_none()
 
+    async def mark_dispatch_failed(self, path_id: uuid.UUID) -> None:
+        """Expose a known scheduling failure, without overwriting a racing claim."""
+        await self.session.execute(
+            update(Path)
+            .where(Path.id == path_id, Path.status == PathStatus.PENDING)
+            .values(status=PathStatus.FAILED, updated_at=func.now())
+        )
+
     async def mark_ready(self, path_id: uuid.UUID, *, fence: datetime.datetime) -> bool:
         """Mark the outline ready (terminal-ish; retryable only via ``failed``).
 

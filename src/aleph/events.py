@@ -82,6 +82,7 @@ BRIEF_READ = "brief_read"
 LEARNING_TUTOR_OPERATION_COMPLETED = "learning_tutor_operation_completed"
 LEARNING_RECOMMENDATION_INTERACTED = "learning_recommendation_interacted"
 LEARNING_RECOMMENDATION_DECIDED = "learning_recommendation_decided"
+LEARNING_RECOMMENDATION_ACCEPTED = "learning_recommendation_accepted"
 
 # --- workflow tags (§12 shared vocabulary: PRD workflow → test → trace) ------- #
 
@@ -176,6 +177,9 @@ _EVENT_OWN_FIELDS: dict[str, frozenset[str]] = {
             "decision",
             "workflow",
         }
+    ),
+    LEARNING_RECOMMENDATION_ACCEPTED: frozenset(
+        {"account_id", "recommendation_id", "target_kind", "target_id", "workflow"}
     ),
     NOTIFICATION_SENT: frozenset({"account_id", "kind", "outcome", "workflow"}),
     DEVICE_REMOVED: frozenset({"account_id", "reason", "workflow"}),
@@ -477,6 +481,24 @@ def emit_learning_recommendation_decided(
     )
 
 
+def emit_learning_recommendation_accepted(
+    *,
+    account_id: uuid.UUID,
+    recommendation_id: uuid.UUID,
+    target_kind: str,
+    target_id: uuid.UUID,
+) -> None:
+    """After the atomic target/receipt commit, never on replay; no private text."""
+    _emit_guarded(
+        LEARNING_RECOMMENDATION_ACCEPTED,
+        account_id=str(account_id),
+        recommendation_id=str(recommendation_id),
+        target_kind=target_kind,
+        target_id=str(target_id),
+        workflow="learning_tutor",
+    )
+
+
 def emit_notification_sent(*, account_id: uuid.UUID, kind: str, outcome: str) -> None:
     """Delivery outcome: delivered means push-service acceptance only (W38)."""
     _emit_guarded(
@@ -516,7 +538,7 @@ def emit_path_created(
     The onboarding Level is emitted as ``path_level``, **not** ``level``:
     structlog's ``add_log_level`` processor owns the ``level`` key (the log
     severity) and would clobber it, so the domain Level rides a distinct name."""
-    _emit(
+    _emit_guarded(
         PATH_CREATED,
         account_id=str(account_id),
         path_id=str(path_id),

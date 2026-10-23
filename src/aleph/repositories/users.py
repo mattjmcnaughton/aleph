@@ -46,6 +46,17 @@ class UserRepository:
             select(User).where(User.id == user_id).with_for_update()
         )
 
+    async def lock_for_creation(self, user_id: uuid.UUID) -> User | None:
+        """Serialize admissions without blocking unrelated child FK inserts.
+
+        NO KEY UPDATE still excludes other admissions and account deletion. A
+        Tutor writer may already hold state while inserting a user-owned receipt;
+        allowing its FK KEY SHARE avoids users->state / state->users deadlock.
+        """
+        return await self.session.scalar(
+            select(User).where(User.id == user_id).with_for_update(key_share=True)
+        )
+
     async def get_by_identity(self, issuer: str, subject: str) -> User | None:
         """Return the account for a stable ``(issuer, subject)`` pair, if any."""
         return await self.session.scalar(

@@ -63,7 +63,7 @@ from aleph.models import (  # noqa: TC001 - FastAPI resolves annotations.
     User,
 )
 from aleph.repositories import BeatRepository, BriefRepository
-from aleph.routers.v1.paths import validate_model_override
+from aleph.routers.v1.paths import creation_errors, validate_model_override
 from aleph.services import creation
 from aleph.services.briefing import briefing_service
 from aleph.services.feature_flags import FeatureFlag, FeatureFlagService
@@ -235,14 +235,20 @@ async def deploy_beat(
     validate_model_override(
         body.model_brief, is_admin=admin, allowed=settings.allowlist_ids
     )
-    beat = await creation.create_beat(
-        session,
-        user,
-        body,
-        local_today=_local_today(tz_offset_minutes),
-        is_admin=admin,
+    with creation_errors():
+        beat = await creation.create_beat(
+            session,
+            user,
+            body,
+            local_today=_local_today(tz_offset_minutes),
+            is_admin=admin,
+        )
+    entries = (
+        await BriefRepository(session).list_for_beat(beat.id)
+        if body.learning_recommendation_id is not None
+        else []
     )
-    return _beat_detail_dto(beat, entries=[])
+    return _beat_detail_dto(beat, entries=entries)
 
 
 @router.get("/beats")
