@@ -8,6 +8,7 @@ import {
 import { useEffect } from "react";
 import type { RouterContext } from "../app/app";
 import { AppHeader } from "../components/app-header";
+import { LearningAccountBoundary } from "../components/learning-tutor/account-boundary";
 import { PushLifecycle } from "../components/push-lifecycle";
 import { LOGIN_PATH, authRedirect, sessionQueryOptions } from "../lib/auth";
 import { clearFlow, readFlow } from "../lib/flow";
@@ -58,6 +59,7 @@ function RootLayout() {
 
   return (
     <div className="min-h-screen bg-night text-porcelain">
+      <LearningAccountBoundary />
       {showChrome ? <AppHeader /> : null}
       {showChrome ? <PushLifecycle /> : null}
       <Outlet />

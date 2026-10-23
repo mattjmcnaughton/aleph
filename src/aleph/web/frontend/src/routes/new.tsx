@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import {
   type Level,
@@ -30,6 +30,13 @@ import {
 } from "../lib/onboarding";
 import { makePollingRefetchInterval } from "../lib/polling";
 import { useRetryGeneration } from "../lib/use-retry-generation";
+import {
+  CreationNotice,
+  CreationSeed,
+  type RecommendationSeed,
+  uncertainCreation,
+} from "../components/learning-tutor/creation-seed";
+import { LEARNING_KEY } from "../lib/learning-tutor";
 
 export const Route = createFileRoute("/new")({
   // `?topic=` seeds the field and nothing else (same shape as `/review?path=`
@@ -38,11 +45,23 @@ export const Route = createFileRoute("/new")({
   // exists. The one caller today is the path-complete card's "Go deeper" door
   // (AL-420), which hands over the finished path's Topic so the learner is not
   // retyping a subject Aleph already knows.
-  validateSearch: (search: Record<string, unknown>): { topic?: string } => ({
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): { topic?: string; recommendation?: string } => ({
     topic: typeof search.topic === "string" ? search.topic : undefined,
+    recommendation: typeof search.recommendation === "string" ? search.recommendation : undefined,
   }),
-  component: NewPath,
+  component: NewPathRoute,
 });
+
+function NewPathRoute() {
+  const search = Route.useSearch();
+  return (
+    <CreationSeed id={search.recommendation} kind="path">
+      {(seed) => <NewPath key={seed?.id ?? "ordinary"} seed={seed} />}
+    </CreationSeed>
+  );
+}
 
 const pathPollConfig = {
   isTerminal: (data: PathDetail | undefined) => isPathStatusTerminal(data?.status),
@@ -55,19 +74,19 @@ const pathPollConfig = {
 //
 // Scope (AL-061): free-text topic + level only. The mock's popular-topic
 // suggestion chips are deliberately out of scope for this ticket and land later.
-function NewPath() {
+function NewPath({ seed }: { seed?: RecommendationSeed }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const search = Route.useSearch();
 
   // Seeded once, as the initial value — not synced to the search param, so a
   // learner who edits the field keeps their edit.
-  const [topic, setTopic] = useState(search.topic ?? "");
-  const [level, setLevel] = useState<Level>("new_to_it");
+  const [topic, setTopic] = useState(seed?.topic ?? search.topic ?? "");
+  const [level, setLevel] = useState<Level>(seed?.level ?? "new_to_it");
   // Optional creation input alongside topic (§5.1, docs/api.md): free text the
   // learner pastes to shape the outline. Preserved across the failed→editing
   // round trip exactly like topic/level, below.
-  const [guidance, setGuidance] = useState("");
+  const [guidance, setGuidance] = useState(seed?.guidance ?? "");
   const [teachingStyle, setTeachingStyle] = useState("");
   const [pathId, setPathId] = useState<string | null>(null);
   // Admin model slots (§5.3/D14). `MODEL_SLOT_DEFAULT` means "no override" —
@@ -86,7 +105,11 @@ function NewPath() {
   const createMutation = useMutation({
     mutationFn: createPath,
     onSuccess: async (created) => {
+      if (seed && queryClient.getQueryData(sessionQueryOptions.queryKey)?.user?.id !== seed.account)
+        return;
       setPathId(created.id);
+      if (seed)
+        void queryClient.invalidateQueries({ queryKey: [...LEARNING_KEY, seed.account, "state"] });
       if (user) announcePathCreated(user.id);
       // The switcher's cached list no longer matches the server. Nothing else
       // would correct it: the list is fresh for `staleTime` (30s) so a remount
@@ -97,6 +120,8 @@ function NewPath() {
       await queryClient.invalidateQueries({ queryKey: PATHS_LIST_QUERY_KEY });
     },
     onError: (error, variables) => {
+      if (seed && queryClient.getQueryData(sessionQueryOptions.queryKey)?.user?.id === seed.account)
+        void queryClient.invalidateQueries({ queryKey: [...LEARNING_KEY, seed.account, "state"] });
       // A rejected model id says the cached session's allowlist is stale — it
       // is the *only* thing that can produce this error. Refetch it so the
       // picker re-offers what the server will actually accept, instead of
@@ -139,10 +164,18 @@ function NewPath() {
 
   function onSubmit(event: React.FormEvent) {
     event.preventDefault();
-    if (!canSubmitTopic(topic)) return;
-    createMutation.mutate(
-      buildCreatePathInput({ topic, level, guidance, teachingStyle, modelOutline, modelLesson }),
-    );
+    if (
+      !canSubmitTopic(topic) ||
+      createMutation.isPending ||
+      (seed && uncertainCreation(createMutation.error))
+    )
+      return;
+    createMutation.mutate({
+      ...buildCreatePathInput({ topic, level, guidance, teachingStyle, modelOutline, modelLesson }),
+      ...(seed
+        ? { learning_recommendation_id: seed.id, learning_tutor_revision: seed.revision }
+        : {}),
+    });
   }
 
   const rateLimited = createMutation.isError && isRateLimited(createMutation.error);
@@ -167,6 +200,28 @@ function NewPath() {
     <main className="mx-auto w-full max-w-[480px] px-4 py-8">
       <Breadcrumbs current="New path" />
 
+      {seed && (
+        <>
+          <p className="mb-3 text-sm text-mist">
+            Suggested starting point — edit anything before creating.
+          </p>
+          <Link
+            to="/tutor"
+            search={{ recommendation: seed.id }}
+            className="inline-flex min-h-11 items-center text-sm text-teal"
+          >
+            Cancel exploration
+          </Link>
+          <CreationNotice
+            error={createMutation.error}
+            recovering={createMutation.isPending}
+            recover={() => {
+              if (createMutation.variables) createMutation.mutate(createMutation.variables);
+            }}
+          />
+        </>
+      )}
+
       <p className="kicker">New path</p>
       <h1 className="mt-2 text-3xl font-semibold leading-tight tracking-tight">
         What do you want to learn?
@@ -186,7 +241,9 @@ function NewPath() {
           onGuidanceChange={setGuidance}
           onTeachingStyleChange={setTeachingStyle}
           onSubmit={onSubmit}
-          submitting={createMutation.isPending}
+          submitting={
+            createMutation.isPending || Boolean(seed && uncertainCreation(createMutation.error))
+          }
           rateLimited={rateLimited}
           errored={createFailed}
           // Assembled here rather than relayed as eight props the form only
