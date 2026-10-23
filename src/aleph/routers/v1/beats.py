@@ -64,6 +64,7 @@ from aleph.models import (  # noqa: TC001 - FastAPI resolves annotations.
 )
 from aleph.repositories import BeatRepository, BriefRepository
 from aleph.routers.v1.paths import validate_model_override
+from aleph.services import creation
 from aleph.services.briefing import briefing_service
 from aleph.services.feature_flags import FeatureFlag, FeatureFlagService
 from aleph.services.rate_limit import build_daily_rate_limiter
@@ -228,46 +229,19 @@ async def deploy_beat(
     picks up the claim's short transaction before returning the polling state.
     """
     admin = is_admin(user, settings)
-    model_research = validate_model_override(
+    validate_model_override(
         body.model_research, is_admin=admin, allowed=settings.allowlist_ids
     )
-    model_brief = validate_model_override(
+    validate_model_override(
         body.model_brief, is_admin=admin, allowed=settings.allowlist_ids
     )
-
-    limiter = build_daily_rate_limiter(session)
-    await limiter.check_beat_creation(user_id=user.id, is_admin=admin)
-
-    beat = await BeatRepository(session).create(
-        user_id=user.id,
-        topic=body.topic,
-        level=body.level,
-        anchor_weekday=body.anchor_weekday,
-        guidance=body.guidance,
-        model_research=model_research,
-        model_brief=model_brief,
-    )
-    await session.commit()
-
-    await briefing_service.trigger_initial(
-        beat.id,
-        user_id=user.id,
+    beat = await creation.create_beat(
+        session,
+        user,
+        body,
         local_today=_local_today(tz_offset_minutes),
         is_admin=admin,
     )
-    await session.refresh(beat)
-
-    # AL-540: the Beat is created, committed, and its first run already
-    # claimed and spawned by the drain above — Beat survival's own
-    # denominator and the deployment-mix datum (TDD §9).
-    events.emit_beat_deployed(
-        account_id=user.id,
-        beat_id=beat.id,
-        beat_level=beat.level.value,
-        anchor_weekday=beat.anchor_weekday,
-        has_guidance=beat.guidance is not None,
-    )
-
     return _beat_detail_dto(beat, entries=[])
 
 

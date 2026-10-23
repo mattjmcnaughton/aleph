@@ -61,6 +61,7 @@ from aleph.repositories import (
     LessonRepository,
     PathRepository,
 )
+from aleph.services import creation
 from aleph.services.generation import generation_orchestrator
 from aleph.services.paths_read import load_path_detail
 from aleph.services.rate_limit import build_daily_rate_limiter
@@ -214,20 +215,8 @@ async def create_path(
     outcome.
     """
     admin = is_admin(user, settings)
-    overrides = resolve_model_overrides(
-        body, is_admin=admin, allowed=settings.allowlist_ids
-    )
-    limiter = build_daily_rate_limiter(session)
-    await limiter.check_path_creation(user_id=user.id, is_admin=admin)
-    path = await generation_orchestrator.create_path(
-        user_id=user.id,
-        topic=body.topic,
-        level=body.level,
-        guidance=body.guidance,
-        teaching_style=body.teaching_style,
-        model_outline=overrides.model_outline,
-        model_lesson=overrides.model_lesson,
-    )
+    resolve_model_overrides(body, is_admin=admin, allowed=settings.allowlist_ids)
+    path = await creation.create_path(session, user, body, is_admin=admin)
     return CreatePathResponse(id=path.id)
 
 
