@@ -321,7 +321,7 @@ function Turn({ turn, analyst }: { turn: LearningTutorOperation; analyst: boolea
       <p className="whitespace-pre-wrap rounded-lg bg-elevated p-4 text-sm">
         {String(turn.input?.content ?? "")}
       </p>
-      <Markdown>{turn.output?.reply ?? ""}</Markdown>
+      <Markdown inertResources>{turn.output?.reply ?? ""}</Markdown>
       <div className="flex flex-wrap gap-2">
         {turn.output?.existing_work?.map((work) => {
           const [kind, id] = work.supplied_target_key.split(":");
