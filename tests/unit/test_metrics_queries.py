@@ -44,6 +44,9 @@ _ARROW = re.compile(r"->>")
 # The §7 metrics that MUST have a saved query (the ticket's required set + the
 # guardrails shipped alongside). Filenames are the contract docs/metrics.md maps.
 _REQUIRED_QUERIES = {
+    "learning_tutor_acceptances.sql",
+    "learning_tutor_operations.sql",
+    "learning_tutor_interactions.sql",
     # Phase 1 (AL-070).
     "activation_rate.sql",
     "first_lesson_activation.sql",

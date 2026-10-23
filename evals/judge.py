@@ -73,8 +73,9 @@ if TYPE_CHECKING:
 SYSTEM_PROMPT = """\
 You are the quality gate for a self-directed adult learning app. You are given \
 one generated artifact — a path OUTLINE, a single LESSON (a Read passage plus a \
-Quick check), or a published BRIEF (a short cited report from a \
-standing research assignment, shown together with the prior Brief it follows) \
+Quick check), a published BRIEF (a short cited report from a \
+standing research assignment, shown together with the prior Brief it follows), \
+or an Account-wide Tutor reply and recommendations (including no-card outputs) \
 — together with the context it was generated in, and you score it against a \
 fixed rubric.
 
@@ -169,7 +170,7 @@ def build_judge_agent() -> Agent[JudgeDeps, JudgeVerdict]:
 # emit. First line, exactly once, ahead of any free text.
 _ARTIFACT_TOKEN = "artifact"
 _ARTIFACT_RE = re.compile(
-    rf"{_ARTIFACT_TOKEN}\s*=\s*(outline|lesson|brief)", re.IGNORECASE
+    rf"{_ARTIFACT_TOKEN}\s*=\s*(outline|lesson|brief|learning_tutor)", re.IGNORECASE
 )
 
 

@@ -13,6 +13,88 @@ queries / dashboard tiles in Logfire (AL-103).
 > `tests/unit/test_metrics_queries.py`. So a query can never reference a field no
 > event actually emits.
 
+## Account-wide Tutor (LT5): receipts first, observations second
+
+| Question | Saved query | Source |
+| --- | --- | --- |
+| Accepted path → lesson completion in 7 days; Beat → published Brief read in 14 days | `queries/postgres/learning_tutor_follow_through.sql` | Durable receipts and current owned targets |
+| Authoritative ID-only acceptance reconciliation | `queries/postgres/learning_tutor_acceptances.sql` | Durable accepted receipts, including cleared ones |
+| Observed accepted recommendations | `queries/logfire/learning_tutor_acceptances.sql` | Best-effort accepted events, deduplicated by account/recommendation |
+| Terminal operation failures, duration, admissions and token usage | `learning_tutor_operations.sql` | Deduplicated account/operation events |
+| Shown/explore/discuss and dismiss/restore observations | `learning_tutor_interactions.sql` | Distinct card/surface/session/action; distinct card/decision |
+
+PostgreSQL queries are **not Logfire queries**. Execute only in an authorized,
+read-only reporting session; LT5 verification uses disposable synthetic databases
+only. Bind `:as_of` to a fixed UTC timestamp (SQLAlchemy named bind syntax; use
+the reporting client's equivalent parameter syntax). The supplied query includes
+all surviving accounts' receipts up to that timestamp. If reviewing a selected
+cohort, restrict accounts/acceptance dates consistently in both durable queries
+and the observational extracts; do not filter follow-through activity to the
+acceptance period rather than its complete observation window.
+
+### Cohort semantics
+
+One accepted recommendation receipt is one acceptance, independent of request
+replay, conversation Clear, or later payload redaction. A window is mature when
+`accepted_at + 7/14 days <= as_of`. Activity qualifies in the **inclusive elapsed**
+interval `[accepted_at, deadline]`; these are not local-calendar-day windows.
+Paths need one completed lesson, not an Attempt or a fully completed path. Beats
+need one published Brief with `read_at`; Skipped and Sources-only marks do not
+qualify. Multiple lessons or reads still count once. Ownership is included in
+target joins. This is follow-through, not Activation or statistical uplift.
+
+Report `accepted`, `pending`, `mature`, `succeeded`, `no_activity`,
+`deleted_unknown`, and `known` together. Pending windows never dilute a rate.
+`known_rate = succeeded / known`; `confirmed_lower_bound = succeeded / mature`.
+The latter includes deleted unknowns in the denominator and is explicitly a
+lower bound, not evidence that those learners failed. Empty denominators are NULL.
+No receipts produces no rows, not a fabricated zero-percent cohort.
+
+Target deletion nulls receipt FKs and deletes activity history. Those receipts
+remain accepted but their earlier follow-through is **unknown**, even if it once
+succeeded. Current-state queries cannot reconstruct an earlier deletion snapshot;
+`as_of` fixes the time cutoff, not historical database state. Account deletion
+cascades its receipts and removes the account from this surviving-account report.
+Do not introduce a retention store to compensate. There is no Beat-deleted event,
+so Logfire alone cannot reliably classify deleted targets.
+
+### Delivery gaps and reconciliation
+
+Accepted events are emitted after commit and not on creation replay, but delivery
+is best effort. Export only the ID/timestamp columns of the two acceptance queries,
+scope them consistently, then compare `(account_id, recommendation_id)` sets:
+durable-minus-observed is missing telemetry; observed-minus-durable needs review
+(for example account deletion or different retention/scope). Compare target kind
+and surviving target IDs too. Event timestamps are observation time, not the exact
+transactional `accepted_at`; use receipt time for window boundaries. Allow delivery
+lag before auditing gaps. Missing accepted events never shrink the authoritative
+denominator. Do not export Topic, focus, Guidance, rationale, or chat content.
+
+Operation events carry only IDs/kind/outcome/duration/token counts/admission.
+`completed` and `needs_context` are successful outcomes; other emitted outcomes
+are failures. The query reports terminal observations, not all attempted requests
+or currently running admissions. Cold `needs_context` success has no admission.
+Token totals include failed operations; tokens per success divides that total by
+successful terminal operations. Tokens per observed acceptance is a period-level
+ratio (per operation kind over all observed acceptances), **not causal card cost**.
+Missing events, interrupted work's unrecorded usage and cleared operation receipt
+pruning can limit reconstruction. Inspect durable operation status/admission/token
+columns without input/output text when reconciling a recent period; do not infer
+zero usage from missing events. No dollar-cost claims are made.
+
+Shown is deduplicated by recommendation/surface/session (and account). Explore
+and discuss use the same distinct observation unit, not raw click totals.
+Dismiss/restore lack an action event ID, so counts mean distinct cards with that
+decision, not number of repeated decision cycles. These observations are not
+authorization or a reliable conversion denominator.
+
+`tests/integration/test_learning_tutor_metrics.py` executes the checked-in SQL on
+real disposable PostgreSQL: exact window boundaries, before/after activity,
+deleted/cleared receipts, repeated activity and event replay, and telemetry gaps.
+`tests/unit/test_metrics_queries.py` checks emitted field coverage; existing
+event tests enforce the no-content emitter contracts. No private production query
+or external dashboard operation is part of these checks.
+
 ## The events (PRD §5.7)
 
 ### Client attribution (Home Screen TDD §7)

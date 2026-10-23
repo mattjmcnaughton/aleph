@@ -1130,9 +1130,107 @@ def _run_brief_mode(args: argparse.Namespace) -> int:
     return 1 if (failed_cases or gate_failed) else 0
 
 
+def _run_learning_tutor_mode(args: argparse.Namespace) -> int:
+    from evals.learning_tutor import (
+        ASSERTIONS,
+        HARD_FLOORS,
+        JUDGE_CHECKS,
+        JUDGE_HARD_FLOORS,
+        SEED_PATH,
+        build_task,
+        dataset,
+        load_cases,
+    )
+
+    try:
+        cases = load_cases()
+    except (OSError, ValueError, yaml.YAMLError) as error:
+        _unreadable_data_file(SEED_PATH, error)
+        return 2
+    model = None
+    judge = build_stub_judge() if args.smoke and _judging_enabled(args) else None
+    label = "scripted-smoke"
+    if not args.smoke:
+        from aleph.config import settings
+        from aleph.services.openrouter import resolve_model
+
+        if not settings.openrouter_api_key:
+            _missing_key_message()
+            return 2
+        label = settings.model_learning_tutor
+        model = resolve_model(label)
+        judge = _live_judge(settings.model_judge) if _judging_enabled(args) else None
+    caveat = (
+        "Synthetic fixtures. Smoke proves plumbing, NOT recommendation quality. "
+        "No learning-tutor human calibration or judge agreement has been measured."
+    )
+    print(caveat)
+    report = asyncio.run(
+        dataset(cases, judge).evaluate(
+            build_task(model),
+            name=f"learning-tutor ({label})",
+            max_concurrency=args.max_concurrency,
+        )
+    )
+    report.print(width=_REPORT_WIDTH, include_reasons=True)
+    gate = _gate_summary(
+        report,
+        judged=judge is not None,
+        hard_floor_evaluators=HARD_FLOORS,
+        judge_assertions=JUDGE_CHECKS,
+        assertions_map=ASSERTIONS,
+        safety_assertion="safety",
+    )
+    hard = HARD_FLOORS | (JUDGE_HARD_FLOORS if judge else frozenset())
+    failures = _hard_floor_failures(report, hard, assertions_map=ASSERTIONS)
+    failed = bool(failures) or (judge is not None and not gate.meets_gate)
+    print(_render_gate_summary(label, gate))
+    for failure in failures:
+        print(f"HARD FLOOR FAILED: {failure}", file=sys.stderr)
+    print(f"Overall checks: {'FAIL' if failed else 'PASS'}")
+    print(caveat)
+    _append_step_summary(
+        f"learning-tutor — {label} — Overall {'FAIL' if failed else 'PASS'} — {caveat}",
+        report,
+        gate,
+    )
+    if args.report:
+        _write_report(
+            args.report,
+            {
+                "learning_tutor": {
+                    "model": label,
+                    "judge": judge.label if judge else None,
+                    "smoke": args.smoke,
+                    "passed": not failed,
+                    "caveat": caveat,
+                    "gate": _gate_payload(gate),
+                    "hard_floor_failures": failures,
+                    "cases": [
+                        {
+                            "name": case.name,
+                            "output": case.output.model_dump(mode="json"),
+                            "assertions": {
+                                name: {"passed": value.value, "reason": value.reason}
+                                for name, value in case.assertions.items()
+                            },
+                        }
+                        for case in report.cases
+                    ],
+                }
+            },
+        )
+    return int(failed)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="evals", description="Run the Aleph agent eval harness."
+    )
+    parser.add_argument(
+        "--learning-tutor",
+        action="store_true",
+        help="Account-wide Tutor evaluation; --smoke is offline plumbing only",
     )
     parser.add_argument(
         "--models",
@@ -1193,6 +1291,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    if args.learning_tutor and (args.briefs or args.agreement or args.models):
+        parser.error(
+            "--learning-tutor cannot combine with --briefs, --agreement or --models"
+        )
+    if args.max_concurrency < 1:
+        parser.error("--max-concurrency must be at least 1")
     if args.smoke and args.models:
         # Silently dropping --models here would read as "swept those models
         # offline", which is exactly the wrong conclusion to hand someone.
@@ -1225,6 +1329,8 @@ def main(argv: list[str] | None = None) -> int:
             "always scores research/writing quality against the configured "
             "MODEL_RESEARCH/MODEL_BRIEF, not a swept model."
         )
+    if args.learning_tutor:
+        return _run_learning_tutor_mode(args)
     if args.agreement:
         return _run_agreement_mode(args)
     if args.briefs:
