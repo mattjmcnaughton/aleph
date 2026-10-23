@@ -1174,23 +1174,26 @@ async def test_poll_as_trigger_self_heals_lost_outline(
         assert resp.status_code == 202
         path_id = resp.json()["id"]
 
-        # Restore the drainable collector; the outline never generated.
-        monkeypatch.setattr(gen_module.generation_orchestrator, "_spawn", spawn)
+        # Hold recovery until drain: the ordinary collector starts tasks
+        # immediately and can finish the outline before the first snapshot.
+        recovery = CollectingSpawn(hold=True)
+        monkeypatch.setattr(gen_module.generation_orchestrator, "_spawn", recovery)
+        try:
+            # G4: before releasing recovery, the poll observes a non-terminal
+            # status and an empty outline.
+            pre = (await client.get(f"/api/v1/paths/{path_id}")).json()
+            assert pre["status"] in {"pending", "generating"}
+            assert pre["units"] == []
 
-        # G4: a poll before the resume drains observes a NON-terminal status and
-        # an empty outline — no dead spinner, and no units yet.
-        pre = (await client.get(f"/api/v1/paths/{path_id}")).json()
-        assert pre["status"] in {"pending", "generating"}
-        assert pre["units"] == []
+            # The poll above spawned the idempotent resume; release and drain it.
+            await recovery.drain()
 
-        # The poll above spawned the idempotent resume; drain it.
-        await spawn.drain()
-
-        # A subsequent poll now observes the self-healed, ready path with its
-        # outline — the waiting learner's poll WAS the retry loop (§5.4).
-        healed = await _poll(client, spawn, path_id)
-        assert healed["status"] == "ready"
-        assert healed["units"]
+            # The learner's poll was the retry loop (§5.4), not another create.
+            healed = await _poll(client, recovery, path_id)
+            assert healed["status"] == "ready"
+            assert healed["units"]
+        finally:
+            await recovery.cancel_pending()
 
 
 @pytest.mark.anyio
