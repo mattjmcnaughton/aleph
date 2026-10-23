@@ -168,11 +168,12 @@ def test_the_rubric_is_the_prds_six_items() -> None:
         "check_validity",
         "safe",
     )
-    assert set(RUBRIC) == set(ALL_ITEMS)
+    learning_items = {"grounding", "utility", "novelty", "privacy", "safety"}
+    assert set(RUBRIC) == set(ALL_ITEMS) | learning_items
     assert all(RUBRIC[item].strip() for item in ALL_ITEMS)
     assert SAFETY_ITEM == "safe"
-    # The Literal and the tuple cannot drift: one is derived from the other.
-    assert set(get_args(RubricItem)) == set(ALL_ITEMS)
+    # Explicit family membership must cover the Literal without leaking into lessons.
+    assert set(get_args(RubricItem)) == set(ALL_ITEMS) | learning_items
 
 
 def test_applicable_items_cover_every_item_across_the_two_artifacts() -> None:

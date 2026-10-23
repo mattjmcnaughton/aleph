@@ -34,6 +34,65 @@
 > mirrors it into the GitHub Actions step summary, and records it in the
 > `--report` JSON — see that section's "HAND-AUTHORED PLACEHOLDERS" paragraph.
 
+## Account-wide Tutor (`--learning-tutor`, LT5)
+
+```sh
+just evals --learning-tutor --smoke
+just evals --learning-tutor --smoke --judge
+just evals --learning-tutor --smoke --judge --report /tmp/learning-tutor.json
+# Only with separate authorization; calls paid providers:
+just evals --learning-tutor
+```
+
+This local-only mode uses the actual `build_learning_tutor_agent`, output schema,
+and `output_violation` predicate, with the production request instruction.
+`evals/learning_tutor_seed_set.yaml` contains **24 curated synthetic cases**, not
+private learner records or human labels. Each has independent expected/forbidden
+behavior and allowed evidence/target inputs; a separate scripted smoke output is
+never shown to the generator. The judge sees the supplied metadata, candidate
+output, and curation criteria, not the scripted reference output.
+
+Coverage: empty refresh, cold-start clarification, message-only interest, explicit
+focus, focus over history, competing interests, continuing a path, reading an
+existing Brief, no suitable recommendation, foundational path versus moving-topic
+Beat, analyst disabled, exact and normalized duplicates, dismissed paraphrases,
+deleted and stale sources, omitted context, injections in Topic/Guidance/carried
+messages, sensitive inference, unsupported mastery, and harmful requests.
+The empty-refresh case probes the agent boundary; production normally returns
+`needs_context` without admitting a model. This harness does not test context
+assembly, authorization, persistence, or frontend presentation.
+
+Layer 1 must pass **100%**. Tests submit independently corrupted candidates:
+unknown evidence, over-cap card sets, analyst-off Beats and duplicate Topics fail
+the shipped predicate and actual agent validation. Membership does not establish
+that a reason is supported by evidence: that is separate quality evidence.
+
+The `learning_tutor` artifact has five separate binary rubric dimensions:
+`grounding`, `utility`, `novelty`, `privacy`, `safety`. Existing outline/lesson/Brief
+item sets are unchanged. The whole output is judged, including useful no-card
+and continue-existing-work answers; these cases are not skipped or auto-passed.
+The proposed authorized-live gate is **at least 20 cases, >=90% whole-case pass,
+zero grounding/privacy/safety failures**, and human inspection of every failure.
+Grounding is conservatively a hard floor so fabricated evidence cannot hide in
+the tolerated 10%. Missing assertions, evaluator crashes and generation failures
+fail closed. `--no-judge` measures structure only, never the 90% quality gate.
+
+Live generation binds `MODEL_LEARNING_TUTOR`; judging binds `MODEL_JUDGE`.
+Approximately 24 generation plus 24 judge calls are needed before retries; cost
+depends on configured models and retries. No retrieval is performed in either
+mode. `--models`, `--briefs`, and `--agreement` cannot combine with this mode.
+Existing exit codes and bounded concurrency/report conventions apply.
+
+**Smoke is plumbing evidence only, including `--smoke --judge`.** Its stub judge
+passes by default; deliberate failure sentinels test gate arithmetic, not quality.
+The console, JSON report and optional job summary carry this caveat. No live
+quality run, human calibration labels, or learning-tutor agreement measurement
+is supplied by LT5. Existing outline/lesson calibration cannot establish trust
+in this new rubric. Calibrate against real human judgments before claiming judge
+agreement; do not relabel these synthetic scripts as human verdicts. Live runs,
+retrieval recordings, production queries and feature enablement require separate
+approval. No new CI workflow or automatic production quality enforcement is added.
+
 ## Why
 
 Aleph has two pydantic-ai agents: outline generation
