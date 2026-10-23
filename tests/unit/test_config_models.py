@@ -22,6 +22,7 @@ def test_model_slots_default_to_luna() -> None:
         "model_shaper": "openai/gpt-5.6-luna",
         "model_research": "openai/gpt-5.6-luna",
         "model_brief": "openai/gpt-5.6-luna",
+        "model_learning_tutor": "openai/gpt-5.6-luna",
     }
 
 
@@ -70,6 +71,7 @@ def test_stub_allowed_outside_production() -> None:
         "model_judge",
         "model_tutor",
         "model_shaper",
+        "model_learning_tutor",
     ],
 )
 def test_stub_rejected_in_production(slot: str) -> None:

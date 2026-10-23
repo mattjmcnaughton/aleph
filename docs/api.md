@@ -971,8 +971,8 @@ routes below require authentication and the flag; unavailable features and unown
 identifiers return `404` (`401` when signed out). No live enablement is implied.
 Setting the default off does not override a per-user on override.
 
-Prefix: `/api/v1/learning-tutor`. **This is the implemented state subset only**:
-there is no operation POST, model call, acceptance action, or learner UI yet.
+Prefix: `/api/v1/learning-tutor`. State and explicit generation are implemented;
+acceptance and learner presentation remain later slices. GET never starts work.
 
 | Method and suffix | Request | Response |
 | --- | --- | --- |
@@ -980,10 +980,12 @@ there is no operation POST, model call, acceptance action, or learner UI yet.
 | `PUT /focus` | `{focus: string|null, revision: integer >= 0}` | State |
 | `DELETE /conversation?revision=N` | Current revision | State |
 | `GET /history?before=UUID` | Optional page cursor | `{items: Operation[], before: UUID|null}` |
+| `POST /operations` | `{request_id: UUID, revision, epoch, kind: "turn"|"refresh", content?, recommendation_id?}` | `202` running receipt or `200` terminal receipt |
 | `GET /operations/{id}` | Owned operation ID | Operation receipt |
 | `GET /recommendations?status=dismissed&before=UUID` | Required status, optional cursor | `{items: Recommendation[], before: UUID|null}` |
 | `GET /recommendations/{id}` | Owned recommendation ID | Recommendation |
 | `PUT /recommendations/{id}/decision` | `{decision: "dismiss"|"restore", revision}` | State |
+| `POST /recommendations/{id}/interactions` | `{interaction: "shown"|"explore"|"discuss", surface: "home"|"tutor", session_id: UUID}` | `204`; observational only, never a decision |
 
 State fields: `focus`, `revision`, `focus_version`, `epoch`, `recommendations`
 (live active cards), `latest_refresh` (receipt or null), `current_operation_id`
@@ -1021,8 +1023,7 @@ Operation fields: `id`, `epoch`, `kind` (`turn|refresh`), `status`
 (`running|succeeded|failed`), `error_code`, `input`, `output`, `started_at`,
 `finished_at`, `cleared`. Expired running receipts read as failed/interrupted using
 the database clock without writing. Cleared receipts have null input/output/error.
-Input/output are JSON objects; their generation schema/admission is LT-2, not an
-implemented writable API. History contains whole successful turns only, never
+Input/output are JSON objects. History contains whole successful turns only, never
 refreshes or failures, restricted to the current epoch. Pages are newest first,
 up to 20 records, using a UUID cursor for the last scanned row with timestamp/UUID
 ordering; dismissed pages may be shorter after stale/flag filtering. Continue
@@ -1031,10 +1032,85 @@ while `before` is non-null. Foreign or cleared-epoch cursors return 404.
 Dependent implementation seams: `LearningTutorRepository.lock_state` performs
 race-safe lazy creation and locking; repository methods never commit.
 `replay(user_id, epoch, request_id)` is an owned receipt lookup, not admission:
-LT-2 must check epoch first, then replay/hash before rejecting an old revision.
+Admission checks epoch first, then replay/hash before rejecting an old revision.
 `LearningTutorService.add_recommendation` takes a validated `RecommendationDraft`
 and acquires the state lock; it checks exclusion, sources and capacity, flushes but
 does not commit or bump revision. LT-2 owns atomic whole-result settlement and
 the revision bump. LT-3 must lock users, then Tutor state, then recommendation,
 and atomically insert its target plus acceptance receipt. Composite owner FKs
 protect operation/target links; target deletion nulls only the target reference.
+
+### Explicit generation (LT-2)
+
+A turn requires trimmed, nonempty `content` (maximum 2,000 characters); refresh
+forbids content and recommendation ID. A discussion ID must be owned, active and
+live. Keep the same request UUID and body while its HTTP result is uncertain.
+Same UUID/body returns the receipt without another call, even after revision
+advances; changed body is `409 request_reused`. An old epoch after clear is always
+`409 stale_state`, before replay. A different concurrent request is
+`409 operation_in_progress`, with `error.details.operation_id` for recovery.
+Failed operations require a new UUID and current revision for an explicit retry.
+
+New model work returns 202 only after durable admission. Poll its owned receipt;
+success publishes the whole reply/cards and increments revision once. Output has
+`outcome=completed`, `reply` (turn only), `existing_work` (0–2 kind/supplied-target-key
+objects), `recommendations` (validated draft objects with evidence keys),
+`replacement`, `recommendation_ids`, and `omitted`. Resolve current cards from state,
+never reconstruct cards from historical operation output. Existing-work keys are
+server-supplied `path:UUID`, `beat:UUID` or `brief:UUID`, not arbitrary URLs; the
+destination's normal owned GET still authorizes access. Refresh publishes 0–3
+cards; a turn publishes at most one and only replaces its explicit discussion card.
+Sources and flags are rechecked before publication. Exact normalized existing
+Topics, active cards and all retained dismissals are excluded, not merely the
+sample of recent dismissals shown to the model.
+
+Cold refresh (no focus or owned path/available Beat metadata) returns 200 with
+`output={outcome:"needs_context", omitted:{...}}`, no provider call and no quota
+charge. A current typed interest can ground a turn without saved focus. A valid
+empty refresh is `completed`; provider/validation failures are never empty success.
+Safe failure codes: `provider_failed`, `invalid_output`, `timed_out`, `interrupted`,
+`context_changed`, `feature_disabled`. Previous cards survive failed refreshes.
+
+Context is sampled metadata only: up to 12 paths, 8 Beats (analyst-enabled only),
+2 published Brief metadata records per selected Beat, 10 recent whole successful
+Turns, 3 active cards and 20 dismissal excerpts. Dynamic JSON totals at most
+40,000 characters, retaining newest Turns and dropping whole oldest records. `omitted` exposes
+counts for `turns`, `paths`, `beats`, `briefs`, `recommendations`; Brief omissions
+refer to selected included Beats. Path title, bodies, other Tutor conversations,
+identity and correctness are not queried into context. Historical evidence values
+are server-supplied, not model-invented counts.
+
+`MODEL_LEARNING_TUTOR` is a guarded model slot. Defaults: 30 admitted operations
+per account/UTC day (`RATE_LIMIT_LEARNING_TUTOR_PER_DAY`, 0 disables the cap;
+admins exempt), separate concurrency 2 (`MAX_CONCURRENT_LEARNING_TUTOR_OPERATIONS`),
+90-second total execution deadline including permit wait (`LEARNING_TUTOR_TIMEOUT`,
+maximum 90), fixed 120-second database-clock lease. Failed admitted work consumes
+quota; clear preserves receipts. Character limits are not a dollar ceiling.
+Expired GETs expose interrupted without writes; next admission materializes expiry.
+No automatic rebilling/retry, scheduler or broker is added. Flag-off fences
+publication but cannot un-send or refund an in-flight provider request. No live
+enablement, paid evaluation or deployment is authorized by this implementation.
+
+### Synthetic provider and event contracts (LT-4/LT-5)
+
+With `MODEL_LEARNING_TUTOR=stub` only, current turn content or refresh focus may
+contain `[lt-path]`, `[lt-beat]`, `[lt-existing]`, `[lt-empty]`, `[lt-invalid]`,
+`[lt-failure]`, or `[lt-delay]`. Path/Beat sentinels return one grounded synthetic
+card; existing-work uses the first available owned target; empty is the default.
+Invalid fabricates an evidence key (one validation retry, then failure); failure
+raises a safe provider failure; delay adds two seconds asynchronously before the
+stub call and can combine with another sentinel. Cold refresh is determined by
+real absence of context, not a magic string. These prove plumbing, not quality.
+
+Safe events (all carry account ID, workflow `learning_tutor`, and request `client`
+when present) are `learning_tutor_operation_completed` (operation ID, kind, outcome,
+duration_ms, input_tokens, output_tokens, model_admitted),
+`learning_recommendation_interacted` (recommendation ID, interaction, surface,
+session_id), and `learning_recommendation_decided` (recommendation ID, decision).
+Durable completion/decision events emit after commit, not on replay; sinks are
+best-effort and receipts remain authoritative. No prompt/reply/focus/card text is
+logged; this agent disables automatic content instrumentation and its HTTP routes
+drop request/validation attributes. Interaction pings authenticate and revalidate
+the card but never mutate it. Clients must deduplicate `shown` per card/surface/
+session; metric queries should also deduplicate those keys. Acceptance events and
+target creation remain LT-3-owned; no acceptance event is emitted here.

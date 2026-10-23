@@ -785,6 +785,28 @@ def test_a_failing_shaping_emitter_never_breaks_the_request_path(
 
 
 def _drive_every_emitter() -> None:
+    events.emit_learning_tutor_operation_completed(
+        account_id=ACCOUNT,
+        operation_id=PATH,
+        kind="turn",
+        outcome="completed",
+        duration_ms=10,
+        input_tokens=1,
+        output_tokens=2,
+        model_admitted=True,
+    )
+    events.emit_learning_recommendation_interacted(
+        account_id=ACCOUNT,
+        recommendation_id=PATH,
+        interaction="shown",
+        surface="home",
+        session_id=LESSON,
+    )
+    events.emit_learning_recommendation_decided(
+        account_id=ACCOUNT,
+        recommendation_id=PATH,
+        decision="dismiss",
+    )
     events.emit_notification_sent(
         account_id=ACCOUNT, kind="path_ready", outcome="disabled"
     )

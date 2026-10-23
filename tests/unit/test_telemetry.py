@@ -153,3 +153,35 @@ def test_sqlalchemy_instrumentation_produces_query_spans(capfire) -> None:
 
     names = [span["name"] for span in capfire.exporter.exported_spans_as_dict()]
     assert "SELECT" in names, names
+
+
+def test_learning_tutor_request_validation_never_records_private_content(
+    capfire, monkeypatch
+):
+    from aleph.dtos.learning_tutor import FocusRequest
+
+    monkeypatch.setattr(telemetry, "_logfire_configured", True)
+    app = FastAPI()
+
+    @app.put("/api/v1/learning-tutor/focus")
+    def focus(body: FocusRequest):
+        return {"ok": True}
+
+    telemetry.setup_telemetry(app)
+    with TestClient(app) as client:
+        assert (
+            client.put(
+                "/api/v1/learning-tutor/focus",
+                json={"focus": "PRIVATE_FOCUS", "revision": 0},
+            ).status_code
+            == 200
+        )
+        assert (
+            client.put(
+                "/api/v1/learning-tutor/focus",
+                json={"focus": "PRIVATE_FOCUS", "revision": "PRIVATE_INVALID"},
+            ).status_code
+            == 422
+        )
+    spans = repr(capfire.exporter.exported_spans_as_dict())
+    assert "PRIVATE_FOCUS" not in spans and "PRIVATE_INVALID" not in spans

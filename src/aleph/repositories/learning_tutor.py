@@ -110,6 +110,29 @@ class LearningTutorRepository:
             )
         )
 
+    async def admissions_since(self, user_id: UUID, since: datetime) -> int:
+        return (
+            await self.session.scalar(
+                select(func.count())
+                .select_from(Operation)
+                .where(
+                    Operation.user_id == user_id,
+                    Operation.model_admitted.is_(True),
+                    Operation.started_at >= since,
+                )
+            )
+            or 0
+        )
+
+    async def prune_cleared(self, user_id: UUID, before: datetime) -> None:
+        await self.session.execute(
+            delete(Operation).where(
+                Operation.user_id == user_id,
+                Operation.cleared_at < before,
+                Operation.status != "running",
+            )
+        )
+
     async def history(
         self, user_id: UUID, epoch: int, before: Operation | None
     ) -> list[Operation]:

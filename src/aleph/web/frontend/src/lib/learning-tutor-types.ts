@@ -1,4 +1,4 @@
-/** LT-1 wire contracts only. No learner surface or generation admission yet. */
+/** Dark-gated Learning Tutor wire contracts; presentation is a later slice. */
 export interface LearningEvidence {
   kind: "path" | "beat" | "brief" | "focus" | "message";
   id: string | null;
@@ -31,7 +31,7 @@ export interface LearningTutorOperation {
   status: "running" | "succeeded" | "failed";
   error_code: string | null;
   input: Record<string, unknown> | null;
-  output: Record<string, unknown> | null;
+  output: LearningOperationOutput | null;
   started_at: string;
   finished_at: string | null;
   cleared: boolean;
@@ -66,4 +66,40 @@ export interface LearningFocusRequest {
 export interface LearningDecisionRequest {
   decision: "dismiss" | "restore";
   revision: number;
+}
+
+export type LearningOperationRequest = {
+  request_id: string;
+  revision: number;
+  epoch: number;
+} & (
+  | { kind: "turn"; content: string; recommendation_id?: string }
+  | { kind: "refresh"; content?: never; recommendation_id?: never }
+);
+
+export interface LearningInteractionRequest {
+  interaction: "shown" | "explore" | "discuss";
+  surface: "home" | "tutor";
+  session_id: string;
+}
+
+export interface LearningOperationOutput {
+  outcome: "needs_context" | "completed";
+  omitted: Record<"turns" | "paths" | "beats" | "briefs" | "recommendations", number>;
+  reply?: string | null;
+  existing_work?: {
+    kind: "path" | "beat" | "brief";
+    supplied_target_key: string;
+  }[];
+  recommendation_ids?: string[];
+  replacement?: string | null;
+  recommendations?: {
+    kind: "path" | "beat";
+    topic: string;
+    level: "new_to_it" | "some_experience" | "work_in_it";
+    guidance: string | null;
+    description: string;
+    rationale: string;
+    evidence_keys: string[];
+  }[];
 }

@@ -19,6 +19,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, StringConstraints
 
+from aleph.creation_inputs import GuidanceStr as GuidanceStr
+from aleph.creation_inputs import TopicStr as TopicStr
 from aleph.domains.progression import UnlockState
 from aleph.models import LessonGenerationState, Level, PathStatus
 
@@ -26,9 +28,7 @@ from aleph.models import LessonGenerationState, Level, PathStatus
 # whitespace, required non-empty, and bounded so a pathological payload cannot
 # reach the model or the DB Text column unchecked. A violation is a ``422``
 # through the shared validation envelope (``app.py``), never a 500.
-TopicStr = Annotated[
-    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)
-]
+# Shared domain constraints also validate Learning recommendation drafts.
 
 # The learner-editable display label (CONTEXT.md: *Path title*). Stripped and
 # bounded like ``TopicStr`` but shorter (200 vs 500) — a display label sits atop
@@ -47,9 +47,7 @@ PathTitleStr = Annotated[
 # subject line, so it needs more room; still bounded so a pathological payload
 # never reaches the model or the DB column unchecked (same rationale as
 # ``TopicStr``).
-GuidanceStr = Annotated[
-    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=4000)
-]
+# GuidanceStr is re-exported above for existing API consumers.
 
 # The learner's standing instruction about how a path's lessons are taught
 # (CONTEXT.md: *Teaching style*). Stripped and bounded like ``GuidanceStr`` but

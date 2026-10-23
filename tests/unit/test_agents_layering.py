@@ -32,6 +32,7 @@ import subprocess
 import sys
 
 from aleph.agents.analyst import AnalystDeps, build_analyst_agent
+from aleph.agents.learning_tutor import LearningTutorDeps, build_learning_tutor_agent
 from aleph.agents.lesson import LessonDeps
 from aleph.agents.outline import OutlineDeps
 from aleph.agents.researcher import ResearcherDeps, build_researcher_agent
@@ -103,7 +104,11 @@ def test_agents_package_imports_without_app_layers() -> None:
 # is worth the coupling, since a tool silently appearing on any agent is
 # exactly the regression this test exists to catch.
 
-_NO_TOOL_AGENT_FACTORIES = (build_researcher_agent, build_analyst_agent)
+_NO_TOOL_AGENT_FACTORIES = (
+    build_researcher_agent,
+    build_analyst_agent,
+    build_learning_tutor_agent,
+)
 
 
 def test_researcher_and_analyst_define_no_tool() -> None:
@@ -199,6 +204,7 @@ def test_no_agent_deps_carries_a_path_title_field() -> None:
         ShaperDeps,
         ResearcherDeps,
         AnalystDeps,
+        LearningTutorDeps,
     ):
         for f in dataclasses.fields(deps_cls):
             if "title" not in f.name:

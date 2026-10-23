@@ -85,6 +85,7 @@ from aleph.config import settings as global_settings
 from aleph.db import new_session
 from aleph.repositories import PathRepository
 from aleph.services.briefing import briefing_service
+from aleph.services.learning_tutor_generation import learning_tutor_generation
 from aleph.services.retrieval import ExaRetriever
 
 if TYPE_CHECKING:
@@ -436,6 +437,9 @@ class GenerationLifecycle:
         self._research_semaphore = asyncio.Semaphore(
             config.max_concurrent_brief_research
         )
+        self._learning_tutor_semaphore = asyncio.Semaphore(
+            config.max_concurrent_learning_tutor_operations
+        )
         # The AL-521/AL-523 handoff gap this ticket closes: neither ticket's
         # brief owned wiring a live ``Retriever`` into production, so nothing
         # ever did — ``briefing_service`` shipped permanently bound to
@@ -509,6 +513,8 @@ class GenerationLifecycle:
             model_slot=lambda: self._research_semaphore,
             retriever=self._research_retriever,
         )
+        learning_tutor_generation.spawn = self._registry.spawn
+        learning_tutor_generation.semaphore = self._learning_tutor_semaphore
         self._reconciler_task = asyncio.create_task(self._reconciler.run_forever())
         logger.info("generation_lifecycle_started")
 
@@ -532,4 +538,5 @@ class GenerationLifecycle:
         await self._registry.cancel_all()
         self._orchestrator.reset_runtime()
         briefing_service.reset_runtime()
+        learning_tutor_generation.spawn = None
         logger.info("generation_lifecycle_stopped")
