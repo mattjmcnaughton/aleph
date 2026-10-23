@@ -154,6 +154,7 @@ provenance discipline the real agents' validators enforce.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import re
@@ -1546,6 +1547,17 @@ async def _stub_stream(
         yield delta
 
 
+async def _stub_respond_async(
+    messages: Sequence[ModelMessage], info: AgentInfo
+) -> ModelResponse:
+    if _tool_with(info.output_tools, "recommendations") is not None:
+        instructions = info.instructions or ""
+        context = json.loads(instructions[instructions.index('{"kind":') :])
+        if "[lt-delay]" in (context.get("content") or context.get("focus") or ""):
+            await asyncio.sleep(2)
+    return _stub_respond(messages, info)
+
+
 @cache
 def build_stub_model() -> FunctionModel:
     """The process-wide deterministic stub :class:`FunctionModel`.
@@ -1558,4 +1570,4 @@ def build_stub_model() -> FunctionModel:
     Both branches are bound: generation (outline/lesson) runs non-streamed
     through ``function``, the tutor runs streamed through ``stream_function``.
     """
-    return FunctionModel(_stub_respond, stream_function=_stub_stream)
+    return FunctionModel(_stub_respond_async, stream_function=_stub_stream)

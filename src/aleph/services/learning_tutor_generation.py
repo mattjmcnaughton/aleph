@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import ValidationError
 from pydantic_ai.exceptions import UnexpectedModelBehavior
+from pydantic_ai.usage import RunUsage
 
 from aleph.agents.learning_tutor import build_learning_tutor_agent, output_violation
 from aleph.authz import is_admin
@@ -56,6 +57,11 @@ class LearningTutorBusy(RecommendationConflict):
 class InvalidLearningOutput(ValueError):  # noqa: N818 - domain outcome
     """Invalid whole output, never a successful empty result."""
 
+    def __init__(self, input_tokens: int = 0, output_tokens: int = 0):
+        super().__init__("invalid_output")
+        self.input_tokens = input_tokens
+        self.output_tokens = output_tokens
+
 
 class LearningTutorGeneration:
     def __init__(
@@ -82,16 +88,18 @@ class LearningTutorGeneration:
     async def _provide(
         self, deps: LearningTutorDeps
     ) -> tuple[LearningTutorOutput, int, int]:
-        if self.config.model_learning_tutor == "stub":
-            current = json.loads(deps.context)
-            if "[lt-delay]" in (current.get("content") or current.get("focus") or ""):
-                await asyncio.sleep(2)
-        result = await build_learning_tutor_agent().run(
-            "Respond to the current request in the supplied context.",
-            deps=deps,
-            model=resolve_model(self.config.model_learning_tutor),
-        )
-        usage = result.usage
+        usage = RunUsage()
+        try:
+            result = await build_learning_tutor_agent().run(
+                "Respond to the current request in the supplied context.",
+                deps=deps,
+                model=resolve_model(self.config.model_learning_tutor),
+                usage=usage,
+            )
+        except (UnexpectedModelBehavior, ValidationError):
+            raise InvalidLearningOutput(
+                usage.input_tokens, usage.output_tokens
+            ) from None
         return result.output, usage.input_tokens, usage.output_tokens
 
     async def admit(
@@ -201,6 +209,7 @@ class LearningTutorGeneration:
     async def execute(
         self, user_id: UUID, operation_id: UUID, context: LearningContext
     ) -> None:
+        input_tokens = output_tokens = 0
         try:
             async with asyncio.timeout(self.config.learning_tutor_timeout):
                 async with self.semaphore:
@@ -216,14 +225,30 @@ class LearningTutorGeneration:
             # Shutdown/process loss keeps the durable lease; GET exposes expiry.
             raise
         except TimeoutError:
-            await self.fail(user_id, operation_id, "timed_out")
-        except (InvalidLearningOutput, UnexpectedModelBehavior, ValidationError):
-            await self.fail(user_id, operation_id, "invalid_output")
+            await self.fail(
+                user_id, operation_id, "timed_out", input_tokens, output_tokens
+            )
+        except (InvalidLearningOutput, UnexpectedModelBehavior, ValidationError) as exc:
+            if isinstance(exc, InvalidLearningOutput):
+                input_tokens = max(input_tokens, exc.input_tokens)
+                output_tokens = max(output_tokens, exc.output_tokens)
+            await self.fail(
+                user_id, operation_id, "invalid_output", input_tokens, output_tokens
+            )
         except Exception:
             # Never log provider exceptions: they can contain prompt/reply text.
-            await self.fail(user_id, operation_id, "provider_failed")
+            await self.fail(
+                user_id, operation_id, "provider_failed", input_tokens, output_tokens
+            )
 
-    async def fail(self, user_id: UUID, operation_id: UUID, reason: str) -> None:
+    async def fail(
+        self,
+        user_id: UUID,
+        operation_id: UUID,
+        reason: str,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+    ) -> None:
         async with self.session_factory() as session:
             user = await session.get(User, user_id)
             if user is None:
@@ -231,11 +256,17 @@ class LearningTutorGeneration:
             service = LearningTutorService(session, user)
             await service.repository.lock_state(user_id)
             row = await service.repository.operation(user_id, operation_id, lock=True)
-            if row and row.status == "running":
+            if row is None:
+                return
+            row.input_tokens = max(row.input_tokens, input_tokens)
+            row.output_tokens = max(row.output_tokens, output_tokens)
+            running = row.status == "running"
+            if running:
                 now = await service.repository.now()
                 row.status, row.finished_at = "failed", now
                 row.error_code = "interrupted" if row.expires_at <= now else reason
-                await session.commit()
+            await session.commit()
+            if running:
                 emit_operation_completed(row)
 
     async def settle(
@@ -255,14 +286,13 @@ class LearningTutorGeneration:
             repo = service.repository
             state = await repo.lock_state(user_id)
             row = await repo.operation(user_id, operation_id, lock=True)
-            if row is not None and row.cleared_at is not None:
-                # Clear erases content, not usage receipts. A delayed provider may
-                # report billed tokens, but can never restore a Turn or card.
-                row.input_tokens = max(row.input_tokens, input_tokens)
-                row.output_tokens = max(row.output_tokens, output_tokens)
-                await session.commit()
+            if row is None:
                 return
-            if row is None or row.status != "running":
+            # Late usage enriches receipts, never resurrects terminal content.
+            row.input_tokens = max(row.input_tokens, input_tokens)
+            row.output_tokens = max(row.output_tokens, output_tokens)
+            if row.cleared_at is not None or row.status != "running":
+                await session.commit()
                 return
             now = await repo.now()
             reason = None
@@ -280,7 +310,6 @@ class LearningTutorGeneration:
             refs = list(context.evidence.values())
             if not all([await repo.source_exists(user_id, ref) for ref in refs]):
                 reason = "context_changed"
-            row.input_tokens, row.output_tokens = input_tokens, output_tokens
             if reason:
                 row.status, row.error_code, row.finished_at = "failed", reason, now
                 await session.commit()
