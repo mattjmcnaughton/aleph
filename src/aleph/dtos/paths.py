@@ -22,6 +22,7 @@ from pydantic import BaseModel, ConfigDict, StringConstraints
 from aleph.creation_inputs import GuidanceStr as GuidanceStr
 from aleph.creation_inputs import TopicStr as TopicStr
 from aleph.domains.progression import UnlockState
+from aleph.dtos.learning_tutor import RecommendationCreationRequest
 from aleph.models import LessonGenerationState, Level, PathStatus
 
 # The learner's free-text topic (CONTEXT.md: *Topic*). Stripped of surrounding
@@ -59,7 +60,7 @@ TeachingStyleStr = Annotated[
 ]
 
 
-class CreatePathRequest(BaseModel):
+class CreatePathRequest(RecommendationCreationRequest):
     """``POST /api/v1/paths`` body: the topic + onboarding level (W1).
 
     ``model_outline``/``model_lesson`` are the **admin** model-picker overrides

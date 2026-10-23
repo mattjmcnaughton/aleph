@@ -393,6 +393,22 @@ class BeatRepository:
     # that lost its claim to a fresh re-claim cannot overwrite it. Each returns
     # whether *this* call still owned the claim.
 
+    async def mark_initial_dispatch_failed(self, beat_id: uuid.UUID) -> None:
+        """Only a never-claimed idle target; never overwrite a racing job."""
+        await self.session.execute(
+            update(Beat)
+            .where(
+                Beat.id == beat_id,
+                Beat.research_state == BeatResearchState.IDLE,
+                Beat.research_started_at.is_(None),
+            )
+            .values(
+                research_state=BeatResearchState.FAILED,
+                research_error="dispatch_failed",
+                updated_at=func.now(),
+            )
+        )
+
     async def mark_idle(self, beat_id: uuid.UUID, *, fence: datetime.datetime) -> bool:
         """Return the Beat to ``idle`` after a resolved run (published or
         skipped) — ready to report again next Anchor day (D3's asymmetry with

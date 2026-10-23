@@ -24,6 +24,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from aleph.dtos.learning_tutor import RecommendationCreationRequest
 from aleph.dtos.paths import GuidanceStr, TopicStr
 from aleph.models import BeatResearchState, Level
 
@@ -53,7 +54,7 @@ AnchorWeekday = Annotated[int, Field(ge=0, le=6)]
 Cadence = Literal["weekly"]
 
 
-class DeployBeatRequest(BaseModel):
+class DeployBeatRequest(RecommendationCreationRequest):
     """``POST /api/v1/beats`` body (§6): deploy an analyst.
 
     ``topic``/``guidance`` reuse ``dtos/paths.py``'s ``TopicStr``/

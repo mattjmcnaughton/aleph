@@ -302,7 +302,9 @@ class LearningTutorRepository:
             )
         )
 
-    async def source_exists(self, user_id: UUID, reference: EvidenceReference) -> bool:
+    async def source_exists(
+        self, user_id: UUID, reference: EvidenceReference, *, lock: bool = False
+    ) -> bool:
         if reference.kind in {"focus", "message"}:
             return True
         if reference.kind == "brief":
@@ -316,6 +318,10 @@ class LearningTutorRepository:
             query = select(model.id).where(
                 model.user_id == user_id, model.id == reference.id
             )
+        if lock:
+            # KEY SHARE blocks DELETE without blocking ordinary activity updates.
+            # A Brief join locks both the Brief and its owning Beat.
+            query = query.with_for_update(read=True, key_share=True)
         return await self.session.scalar(query) is not None
 
     async def topic_excluded(self, user_id: UUID, kind: str, key: str) -> bool:

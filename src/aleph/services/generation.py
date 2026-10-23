@@ -412,7 +412,12 @@ class GenerationOrchestrator:
         events.emit_path_created(
             account_id=path.user_id, path_id=path.id, path_level=path.level.value
         )
-        self._spawn(self.run_outline_task(path.id))
+        task = self.run_outline_task(path.id)
+        try:
+            self._spawn(task)
+        except Exception:
+            task.close()
+            raise
 
     # -- outline task ------------------------------------------------------- #
 

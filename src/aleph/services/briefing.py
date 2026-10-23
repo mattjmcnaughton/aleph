@@ -660,7 +660,17 @@ class BriefingService:
             fence = await self._beats(session).claim_research(beat_id)
             await session.commit()
         if fence is not None:
-            self._spawn(self.run_research(beat_id, local_today, fence=fence))
+            task = self.run_research(beat_id, local_today, fence=fence)
+            try:
+                self._spawn(task)
+            except Exception:
+                task.close()
+                async with self._session_factory() as session:
+                    await self._beats(session).mark_failed(
+                        beat_id, fence=fence, error="dispatch_failed"
+                    )
+                    await session.commit()
+                raise
 
     # -- the arrival drain (TDD §5.6/D15) ------------------------------------ #
 

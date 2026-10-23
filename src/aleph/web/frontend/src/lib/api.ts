@@ -352,6 +352,9 @@ export interface PathCreated {
 }
 
 export interface CreatePathInput {
+  /** Final explicit acceptance only; send both fields or neither. */
+  learning_recommendation_id?: string;
+  learning_tutor_revision?: number;
   topic: string;
   level: Level;
   /**
@@ -916,6 +919,9 @@ export interface BeatList {
  *  never renders that picker (TDD §8's own field list omits it) — the type
  *  still names the real shape rather than hiding it. */
 export interface DeployBeatInput {
+  /** Final explicit acceptance only; send both fields or neither. */
+  learning_recommendation_id?: string;
+  learning_tutor_revision?: number;
   topic: string;
   level: Level;
   anchor_weekday: number;

@@ -807,6 +807,12 @@ def _drive_every_emitter() -> None:
         recommendation_id=PATH,
         decision="dismiss",
     )
+    events.emit_learning_recommendation_accepted(
+        account_id=ACCOUNT,
+        recommendation_id=PATH,
+        target_kind="beat",
+        target_id=BEAT,
+    )
     events.emit_notification_sent(
         account_id=ACCOUNT, kind="path_ready", outcome="disabled"
     )
