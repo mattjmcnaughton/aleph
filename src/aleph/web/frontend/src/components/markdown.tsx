@@ -4,7 +4,8 @@
 // GitHub-Flavored Markdown so it can use headings, lists, tables, fenced code
 // blocks, and mermaid diagrams instead of one undifferentiated wall of prose.
 // This module is the single place that turns that Markdown into DOM — every
-// surface renders it the same way.
+// surface shares its styling. Privacy-sensitive conversations can disable
+// automatic resource loading (images and Mermaid) with `inertResources`.
 //
 // **Safety.** The content is model-generated, so it is untrusted input. We rely on
 // react-markdown's default posture and deliberately keep it: no `rehype-raw`, so
@@ -43,6 +44,14 @@ function mermaidSource(children: ReactNode): string | null {
     return null;
   }
   return typeof code === "string" ? code : null;
+}
+
+function CodeBlock({ children }: { children?: ReactNode }) {
+  return (
+    <pre className="overflow-x-auto rounded-md border border-divider bg-elevated p-4 font-mono text-[13px] leading-6 text-porcelain [&_code]:bg-transparent [&_code]:p-0 [&_code]:text-[inherit] [&_code]:text-porcelain">
+      {children}
+    </pre>
+  );
 }
 
 // Nocturne treatments for the block/inline elements the agent is told it may use
@@ -124,11 +133,7 @@ const COMPONENTS: Components = {
   pre: ({ children }) => {
     const chart = mermaidSource(children);
     if (chart !== null) return <Mermaid source={chart} />;
-    return (
-      <pre className="overflow-x-auto rounded-md border border-divider bg-elevated p-4 font-mono text-[13px] leading-6 text-porcelain [&_code]:bg-transparent [&_code]:p-0 [&_code]:text-[inherit] [&_code]:text-porcelain">
-        {children}
-      </pre>
-    );
+    return <CodeBlock>{children}</CodeBlock>;
   },
   // GFM tables (remark-gfm). Same reflow problem as code blocks: the wrapper owns
   // the horizontal scroll so a wide table never widens the page on a phone.
@@ -148,6 +153,15 @@ const COMPONENTS: Components = {
   ),
 };
 
+// A model can encode private conversation context in even an HTTPS resource URL.
+// Keep alt text and diagram source readable without mounting a fetching element
+// or invoking Mermaid. Safe links remain explicit, user-initiated navigation.
+const INERT_RESOURCE_COMPONENTS: Components = {
+  ...COMPONENTS,
+  img: ({ alt }) => <>{alt}</>,
+  pre: CodeBlock,
+};
+
 /**
  * Render model-generated Markdown as Nocturne-styled DOM.
  *
@@ -161,14 +175,19 @@ export function Markdown({
   children,
   className = "",
   testid,
+  inertResources = false,
 }: {
   children: string;
   className?: string;
   testid?: string;
+  inertResources?: boolean;
 }) {
   return (
     <div data-testid={testid} className={`space-y-4 ${className}`}>
-      <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={COMPONENTS}>
+      <ReactMarkdown
+        remarkPlugins={REMARK_PLUGINS}
+        components={inertResources ? INERT_RESOURCE_COMPONENTS : COMPONENTS}
+      >
         {children}
       </ReactMarkdown>
     </div>
