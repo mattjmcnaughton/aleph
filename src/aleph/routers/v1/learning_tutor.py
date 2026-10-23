@@ -34,6 +34,10 @@ async def require_enabled(user: CurrentUser, session: Session) -> None:
 
 
 async def service(user: CurrentUser, session: Session):
+    # Authentication/zone observation has committed; the gate only reads flags.
+    # Release its connection before the service opens a read-only snapshot, so
+    # concurrent requests never hold one pool slot while waiting for another.
+    await session.close()
     try:
         yield LearningTutorService(session, user)
     except LearningTutorUnavailable:
