@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from aleph.domains.learning_recommendations import (
+    MAX_ACTIVE,
     RecommendationConflict,
     normalize_topic,
     transition,
@@ -24,10 +28,9 @@ from aleph.repositories.learning_tutor import LearningTutorRepository
 from aleph.services.feature_flags import FeatureFlag, FeatureFlagService
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
     from datetime import datetime
     from uuid import UUID
-
-    from sqlalchemy.ext.asyncio import AsyncSession
 
     from aleph.domains.learning_recommendations import Decision
     from aleph.models import User
@@ -86,6 +89,19 @@ class LearningTutorService:
         self.user = user
         self.repository = LearningTutorRepository(session)
 
+    @asynccontextmanager
+    async def _snapshot(self) -> AsyncIterator[LearningTutorService]:
+        # A new identity map also prevents post-commit mutation responses from
+        # retaining the writer's cached state alongside newer recommendations.
+        async with AsyncSession(bind=self.session.bind) as session:
+            await session.connection(
+                execution_options={
+                    "isolation_level": "REPEATABLE READ",
+                    "postgresql_readonly": True,
+                }
+            )
+            yield LearningTutorService(session, self.user)
+
     async def flags(self) -> dict[str, bool]:
         flags = await FeatureFlagService(self.session).resolve_for_user(self.user)
         if not flags.get(FeatureFlag.LEARNING_TUTOR):
@@ -124,6 +140,10 @@ class LearningTutorService:
         return active
 
     async def history(self, before: UUID | None = None) -> HistoryPage:
+        async with self._snapshot() as snapshot:
+            return await snapshot._history(before)
+
+    async def _history(self, before: UUID | None = None) -> HistoryPage:
         await self.flags()
         state = await self.state_or_empty()
         cursor = (
@@ -145,6 +165,10 @@ class LearningTutorService:
         )
 
     async def read(self) -> LearningTutorStateDTO:
+        async with self._snapshot() as snapshot:
+            return await snapshot._read()
+
+    async def _read(self) -> LearningTutorStateDTO:
         flags = await self.flags()
         state = await self.state_or_empty()
         active = []
@@ -172,10 +196,14 @@ class LearningTutorService:
             current_operation_id=running.id
             if running and running.expires_at > now and running.epoch == state.epoch
             else None,
-            history=await self.history(),
+            history=await self._history(),
         )
 
     async def operation(self, operation_id: UUID) -> OperationDTO:
+        async with self._snapshot() as snapshot:
+            return await snapshot._operation(operation_id)
+
+    async def _operation(self, operation_id: UUID) -> OperationDTO:
         await self.flags()
         row = await self.repository.operation(self.user.id, operation_id)
         if row is None:
@@ -183,6 +211,10 @@ class LearningTutorService:
         return operation_dto(row, await self.repository.now())
 
     async def recommendation(self, recommendation_id: UUID) -> RecommendationDTO:
+        async with self._snapshot() as snapshot:
+            return await snapshot._recommendation(recommendation_id)
+
+    async def _recommendation(self, recommendation_id: UUID) -> RecommendationDTO:
         flags = await self.flags()
         row = await self.repository.recommendation(self.user.id, recommendation_id)
         if row is None or (row.kind == "beat" and not flags.get(FeatureFlag.ANALYST)):
@@ -194,6 +226,10 @@ class LearningTutorService:
         return recommendation_dto(row)
 
     async def dismissed(self, before: UUID | None = None) -> RecommendationPage:
+        async with self._snapshot() as snapshot:
+            return await snapshot._dismissed(before)
+
+    async def _dismissed(self, before: UUID | None = None) -> RecommendationPage:
         flags = await self.flags()
         state = await self.state_or_empty()
         cursor = (
@@ -302,7 +338,7 @@ class LearningTutorService:
             raise LearningTutorUnavailable()
         state = await self.repository.lock_state(self.user.id)
         active = await self.supersede_stale(state)
-        if len(active) >= 3:
+        if len(active) >= MAX_ACTIVE:
             raise RecommendationConflict("recommendation_capacity")
         key = normalize_topic(draft.topic)
         excluded = {

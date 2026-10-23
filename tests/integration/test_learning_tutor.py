@@ -8,6 +8,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from aleph import db
 from aleph.app import create_app
@@ -600,3 +601,139 @@ async def test_analyst_gate_and_input_validation(monkeypatch):
         transport=ASGITransport(app=app), base_url="http://test"
     ) as http:
         assert (await http.get(URL + "/")).status_code == 401
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("existing", [False, True])
+async def test_state_read_is_one_snapshot_during_committed_replacement(
+    monkeypatch, existing
+):
+    user = await account()
+    if existing:
+        async with db.async_session() as session:
+            state = await LearningTutorRepository(session).lock_state(user.id)
+            state.focus = "Old focus"
+            session.add_all(
+                [
+                    card(user.id),
+                    operation(
+                        user.id, status="succeeded", output={"reply": "Old turn"}
+                    ),
+                ]
+            )
+            await session.commit()
+
+    original_state = LearningTutorRepository.state
+    replaced = False
+
+    async def read_then_replace(repository, user_id):
+        nonlocal replaced
+        row = await original_state(repository, user_id)
+        if not replaced:
+            replaced = True
+            # The reader has observed its state. A different real transaction
+            # clears and publishes a new epoch before the reader loads cards.
+            # Awaiting commit proves the reader is not blocking the writer.
+            async with db.async_session() as writer:
+                repo = LearningTutorRepository(writer)
+                state = await repo.lock_state(user_id)
+                await repo.clear(user_id, await repo.now())
+                state.focus = "New focus"
+                state.revision = state.focus_version = state.epoch = 1
+                new_card = card(user_id, topic="New direction")
+                new_card.epoch = new_card.focus_version = 1
+                new_turn = operation(
+                    user_id, status="succeeded", output={"reply": "New turn"}
+                )
+                new_turn.epoch = 1
+                writer.add_all([new_card, new_turn])
+                await writer.commit()
+        return row
+
+    monkeypatch.setattr(LearningTutorRepository, "state", read_then_replace)
+    async with client(user) as http:
+        response = await asyncio.wait_for(http.get(URL + "/"), 5)
+        assert response.status_code == 200
+        body = response.json()
+        assert (body["focus"], body["revision"], body["epoch"]) == (
+            "Old focus" if existing else None,
+            0,
+            0,
+        )
+        assert [row["topic"] for row in body["recommendations"]] == (
+            ["Electricity"] if existing else []
+        )
+        assert [row["output"]["reply"] for row in body["history"]["items"]] == (
+            ["Old turn"] if existing else []
+        )
+        current = (await http.get(URL + "/")).json()
+        assert (current["focus"], current["revision"], current["epoch"]) == (
+            "New focus",
+            1,
+            1,
+        )
+        assert [row["topic"] for row in current["recommendations"]] == ["New direction"]
+        assert [row["output"]["reply"] for row in current["history"]["items"]] == [
+            "New turn"
+        ]
+
+
+@pytest.mark.anyio
+async def test_mutation_response_does_not_reuse_precommit_identity_map():
+    user = await account()
+
+    class InterleavedService(LearningTutorService):
+        async def read(self):
+            # save_focus retains its state ORM object with expire_on_commit=False.
+            # Another tab commits before the response read starts.
+            async with db.async_session() as writer:
+                state = await LearningTutorRepository(writer).lock_state(user.id)
+                assert state.revision == 1
+                state.focus = "Other tab"
+                state.revision = state.focus_version = 2
+                replacement = card(user.id)
+                replacement.focus_version = 2
+                writer.add(replacement)
+                await writer.commit()
+            return await super().read()
+
+    async with db.async_session() as session:
+        response = await InterleavedService(session, user).save_focus(
+            "My edit", revision=0
+        )
+        assert (response.focus, response.revision, response.focus_version) == (
+            "Other tab",
+            2,
+            2,
+        )
+        assert [row.topic for row in response.recommendations] == ["Electricity"]
+
+
+@pytest.mark.anyio
+async def test_state_api_does_not_hold_gate_connection_while_reading_snapshot():
+    user = await account()
+    engine = create_async_engine(
+        db.engine.url, pool_size=1, max_overflow=0, pool_timeout=0.25
+    )
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+
+    async def request_session():
+        async with sessions() as session:
+            yield session
+
+    app = create_app()
+    app.dependency_overrides[get_current_user] = lambda: user
+    app.dependency_overrides[db.get_session] = request_session
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as http:
+            assert (await http.get(URL + "/")).status_code == 200
+            response = await http.put(
+                URL + "/focus", json={"focus": "Physics", "revision": 0}
+            )
+            assert response.status_code == 200
+            assert response.json()["focus"] == "Physics"
+            assert (await http.get(URL + "/history")).status_code == 200
+    finally:
+        await engine.dispose()
