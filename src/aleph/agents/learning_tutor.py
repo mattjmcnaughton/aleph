@@ -35,6 +35,7 @@ class LearningTutorDeps:
     analyst_enabled: bool = False
     available_slots: int = 3
     selected_id: UUID | None = None
+    selected_topic: tuple[str, str] | None = None
 
     def __post_init__(self):
         if len(self.context) > 40000:
@@ -85,7 +86,11 @@ def output_violation(
     seen = set()
     for draft in output.recommendations:
         key = (draft.kind, normalize_topic(draft.topic))
-        if key in deps.excluded or key in seen:
+        if (
+            key in deps.excluded
+            or key in seen
+            or (key == deps.selected_topic and not output.replacement)
+        ):
             return "Exact Topic is excluded"
         seen.add(key)
         if draft.kind == "beat" and not deps.analyst_enabled:

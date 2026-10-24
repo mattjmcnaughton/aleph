@@ -164,16 +164,17 @@ class LearningTutorRepository:
             or 0
         )
 
-    async def excluded_card_topics(self, user_id: UUID):
-        return (
-            await self.session.execute(
-                select(Card.kind, Card.normalized_topic).where(
-                    Card.user_id == user_id,
-                    Card.status.in_(["active", "dismissed"]),
-                    Card.normalized_topic.is_not(None),
-                )
-            )
-        ).all()
+    async def excluded_card_topics(
+        self, user_id: UUID, *, except_id: UUID | None = None
+    ):
+        query = select(Card.kind, Card.normalized_topic).where(
+            Card.user_id == user_id,
+            Card.status.in_(["active", "dismissed"]),
+            Card.normalized_topic.is_not(None),
+        )
+        if except_id is not None:
+            query = query.where(Card.id != except_id)
+        return (await self.session.execute(query)).all()
 
     async def now(self) -> datetime:
         return (await self.session.execute(select(func.clock_timestamp()))).scalar_one()

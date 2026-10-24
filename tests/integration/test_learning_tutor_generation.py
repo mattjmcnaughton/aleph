@@ -397,7 +397,13 @@ async def test_refresh_and_refinement_publish_cards_atomically_once():
         response = LearningTutorOutput(
             reply="Refined",
             replacement=selected,
-            recommendations=[draft("Replacement")],
+            recommendations=[
+                dict(
+                    draft(state.recommendations[0].topic),
+                    level="work_in_it",
+                    guidance="Focus on practical applications.",
+                )
+            ],
         )
         await runtime.admit(
             service,
@@ -417,6 +423,90 @@ async def test_refresh_and_refinement_publish_cards_atomically_once():
         assert kept < {c.id for c in state.recommendations}
         assert selected not in {c.id for c in state.recommendations}
         assert len(state.history.items) == 1
+        refined = next(c for c in state.recommendations if c.id not in kept)
+        assert refined.topic == response.recommendations[0].topic
+        assert refined.level == "work_in_it"
+        assert refined.guidance == "Focus on practical applications."
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "collision",
+    ["none", "addition", "unselected", "other_active", "target", "dismissed"],
+)
+async def test_same_topic_refinement_preserves_exclusions(collision):
+    user = await account()
+    pending = []
+    async with db.async_session() as session:
+        selected = card(user.id)
+        session.add(selected)
+        if collision == "other_active":
+            session.add(card(user.id, topic="Circuits"))
+        elif collision == "target":
+            session.add(
+                Path(user_id=user.id, topic="ELECTRICITY", level=Level.NEW_TO_IT)
+            )
+        elif collision == "dismissed":
+            session.add(card(user.id, status="dismissed"))
+        await session.commit()
+        selected_id = selected.id
+
+    async def provider(deps):
+        return (
+            LearningTutorOutput(
+                reply="Refined",
+                replacement=None if collision == "addition" else selected_id,
+                recommendations=[
+                    dict(
+                        draft(
+                            "CIRCUITS"
+                            if collision == "other_active"
+                            else "ＥLECTRICITY",
+                            "message",
+                        ),
+                        level="work_in_it",
+                        guidance="Focus on circuit design.",
+                    )
+                ],
+            ),
+            1,
+            2,
+        )
+
+    runtime = LearningTutorGeneration(provider=provider, spawn=pending.append)
+    async with db.async_session() as session:
+        result = await runtime.admit(
+            LearningTutorService(session, user),
+            OperationRequest(
+                request_id=uuid.uuid4(),
+                revision=0,
+                epoch=0,
+                kind="turn",
+                content="Keep the Topic but make the Level and Guidance more advanced.",
+                recommendation_id=None if collision == "unselected" else selected_id,
+            ),
+        )
+    await pending.pop()
+    async with db.async_session() as session:
+        service = LearningTutorService(session, user)
+        result = await service.operation(result.id)
+        state = await service.read()
+        if collision == "none":
+            assert result.status == "succeeded"
+            assert len(state.recommendations) == 1
+            assert state.recommendations[0].id != selected_id
+            assert state.recommendations[0].level == "work_in_it"
+            assert state.recommendations[0].guidance == "Focus on circuit design."
+            assert len(state.history.items) == 1
+        else:
+            assert (result.status, result.error_code) == ("failed", "invalid_output")
+            assert state.revision == 0
+            assert not state.history.items
+            original = next(c for c in state.recommendations if c.id == selected_id)
+            assert original.level == "new_to_it" and original.guidance is None
+            assert len(state.recommendations) == (
+                2 if collision == "other_active" else 1
+            )
 
 
 @pytest.mark.anyio
