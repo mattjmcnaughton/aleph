@@ -3,7 +3,12 @@ import { Link, createFileRoute } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { Breadcrumbs } from "../components/breadcrumbs";
 import { Markdown } from "../components/markdown";
-import { LT_BUTTON, LT_FIELD, Recommendations } from "../components/learning-tutor/recommendations";
+import {
+  LT_BUTTON,
+  LT_FIELD,
+  LearningNotices,
+  Recommendations,
+} from "../components/learning-tutor/recommendations";
 import {
   type LearningTutor,
   useLearningTutor,
@@ -272,6 +277,9 @@ function LearningConversation({
           </Link>
         </p>
       )}
+      <div className="mt-3">
+        <LearningNotices tutor={tutor} />
+      </div>
       <form
         className="mt-5"
         onSubmit={(event) => {
