@@ -3,7 +3,7 @@
 import asyncio
 import json
 import uuid
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import delete, update
@@ -14,7 +14,7 @@ from aleph.agents.learning_tutor import LearningTutorOutput
 from aleph.config import Settings
 from aleph.domains.learning_recommendations import RecommendationConflict
 from aleph.dtos.learning_tutor import OperationRequest
-from aleph.models import Level, Path, UserFeatureOverride
+from aleph.models import Lesson, Level, Path, Unit, UserFeatureOverride
 from aleph.models.learning_tutor import LearningTutorOperation
 from aleph.services.learning_tutor import LearningTutorService
 from aleph.services.learning_tutor_generation import (
@@ -223,6 +223,75 @@ async def test_metadata_context_excludes_path_title_and_other_account():
         )
     await pending.pop()
     assert captured[0]["paths"][0]["topic"] == "Electricity"
+
+
+@pytest.mark.anyio
+async def test_context_distinguishes_next_lesson_from_remaining_work():
+    user = await account()
+    captured, pending = [], []
+
+    async def provider(deps):
+        captured.append(json.loads(deps.context))
+        return LearningTutorOutput(reply="Continue with the next lesson."), 1, 1
+
+    async with db.async_session() as session:
+        for topic, completed, titles in (
+            ("Urban ecology", 2, ["Habitats", "Surveys", "Designing a green corridor"]),
+            (
+                "Data visualization",
+                1,
+                [
+                    "Choosing a chart",
+                    "Uncertainty and error bars",
+                    "Explaining a comparison",
+                ],
+            ),
+            ("New path", 0, []),
+        ):
+            path = Path(user_id=user.id, topic=topic, level=Level.NEW_TO_IT)
+            session.add(path)
+            await session.flush()
+            unit = Unit(path_id=path.id, position=0, title="Unit", summary="Synthetic")
+            session.add(unit)
+            await session.flush()
+            for index, title in enumerate(titles):
+                session.add(
+                    Lesson(
+                        path_id=path.id,
+                        unit_id=unit.id,
+                        position_in_path=index,
+                        position_in_unit=index,
+                        title=title,
+                        completed_at=datetime.now(UTC) if index < completed else None,
+                    )
+                )
+        await session.commit()
+        await LearningTutorGeneration(provider=provider, spawn=pending.append).admit(
+            LearningTutorService(session, user),
+            OperationRequest(
+                request_id=uuid.uuid4(),
+                revision=0,
+                epoch=0,
+                kind="turn",
+                content="What remains in my paths?",
+            ),
+        )
+    await pending.pop()
+    paths = {path["topic"]: path for path in captured[0]["paths"]}
+    for topic, counts, next_name in (
+        ("Urban ecology", (3, 2, 1), "Designing a green corridor"),
+        ("Data visualization", (3, 1, 2), "Uncertainty and error bars"),
+        ("New path", (0, 0, 0), None),
+    ):
+        path = paths[topic]
+        assert (
+            path["total_lessons"],
+            path["completed_lessons"],
+            path["remaining_lessons"],
+        ) == counts
+        assert (
+            path["next_lesson"]["name"] if path["next_lesson"] else None
+        ) == next_name
 
 
 @pytest.mark.anyio

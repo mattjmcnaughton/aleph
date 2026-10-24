@@ -49,6 +49,7 @@ class LearningTutorRepository:
         progress = (
             select(
                 Lesson.path_id,
+                func.count(Lesson.id).label("total"),
                 func.count(Lesson.completed_at).label("completed"),
                 func.max(Lesson.completed_at).label("latest"),
             )
@@ -62,6 +63,7 @@ class LearningTutorRepository:
                     Path.topic,
                     Path.level,
                     Path.guidance,
+                    progress.c.total,
                     progress.c.completed,
                     progress.c.latest,
                 )

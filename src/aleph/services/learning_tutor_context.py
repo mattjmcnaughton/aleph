@@ -119,7 +119,9 @@ async def assemble_context(
                 topic=row.topic,
                 level=row.level,
                 guidance=(row.guidance or "")[:500],
+                total_lessons=row.total or 0,
                 completed_lessons=row.completed or 0,
+                remaining_lessons=(row.total or 0) - (row.completed or 0),
                 latest_completion=row.latest,
                 next_lesson=dict(id=str(next_lesson.id), name=next_lesson.title[:200])
                 if next_lesson
