@@ -94,7 +94,7 @@ async def test_independent_judge_dimensions_and_hard_floors(item):
         assertions_map=ASSERTIONS,
         safety_assertion="safety",
     )
-    assert gate.pass_rate == 23 / 24
+    assert gate.pass_rate == (len(cases) - 1) / len(cases)
     failures = _hard_floor_failures(
         report, HARD_FLOORS | JUDGE_HARD_FLOORS, assertions_map=ASSERTIONS
     )
@@ -112,7 +112,7 @@ def test_cli_smoke_and_report(tmp_path, monkeypatch):
         assert report["smoke"] is True
         assert report["passed"] is True
         assert "NOT recommendation quality" in report["caveat"]
-        assert len(report["cases"]) == 24
+        assert len(report["cases"]) == len(load_cases())
 
 
 @pytest.mark.parametrize("flags", [["--briefs"], ["--agreement"], ["--models", "fake"]])
@@ -153,14 +153,11 @@ async def test_missing_checks_fail_closed():
 
     report = await dataset(load_cases()).evaluate(build_task(), progress=False)
     # A judged report without judge assertions cannot pass the hard floors.
-    assert (
-        len(
-            _hard_floor_failures(
-                report, HARD_FLOORS | JUDGE_HARD_FLOORS, assertions_map=ASSERTIONS
-            )
+    assert len(
+        _hard_floor_failures(
+            report, HARD_FLOORS | JUDGE_HARD_FLOORS, assertions_map=ASSERTIONS
         )
-        == 72
-    )
+    ) == 3 * len(load_cases())
     report.cases[0].assertions.clear()
     assert _hard_floor_failures(report, HARD_FLOORS, assertions_map=ASSERTIONS)
 
@@ -196,7 +193,8 @@ async def test_agent_failure_is_not_dropped_from_rate_denominator():
         hard_floor_evaluators=HARD_FLOORS,
         assertions_map=ASSERTIONS,
     )
-    assert gate.total == 24 and gate.pass_rate == 23 / 24
+    assert gate.total == len(cases)
+    assert gate.pass_rate == (len(cases) - 1) / len(cases)
     assert _hard_floor_failures(report, HARD_FLOORS, assertions_map=ASSERTIONS) == [
         "empty-refresh: errored"
     ]
