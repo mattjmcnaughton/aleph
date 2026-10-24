@@ -199,10 +199,37 @@ Output is a validated object:
 ```text
 reply: bounded Markdown (turn only, nonempty, <= 6,000 chars)
 existing_work: 0..2 {kind, supplied_target_key}
-recommendations: 0..3 draft objects for refresh; 0..1 for a turn
+recommendations: 0..3 draft objects for refresh; 0..1 for a turn unless requested_pair
   {kind, topic, level, guidance?, description, rationale, evidence_keys[]}
 replacement: optional discussed recommendation ID (turn only)
+requested_pair: boolean, default false (turn only; no replacement)
 ```
+
+**Owner amendment, 2026-10-24:** Normal chat stays the default. Optional discovery
+uses ordinary turn content and bounded conversation history, without a new API
+input, tools, inferred-profile storage, or persisted interview mode. The prompt
+asks one short question at a time, skips already supplied answers and honors an
+exit to ordinary chat. Explicit novelty requests use activity as contrast rather
+than forcing similarity; current requests override saved focus without changing it.
+
+`requested_pair` records the model's interpretation of a connected path+Beat
+request, including blocked/clarifying replies. A declared pair has exactly one
+draft of each kind or no drafts; two cards without that declaration are invalid.
+Both drafts independently pass the existing predicates and fit two available
+slots within the unchanged three-active-card cap. No silent eviction or combining
+a pair with single-card refinement. If capacity or analyst availability prevents
+the pair, instructions require a no-card reply explaining how to free slots or
+asking whether the learner wants one kind instead. Semantic request recognition,
+connection, novelty and actionable prose need quality evaluation: deterministic
+validation cannot prove the model correctly set the declaration or understood
+the learner. Scripted offline cases do not prove live adherence.
+
+Pair publication uses the existing whole-operation savepoint: a late collision
+on either draft rolls back both. The cards remain independently editable,
+dismissible and explicitly accepted through existing creation flows; no joint
+enrollment action or persistent pair relationship is introduced. The additive
+output marker is internal model/receipt metadata; older receipts lack it and
+clients consume their existing reply/card arrays without a new request shape.
 
 Reuse Topic/Level/Guidance constraints without importing router/DTO dependencies
 into agents. Share pure predicates rather than repeating divergent constraints.

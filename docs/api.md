@@ -1062,7 +1062,14 @@ objects), `recommendations` (validated draft objects with evidence keys),
 never reconstruct cards from historical operation output. Existing-work keys are
 server-supplied `path:UUID`, `beat:UUID` or `brief:UUID`, not arbitrary URLs; the
 destination's normal owned GET still authorizes access. Refresh publishes 0–3
-cards; a turn publishes at most one and only replaces its explicit discussion card.
+cards; a turn publishes at most one, or a requested connected path+Beat pair
+when two slots are free. The additive `requested_pair` output marker describes
+model-interpreted pair intent (absent in older receipts); a declared pair contains
+one of each kind or no cards, never a partial pair. Capacity/analyst restrictions
+should produce actionable no-card replies. A pair cannot refine an existing card;
+single-card refinement only replaces the explicit discussion card. Every card
+still requires independent explicit creation. Discovery uses ordinary turn content,
+not a new mode or request field.
 Sources and flags are rechecked before publication. Exact normalized existing
 Topics, active cards and all retained dismissals are excluded, not merely the
 sample of recent dismissals shown to the model.

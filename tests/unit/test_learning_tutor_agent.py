@@ -56,7 +56,61 @@ def test_turn_requires_reply_and_known_evidence():
 def test_context_cannot_exceed_total_bound():
     with pytest.raises(ValueError):
         LearningTutorDeps(context="x" * 40001, kind="refresh")
-    assert len(SYSTEM_PROMPT) < 2000
+    assert len(SYSTEM_PROMPT) < 4000
+
+
+@pytest.mark.parametrize(
+    "kinds,paired,slots,analyst,valid",
+    [
+        (["path", "beat"], True, 2, True, True),
+        (["path", "beat"], True, 1, True, False),
+        (["path", "beat"], True, 3, False, False),
+        (["path"], True, 3, True, False),
+        (["beat"], True, 3, True, False),
+        (["path", "path"], True, 3, True, False),
+        (["path", "beat"], False, 3, True, False),
+        ([], True, 1, True, True),
+        ([], True, 3, False, True),
+        ([], False, 0, False, True),
+    ],
+)
+def test_pair_requires_both_kinds_and_room_without_weakening_chat(
+    kinds, paired, slots, analyst, valid
+):
+    deps = LearningTutorDeps(
+        context="{}",
+        kind="turn",
+        evidence_keys=("message",),
+        available_slots=slots,
+        analyst_enabled=analyst,
+    )
+    output = LearningTutorOutput.model_validate(
+        dict(
+            reply="Discuss next steps",
+            requested_pair=paired,
+            recommendations=[
+                dict(
+                    kind=kind,
+                    topic=f"Topic {index}",
+                    level="new_to_it",
+                    description="Explore",
+                    rationale="You asked",
+                    evidence_keys=["message"],
+                )
+                for index, kind in enumerate(kinds)
+            ],
+        )
+    )
+    assert (output_violation(output, deps) is None) is valid
+    if paired:
+        assert output_violation(
+            output.model_copy(update={"reply": None}), replace(deps, kind="refresh")
+        )
+        selected = uuid4()
+        assert output_violation(
+            output.model_copy(update={"replacement": selected}),
+            replace(deps, selected_id=selected),
+        )
 
 
 @pytest.mark.parametrize(

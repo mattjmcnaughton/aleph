@@ -105,10 +105,24 @@ browser journeys; GET/navigation causes no model work.
 
 The top-level Tutor states what it can see. A learner can ask what to do next,
 explain an interest, connect two topics, or ask whether to start a path or Beat.
-Responses may offer owned existing-work links and at most one new recommendation
-per turn. A recommendation's “Discuss” action carries that card's identity into
+Normal conversational chat is the default. Responses may offer owned existing-work
+links and one new recommendation, or a connected path+Beat pair when explicitly
+requested. Each card still requires its own explicit creation action.
+A recommendation's “Discuss” action carries that card's identity into
 the Learning conversation. A refinement supersedes that card only after a whole
 successful turn; merely discussing it does not dismiss or accept it.
+
+**Owner amendment, 2026-10-24:** “Help me discover something new” optionally starts
+a guided conversation, not a mandatory wizard or persisted mode. Ask a few short
+questions one at a time about distance from current interests, path/Beat/both,
+and practical constraints; skip answers already supplied and let the learner
+return to normal conversation or request recommendations anytime. The starter
+uses the ordinary turn API with content: “Help me discover something new. Ask me
+a few short questions one at a time to find a direction.” Novelty requests use
+past activity as contrast, not a requirement of similarity. A cold-start request
+for surprise can ground a recommendation without inventing history. Current
+explicit requests take priority over saved focus; no inferred profile or automatic
+focus update is introduced.
 
 First-slice replies arrive whole after a visible waiting state, rather than
 streaming provisional text. Navigation/reload can recover an in-flight operation.
@@ -133,8 +147,12 @@ the Tutor also receives bounded dismissal context to discourage paraphrases.
 Semantic novelty is evaluated, not claimed to be mechanically guaranteed.
 
 At most three active cards exist. Explicit refresh replaces the current set
-atomically. A conversation can add a card if there is space; with three cards it
-may refine the explicitly discussed card, but cannot silently evict another.
+atomically. A conversation can add a card if there is space, or a requested pair
+only if two slots are free. With insufficient room, explain how to dismiss active
+cards or ask for one kind instead; never silently publish half a requested pair.
+If Beats are unavailable, explain that and ask before substituting a path alone.
+With three cards a turn may refine the explicitly discussed card, but cannot
+silently evict another. A pair cannot be combined with single-card refinement.
 Dismissal persists across devices and refreshes. Immediately offer Undo, and a
 small dismissed-recommendations list allows restoring later. Restore cannot
 exceed the three-card cap or restore an accepted/superseded card.
