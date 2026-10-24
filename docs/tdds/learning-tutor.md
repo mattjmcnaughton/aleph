@@ -484,3 +484,22 @@ the exact initial revision and permission grant. Neither `main` nor the unrelate
 Home Screen feature branch is a permitted PR target. Before dogfooding, authorize
 designated accounts, live model spend and rollout separately. This design work has
 not run application tests or demonstrated these guarantees.
+
+## 13. Chat-first presentation amendment (2026-10-24)
+
+The owner selected inline questions within a single conversation. An additive
+optional `question` output contains a trimmed nonempty `prompt` (≤500 characters)
+and 2–5 trimmed nonempty `options` (≤200 characters each), distinct after casefold.
+Only turns may ask questions; legacy outputs without the field remain valid.
+The JSON receipt stores this alongside the whole validated reply with no migration.
+Continue sends `prompt + "\n" + option` through the existing ordinary turn API.
+Free text can bypass a question; no separate questionnaire session is persisted.
+
+The newest successful turn's question is interactive; older questions are compact
+history. Draft, running-operation, uncertain acknowledgement and unavailable selected
+recommendation guards apply to Continue just as to Send. Active recommendation IDs
+attach cards to their source turns; cards from legacy refreshes or unloaded history
+remain accessible in the conversation. Home offers chat rather than refresh, and
+Learning focus uses a secondary disclosure. Refresh remains a compatible backend
+operation, not a user-facing requirement. Existing admission, recovery, provenance,
+pair validation and explicit creation transactions remain unchanged.

@@ -17,6 +17,27 @@ async function send(page: Page, text: string) {
   await page.getByRole("button", { name: "Send", exact: true }).click();
 }
 
+test("@w41 optional inline question survives reload and allows choice or free text", async ({
+  page,
+}) => {
+  await freshAccount(page);
+  await send(page, "[lt-question] Help me explore");
+  await expect(page.getByRole("radio", { name: "Something completely different" })).toBeVisible();
+  await page.reload();
+  await page.getByRole("radio", { name: "Something completely different" }).check();
+  await expect(page.getByTestId("learning-turn")).toHaveCount(1);
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await expect(page.getByTestId("learning-turn")).toHaveCount(2);
+  await expect(page.getByRole("radio")).toHaveCount(0);
+  await expect(page.getByTestId("learning-recommendation")).toHaveCount(0);
+  await send(page, "[lt-question] Another question");
+  await page.getByRole("button", { name: "Write my own answer" }).click();
+  await expect(page.getByLabel("Message your Tutor")).toBeFocused();
+  await send(page, "Actually, explain a musical cadence");
+  await expect(page.getByTestId("learning-turn")).toHaveCount(4);
+  await expect(page.getByRole("radio")).toHaveCount(0);
+});
+
 test("@w41 Learning conversation persists whole turns, dismisses and restores", async ({
   page,
 }) => {
@@ -26,10 +47,12 @@ test("@w41 Learning conversation persists whole turns, dismisses and restores", 
       posts++;
   });
   await freshAccount(page);
-  await expect(page.getByLabel("Learning focus")).toBeVisible();
+  await expect(page.getByLabel("Message your Tutor")).toBeVisible();
   expect(posts).toBe(0);
-  await page.getByRole("button", { name: "Find directions to explore", exact: true }).click();
-  await expect(page.getByTestId("learning-needs_context")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Find directions to explore", exact: true }),
+  ).toHaveCount(0);
+  await page.locator("summary").filter({ hasText: "Learning focus" }).click();
   await page.getByLabel("Learning focus").fill("[lt-path] Electricity markets");
   await page.getByRole("button", { name: "Save focus" }).click();
   await expect(page.getByText(/Learning focus saved/)).toBeVisible();
@@ -38,7 +61,7 @@ test("@w41 Learning conversation persists whole turns, dismisses and restores", 
   await page.reload();
   await expect(page.getByTestId("learning-turn")).toHaveCount(1, { timeout: 30_000 });
   await expect(page.getByTestId("learning-recommendation")).toHaveCount(1);
-  expect(posts).toBe(2);
+  expect(posts).toBe(1);
   await page.getByRole("button", { name: "Not interested" }).click();
   await expect(page.getByRole("button", { name: "Undo", exact: true })).toBeFocused();
   await page.getByRole("button", { name: "Undo", exact: true }).click();
@@ -50,6 +73,7 @@ test("@w41 Learning conversation persists whole turns, dismisses and restores", 
   await page.getByRole("button", { name: "Confirm clear" }).click();
   await expect(page.getByTestId("learning-turn")).toHaveCount(0);
   await expect(page.getByTestId("learning-recommendation")).toHaveCount(0);
+  await page.locator("summary").filter({ hasText: "Learning focus" }).click();
   await expect(page.getByLabel("Learning focus")).toHaveValue("[lt-path] Electricity markets");
 });
 

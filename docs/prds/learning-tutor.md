@@ -277,3 +277,25 @@ These remain revisable design choices; the owner's execution request accepts the
 as the experiment's implementation baseline, not as demonstrated product value. The TDD
 maps constitution obligations to enforcement and evidence; the ticket guide owns
 dependencies and execution permission boundaries.
+
+## 7. Owner-approved chat-first amendment (2026-10-24)
+
+This amendment supersedes the separate refresh-first UI above. Tutor is one
+conversation, not a recommendation dashboard. Home opens that conversation;
+neither surface offers a recommendation-refresh button or a “nothing useful”
+empty-card message. A reply without a proposal remains a normal conversation.
+
+The Tutor may ask one optional inline question with 2–5 choices. Selecting a choice
+does not submit; Continue sends the question and answer as an ordinary turn.
+Learners can write their own answer or change the subject in the composer at any
+time. There is no mandatory discovery interview. A later successful turn collapses
+the old question into conversation history. Pending/uncertain submissions prevent
+duplicate choice submission; an existing draft is never overwritten by a choice.
+
+Proposals appear with their originating replies and retain explicit creation and
+dismissal/Undo. Existing proposals from older refreshes or unloaded history remain
+available in the conversation. No automatic creation or eviction is introduced.
+Learning focus is an optional secondary disclosure, not a prerequisite for chat.
+Metadata-only context, default-off flags, whole validated replies, transactional
+publication, quotas and recovery remain unchanged. Legacy refresh API requests
+remain compatible but are no longer the active client workflow.

@@ -87,6 +87,7 @@ export interface LearningOperationOutput {
   outcome: "needs_context" | "completed";
   omitted: Record<"turns" | "paths" | "beats" | "briefs" | "recommendations", number>;
   reply?: string | null;
+  question?: { prompt: string; options: string[] } | null;
   existing_work?: {
     kind: "path" | "beat" | "brief";
     supplied_target_key: string;

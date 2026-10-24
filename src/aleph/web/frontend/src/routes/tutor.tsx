@@ -45,21 +45,19 @@ function TutorPage({ account }: { account: string }) {
   const { recommendation } = Route.useSearch();
   const state = tutor.state.data;
   return (
-    <main data-testid="learning-tutor" className="mx-auto w-full max-w-[1200px] px-4 py-8 lg:px-8">
+    <main data-testid="learning-tutor" className="mx-auto w-full max-w-[800px] px-4 py-8 lg:px-8">
       <Breadcrumbs current="Tutor" />
-      <p className="kicker">Your Tutor</p>
-      <h1 className="mt-2 text-3xl font-semibold tracking-tight">See the bigger picture.</h1>
-      <p className="mt-3 max-w-[680px] text-mist">
-        Connect your interests, continue what matters, or explore something new. You decide what to
-        create.
-      </p>
+      <h1 className="mt-2 text-3xl font-semibold tracking-tight">Your Tutor</h1>
       {state && (
-        <div className="mt-8 grid gap-8 lg:grid-cols-[minmax(0,1fr)_300px]">
+        <div className="mt-5">
+          <details className="mb-6 rounded-lg border border-divider">
+            <summary className="cursor-pointer px-4 py-3 text-sm text-mist">Learning focus</summary>
+            <FocusEditor tutor={tutor} />
+          </details>
           <LearningConversation key={state.epoch} tutor={tutor} recommendation={recommendation} />
-          <FocusEditor tutor={tutor} />
         </div>
       )}
-      <Recommendations tutor={tutor} surface="tutor" />
+      {!state && <Recommendations tutor={tutor} surface="tutor" />}
     </main>
   );
 }
@@ -69,13 +67,17 @@ function FocusEditor({ tutor }: { tutor: LearningTutor }) {
   const [draft, setDraft] = useState<string | null>(null);
   const editVersion = useRef(0);
   return (
-    <aside className="rounded-lg border border-divider bg-surface p-5">
+    <aside className="rounded-b-lg border-t border-divider bg-surface p-5">
       <label htmlFor="learning-focus" className="kicker">
         Learning focus
       </label>
       <p className="mt-3 text-sm leading-6 text-mist">
         Optional. Save what you want to understand. Your conversation never changes this
         automatically. Clear the field and save to remove it.
+      </p>
+      <p className="mt-3 text-xs text-slate">
+        Your Tutor uses sampled activity metadata, not lesson conversations, Read passages or Brief
+        bodies.
       </p>
       <textarea
         id="learning-focus"
@@ -181,14 +183,19 @@ function LearningConversation({
   const latest =
     tutor.operation.data?.output ?? state.history.items[0]?.output ?? state.latest_refresh?.output;
   const omitted = latest?.omitted;
-  function send() {
-    if (text.trim() && !tutor.busy && !tutor.uncertain && (!recommendation || selected)) {
+  const latestTurnId = state.history.items[0]?.id;
+  const linkedCards = new Set(unique.flatMap((turn) => turn.output?.recommendation_ids ?? []));
+  const earlierCards = state.recommendations
+    .filter((card) => !linkedCards.has(card.id))
+    .map((card) => card.id);
+  function send(content = text.trim()) {
+    if (content && !tutor.busy && !tutor.uncertain && (!recommendation || selected)) {
       submitted.current = {
         version: editVersion.current,
-        content: text.trim(),
+        content,
         previousId: tutor.send.data?.id,
       };
-      void tutor.start(text.trim(), selected?.id);
+      void tutor.start(content, selected?.id);
     }
   }
   return (
@@ -261,8 +268,36 @@ function LearningConversation({
           </p>
         )}
         {unique.map((turn) => (
-          <Turn key={turn.id} turn={turn} analyst={analyst} />
+          <div key={turn.id}>
+            <Turn turn={turn} analyst={analyst} />
+            {turn.output?.question &&
+              (turn.id === latestTurnId ? (
+                <InlineQuestion
+                  question={turn.output.question}
+                  disabled={
+                    tutor.busy ||
+                    Boolean(tutor.uncertain) ||
+                    Boolean(text.trim()) ||
+                    Boolean(recommendation && !selected)
+                  }
+                  answer={(answer) => {
+                    editVersion.current++;
+                    setText(answer);
+                    send(answer);
+                  }}
+                  writeOwn={() => input.current?.focus()}
+                />
+              ) : (
+                <p className="mt-3 text-sm text-slate">{turn.output.question.prompt}</p>
+              ))}
+            <Recommendations
+              tutor={tutor}
+              surface="tutor"
+              ids={turn.output?.recommendation_ids ?? []}
+            />
+          </div>
         ))}
+        <Recommendations tutor={tutor} surface="tutor" ids={earlierCards} />
       </div>
       {selected && (
         <p className="mt-5 rounded-md border border-iris/40 p-3 text-sm">
@@ -301,7 +336,7 @@ function LearningConversation({
             editVersion.current++;
             setText(event.target.value);
           }}
-          onKeyDown={(event) => handleComposerKeyDown(event, send)}
+          onKeyDown={(event) => handleComposerKeyDown(event, () => send())}
         />
         <div className="mt-2 flex items-center justify-between gap-3">
           <span className="text-xs text-slate">Enter for a new line · Shift+Enter to send</span>
@@ -320,6 +355,60 @@ function LearningConversation({
         </div>
       </form>
     </section>
+  );
+}
+
+function InlineQuestion({
+  question,
+  disabled,
+  answer,
+  writeOwn,
+}: {
+  question: { prompt: string; options: string[] };
+  disabled: boolean;
+  answer: (text: string) => void;
+  writeOwn: () => void;
+}) {
+  const [choice, setChoice] = useState<string | null>(null);
+  return (
+    <fieldset className="mt-4 rounded-lg border border-divider bg-surface p-4">
+      <legend className="px-1 text-sm font-semibold">{question.prompt}</legend>
+      <div className="space-y-2">
+        {question.options.map((option) => (
+          <label
+            key={option}
+            className={`flex min-h-11 cursor-pointer items-center gap-3 rounded-md border p-3 text-sm ${choice === option ? "border-teal bg-teal/10" : "border-divider"}`}
+          >
+            <input
+              type="radio"
+              name="tutor-question"
+              value={option}
+              checked={choice === option}
+              disabled={disabled}
+              onChange={() => setChoice(option)}
+              className="accent-teal"
+            />
+            {option}
+          </label>
+        ))}
+      </div>
+      <div className="mt-3 flex flex-wrap gap-3">
+        <button
+          type="button"
+          className={`${LT_BUTTON} text-teal`}
+          disabled={disabled || choice === null}
+          onClick={() => choice !== null && answer(`${question.prompt}\n${choice}`)}
+        >
+          Continue
+        </button>
+        <button type="button" className={LT_BUTTON} onClick={writeOwn}>
+          Write my own answer
+        </button>
+      </div>
+      <p className="mt-3 text-xs text-slate">
+        Or keep chatting below. Choosing an option never creates anything.
+      </p>
+    </fieldset>
   );
 }
 

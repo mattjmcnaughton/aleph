@@ -1,4 +1,4 @@
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { ApiError } from "../../lib/api";
 import { sessionQueryOptions } from "../../lib/auth";
@@ -6,7 +6,6 @@ import {
   LEARNING_KEY,
   clearLearningConversation,
   decideLearningRecommendation,
-  getDismissed,
   getLearningOperation,
   learningError,
   learningStateOptions,
@@ -35,13 +34,6 @@ export function useLearningTutor(account: string) {
   const currentAccount = () =>
     client.getQueryData(sessionQueryOptions.queryKey)?.user?.id === account;
   const invalidate = () => client.invalidateQueries({ queryKey: [...LEARNING_KEY, account] });
-  const dismissed = useInfiniteQuery({
-    queryKey: [...LEARNING_KEY, account, "dismissed", state.data?.epoch],
-    queryFn: ({ pageParam, signal }) => getDismissed(pageParam, signal),
-    initialPageParam: undefined as string | undefined,
-    getNextPageParam: (page) => page.before ?? undefined,
-    refetchOnWindowFocus: "always",
-  });
   const id = state.data?.current_operation_id ?? operationId;
   const operation = useQuery({
     queryKey: [...LEARNING_KEY, account, "operation", id],
@@ -122,7 +114,7 @@ export function useLearningTutor(account: string) {
       }
       if (action.kind === "focus")
         setNotice(
-          "Learning focus saved. Previous recommendations are no longer current; refresh when you're ready.",
+          "Learning focus saved. Previous recommendations are no longer current; keep chatting to explore new directions.",
         );
       void invalidate();
     },
@@ -176,7 +168,6 @@ export function useLearningTutor(account: string) {
   return {
     account,
     state,
-    dismissed,
     operation,
     send,
     change,

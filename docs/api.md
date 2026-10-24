@@ -1032,6 +1032,15 @@ up to 20 records, using a UUID cursor for the last scanned row with timestamp/UU
 ordering; dismissed pages may be shorter after stale/flag filtering. Continue
 while `before` is non-null. Foreign or cleared-epoch cursors return 404.
 
+Successful turn output may include an optional `question` object: `prompt` is a
+trimmed nonempty string of at most 500 characters; `options` is 2–5 trimmed nonempty
+strings of at most 200 characters each, distinct ignoring case. Missing or null
+means ordinary conversation without structured choices. Refresh cannot return a
+question. The chat client submits a chosen answer as ordinary turn `content`
+(`prompt`, newline, option); no new endpoint or questionnaire mode is introduced.
+Legacy refresh requests remain supported, but the active client opens conversation
+instead of exposing a separate recommendation refresh workflow.
+
 Dependent implementation seams: `LearningTutorRepository.lock_state` performs
 race-safe lazy creation and locking; repository methods never commit.
 `replay(user_id, epoch, request_id)` is an owned receipt lookup, not admission:

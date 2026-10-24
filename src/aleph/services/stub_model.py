@@ -1280,13 +1280,19 @@ def build_stub_learning_tutor(context: dict) -> dict:
     if "[lt-failure]" in text:
         raise StubModelForcedError("forced Learning Tutor provider failure")
     reply = "Continue your learning, or tell me what you want to explore."
-    result = dict(
+    result: dict = dict(
         reply=reply if context["kind"] == "turn" else None,
         existing_work=[],
         recommendations=[],
         replacement=None,
     )
-    if "[lt-existing]" in text:
+    if "[lt-question]" in text and context["kind"] == "turn":
+        result["reply"] = "We can explore beyond your usual interests."
+        result["question"] = dict(
+            prompt="How far would you like to wander?",
+            options=["A fresh angle", "Something completely different", "Surprise me"],
+        )
+    elif "[lt-existing]" in text:
         for group, kind in (("paths", "path"), ("beats", "beat")):
             if context[group]:
                 result["existing_work"] = [
