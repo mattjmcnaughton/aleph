@@ -1,10 +1,10 @@
 """No-tool Account-wide Tutor: bounded data in, validated proposals out."""
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 from pydantic_ai import Agent, ModelRetry, RunContext
 
 from aleph.creation_inputs import GuidanceStr, TopicStr
@@ -29,10 +29,13 @@ interview. Fulfill explicit requests for a path, Beat, or connected path+Beat pa
 when safe and sufficiently specified. For novelty or surprise, use past activity
 as contrast, not a constraint forcing similarity; a cold-start request for surprise
 is enough grounding without inventing a history. Explain the proposed connection.
-Only if invited to help discover a direction, ask a few short questions one at a
-time: distance from current interests, path/Beat/both, then practical constraints.
-Skip what the learner already answered; allow normal conversation or a direct
-recommendation anytime. Never save answers as inferred Learning focus or a profile.
+When helpful on a turn, ask one useful optional structured question with a short
+prompt and 2-5 distinct choices. Otherwise set question=null. Choices are shortcuts,
+not required answers: the learner may reply freely, skip them, or change direction.
+Answers are ordinary conversation text, not authorization to create anything.
+Never impose a scripted discovery interview or ask what was already answered.
+Open-ended conversation without a question or cards is always welcome. Never save
+answers as inferred Learning focus or a profile.
 Recommend only when useful, never to fill capacity. A turn offers at most one
 card unless the learner requests a connected pair. Set requested_pair=true for
 that request even if blocked: return exactly one path and one Beat, or no cards.
@@ -46,7 +49,8 @@ Refresh may return up to three cards, without requested_pair. Refinement replace
 only the selected card, only when requested, and cannot be combined with a pair.
 Cards are proposals: each requires its own explicit Create path / Deploy action.
 No browsing, tools, URLs, account identity or correctness profiles.
-Return the whole structured output; refresh has no reply, turn needs a reply.
+Return the whole structured output; refresh has no reply or question.
+A turn needs a reply.
 """
 
 
@@ -84,9 +88,29 @@ class ExistingWork(BaseModel):
     supplied_target_key: str
 
 
+class LearningTutorQuestion(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    prompt: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)
+    ]
+    options: list[
+        Annotated[
+            str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)
+        ]
+    ] = Field(min_length=2, max_length=5)
+
+    @field_validator("options")
+    @classmethod
+    def distinct_options(cls, options: list[str]) -> list[str]:
+        if len({option.strip().casefold() for option in options}) != len(options):
+            raise ValueError("Question options must be distinct")
+        return options
+
+
 class LearningTutorOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     reply: str | None = Field(default=None, max_length=6000)
+    question: LearningTutorQuestion | None = None
     existing_work: list[ExistingWork] = Field(default_factory=list, max_length=2)
     recommendations: list[Draft] = Field(default_factory=list, max_length=3)
     replacement: UUID | None = None
@@ -103,6 +127,8 @@ def output_violation(
         return "A turn requires a reply"
     if deps.kind == "refresh" and (output.reply is not None or output.replacement):
         return "Refresh cannot reply or refine"
+    if deps.kind == "refresh" and output.question is not None:
+        return "Refresh cannot ask a question"
     if output.replacement and (
         output.replacement != deps.selected_id or len(output.recommendations) != 1
     ):

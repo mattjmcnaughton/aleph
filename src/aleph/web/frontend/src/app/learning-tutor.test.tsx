@@ -51,6 +51,90 @@ function setup(enabled = true) {
 }
 
 describe("Account-wide Tutor", () => {
+  it("keeps optional choices inline, submits only on Continue, and keeps free chat available", async () => {
+    setup();
+    const fake = learningFake();
+    const turn = learningReceipt({
+      kind: "turn",
+      content: "Surprise me",
+      request_id: "question",
+      epoch: 0,
+      revision: 0,
+    });
+    if (!turn.output) throw new Error("Expected successful fixture output");
+    turn.output = {
+      ...turn.output,
+      question: {
+        prompt: "How far would you like to wander?",
+        options: ["A fresh angle", "Something completely different", "Surprise me"],
+      },
+    };
+    fake.state.history.items = [turn];
+    server.use(...fake.handlers);
+    window.history.pushState({}, "", "/tutor");
+    render(<App />);
+    const choice = await screen.findByRole("radio", { name: "Something completely different" });
+    expect(
+      screen.queryByRole("button", { name: /Refresh recommendations|Find directions/ }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(choice);
+    expect(fake.requests).toHaveLength(0);
+    const composer = screen.getByLabelText("Message your Tutor");
+    fireEvent.change(composer, { target: { value: "My own question" } });
+    expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled();
+    fireEvent.change(composer, { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    await waitFor(() => expect(fake.requests).toHaveLength(1));
+    expect(fake.requests[0]).toMatchObject({
+      kind: "turn",
+      content: "How far would you like to wander?\nSomething completely different",
+    });
+    await waitFor(() => expect(screen.queryByRole("radio")).not.toBeInTheDocument());
+    expect(screen.getByLabelText("Message your Tutor")).toBeEnabled();
+  });
+  it("blocks a selected choice with an empty composer during pending and uncertain requests", async () => {
+    setup();
+    const fake = learningFake();
+    const turn = learningReceipt({
+      kind: "turn",
+      content: "Explore",
+      request_id: "question",
+      epoch: 0,
+      revision: 0,
+    });
+    if (!turn.output) throw new Error("Expected successful fixture output");
+    turn.output = {
+      ...turn.output,
+      question: { prompt: "Which direction?", options: ["Music", "Economics"] },
+    };
+    fake.state.history.items = [turn];
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let received = false;
+    server.use(...fake.handlers);
+    server.use(
+      http.post(`${base}/operations`, async () => {
+        received = true;
+        await pending;
+        return HttpResponse.error();
+      }),
+    );
+    window.history.pushState({}, "", "/tutor");
+    render(<App />);
+    fireEvent.click(await screen.findByRole("radio", { name: "Music" }));
+    const composer = screen.getByLabelText("Message your Tutor");
+    fireEvent.change(composer, { target: { value: "Let me explain" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(received).toBe(true));
+    fireEvent.change(composer, { target: { value: "" } });
+    expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled();
+    release();
+    await screen.findByText(/couldn't reach your Tutor/);
+    expect(composer).toHaveValue("");
+    expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled();
+  });
   it.each(["succeeded", "failed", "uncertain"] as const)(
     "keeps pending text and handles delayed %s acknowledgement",
     async (status) => {

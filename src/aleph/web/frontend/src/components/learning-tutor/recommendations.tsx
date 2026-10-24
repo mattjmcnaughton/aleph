@@ -1,11 +1,7 @@
 import { Link } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { useFeatureFlag } from "../../lib/feature-flags";
-import {
-  learningError,
-  recommendationState,
-  recordLearningInteraction,
-} from "../../lib/learning-tutor";
+import { learningError, recordLearningInteraction } from "../../lib/learning-tutor";
 import type { LearningRecommendation } from "../../lib/learning-tutor-types";
 import type { LearningTutor } from "./use-learning-tutor";
 
@@ -14,24 +10,16 @@ export const LT_BUTTON =
 export const LT_FIELD =
   "mt-2 w-full rounded-md border border-divider bg-surface px-3 py-3 text-base text-porcelain focus:border-teal focus:outline-none";
 
-const EMPTY_COPY = {
-  initial: "Find directions to explore, when you're ready. Nothing is generated just by visiting.",
-  needs_context:
-    "Tell your Tutor an interest, save a Learning focus, or start a path. There's not enough context yet; no model call was used.",
-  empty:
-    "Nothing useful to add right now. Continue your current work or clarify your Learning focus.",
-  dismissed: "You've dismissed your recommendations. Refresh explicitly for new directions.",
-  unavailable:
-    "The previous recommendations are no longer available. Your focus or sources may have changed, or you may have accepted them. Refresh when you're ready.",
-  failed:
-    "Recommendations couldn't be refreshed. This is a failure, not an empty result. Try again when you're ready.",
-  running: "Finding directions to explore…",
-  cards: "",
-};
-
 export function LearningNotices({ tutor }: { tutor: LearningTutor }) {
   const error = tutor.send.error ?? tutor.change.error ?? tutor.operation.error;
   const failed = tutor.operation.data?.status === "failed" && !tutor.operation.data.cleared;
+  const refresh = tutor.state.data?.latest_refresh;
+  const lastTurn = tutor.state.data?.history.items[0];
+  const legacyFailure =
+    refresh?.status === "failed" &&
+    !refresh.cleared &&
+    (!lastTurn ||
+      Date.parse(lastTurn.started_at) <= Date.parse(refresh.finished_at ?? refresh.started_at));
   return (
     <div className="space-y-3" aria-live="polite">
       {tutor.notice && <p className="text-sm leading-6 text-mist">{tutor.notice}</p>}
@@ -55,6 +43,12 @@ export function LearningNotices({ tutor }: { tutor: LearningTutor }) {
           {learningError(error)}
         </p>
       )}
+      {!failed && !tutor.busy && legacyFailure && (
+        <p role="alert" className="rounded-md border border-danger-border bg-danger-bg p-3 text-sm">
+          An earlier recommendation request didn't finish. Continue the conversation when you're
+          ready.
+        </p>
+      )}
       {failed && (
         <p role="alert" className="rounded-md border border-danger-border bg-danger-bg p-3 text-sm">
           {tutor.operation.data?.error_code === "context_changed"
@@ -75,11 +69,11 @@ export function LearningNotices({ tutor }: { tutor: LearningTutor }) {
 export function Recommendations({
   tutor,
   surface,
-}: { tutor: LearningTutor; surface: "home" | "tutor" }) {
+  ids,
+}: { tutor: LearningTutor; surface: "home" | "tutor"; ids?: string[] }) {
   const analyst = useFeatureFlag("analyst");
   const [undo, setUndo] = useState<LearningRecommendation | null>(null);
   const undoRef = useRef<HTMLButtonElement>(null);
-  const refreshRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     if (undo) undoRef.current?.focus();
   }, [undo]);
@@ -100,70 +94,37 @@ export function Recommendations({
         )}
       </section>
     );
-  const dismissed =
-    tutor.dismissed.data?.pages
-      .flatMap((page) => page.items)
-      .filter((card) => analyst || card.kind !== "beat") ?? [];
-  const cards = state.recommendations.filter((card) => analyst || card.kind !== "beat");
-  const kind = recommendationState({ ...state, recommendations: cards }, dismissed.length);
-  const refresh = state.latest_refresh;
-  const refreshFinishedAt = refresh?.finished_at;
-  // A later turn can publish cards without replacing the last refresh receipt.
-  const newerCards =
-    refreshFinishedAt &&
-    cards.some((card) => Date.parse(card.created_at) > Date.parse(refreshFinishedAt));
+  const cards = state.recommendations.filter(
+    (card) => (analyst || card.kind !== "beat") && (!ids || ids.includes(card.id)),
+  );
   async function decide(card: LearningRecommendation, decision: "dismiss" | "restore") {
     try {
       await tutor.change.mutateAsync({ kind: "decision", id: card.id, decision });
       setUndo(decision === "dismiss" ? card : null);
-      if (decision === "restore") refreshRef.current?.focus();
     } catch {
       /* The shared notice retains the actionable error. */
     }
   }
+  if (surface === "tutor" && cards.length === 0 && !undo) return null;
   return (
-    <section data-testid="learning-recommendations" className="mt-8 border-t border-divider pt-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="kicker">From your Tutor</h2>
-        <button
-          ref={refreshRef}
-          type="button"
-          className={LT_BUTTON}
-          disabled={tutor.busy || Boolean(tutor.uncertain)}
-          onClick={() => void tutor.start()}
-        >
-          {state.latest_refresh ? "Refresh recommendations" : "Find directions to explore"}
-        </button>
-      </div>
-      <p className="mt-3 text-sm leading-6 text-mist">
-        Uses your explicit Learning focus and sampled activity metadata from paths
-        {analyst ? " and Beats" : ""}, not lesson conversations or Read passages
-        {analyst ? " or Brief bodies" : ""}.
-      </p>
-      {state.latest_refresh?.finished_at && (
-        <p className="mt-2 text-xs text-slate">
-          Last refresh: {new Date(state.latest_refresh.finished_at).toLocaleString()}. Not
-          automatically updated with later activity.
-        </p>
-      )}
+    <section data-testid="learning-recommendations" className="mt-4">
       {surface === "home" && (
-        <div className="mt-3">
+        <div className="mt-8 border-t border-divider pt-6">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="kicker">From your Tutor</h2>
+            <Link to="/tutor" search={{}} className={LT_BUTTON}>
+              Chat with your Tutor
+            </Link>
+          </div>
+          {cards.length === 0 && (
+            <p className="mt-3 text-sm text-mist">
+              Ask a question, explore an interest, or discover something new.
+            </p>
+          )}
           <LearningNotices tutor={tutor} />
         </div>
       )}
-      {cards.length === 0 && (
-        <p data-testid={`learning-${kind}`} className="mt-4 text-sm leading-6 text-mist">
-          {EMPTY_COPY[kind]}
-        </p>
-      )}
-      {refresh?.status === "failed" && !newerCards && (
-        <p role="alert" className="mt-3 text-sm text-danger">
-          {cards.length > 0
-            ? "Refresh failed. Your previous recommendations are still here."
-            : "Refresh failed. Try again explicitly when you're ready."}
-        </p>
-      )}
-      <div className="mt-4 grid gap-4 lg:grid-cols-3">
+      <div className={`mt-4 grid gap-4 ${surface === "home" ? "lg:grid-cols-3" : ""}`}>
         {cards.map((card) => (
           <RecommendationCard
             key={card.id}

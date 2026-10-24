@@ -26,8 +26,22 @@ const refreshRequest = {
   epoch: 0,
 };
 describe("Learning Tutor visual state contracts", () => {
+  it.each(["provider_failed", "interrupted"])(
+    "keeps durable legacy %s visible in a fresh tab",
+    async (error_code) => {
+      enabled();
+      const fake = learningFake();
+      fake.state.latest_refresh = { ...learningReceipt(refreshRequest, "failed"), error_code };
+      server.use(...fake.handlers);
+      window.history.pushState({}, "", "/tutor");
+      render(<App />);
+      await screen.findByText(/An earlier recommendation request didn't finish/);
+      expect(screen.getByLabelText("Message your Tutor")).toBeEnabled();
+      expect(fake.requests).toHaveLength(0);
+    },
+  );
   it.each(["empty", "needs_context", "unavailable", "failed"] as const)(
-    "distinguishes %s",
+    "offers conversation instead of the legacy %s refresh dead end",
     async (kind) => {
       enabled();
       const fake = learningFake();
@@ -40,7 +54,11 @@ describe("Learning Tutor visual state contracts", () => {
       server.use(...fake.handlers);
       window.history.pushState({}, "", "/tutor");
       render(<App />);
-      await screen.findByTestId(`learning-${kind}`);
+      await screen.findByLabelText("Message your Tutor");
+      expect(screen.queryByText(/Nothing useful to add|Refresh failed/)).toBeNull();
+      expect(
+        screen.queryByRole("button", { name: /Refresh recommendations|Find directions/ }),
+      ).toBeNull();
       expect(fake.requests).toHaveLength(0);
     },
   );
@@ -51,9 +69,9 @@ describe("Learning Tutor visual state contracts", () => {
     fake.state.latest_refresh = learningReceipt(refreshRequest, "failed");
     server.use(...fake.handlers);
     render(<App />);
-    await screen.findByText(/Refresh failed. Your previous recommendations/);
+    await screen.findByTestId("learning-recommendation");
     fireEvent.click(screen.getByRole("button", { name: "Not interested" }));
-    await screen.findByTestId("learning-dismissed");
+    await screen.findByText("Recommendation dismissed.");
     expect(screen.getByRole("button", { name: "Undo" })).toHaveFocus();
     expect(screen.queryByText("Dismissed recommendations")).toBeNull();
     expect(screen.queryByText(/Restore one below/)).toBeNull();
@@ -61,9 +79,9 @@ describe("Learning Tutor visual state contracts", () => {
     await screen.findByTestId("learning-recommendation");
     expect(fake.state.recommendations).toHaveLength(1);
     fireEvent.click(screen.getByRole("button", { name: "Not interested" }));
-    await screen.findByTestId("learning-dismissed");
+    await screen.findByText("Recommendation dismissed.");
     fireEvent.click(screen.getByRole("link", { name: "Tutor" }));
-    await screen.findByTestId("learning-dismissed");
+    await screen.findByLabelText("Message your Tutor");
     expect(screen.queryByTestId("learning-recommendation")).toBeNull();
     expect(screen.queryByText("Dismissed recommendations")).toBeNull();
     expect(fake.dismissed).toHaveLength(1);
@@ -90,7 +108,7 @@ describe("Learning Tutor visual state contracts", () => {
     );
     window.history.pushState({}, "", "/tutor");
     render(<App />);
-    await screen.findByText("Refresh failed. Try again explicitly when you're ready.");
+    await screen.findByLabelText("Message your Tutor");
     fireEvent.change(screen.getByLabelText("Message your Tutor"), {
       target: { value: "Suggest a complementary path" },
     });
@@ -102,18 +120,16 @@ describe("Learning Tutor visual state contracts", () => {
     { label: "earlier", created_at: "2026-10-23T12:00:00Z", hidden: false },
     { label: "equal", created_at: "2026-10-23T12:00:01Z", hidden: false },
     { label: "newer but hidden", created_at: "2026-10-23T12:00:02Z", hidden: true },
-  ])("retains truthful refresh failure for $label cards", async ({ created_at, hidden }) => {
+  ])("keeps $label legacy cards subject to feature gates", async ({ created_at, hidden }) => {
     enabled(!hidden);
     const fake = learningFake();
     fake.state.latest_refresh = learningReceipt(refreshRequest, "failed");
     fake.state.recommendations = [{ ...learningCard(hidden ? "beat" : "path"), created_at }];
     server.use(...fake.handlers);
     render(<App />);
-    await screen.findByText(
-      hidden
-        ? "Refresh failed. Try again explicitly when you're ready."
-        : "Refresh failed. Your previous recommendations are still here.",
-    );
+    await screen.findByRole("link", { name: "Chat with your Tutor" });
+    expect(screen.queryAllByTestId("learning-recommendation")).toHaveLength(hidden ? 0 : 1);
+    expect(screen.queryByText(/Refresh failed/)).toBeNull();
   });
   it("renders unsafe Markdown inertly and hides Beat actions with analyst off", async () => {
     enabled(false);

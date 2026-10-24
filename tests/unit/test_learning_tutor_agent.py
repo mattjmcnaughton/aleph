@@ -19,6 +19,64 @@ from aleph.agents.learning_tutor import (
 from aleph.services.stub_model import build_stub_model
 
 
+@pytest.mark.parametrize(
+    "payload", [{"reply": "Hello"}, {"reply": "Hello", "question": None}]
+)
+def test_legacy_chat_output_needs_no_question_or_cards(payload):
+    output = LearningTutorOutput.model_validate(payload)
+    assert output.question is None
+    assert output.recommendations == []
+    assert (
+        output_violation(output, LearningTutorDeps(context="{}", kind="turn")) is None
+    )
+
+
+@pytest.mark.parametrize("count", [2, 5])
+def test_optional_question_is_bounded_and_turn_only(count):
+    output = LearningTutorOutput.model_validate(
+        dict(
+            reply="Let's explore",
+            question=dict(
+                prompt="p" * 500,
+                options=[str(i) * 200 for i in range(count)],
+            ),
+        )
+    )
+    assert output.question is not None
+    assert output.question.prompt == "p" * 500
+    assert len(output.question.options) == count
+    deps = LearningTutorDeps(context="{}", kind="turn", available_slots=0)
+    assert output_violation(output, deps) is None
+    assert output_violation(
+        output.model_copy(update={"reply": None}), replace(deps, kind="refresh")
+    )
+    assert (
+        output_violation(LearningTutorOutput(), replace(deps, kind="refresh")) is None
+    )
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        dict(prompt="", options=["A", "B"]),
+        dict(prompt=" \n ", options=["A", "B"]),
+        dict(prompt="p" * 501, options=["A", "B"]),
+        dict(prompt="Choose", options=[]),
+        dict(prompt="Choose", options=["A"]),
+        dict(prompt="Choose", options=list("ABCDEF")),
+        dict(prompt="Choose", options=["", "B"]),
+        dict(prompt="Choose", options=[" \n ", "B"]),
+        dict(prompt="Choose", options=["a" * 201, "B"]),
+        dict(prompt="Choose", options=[" A ", "a"]),
+        dict(prompt="Choose", options=["Straße", "STRASSE"]),
+        dict(prompt="Choose", options=["A", "B"], create_path=True),
+    ],
+)
+def test_question_rejects_invalid_or_ambiguous_choices(question):
+    with pytest.raises(ValidationError):
+        LearningTutorOutput.model_validate(dict(reply="Hello", question=question))
+
+
 @pytest.mark.anyio
 async def test_stub_delay_is_async_and_owned_by_the_provider():
     deps = LearningTutorDeps(

@@ -4,7 +4,6 @@ import type {
   LearningHistoryPage,
   LearningOperationRequest,
   LearningRecommendation,
-  LearningRecommendationPage,
   LearningTutorOperation,
   LearningTutorState,
 } from "./learning-tutor-types";
@@ -33,13 +32,6 @@ export const getLearningOperation = (id: string, signal?: AbortSignal) =>
   apiFetch<LearningTutorOperation>(path(`/operations/${encodeURIComponent(id)}`), { signal });
 export const getLearningHistory = (before: string, signal?: AbortSignal) =>
   apiFetch<LearningHistoryPage>(path(`/history?before=${encodeURIComponent(before)}`), { signal });
-export const getDismissed = (before?: string, signal?: AbortSignal) =>
-  apiFetch<LearningRecommendationPage>(
-    path(
-      `/recommendations?status=dismissed${before ? `&before=${encodeURIComponent(before)}` : ""}`,
-    ),
-    { signal },
-  );
 export const startLearningOperation = (body: LearningOperationRequest) =>
   apiFetch<LearningTutorOperation>(path("/operations"), {
     method: "POST",
@@ -86,21 +78,6 @@ export function learningError(error: unknown): string {
     }
   }
   return "We couldn't reach your Tutor. Your input is still here. Try again explicitly.";
-}
-
-export function recommendationState(state: LearningTutorState, dismissed: number) {
-  if (state.recommendations.length) return "cards";
-  if (dismissed) return "dismissed";
-  const refresh = state.latest_refresh;
-  if (!refresh)
-    return state.history.items.some((turn) => turn.output?.recommendation_ids?.length)
-      ? "unavailable"
-      : "initial";
-  if (refresh.status === "failed") return "failed";
-  if (refresh.status === "running") return "running";
-  if (refresh.output?.outcome === "needs_context") return "needs_context";
-  if (refresh.output?.recommendation_ids?.length) return "unavailable";
-  return "empty";
 }
 
 // Only uncertain operation bodies are retained, in this tab and account. They are
