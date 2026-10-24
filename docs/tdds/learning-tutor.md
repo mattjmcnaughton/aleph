@@ -396,6 +396,15 @@ metadata-only context as “I read your Briefs.” Show sampled context and gene
 time. Empty, initial and failed are separate states. Clear requires an explicit
 confirmation naming what survives. Explain when focus edits invalidate cards.
 
+**Owner UI scope amendment (2026-10-24):** do not render a dismissed-recommendations
+list or later restore controls. Keep immediate Undo, persistent dismissal and the
+existing history/restore API. Reuse the Tutor thinking-dot animation while pending;
+decorative dots are hidden from assistive technology and stop for reduced motion,
+while status/recovery text stays available. Suppress the obsolete refresh-failure
+warning when a visible card's `created_at` is later than that failed refresh's
+`finished_at`; equal/earlier timestamps or no newer visible cards retain the warning.
+This uses the existing wire contract, not browser-local timing or a history scan.
+
 ## 10. Telemetry and quality evidence
 
 Extend typed `events.py` fields: operation completed (kind/outcome/duration/tokens),

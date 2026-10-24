@@ -153,9 +153,16 @@ cards or ask for one kind instead; never silently publish half a requested pair.
 If Beats are unavailable, explain that and ask before substituting a path alone.
 With three cards a turn may refine the explicitly discussed card, but cannot
 silently evict another. A pair cannot be combined with single-card refinement.
-Dismissal persists across devices and refreshes. Immediately offer Undo, and a
-small dismissed-recommendations list allows restoring later. Restore cannot
-exceed the three-card cap or restore an accepted/superseded card.
+Dismissal persists across devices and refreshes. Immediately offer Undo. The
+learner UI has no dismissed-recommendations list or later restore action. Undo
+cannot exceed the three-card cap or restore an accepted/superseded card.
+
+**Owner UI scope amendment (2026-10-24):** remove the expandable dismissed list,
+retaining immediate Undo and persistent dismissal; backend history/restore APIs
+remain available. Show animated thinking dots while an operation is pending,
+with reduced-motion support and accessible status/recovery text. A failed refresh
+must not describe recommendations published by a later turn as preserved old cards;
+retain truthful failure feedback when no newer visible cards were published.
 
 **Verify:** evidence references, exact repeat filtering, kind distinctions,
 card cap, atomic refresh, dismissal/restore persistence; quality evals cover

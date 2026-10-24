@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
 import { API_V1_BASE } from "../lib/api";
+import type { LearningOperationRequest } from "../lib/learning-tutor-types";
 import { learnerUser } from "../mocks/handlers";
 import { learningCard, learningFake, learningReceipt } from "../mocks/learning-tutor";
 import { server } from "../mocks/server";
@@ -43,7 +44,7 @@ describe("Learning Tutor visual state contracts", () => {
       expect(fake.requests).toHaveLength(0);
     },
   );
-  it("keeps prior cards on failed refresh and persists dismissal/Undo across navigation", async () => {
+  it("keeps prior cards on failed refresh and immediate Undo without a dismissed list", async () => {
     enabled();
     const fake = learningFake();
     fake.state.recommendations = [learningCard()];
@@ -54,12 +55,65 @@ describe("Learning Tutor visual state contracts", () => {
     fireEvent.click(screen.getByRole("button", { name: "Not interested" }));
     await screen.findByTestId("learning-dismissed");
     expect(screen.getByRole("button", { name: "Undo" })).toHaveFocus();
-    fireEvent.click(screen.getByRole("link", { name: "Tutor" }));
-    await screen.findByTestId("learning-dismissed");
-    fireEvent.click(screen.getByText("Dismissed recommendations", { selector: "summary" }));
-    fireEvent.click(screen.getByRole("button", { name: /Restore Electricity/ }));
+    expect(screen.queryByText("Dismissed recommendations")).toBeNull();
+    expect(screen.queryByText(/Restore one below/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
     await screen.findByTestId("learning-recommendation");
     expect(fake.state.recommendations).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Not interested" }));
+    await screen.findByTestId("learning-dismissed");
+    fireEvent.click(screen.getByRole("link", { name: "Tutor" }));
+    await screen.findByTestId("learning-dismissed");
+    expect(screen.queryByTestId("learning-recommendation")).toBeNull();
+    expect(screen.queryByText("Dismissed recommendations")).toBeNull();
+    expect(fake.dismissed).toHaveLength(1);
+  });
+  it("does not describe a new turn's published card as preserved from a failed refresh", async () => {
+    enabled();
+    const fake = learningFake();
+    fake.state.latest_refresh = learningReceipt(refreshRequest, "failed");
+    server.use(...fake.handlers);
+    server.use(
+      http.post(`${API_V1_BASE}/learning-tutor/operations`, async ({ request }) => {
+        const body = (await request.json()) as LearningOperationRequest;
+        const turn = learningReceipt(body);
+        turn.started_at = "2026-10-23T12:01:58Z";
+        turn.finished_at = "2026-10-23T12:02:00Z";
+        fake.receipts.set(turn.id, turn);
+        fake.state.history.items = [turn];
+        fake.state.recommendations = [
+          { ...learningCard(), created_at: "2026-10-23T08:01:59-04:00" },
+        ];
+        fake.state.revision++;
+        return HttpResponse.json(turn);
+      }),
+    );
+    window.history.pushState({}, "", "/tutor");
+    render(<App />);
+    await screen.findByText("Refresh failed. Try again explicitly when you're ready.");
+    fireEvent.change(screen.getByLabelText("Message your Tutor"), {
+      target: { value: "Suggest a complementary path" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await screen.findByTestId("learning-recommendation");
+    expect(screen.queryByText(/Refresh failed\./)).toBeNull();
+  });
+  it.each([
+    { label: "earlier", created_at: "2026-10-23T12:00:00Z", hidden: false },
+    { label: "equal", created_at: "2026-10-23T12:00:01Z", hidden: false },
+    { label: "newer but hidden", created_at: "2026-10-23T12:00:02Z", hidden: true },
+  ])("retains truthful refresh failure for $label cards", async ({ created_at, hidden }) => {
+    enabled(!hidden);
+    const fake = learningFake();
+    fake.state.latest_refresh = learningReceipt(refreshRequest, "failed");
+    fake.state.recommendations = [{ ...learningCard(hidden ? "beat" : "path"), created_at }];
+    server.use(...fake.handlers);
+    render(<App />);
+    await screen.findByText(
+      hidden
+        ? "Refresh failed. Try again explicitly when you're ready."
+        : "Refresh failed. Your previous recommendations are still here.",
+    );
   });
   it("renders unsafe Markdown inertly and hides Beat actions with analyst off", async () => {
     enabled(false);

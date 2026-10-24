@@ -20,8 +20,7 @@ const EMPTY_COPY = {
     "Tell your Tutor an interest, save a Learning focus, or start a path. There's not enough context yet; no model call was used.",
   empty:
     "Nothing useful to add right now. Continue your current work or clarify your Learning focus.",
-  dismissed:
-    "You've dismissed your recommendations. Restore one below or explicitly refresh for new directions.",
+  dismissed: "You've dismissed your recommendations. Refresh explicitly for new directions.",
   unavailable:
     "The previous recommendations are no longer available. Your focus or sources may have changed, or you may have accepted them. Refresh when you're ready.",
   failed:
@@ -37,9 +36,19 @@ export function LearningNotices({ tutor }: { tutor: LearningTutor }) {
     <div className="space-y-3" aria-live="polite">
       {tutor.notice && <p className="text-sm leading-6 text-mist">{tutor.notice}</p>}
       {tutor.busy && (
-        <p className="text-sm text-iris-300">
-          Your Tutor is thinking. You can return here to recover the result.
-        </p>
+        <output className="flex items-center gap-2.5 text-sm text-iris-300">
+          <span aria-hidden="true" className="flex shrink-0 items-center gap-1">
+            {["[animation-delay:0ms]", "[animation-delay:160ms]", "[animation-delay:320ms]"].map(
+              (delay) => (
+                <span
+                  key={delay}
+                  className={`h-1.5 w-1.5 animate-thinking rounded-full bg-iris motion-reduce:animate-none ${delay}`}
+                />
+              ),
+            )}
+          </span>
+          <span>Your Tutor is thinking. You can return here to recover the result.</span>
+        </output>
       )}
       {Boolean(error) && (
         <p role="alert" className="rounded-md border border-danger-border bg-danger-bg p-3 text-sm">
@@ -97,6 +106,12 @@ export function Recommendations({
       .filter((card) => analyst || card.kind !== "beat") ?? [];
   const cards = state.recommendations.filter((card) => analyst || card.kind !== "beat");
   const kind = recommendationState({ ...state, recommendations: cards }, dismissed.length);
+  const refresh = state.latest_refresh;
+  const refreshFinishedAt = refresh?.finished_at;
+  // A later turn can publish cards without replacing the last refresh receipt.
+  const newerCards =
+    refreshFinishedAt &&
+    cards.some((card) => Date.parse(card.created_at) > Date.parse(refreshFinishedAt));
   async function decide(card: LearningRecommendation, decision: "dismiss" | "restore") {
     try {
       await tutor.change.mutateAsync({ kind: "decision", id: card.id, decision });
@@ -131,15 +146,17 @@ export function Recommendations({
           automatically updated with later activity.
         </p>
       )}
-      <div className="mt-3">
-        <LearningNotices tutor={tutor} />
-      </div>
+      {surface === "home" && (
+        <div className="mt-3">
+          <LearningNotices tutor={tutor} />
+        </div>
+      )}
       {cards.length === 0 && (
         <p data-testid={`learning-${kind}`} className="mt-4 text-sm leading-6 text-mist">
           {EMPTY_COPY[kind]}
         </p>
       )}
-      {state.latest_refresh?.status === "failed" && (
+      {refresh?.status === "failed" && !newerCards && (
         <p role="alert" className="mt-3 text-sm text-danger">
           {cards.length > 0
             ? "Refresh failed. Your previous recommendations are still here."
@@ -171,46 +188,6 @@ export function Recommendations({
           </button>
         </div>
       )}
-      <details className="mt-4 text-sm text-mist">
-        <summary className="min-h-11 cursor-pointer py-3">Dismissed recommendations</summary>
-        {tutor.dismissed.isError ? (
-          <button
-            type="button"
-            className={LT_BUTTON}
-            onClick={() => void tutor.dismissed.refetch()}
-          >
-            Retry loading dismissed recommendations
-          </button>
-        ) : dismissed.length === 0 ? (
-          <p>No dismissed recommendations.</p>
-        ) : (
-          <ul className="space-y-2">
-            {dismissed.map((card) => (
-              <li key={card.id} className="flex flex-wrap items-center justify-between gap-2">
-                <span>{card.topic}</span>
-                <button
-                  type="button"
-                  className={LT_BUTTON}
-                  disabled={tutor.change.isPending}
-                  onClick={() => void decide(card, "restore")}
-                >
-                  Restore {card.topic}
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-        {tutor.dismissed.hasNextPage && (
-          <button
-            type="button"
-            className={LT_BUTTON}
-            disabled={tutor.dismissed.isFetchingNextPage}
-            onClick={() => void tutor.dismissed.fetchNextPage()}
-          >
-            Older dismissed recommendations
-          </button>
-        )}
-      </details>
     </section>
   );
 }
