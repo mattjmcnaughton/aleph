@@ -579,6 +579,108 @@ async def test_same_topic_refinement_preserves_exclusions(collision):
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize(
+    "scenario",
+    ["pair", "one_slot", "analyst_off", "partial", "bad_second", "late_collision"],
+)
+async def test_requested_pair_is_whole_or_absent_and_preserves_existing_cards(scenario):
+    user = await account()
+    pending = []
+    async with db.async_session() as session:
+        session.add(
+            UserFeatureOverride(
+                user_id=user.id, flag_key="analyst", enabled=scenario != "analyst_off"
+            )
+        )
+        previous = card(user.id)
+        session.add(previous)
+        if scenario == "one_slot":
+            session.add(card(user.id, topic="Circuits"))
+        await session.commit()
+        previous_id = previous.id
+
+    async def provider(deps):
+        payload: dict = dict(
+            reply="A path builds foundations; the connected Beat follows developments.",
+            requested_pair=True,
+            recommendations=[
+                draft("Ocean acoustics", "message"),
+                draft("Ocean acoustics", "message", "beat"),
+            ],
+        )
+        if scenario in {"one_slot", "analyst_off"}:
+            payload["recommendations"] = []
+            payload["reply"] = (
+                "A pair needs two free slots. Dismiss a card, then ask again."
+                if scenario == "one_slot"
+                else "Beats are unavailable. Would you like just a path instead?"
+            )
+        elif scenario == "partial":
+            payload["recommendations"].pop()
+        elif scenario == "bad_second":
+            payload["recommendations"][1]["evidence_keys"] = ["invented"]
+        elif scenario == "late_collision":
+            # Ordinary creation does not change the Tutor revision. The second
+            # draft must be rechecked after the first was tentatively inserted.
+            from aleph.models import Beat
+
+            async with db.async_session() as session:
+                session.add(
+                    Beat(
+                        user_id=user.id,
+                        topic="Ocean acoustics",
+                        level=Level.NEW_TO_IT,
+                        anchor_weekday=0,
+                    )
+                )
+                await session.commit()
+        return LearningTutorOutput.model_validate(payload), 3, 5
+
+    runtime = LearningTutorGeneration(provider=provider, spawn=pending.append)
+    request = OperationRequest(
+        request_id=uuid.uuid4(),
+        revision=0,
+        epoch=0,
+        kind="turn",
+        content="Recommend an unexpected path and a connected Beat.",
+    )
+    async with db.async_session() as session:
+        result = await runtime.admit(LearningTutorService(session, user), request)
+    await pending.pop()
+    async with db.async_session() as session:
+        service = LearningTutorService(session, user)
+        result = await service.operation(result.id)
+        state = await service.read()
+        assert previous_id in {c.id for c in state.recommendations}
+        if scenario in {"pair", "one_slot", "analyst_off"}:
+            assert result.status == "succeeded"
+            assert len(state.history.items) == 1
+            assert (
+                len(state.recommendations)
+                == {
+                    "pair": 3,
+                    "one_slot": 2,
+                    "analyst_off": 1,
+                }[scenario]
+            )
+            if scenario == "pair":
+                added = [c for c in state.recommendations if c.id != previous_id]
+                assert {(c.kind, c.topic) for c in added} == {
+                    ("path", "Ocean acoustics"),
+                    ("beat", "Ocean acoustics"),
+                }
+            replay = await runtime.admit(service, request)
+            assert replay.id == result.id and replay.output == result.output
+        else:
+            assert (result.status, result.error_code) == (
+                "failed",
+                "context_changed" if scenario == "late_collision" else "invalid_output",
+            )
+            assert not state.history.items and state.revision == 0
+            assert [c.id for c in state.recommendations] == [previous_id]
+
+
+@pytest.mark.anyio
 async def test_deleted_evidence_and_new_exact_topic_preserve_old_set():
     for change in ("delete", "duplicate"):
         user = await account()

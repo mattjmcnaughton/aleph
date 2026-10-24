@@ -46,7 +46,7 @@ just evals --learning-tutor
 
 This local-only mode uses the actual `build_learning_tutor_agent`, output schema,
 and `output_violation` predicate, with the production request instruction.
-`evals/learning_tutor_seed_set.yaml` contains **25 curated synthetic cases**, not
+`evals/learning_tutor_seed_set.yaml` contains **34 curated synthetic cases**, not
 private learner records or human labels. Each has independent expected/forbidden
 behavior and allowed evidence/target inputs; a separate scripted smoke output is
 never shown to the generator. The judge sees the supplied metadata, candidate
@@ -58,7 +58,9 @@ existing Brief, no suitable recommendation, foundational path versus moving-topi
 Beat, analyst disabled, exact and normalized duplicates, dismissed paraphrases,
 deleted and stale sources, omitted context, injections in Topic/Guidance/carried
 messages, sensitive inference, unsupported mastery, asymmetric remaining lesson
-counts (including correction of an earlier mistaken reply), and harmful requests.
+counts (including correction of an earlier mistaken reply), harmful requests,
+requested path+Beat pairs, novelty with history and cold start, pair capacity and
+analyst gating, ordinary chat, and optional discovery entry/skip/exit/completion.
 The empty-refresh case probes the agent boundary; production normally returns
 `needs_context` without admitting a model. This harness does not test context
 assembly, authorization, persistence, or frontend presentation.
@@ -79,7 +81,7 @@ the tolerated 10%. Missing assertions, evaluator crashes and generation failures
 fail closed. `--no-judge` measures structure only, never the 90% quality gate.
 
 Live generation binds `MODEL_LEARNING_TUTOR`; judging binds `MODEL_JUDGE`.
-Approximately 25 generation plus 25 judge calls are needed before retries; cost
+Approximately 34 generation plus 34 judge calls are needed before retries; cost
 depends on configured models and retries. No retrieval is performed in either
 mode. `--models`, `--briefs`, and `--agreement` cannot combine with this mode.
 Existing exit codes and bounded concurrency/report conventions apply.
