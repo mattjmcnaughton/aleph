@@ -200,8 +200,17 @@ async def assemble_context(
             for topic in await repo.target_topics(user_id, kind)
         )
     excluded.update(
-        (kind, topic) for kind, topic in await repo.excluded_card_topics(user_id)
+        (kind, topic)
+        for kind, topic in await repo.excluded_card_topics(
+            user_id, except_id=selected.id if selected else None
+        )
     )
+    # Only an explicit replacement may reuse the selected card's Topic. Keep
+    # independent target/dismissal/other-card collisions in the exclusion set.
+    selected_topic = None
+    if selected is not None:
+        assert selected.normalized_topic is not None
+        selected_topic = (selected.kind, selected.normalized_topic)
     deps = LearningTutorDeps(
         context=serialize(data),
         kind=request.kind,
@@ -211,6 +220,7 @@ async def assemble_context(
         analyst_enabled=analyst_enabled,
         available_slots=3 if request.kind == "refresh" else 3 - len(active),
         selected_id=selected.id if selected else None,
+        selected_topic=selected_topic,
     )
     return LearningContext(
         deps,
