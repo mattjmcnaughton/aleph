@@ -1,0 +1,484 @@
+{
+  "version": 1,
+  "persona": {
+    "display_name": "Alex Morgan (fictional demo)",
+    "description": "Synthetic learner: a software engineer in healthtech with strong programming and AI experience, developing interests in music and economics. All content and activity are authored demo fixtures, not a real person's history or live research. Health-related examples concern software and institutions, not medical advice.",
+    "focus": "I have about 20 minutes a day to learn. I want to sharpen my AI evaluation and Python engineering, understand the data and incentives behind healthtech, and develop my newer interests in music, audio, and economics. I enjoy concrete examples and connections across disciplines, but I do not want every subject tied back to my job. I am happy to explore unrelated directions, including art, history, nature, or a topic I have never considered. These are interests I am explicitly choosing, not an inferred profile."
+  },
+  "paths": [
+    {
+      "slug": "ai-evaluation",
+      "topic": "AI evaluation beyond a single score",
+      "level": "work_in_it",
+      "guidance": "Cover dataset design, asymmetric error costs, paired comparisons, and release decisions using synthetic administrative examples. Skip introductory model training.",
+      "teaching_style": "Use small numerical examples, explicit assumptions, and one practical evaluation decision per lesson.",
+      "started_days_ago": 40,
+      "units": [
+        {
+          "title": "Define what good means",
+          "summary": "Connect evaluation examples and error costs to the actual software task.",
+          "lessons": [
+            {
+              "title": "An evaluation set is a sampling decision",
+              "read_passage": "A benchmark is a claim about which future situations matter. In a fictional scheduling assistant, ninety percent of requests ask for ordinary appointments, while ten percent contain ambiguous dates. A random sample may estimate average performance reasonably yet include too few ambiguous requests to diagnose failures.\n\nKeep two views: a deployment-weighted set for an overall estimate and a deliberately enriched challenge set for investigation. Do not average their scores together without explaining the weights. If the assistant succeeds on 98 of 100 ordinary requests and 12 of 20 ambiguous requests, the pooled score describes this sample, not necessarily deployment traffic.\n\nSplit by the source of dependence. Templates paraphrased into both training and evaluation can create leakage even when no strings match exactly. Hold out template families or collection periods when those better represent novelty.\n\n**Try it:** write three failure categories before collecting examples. For each, specify where examples would come from and what success means. A larger dataset is useful only if its construction supports the claim you intend to make.",
+              "completed_days_ago": 34,
+              "quick_check": {"stem": "You intentionally oversample ambiguous requests. What best preserves an honest deployment estimate?", "options": ["Report the unweighted pooled score as production accuracy", "Report category scores and use justified deployment weights for the overall estimate", "Remove ambiguous cases after inspecting failures"], "correct_index": 1, "explanation": "Oversampling supports diagnosis. Deployment weighting is a separate choice that must reflect the target population rather than the enriched sample."}
+            },
+            {
+              "title": "Error costs determine the threshold",
+              "read_passage": "Accuracy assigns the same value to every correct decision. Product decisions often do not. Consider a fictional document router that either assigns an administrative category automatically or sends a document for human review. A wrong automatic assignment costs ten units of rework; review costs one unit regardless of the category. These are invented accounting units, not estimates of clinical harm.\n\nIf a calibrated probability of being correct is p, automatic assignment has expected cost 10 × (1 − p). Review costs 1. Under this simplified model, automation is cheaper when p exceeds 0.9. At exactly 0.9 the expected costs tie.\n\nThe calculation depends on calibration: among cases assigned probability 0.95, approximately 95 percent should actually be correct. A confident label is not itself evidence of that property. Check reliability on held-out examples and relevant slices.\n\n**Boundary:** review capacity, unequal error costs, and delayed consequences can change the decision rule. Start with explicit costs, test sensitivity, and avoid presenting a convenient threshold as universally optimal.",
+              "completed_days_ago": 27,
+              "quick_check": {"stem": "Under the stated costs, what should happen to a case with calibrated correctness probability 0.85?", "options": ["Automate because correctness is more likely than error", "Automate because review always adds cost", "Review because expected automation cost is 1.5 units versus 1 unit"], "correct_index": 2, "explanation": "The relevant comparison is expected cost, not whether the probability exceeds 0.5: 10 × 0.15 = 1.5."}
+            }
+          ]
+        },
+        {
+          "title": "Compare and operate",
+          "summary": "Use paired evidence and distinguish model quality from operational reliability.",
+          "lessons": [
+            {
+              "title": "Compare models on the same cases",
+              "read_passage": "Suppose two candidate models each score 88 percent on a fictional request-classification evaluation. That equality hides whether they make the same mistakes. A paired comparison runs both candidates on the same examples and records their joint outcomes.\n\nImagine 100 cases: both succeed on 80, only A succeeds on eight, only B succeeds on eight, and both fail on four. Their aggregate scores match, but sixteen cases distinguish them. Inspect those disagreements before choosing. If B's unique failures all involve a costly category, equal accuracy does not imply equal usefulness.\n\nFor uncertainty estimates, preserve the pairing. A bootstrap can resample cases and calculate B minus A within each resampled set. If cases are clustered by customer or template, resample appropriate clusters rather than pretending every row is independent.\n\nKeep a final holdout untouched while iterating. Repeatedly selecting prompts against the same benchmark turns it into development data. **Practical output:** a score difference, uncertainty, disagreement categories, and a clear statement of what population the comparison represents.",
+              "completed_days_ago": 19,
+              "quick_check": {"stem": "Why inspect disagreements when two models have identical aggregate accuracy?", "options": ["They may fail on different cases with different consequences", "Disagreements prove the benchmark is invalid", "Equal accuracy guarantees identical deployment behavior"], "correct_index": 0, "explanation": "The joint outcomes reveal error substitutions that a marginal accuracy score hides; their importance depends on the task."}
+            },
+            {
+              "title": "A release gate is a bundle of claims",
+              "read_passage": "A model can answer correctly when it responds and still be unusable because it times out. A fictional intake service therefore tracks semantic quality, valid response structure, latency, and availability separately. Each metric answers a different question; none should silently stand in for the others.\n\nSuppose a candidate has 96 percent accuracy among successful responses, but five percent of requests fail before producing an answer. Reporting only conditional accuracy hides those failures. Report response coverage alongside conditional quality, and define any end-to-end success metric explicitly.\n\nA release gate might require no regression on a critical slice, a bounded timeout rate under representative load, and a tested fallback. Thresholds should come from the product's needs rather than whichever values the candidate happens to achieve.\n\nAfter release, monitor input changes and failure categories. A dashboard shift is a prompt to investigate, not proof of model degradation: instrumentation or traffic composition may have changed. **Exercise:** describe one rollback trigger and the evidence needed to distinguish a model problem from an upstream outage.",
+              "completed_days_ago": 12,
+              "quick_check": {"stem": "A candidate improves accuracy among responses but doubles timeout frequency. Which report is most informative?", "options": ["Only conditional accuracy, because timeouts are not model outputs", "Conditional quality, response coverage, and explicitly defined end-to-end success", "Only the number of correct answers without the request count", "A single average of accuracy percentage and latency in milliseconds"], "correct_index": 1, "explanation": "Separate measures expose the tradeoff; an explicit end-to-end definition prevents failed requests from disappearing."}
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "async-python",
+      "topic": "Reliable async Python services",
+      "level": "work_in_it",
+      "guidance": "Focus on structured concurrency, cancellation, backpressure, and retry semantics in network-heavy services.",
+      "teaching_style": "Explain execution timelines and failure cases; assume familiarity with Python syntax.",
+      "started_days_ago": 36,
+      "units": [
+        {
+          "title": "Own concurrent work",
+          "summary": "Understand scheduling and keep child tasks within an explicit lifetime.",
+          "lessons": [
+            {
+              "title": "Await is a scheduling boundary, not magic parallelism",
+              "read_passage": "An asyncio event loop runs one task at a time on its thread. A task can let other tasks run when it awaits an operation that suspends. Merely declaring a function async does not move its work to another thread, and not every await actually suspends.\n\nIn a fictional metadata service, fetching three remote records sequentially takes roughly the sum of their network waits. Scheduling the requests concurrently can overlap those waits. But a synchronous compression step inside any task can still block all three while it occupies the event-loop thread.\n\nUse asynchronous clients for network I/O. Move unavoidable blocking I/O to an appropriate thread boundary, and consider a process pool or separate worker for substantial CPU-bound Python work. Thread offloading is not a universal CPU speedup.\n\n**Trace it:** draw a timeline with request A waiting, request B waiting, and a 200-millisecond blocking call between them. The delay affects unrelated requests sharing the loop. Measuring event-loop lag can expose this problem even when average remote-service latency looks healthy.",
+              "completed_days_ago": 29,
+              "quick_check": {"stem": "An async handler calls a synchronous function that blocks for two seconds. What is the main risk?", "options": ["The function automatically becomes a background thread", "Only that handler can be delayed", "Other tasks on the same event-loop thread cannot run during the blocking call"], "correct_index": 2, "explanation": "Async syntax does not preempt synchronous code. The event-loop thread remains occupied until the call returns."}
+            },
+            {
+              "title": "Task groups make failure ownership visible",
+              "read_passage": "Concurrent work needs a parent that owns its lifetime. In modern Python, asyncio.TaskGroup provides a structured scope: tasks created in the group are awaited when the scope exits. If a child fails with an ordinary exception, the group cancels remaining children and ultimately reports failures through an exception group.\n\nImagine a fictional profile page requiring both account details and entitlement data. If either is essential, running both inside a task group makes their shared lifetime explicit. The handler should not leave an entitlement request running after account loading has failed.\n\nCancellation is cooperative, so cleanup still matters. Use async context managers for connections and finally blocks for local resources. Do not swallow cancellation just to return a success-shaped placeholder; that hides the request's actual outcome and can interfere with structured concurrency.\n\nNot every child should fail the whole operation. An optional decoration can catch its own expected failure and return a clearly typed absence. **Design question:** decide which results are essential before choosing concurrency primitives, rather than discovering the dependency policy through accidental exception handling.",
+              "completed_days_ago": 16,
+              "quick_check": {"stem": "Two essential child tasks run in a TaskGroup. One raises an ordinary exception. What behavior should the parent expect?", "options": ["The group cancels remaining children and reports failures after cleanup", "The parent immediately returns both results successfully", "The remaining child becomes a permanent detached task"], "correct_index": 0, "explanation": "TaskGroup owns child lifetimes, cancels siblings on ordinary child failure, and waits for termination before surfacing grouped exceptions."}
+            }
+          ]
+        },
+        {
+          "title": "Bound work and uncertainty",
+          "summary": "Control admitted work and handle ambiguous external outcomes safely.",
+          "lessons": [
+            {
+              "title": "Limit the queue, not just active requests",
+              "read_passage": "A semaphore limits how many tasks enter a protected section. It does not necessarily limit how many tasks exist. Creating a million tasks and letting each wait on a semaphore can still consume substantial memory before any useful work finishes.\n\nFor a fictional batch importer, use a bounded queue and a fixed number of workers. If the queue holds 100 items and ten workers process them, a producer awaiting queue.put pauses when the buffer is full. That pause is backpressure: the system communicates limited capacity upstream instead of accumulating unbounded promises.\n\nChoose capacity using expected item size, acceptable waiting time, and downstream throughput. More buffering absorbs bursts but can also hide overload and increase latency. When arrivals exceed service capacity indefinitely, no finite buffer solves the problem; admission control or load shedding is required.\n\n**Observe three numbers:** active workers, queue depth, and age of the oldest queued item. A stable depth with rising item age can still signal trouble. Specify shutdown behavior so queued work is either completed, retried durably, or explicitly abandoned.",
+              "completed_days_ago": 5,
+              "quick_check": {"stem": "Why can a million tasks guarded by a ten-slot semaphore still exhaust memory?", "options": ["Semaphores only work for CPU tasks", "The semaphore bounds active sections, not the number of allocated waiting tasks", "A semaphore increases its limit whenever a task waits"], "correct_index": 1, "explanation": "A bounded producer queue plus fixed workers can bound pending work as well as active work."}
+            },
+            {
+              "title": "A timeout does not prove nothing happened",
+              "read_passage": "A timeout tells the caller that it did not receive a result within its budget. It does not prove that a remote operation never executed. A fictional export service might persist an export request, then lose the connection before returning its identifier. Blindly retrying can create two exports.\n\nFor operations with side effects, send a stable idempotency key representing the logical request. The receiver must enforce uniqueness and return or recover the original outcome when the same key arrives again. Generating a new key for every retry defeats that purpose.\n\nSet a total deadline, not just an independent timeout for every attempt. Otherwise retries can multiply the time a user waits. Backoff with jitter reduces synchronized retry bursts, but it does not make a non-idempotent action safe.\n\nCancellation of the local coroutine may stop waiting without stopping remote work. **Failure exercise:** place the network break before persistence, after persistence, and after response delivery. Write down what each side knows. The middle case requires reconciliation, not a confident claim that the operation failed.",
+              "completed_days_ago": null,
+              "quick_check": {"stem": "An export request times out after the server may have persisted it. What is the safest retry design?", "options": ["Retry with a fresh identifier every time", "Assume cancellation rolled back the remote write", "Retry using the same logical idempotency key, enforced by the receiver"], "correct_index": 2, "explanation": "The outcome is ambiguous. Receiver-enforced idempotency allows retries to recover one logical operation rather than duplicate it."}
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "clinical-interoperability",
+      "topic": "Clinical-data interoperability for software engineers",
+      "level": "some_experience",
+      "guidance": "Cover identifiers, FHIR resource relationships, terminology, and provenance. Stay with data engineering rather than diagnosis or treatment.",
+      "teaching_style": "Use fictional records and distinguish syntactic validity from semantic agreement.",
+      "started_days_ago": 32,
+      "units": [
+        {
+          "title": "Identity and structure",
+          "summary": "Separate resource addressing from business identity and preserve meaningful relationships.",
+          "lessons": [
+            {
+              "title": "An identifier needs a namespace",
+              "read_passage": "The string 12345 is not a globally meaningful patient identifier. Two fictional organizations, North Clinic and River Clinic, can independently assign that value. Interoperability requires the identifier's assigning namespace as well as its value, and often additional context about use and validity.\n\nIn FHIR, a resource's logical id and its business identifiers serve different purposes. A server might address Patient/abc while the resource contains an identifier issued by a particular organization. Copying that resource to another server does not guarantee the same logical address or automatically reconcile identity.\n\nA robust importer preserves identifier systems instead of flattening all values into one column labeled patient_id. Matching records across systems is a separate process with uncertainty and governance; equal names or birth dates alone do not establish identity.\n\n**Example:** store the pair (North's identifier system, 12345) distinctly from (River's identifier system, 12345). If a later mapping connects them, preserve the mapping's origin and confidence. This lesson concerns representation and identity handling, not decisions about any real person's care.",
+              "completed_days_ago": 24,
+              "quick_check": {"stem": "Two organizations send identifier value 12345 under different identifier systems. What follows?", "options": ["They necessarily describe the same person", "The values alone do not establish shared identity", "One organization must have produced invalid data"], "correct_index": 1, "explanation": "An identifier is scoped by its assigning system. Cross-system identity requires additional evidence and an explicit matching process."}
+            },
+            {
+              "title": "References carry relationships, not embedded certainty",
+              "read_passage": "FHIR resources describe different kinds of information and connect through references. An Observation can refer to a subject and an encounter without copying their entire contents. This resembles a graph more than a single flattened spreadsheet row.\n\nIn a fictional integration, an Observation references Patient/p7 and Encounter/e2. Receiving the Observation alone does not guarantee that either referenced resource is already present locally. A reference may require resolution against an appropriate server, and access controls still apply. A transaction or document bundle has its own rules; merely collecting resources into an arbitrary bundle does not establish every desired guarantee.\n\nDesign the importer to distinguish unresolved references from missing relationships. Those are different states: one says a relationship exists but its target is not available here; the other says no relationship was supplied.\n\n**Try it:** draw the three resources and label each edge. Then simulate receiving them out of order. A staging or reconciliation policy should preserve the original references rather than dropping edges until lookup happens to succeed. Structural validation alone cannot prove that linked records describe the intended real-world event.",
+              "completed_days_ago": 10,
+              "quick_check": {"stem": "An incoming Observation references an Encounter not yet imported. What should the importer preserve?", "options": ["The reference and its unresolved state", "A claim that no encounter relationship exists", "A fabricated Encounter with invented details"], "correct_index": 0, "explanation": "An unresolved target is different from an absent relationship. Preserving that distinction enables later reconciliation without inventing facts."}
+            }
+          ]
+        },
+        {
+          "title": "Meaning and lineage",
+          "summary": "Avoid false equivalence in codes, units, and evolving records.",
+          "lessons": [
+            {
+              "title": "Codes and units are part of the value",
+              "read_passage": "A numeric value without its quantity and unit is incomplete. So is a code without its coding system. In a fictional measurement pipeline, the display text 'weight' may look consistent across two feeds while the units differ. Comparing raw numbers would produce a false discrepancy.\n\nPreserve code system, code, and relevant version information when supplied. Treat display text as a human aid, not the primary identity of a coded concept. A local code named 'review complete' might mean document review in one workflow and billing review in another. Similar labels do not justify an automatic mapping.\n\nUnit conversion also requires compatible dimensions and known semantics. Converting kilograms to grams is straightforward; converting a concentration without knowing what substance and representation it describes may not be. Never repair unclear data by guessing a convenient unit.\n\n**Engineering practice:** retain the original payload alongside a documented normalized representation, subject to privacy and retention requirements. Record which mapping version produced the normalized value. This lets a later correction be explained instead of silently replacing the evidence that entered the system.",
+              "completed_days_ago": null,
+              "quick_check": {"stem": "Two local codes share the display label 'review complete'. What is the best next step before merging them?", "options": ["Merge because matching labels establish identical semantics", "Discard both coding-system identifiers", "Verify their definitions and workflow context, then document any mapping"], "correct_index": 2, "explanation": "Display labels are not semantic contracts. A mapping needs evidence about the concepts and the contexts in which they are used."}
+            },
+            {
+              "title": "Provenance makes corrections explainable",
+              "read_passage": "A useful integration can answer not just 'what is the value?' but 'where did this representation come from?' Provenance records the source, transformation, and responsible process or actor. Version history records change over time. They overlap in practice but answer different questions.\n\nSuppose a fictional importer normalizes a timestamp using the wrong timezone assumption. A corrected import should identify the original source record, the transformation version, and why the normalized timestamp changed. Overwriting the value without lineage makes downstream reconciliation much harder.\n\nSeparate event time from receipt time. A record received on Tuesday may describe an event from Monday, and a correction arriving Wednesday may refer to that same event. Sorting only by ingestion time can misrepresent the underlying sequence.\n\n**Design exercise:** specify which fields let an auditor reconstruct one normalized record without exposing unnecessary personal information. Include source identity, source version when available, transformation version, and processing time. Then define a correction policy for consumers. Provenance helps explain trust; it does not automatically prove that the source itself was correct.",
+              "completed_days_ago": null,
+              "quick_check": {"stem": "A corrected timestamp arrives two days after the original event. Which distinction prevents a misleading event timeline?", "options": ["Treat all receipt times as event times", "Preserve event time separately from receipt and correction times", "Drop the original source version to avoid confusion"], "correct_index": 1, "explanation": "Arrival order and event order differ. Keeping distinct timestamps and lineage supports an honest reconstruction."}
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "causal-inference",
+      "topic": "Causal inference for healthtech product decisions",
+      "level": "some_experience",
+      "guidance": "Teach estimands, confounding, randomized rollout, and difference-in-differences through fictional administrative workflows, not treatment recommendations.",
+      "teaching_style": "Use counterfactual reasoning, tiny tables described in prose, and explicit limits on claims.",
+      "started_days_ago": 25,
+      "units": [
+        {
+          "title": "Ask a causal question",
+          "summary": "Specify the intervention and population before interpreting an association.",
+          "lessons": [
+            {
+              "title": "Define the effect before choosing a method",
+              "read_passage": "A causal question compares what would happen under different interventions. 'Do users of reminders attend more appointments?' is an association question unless the intervention and comparison are specified. People who enable reminders may differ from those who do not.\n\nFor a fictional scheduling product, define the estimand as the average effect of offering a reminder feature on attendance during the next month among eligible accounts. This specifies an intervention, outcome, time horizon, and population. It is not necessarily the effect of actually reading a reminder.\n\nEach account has a potential outcome under the offer and another without it, but only one is observed. Randomization can make groups comparable in expectation so group averages estimate the missing comparison; it cannot reveal both outcomes for a particular individual.\n\n**Write the contract:** eligibility is determined before assignment, attendance has one consistent definition, and analysis follows assignment. Changing the population after seeing who engages changes the question. Clear estimands prevent a precise statistical calculation from answering a different question than the product team asked.",
+              "completed_days_ago": 8,
+              "quick_check": {"stem": "An experiment randomizes reminder offers. Comparing only people who opened reminders with controls primarily threatens what?", "options": ["The randomized comparison, because opening is a post-assignment selection", "The ability to count how many offers were sent", "The existence of an outcome definition"], "correct_index": 0, "explanation": "Engagement can depend on user characteristics and the intervention. Selecting on it loses the original randomized comparison and changes the estimand."}
+            },
+            {
+              "title": "A confounder opens a backdoor path",
+              "read_passage": "A confounder is a common cause of the exposure and outcome in the causal question. In a fictional software rollout, larger clinics are more likely to adopt a scheduling dashboard and also have more administrative staff. If staffing improves response times, adopters might appear faster even if the dashboard has no effect.\n\nDraw arrows from clinic size to adoption and from clinic size to response time through staffing. That route connects adoption and outcome without passing through the dashboard's effect. Adjusting for suitable pre-intervention common causes can help block such backdoor paths, under assumptions about the causal structure and measurement.\n\nMore adjustment is not always better. A variable caused by the dashboard may mediate its effect. Controlling for it can remove part of the effect you wanted to estimate. Other variables can introduce bias when conditioned on.\n\n**Practice:** list when each variable is measured and why it affects other variables. Predictive usefulness alone is not a sufficient reason to include a covariate in a causal model. The graph expresses assumptions; data do not magically certify those arrows.",
+              "completed_days_ago": null,
+              "quick_check": {"stem": "Why might adjusting for staffing measured after dashboard adoption distort the total effect estimate?", "options": ["All staffing variables are necessarily irrelevant", "It guarantees complete removal of confounding", "The dashboard may change staffing, making it a mediator rather than a baseline confounder"], "correct_index": 2, "explanation": "Controlling for a downstream mediator can remove part of the total effect. Timing and causal role matter more than predictive strength."}
+            }
+          ]
+        },
+        {
+          "title": "Design credible comparisons",
+          "summary": "Account for spillovers and the assumptions behind observational comparisons.",
+          "lessons": [
+            {
+              "title": "Randomize where interference happens",
+              "read_passage": "Randomization balances groups in expectation, but the assignment unit must fit the workflow. A fictional scheduling team shares one work queue. If half its staff receive a new dashboard, they may reorganize tasks for everyone, including colleagues assigned to control. Individual assignment then creates spillovers.\n\nOne option is to randomize entire teams or sites. This better separates exposure but reduces the number of independent assignment units. One hundred staff in four teams do not supply the same randomization information as one hundred independently assigned teams. Analysis and power calculations must respect clustering.\n\nCluster assignment introduces tradeoffs: sites may differ substantially, and a small number of sites leaves imbalance plausible. Stratifying assignment on important baseline characteristics can help, but does not manufacture more independent units.\n\n**Design before rollout:** identify who shares queues, training, and decision rules. Choose an assignment boundary that limits interference and define what spillovers remain possible. Administrative experiments still need appropriate organizational oversight and privacy protections; random assignment is a statistical design, not permission to bypass governance.",
+              "completed_days_ago": null,
+              "quick_check": {"stem": "Staff share one queue and frequently redistribute each other's work. Which design concern is most immediate?", "options": ["Randomization makes spillovers impossible", "Individual assignment may contaminate control, so team-level assignment merits consideration", "Counting every task as independent always fixes contamination"], "correct_index": 1, "explanation": "Shared workflow can transmit the intervention across individual assignments. Clustering may reduce this interference, with corresponding power and analysis costs."}
+            },
+            {
+              "title": "Difference-in-differences needs a counterfactual trend",
+              "read_passage": "Difference-in-differences compares changes rather than levels. In a fictional administrative rollout, average processing time falls from ten to seven minutes at adopting sites and from eight to six minutes at comparison sites. The estimated difference in changes is −3 minus −2, or −1 minute.\n\nThe key assumption is that, without the rollout, adopting sites would have followed the same average change as comparison sites. This parallel-trends assumption concerns an unobserved counterfactual. Similar pre-rollout trends can support plausibility, but cannot prove it.\n\nA simultaneous staffing initiative at adopting sites would threaten the interpretation. So would changing which tasks enter the sample if the rollout alters task selection. A clean arithmetic calculation does not remove these design problems.\n\n**Investigate:** plot several pre-periods, document concurrent changes, and keep outcome definitions stable. Be cautious with staggered adoption and changing effects, where simple pooled comparisons can have misleading weights. The result is a causal estimate only as credible as the assumptions supporting the missing counterfactual, not merely because a regression produced a small standard error.",
+              "completed_days_ago": null,
+              "quick_check": {"stem": "Adopting sites improve by three minutes and comparison sites improve by two. Under parallel trends, what is the estimated rollout effect?", "options": ["A one-minute reduction", "A three-minute reduction", "A five-minute reduction", "A one-minute increase"], "correct_index": 0, "explanation": "Subtract the comparison change from the adopting change: −3 − (−2) = −1 minute. Causal interpretation still depends on the design assumptions."}
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "music-harmony",
+      "topic": "Harmony through listening and small compositions",
+      "level": "new_to_it",
+      "guidance": "Build from intervals and triads to voice leading and cadences. Use piano-note names and short listening exercises without requiring notation fluency.",
+      "teaching_style": "Make one musical change at a time and describe what to listen for; avoid forcing software analogies.",
+      "started_days_ago": 30,
+      "units": [
+        {
+          "title": "Hear harmonic building blocks",
+          "summary": "Connect interval sizes to major and minor triads.",
+          "lessons": [
+            {
+              "title": "Intervals combine distance and spelling",
+              "read_passage": "An interval describes the relationship between two pitches. On a piano, a semitone is the distance between adjacent keys, including black keys. C to E spans four semitones and is called a major third; C to E-flat spans three and is a minor third.\n\nInterval names also depend on letter spelling. C to D-sharp has the same piano-key distance as C to E-flat in equal temperament, but it is spelled as an augmented second rather than a minor third. Spelling communicates musical function, not just acoustic distance.\n\nStart with sound before memorizing a large table. Play C followed by E, then C followed by E-flat. Next play each pair simultaneously. The sequential version is melodic; the simultaneous version is harmonic. Both express the same interval, but their perceptual context differs.\n\n**Two-minute experiment:** keep C fixed and move only the upper note. Describe the difference without treating 'happy' and 'sad' as universal laws. Register, rhythm, timbre, and musical context can all change how an interval feels.",
+              "completed_days_ago": 21,
+              "quick_check": {"stem": "Why can C–D-sharp and C–E-flat have different interval names on an equal-tempered piano?", "options": ["The piano necessarily tunes those two upper notes differently", "Interval naming considers letter spelling as well as semitone distance", "A minor third always spans four semitones"], "correct_index": 1, "explanation": "Both span three semitones here, but C–D is a kind of second and C–E is a kind of third."}
+            },
+            {
+              "title": "Triads are stacked thirds",
+              "read_passage": "A triad contains three distinct chord tones. Build a C major triad from C, E, and G: a major third from C to E, then a minor third from E to G. A C minor triad uses C, E-flat, and G, reversing those third sizes. The outer perfect fifth stays the same.\n\nThis gives you a controlled listening experiment. Keep the bottom C and top G unchanged while moving the middle note between E and E-flat. You are changing chord quality with a single semitone movement.\n\nA chord can contain more than three sounding notes and still be a triad if some chord tones are doubled. Playing C, E, G, and another C does not create a seventh chord; it adds another occurrence of the root.\n\n**Compose a tiny phrase:** alternate C major and C minor slowly, then change rhythm while keeping the notes fixed. Notice how harmonic identity and musical expression are related but not identical. Chord labels summarize pitch structure; they do not specify every detail of a performance.",
+              "completed_days_ago": 6,
+              "quick_check": {"stem": "Which single change turns C–E–G into a C minor triad?", "options": ["Add another C an octave higher", "Raise G to G-sharp", "Lower E to E-flat"], "correct_index": 2, "explanation": "Lowering the third changes the major triad to minor while preserving the root and perfect fifth."}
+            }
+          ]
+        },
+        {
+          "title": "Connect chords into phrases",
+          "summary": "Use inversions and tonal expectations to shape musical movement.",
+          "lessons": [
+            {
+              "title": "Voice leading follows individual notes",
+              "read_passage": "A chord progression names successive harmonies; voice leading describes how individual notes move between them. The same progression can sound smooth or jumpy depending on register and voicing. You do not need formal counterpoint to begin hearing this difference.\n\nPlay C–E–G, then F–A–C with both chords in root position. Now try C–E–G followed by C–F–A. The second version still moves from C major to F major, but C stays fixed, E rises one semitone, and G rises two. The F chord is in second inversion because its fifth, C, is the lowest note.\n\nAn inversion changes the bass chord tone, not the chord's root identity. Context can change how stable an inversion feels, so smooth motion is not automatically the best choice for every phrase.\n\n**Listen actively:** compare both versions at the same tempo and volume. Hum just the highest voice, then the bass. Tracking one line at a time reveals movement that can disappear when you think only in chord symbols.",
+              "completed_days_ago": null,
+              "quick_check": {"stem": "In the voicing C–F–A, with C lowest, what identifies the chord?", "options": ["F major in second inversion", "C major in root position", "A minor because A is present"], "correct_index": 0, "explanation": "The chord tones are F, A, and C. Putting the fifth C in the bass makes it second inversion without changing the root."}
+            },
+            {
+              "title": "Cadences create degrees of arrival",
+              "read_passage": "A cadence is a phrase-ending gesture, not simply any pair of chords. In C major, G major moving to C major often supports a sense of arrival. The note B in the G chord can move upward by a semitone to C, helping create a directed motion toward the tonic.\n\nTry a short progression: C major, F major, G major, C major. Then replace the final C major with A minor. The second ending changes the expected destination while retaining shared tones with the tonic chord. In common-practice terminology, V moving to vi is a familiar deceptive-cadence pattern.\n\nRhythm, melody, and placement matter. A G-to-C move in the middle of continuous music may feel less conclusive than the same harmonies under a slowing melody at a phrase boundary. Chord symbols alone do not fully specify a cadence.\n\n**Small composition:** make two four-bar phrases with identical first three bars and different endings. Aim for one clear arrival and one invitation to continue. Listen for expectation rather than treating resolution as a mandatory rule.",
+              "completed_days_ago": null,
+              "quick_check": {"stem": "Why might identical G-to-C chords feel conclusive in one passage but not another?", "options": ["G-to-C cannot support a cadence", "Phrase position, rhythm, and melody shape the sense of arrival", "Chord names uniquely determine every listener's response"], "correct_index": 1, "explanation": "A cadence is a contextual phrase gesture. Harmony contributes to closure but does not determine it in isolation."}
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "digital-audio",
+      "topic": "Digital audio from samples to a clean mix",
+      "level": "new_to_it",
+      "guidance": "Explain sampling, quantization, gain staging, and compression with small signal examples. Distinguish technical fidelity from artistic choice.",
+      "teaching_style": "Use numbers sparingly, define units, and suggest safe-volume listening comparisons.",
+      "started_days_ago": 22,
+      "units": [
+        {
+          "title": "Represent a waveform",
+          "summary": "Separate time sampling from amplitude resolution.",
+          "lessons": [
+            {
+              "title": "Sample rate limits representable frequency",
+              "read_passage": "Digital audio stores measurements of a waveform at regular intervals. A sample rate of 48,000 samples per second means the system records 48,000 amplitude values each second per channel. It does not mean that every sound contains a 48-kilohertz tone.\n\nFor a band-limited signal, accurate reconstruction requires a sampling rate greater than twice its highest frequency. The half-rate boundary is the Nyquist frequency. At 48 kilohertz, that boundary is 24 kilohertz, with practical filters needing a transition region rather than an ideal brick wall.\n\nFrequencies above the representable range can alias into lower frequencies if they are not removed before sampling. A 30-kilohertz sinusoid sampled at 48 kilohertz can appear as an 18-kilohertz component. Increasing sample count afterward cannot identify which original signal produced the aliased samples.\n\n**Separate two ideas:** a higher sample rate extends the available frequency range, while bit depth concerns amplitude representation. Neither automatically improves a recording whose microphone placement, room noise, or musical performance is the main limitation.",
+              "completed_days_ago": 2,
+              "quick_check": {"stem": "Why is filtering before sampling important?", "options": ["It guarantees the recording has no background noise", "It increases bit depth without changing the format", "It suppresses out-of-band content that could alias into lower frequencies"], "correct_index": 2, "explanation": "Aliasing can make high-frequency input indistinguishable from lower-frequency content after sampling. Post-processing cannot generally reconstruct the lost distinction."}
+            },
+            {
+              "title": "Bit depth concerns amplitude steps",
+              "read_passage": "Sampling chooses when to measure; quantization chooses which amplitude values can be represented. In a simple integer format, an N-bit sample has 2 to the power N possible codes. More bits permit finer amplitude steps across the same full-scale range.\n\nQuantization error is the difference between the original value and its represented value. For very quiet signals, that error can become correlated with the signal and produce distortion. Dither adds carefully chosen low-level noise before quantization to make the error behave more like noise instead of a signal-dependent pattern.\n\nDither does not recover information already lost, and it does not remove room noise. Its role is most relevant when reducing precision, such as exporting a higher-precision mix to a lower-bit-depth integer format. Floating-point processing has different scaling properties from fixed-point storage.\n\n**Thought experiment:** round a slowly rising sequence to whole numbers, then imagine a tiny random perturbation before rounding. The sequence of jumps changes. Audio dither applies a principled version of that idea, trading structured distortion for a controlled noise floor.",
+              "completed_days_ago": null,
+              "quick_check": {"stem": "What is the purpose of dither when reducing integer bit depth?", "options": ["Make quantization error less signal-correlated by adding controlled noise", "Remove every noise source from the recording", "Restore frequencies lost through aliasing"], "correct_index": 0, "explanation": "Dither changes the character of quantization error; it is not denoising or recovery of previously lost information."}
+            }
+          ]
+        },
+        {
+          "title": "Control level without confusion",
+          "summary": "Distinguish clipping, loudness, and dynamic-range processing.",
+          "lessons": [
+            {
+              "title": "Headroom protects the next stage",
+              "read_passage": "Gain scales signal amplitude. In a fixed-point digital output, 0 dBFS marks the maximum representable sample level. Pushing values beyond the available range can clip peaks, altering the waveform rather than simply making a faithful louder copy.\n\nIn a fictional two-track mix, each track peaks safely below full scale when played alone. Their sum can still exceed the output range when peaks align. Individual track safety does not guarantee bus safety. Floating-point internal processing may accommodate values above nominal full scale, but converters, exports, and some processors still impose limits.\n\nHeadroom is deliberate room below a limit. Lowering a bus before a bounded stage can prevent clipping there, but lowering a signal after it was irreversibly clipped does not restore its original peaks.\n\n**Listening exercise:** compare a clean and clipped synthetic tone at matched perceived loudness and comfortable volume. Otherwise the louder version may seem preferable simply because it is louder. Use meters to locate the overloaded stage and ears to evaluate the result; neither measurement nor preference alone explains the entire signal chain.",
+              "completed_days_ago": null,
+              "quick_check": {"stem": "Two unclipped tracks clip when summed at a fixed-point output. Which change directly prevents that output overload?", "options": ["Lower the signal only after the clipped export is created", "Reduce the summed level before the bounded output stage", "Increase the project's tempo"], "correct_index": 1, "explanation": "Headroom must exist before the limiting stage. Attenuating already clipped audio reduces level but does not reconstruct removed peaks."}
+            },
+            {
+              "title": "Compression changes dynamics over time",
+              "read_passage": "A compressor reduces gain according to a signal's level and its settings. In a simplified hard-knee model, a 4:1 ratio means that four decibels of input increase above the threshold produce one decibel of output increase above it. This describes level change, not a file-size reduction.\n\nIf the threshold is −20 dB and the input reaches −12 dB, it is eight decibels above threshold. Under the static 4:1 rule, the output is two decibels above threshold, or −18 dB, before makeup gain. Real behavior also depends on attack, release, detection, and knee.\n\nA slower attack can let transients pass before reduction develops; release controls how gain returns. These time choices can change punch and movement even when average gain reduction looks similar.\n\n**Compare fairly:** match listening level when bypassing the compressor, because makeup gain can disguise a poor setting as an improvement. Compression is an artistic and technical tool, not a requirement to eliminate every variation in loudness. Preserve dynamics when they serve the music.",
+              "completed_days_ago": null,
+              "quick_check": {"stem": "With threshold −20 dB, ratio 4:1, and input −12 dB, what is the idealized static output before makeup gain?", "options": ["−3 dB", "−12 dB", "−18 dB", "−28 dB"], "correct_index": 2, "explanation": "The input is 8 dB above threshold. Dividing by four leaves 2 dB above −20 dB, giving −18 dB."}
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "platform-economics",
+      "topic": "Economics of platforms and marketplaces",
+      "level": "new_to_it",
+      "guidance": "Cover cross-side network effects, pricing structure, multi-homing, and congestion using fictional creative marketplaces.",
+      "teaching_style": "Introduce one economic mechanism at a time with a counterexample and a small numerical scenario.",
+      "started_days_ago": 9,
+      "units": [
+        {
+          "title": "Understand participation",
+          "summary": "Identify which participants create value for whom and how pricing affects entry.",
+          "lessons": [
+            {
+              "title": "Network effects have a direction",
+              "read_passage": "A network effect occurs when participation changes the value other participants receive. In a fictional marketplace connecting session musicians and producers, more available musicians can make the platform more useful to producers. More producers can make it more useful to musicians. These are cross-side effects.\n\nNot every effect is positive. More musicians may mean tougher competition for existing musicians. More producers can congest search results or support queues. Ask which side joins, which side benefits, and under what conditions. Saying 'the network grows' hides those distinctions.\n\nNetwork effects are also different from economies of scale. A platform may lower hosting cost per user as it grows even if users gain no additional value from each other. Cost structure and demand-side value are separate mechanisms.\n\n**Map the market:** draw musicians and producers as two groups, then label arrows with concrete benefits or harms. A larger catalog helps only if relevant participants can discover and trust one another. Matching quality can matter more than the raw number of accounts.",
+              "completed_days_ago": null,
+              "quick_check": {"stem": "Which example is a cross-side network effect rather than a hosting economy of scale?", "options": ["More musicians give producers a better chance of finding the right performer", "A larger server contract lowers storage cost per account", "An engineer reduces database query time without changing participation"], "correct_index": 0, "explanation": "The first mechanism changes one participant group's value through participation on the other side, rather than through lower operating costs."}
+            },
+            {
+              "title": "Who pays can matter as much as how much",
+              "read_passage": "A two-sided platform chooses a price structure, not just a total fee. Charging musicians nothing and producers a commission can lead to different participation than splitting the same expected revenue evenly across both sides. The sides may differ in willingness to pay and in the value their participation creates.\n\nImagine a fictional marketplace where producers will not join without a varied musician catalog. Temporarily subsidizing musicians might help attract producers, whose transactions later fund the service. That does not prove the subsidy will pay off: musicians may join but remain unavailable, or producers may not find the catalog useful.\n\nEvaluate the mechanism rather than copying another platform's fee schedule. Estimate how participation responds to price, how each side affects the other, and whether transactions create enough contribution margin after support and payment costs.\n\n**Counterexample:** subsidizing thousands of inactive accounts inflates registrations without improving matching. A useful experiment measures completed, satisfactory matches and retention on both sides. Revenue per transaction alone misses the possibility that the pricing structure prevents transactions from happening at all.",
+              "completed_days_ago": null,
+              "quick_check": {"stem": "Why can two fee structures with equal revenue per completed transaction produce different total revenue?", "options": ["Equal per-transaction revenue guarantees equal participation", "Subsidies always create profitable growth", "The distribution of charges can change participation and therefore transaction volume"], "correct_index": 2, "explanation": "Each side responds to its own costs and to participation on the other side. Price structure can change how many matches occur."}
+            }
+          ]
+        },
+        {
+          "title": "Understand limits to growth",
+          "summary": "Explore switching, multi-homing, and the quality costs of increasing scale.",
+          "lessons": [
+            {
+              "title": "Multi-homing weakens simple winner-takes-all stories",
+              "read_passage": "Multi-homing means participating on more than one platform. A fictional musician may list availability on two marketplaces while a producer searches both. If this is easy, a large platform's network does not automatically exclude a smaller competitor.\n\nThe relevant costs include maintaining profiles, synchronizing calendars, learning tools, and transferring reputation. Some are genuine coordination costs; others arise from platform rules. A musician might technically be allowed to join another marketplace but find it costly to rebuild a trusted review history.\n\nDistinguish switching from multi-homing. Switching means moving activity from one platform to another; multi-homing means using both. A feature that makes simultaneous participation easy can reduce dependence without causing immediate departure.\n\n**Reason through a change:** suppose reviews become portable with verifiable context. That may lower entry barriers, but it does not guarantee equal matching quality or identical trust standards. Ask what is portable, who verifies it, and whether old reviews remain relevant to new tasks. Market structure depends on these details, not on network effects alone.",
+              "completed_days_ago": null,
+              "quick_check": {"stem": "A musician uses two marketplaces simultaneously. Which observation best describes the economic mechanism?", "options": ["The musician has necessarily abandoned the first platform", "Multi-homing can reduce exclusivity even without complete switching", "Network effects no longer exist anywhere"], "correct_index": 1, "explanation": "Simultaneous participation can let competing platforms share access to supply. It moderates exclusivity without eliminating network effects."}
+            },
+            {
+              "title": "Congestion can reverse the value of more",
+              "read_passage": "Growth creates value only when participants can use it. In a fictional creative marketplace, doubling the number of proposals per project may improve choice initially. Beyond a point, producers cannot assess them, good matches get buried, and musicians spend more time applying without success.\n\nThis is congestion: additional participation imposes costs on others. Ranking, filters, and application limits can reduce the problem, but they also allocate opportunity. A ranking system that favors established sellers may improve short-term conversion while making it difficult for promising newcomers to obtain their first transaction.\n\nMeasure distribution as well as totals. More completed matches can coexist with longer waits for one group or increasing concentration of earnings. Neither outcome is automatically good or bad without an explicit objective, but an average conceals the choice.\n\n**Design exercise:** choose a metric for match quality, one for participant effort, and one for newcomer access. Then imagine a ranking change that improves one and harms another. Platform economics involves governing these tradeoffs, not simply maximizing registrations or time spent browsing.",
+              "completed_days_ago": null,
+              "quick_check": {"stem": "Proposal volume doubles while producers take longer to choose and musicians win fewer jobs per application. What deserves investigation?", "options": ["Congestion and matching quality, not just account growth", "Whether all network effects must be positive", "Whether more proposals guarantee greater welfare"], "correct_index": 0, "explanation": "Additional participation can create search and attention costs. These symptoms suggest that scale is not translating cleanly into useful matches."}
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "healthcare-incentives",
+      "topic": "Healthcare incentives and administrative economics",
+      "level": "new_to_it",
+      "guidance": "Explain payment incentives, principal-agent problems, risk adjustment, and administrative burden using stylized fictional organizations. Avoid medical advice and jurisdiction-specific legal claims.",
+      "teaching_style": "Separate incentive predictions from claims about actual behavior; use explicit toy assumptions.",
+      "started_days_ago": 18,
+      "units": [
+        {
+          "title": "Follow the incentive",
+          "summary": "Understand how payment rules and information asymmetry shape organizational choices.",
+          "lessons": [
+            {
+              "title": "Payment units shape marginal incentives",
+              "read_passage": "Payment design changes what an additional activity means financially. In a simplified fee-for-service arrangement, another billable service can bring additional revenue. Under a fixed payment per enrolled person for a defined period, another service may add cost without adding payment. Neither arrangement alone determines quality or professional behavior.\n\nConsider a fictional administrative provider receiving 100 units for an additional task that costs 70 units to perform. Its contribution margin is 30 units before fixed costs. Under a fixed budget, the same task adds 70 units of cost with no immediate extra payment. This is an incentive comparison, not a recommendation about which tasks should occur.\n\nReal arrangements combine payment rules, quality conditions, contracts, professional duties, and oversight. A team may respond to financial incentives, but it also faces constraints and goals beyond revenue.\n\n**Ask precisely:** what is the unit of payment, who bears marginal cost, and what outcomes are rewarded or constrained? Those questions are more informative than labeling an entire system as inherently efficient or wasteful. Keep financial incentives distinct from judgments about individual care.",
+              "completed_days_ago": 1,
+              "quick_check": {"stem": "Under a fixed payment for a defined period, an additional task adds cost but no immediate payment. What can you conclude?", "options": ["The organization must refuse every additional task", "The task has no value to anyone", "The marginal financial incentive differs from a per-task payment, without determining actual behavior"], "correct_index": 2, "explanation": "Payment rules change marginal incentives. Duties, quality requirements, contracts, and other goals still affect decisions."}
+            },
+            {
+              "title": "Principal-agent problems are about information and goals",
+              "read_passage": "A principal delegates a task to an agent who has some discretion. Problems can arise when their goals differ and the principal cannot fully observe effort or quality. The terms describe roles, not moral judgments; the same organization can be a principal in one relationship and an agent in another.\n\nIn a fictional document-processing contract, a purchaser wants accurate, timely processing, while a vendor is paid per completed document. If accuracy is difficult to observe, the vendor may face pressure to prioritize throughput. This does not establish that the vendor will behave badly; it identifies a contract design risk.\n\nAdding an accuracy measure can help, but only if the measure reflects the desired outcome and is costly to game. Counting corrections may punish vendors that detect and disclose their own mistakes while rewarding silent errors.\n\n**Map the relationship:** identify who chooses actions, who observes results, and who bears consequences. Then consider audits, aligned payment, transparency, and professional norms as complementary mechanisms. No single metric eliminates the underlying information problem.",
+              "completed_days_ago": null,
+              "quick_check": {"stem": "Why might paying for fewer reported corrections create a perverse incentive?", "options": ["Reported corrections always equal total underlying errors", "A vendor could improve the metric by hiding errors rather than improving accuracy", "Accuracy cannot be measured in any way"], "correct_index": 1, "explanation": "A reporting-based metric can reward reduced detection or disclosure. Measurement design must distinguish actual quality from visible reporting behavior."}
+            }
+          ]
+        },
+        {
+          "title": "Measure fairly and account for friction",
+          "summary": "Recognize case-mix differences and the system-wide cost of administrative work.",
+          "lessons": [
+            {
+              "title": "Risk adjustment is not a fairness guarantee",
+              "read_passage": "Comparing organizations can be misleading when the populations or tasks they serve differ. Risk adjustment attempts to account for measured differences relevant to expected cost or outcomes. In a fictional administrative benchmark, one team handles simple forms while another handles complex appeals; raw completion time is not a like-for-like comparison.\n\nA model might estimate expected time from task type and information available at intake, then compare observed with expected time. The result still depends on which variables are measured, how they are encoded, and whether the model transfers across settings. Unmeasured complexity remains a limitation.\n\nAdjustment can also create incentives around classification. If a higher complexity category brings more payment or a more forgiving benchmark, organizations may invest in more complete coding or strategically classify cases. Those possibilities require investigation rather than automatic accusations.\n\n**Audit question:** does the model use information available before the evaluated work, or does it inadvertently adjust away the work's consequences? Report raw and adjusted results with assumptions. An adjusted number is a model-based comparison, not proof that every difference is deserved or fair.",
+              "completed_days_ago": null,
+              "quick_check": {"stem": "An adjusted performance gap disappears after including a variable caused by the evaluated workflow. What is the concern?", "options": ["The model may have adjusted away part of the workflow's effect", "Adjustment has proved both organizations equally effective", "Any extra variable necessarily improves fairness"], "correct_index": 0, "explanation": "A downstream variable can absorb the very effect under evaluation. Variable timing and causal role must match the comparison's purpose."}
+            },
+            {
+              "title": "Automation can move burden instead of removing it",
+              "read_passage": "An administrative tool can reduce work for one organization while increasing it elsewhere. A fictional submission portal saves a receiving team five minutes per form but requires senders to re-enter information for eight minutes. Looking only at the receiver's dashboard makes a three-minute system-wide increase look like an efficiency gain.\n\nCount effort across the whole workflow: initial entry, validation, exceptions, corrections, support, and reconciliation. Include waiting time separately from hands-on time. A task can require little active effort yet delay a process for days because it sits in a queue.\n\nAutomation also changes who handles unusual cases. If routine cases become fast while exceptions become harder to resolve, average processing time can improve even as a vulnerable subset experiences worse service. Stratify by meaningful workflow characteristics rather than hiding the tail.\n\n**Evaluate a proposal:** draw the handoffs, assign a responsible party to each step, and estimate both labor and elapsed time before and after. Treat estimates as hypotheses to measure. A successful local optimization is not necessarily an improvement for the complete administrative system.",
+              "completed_days_ago": null,
+              "quick_check": {"stem": "A portal saves receivers five minutes but adds eight minutes for senders per form. What is the net change in combined hands-on time?", "options": ["A five-minute saving", "An eight-minute saving", "A three-minute increase"], "correct_index": 2, "explanation": "Combine both sides: −5 + 8 = +3 minutes. Local savings do not establish a system-wide reduction in effort."}
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "beats": [
+    {
+      "slug": "ai-evidence-and-incentives",
+      "topic": "AI evidence, evaluation, and organizational incentives",
+      "level": "work_in_it",
+      "guidance": "Connect technical evaluation to incentives and operational accountability. These seeded Briefs are explicitly authored evergreen demonstrations, not live research or publication evidence.",
+      "briefs": [
+        {
+          "title": "When a benchmark becomes a target",
+          "body_markdown": "A metric becomes less informative when teams can improve it without improving the outcome it was meant to represent. In a fictional document-routing team, rewarding only automatic-routing rate encourages fewer human reviews, even if costly misroutes rise. The metric is not useless; it is incomplete.\n\n**Authored demo Brief — not live research.**\n\nPair automation coverage with audited error cost and a measure of unresolved work. Keep a sample selected independently of the routing decision so the audit does not inspect only easy cases. Ask who can influence each metric and how. The connection to platform economics is practical: changing the reward changes participation and behavior, so evaluation design must anticipate responses rather than merely record yesterday's average.",
+          "days_ago": 14,
+          "read": true
+        },
+        {
+          "title": "Abstention spends human attention",
+          "body_markdown": "Abstaining can improve the quality of automated answers while shifting effort to people. In a fictional support classifier, raising the confidence threshold reduces wrong automatic assignments but doubles the review queue. Whether that is an improvement depends on review capacity, waiting time, and the cost of errors.\n\n**Authored demo Brief — not live research.**\n\nTreat attention as a limited resource rather than a free fallback. Compare policies using both conditional quality and the fraction of requests they resolve. Then estimate queue behavior under busy periods, not only average arrivals. This connects evaluation thresholds to async backpressure: when demand exceeds capacity, hiding work in a growing queue delays failure rather than solving it. A useful policy states what happens when review capacity is exhausted.",
+          "days_ago": 7,
+          "read": true
+        },
+        {
+          "title": "Holdouts need organizational boundaries",
+          "body_markdown": "A holdout stops being independent when its results repeatedly guide development. In a fictional AI team, engineers never inspect individual holdout examples, but they choose among dozens of prompts using the holdout score. That feedback still influences selection and can produce optimistic estimates.\n\n**Authored demo Brief — not live research.**\n\nSeparate development comparisons from final acceptance, and record how often each dataset influences decisions. Reserve fresh evidence for claims that matter enough to justify collection. This is an organizational design problem as much as a statistical one: access controls, review habits, and incentives determine whether a nominal holdout stays untouched. The lesson is not to avoid measurement, but to distinguish exploratory feedback from evidence intended to support a release decision.",
+          "days_ago": 0,
+          "read": false
+        }
+      ]
+    },
+    {
+      "slug": "interoperability-and-public-goods",
+      "topic": "Interoperability, standards, and shared infrastructure",
+      "level": "some_experience",
+      "guidance": "Explore semantic contracts, coordination costs, and incentives to maintain shared standards using fictional administrative examples; no clinical recommendations or fabricated sources.",
+      "briefs": [
+        {
+          "title": "A shared format is only the first agreement",
+          "body_markdown": "Two systems can exchange valid JSON while disagreeing about what a field means. In a fictional integration, one organization uses 'completed' for a submitted form and another reserves it for an approved form. A schema validator accepts both, but a combined dashboard becomes misleading.\n\n**Authored demo Brief — not live research.**\n\nSemantic interoperability requires agreement about states, transitions, identifiers, and timing, not just transport. Treat ambiguous terms as contract questions and preserve original values during translation. The economic connection is coordination cost: each bilateral interpretation creates maintenance work, while a shared definition can reduce repeated negotiation. Shared definitions still need governance for exceptions and change. A standard earns trust through compatible behavior and transparent evolution, not merely through widespread use of the same field names.",
+          "days_ago": 14,
+          "read": true
+        },
+        {
+          "title": "Who maintains the boring mapping?",
+          "body_markdown": "Shared infrastructure can create benefits that exceed any single contributor's private return. In a fictional network of software vendors, everyone benefits from a maintained terminology mapping, yet each would prefer another organization to fund the updates. The result can be underinvestment despite obvious collective value.\n\n**Authored demo Brief — not live research.**\n\nThe practical questions are ownership, funding, review responsibility, and a correction process. An open repository alone does not answer them. A consortium, service contract, or rotating maintenance agreement changes who bears the cost, but each also introduces governance tradeoffs. For an engineer evaluating a dependency, inspect its update process and downstream correction path alongside technical coverage. A mapping that is easy to adopt but impossible to maintain creates deferred integration risk.",
+          "days_ago": 7,
+          "read": false
+        },
+        {
+          "title": "Portability includes the meaning of history",
+          "body_markdown": "Exporting records is not the same as preserving their interpretability. In a fictional workflow migration, the destination receives every row but loses which entries were corrections and which were original submissions. The row count matches while the history becomes less truthful.\n\n**Authored demo Brief — not live research.**\n\nA portability check should cover identity, relationships, versions, timestamps, and transformation provenance. Ask whether a recipient can reconstruct the intended state without reverse-engineering undocumented conventions. This connects to marketplace reputation portability: carrying a score without its task context and measurement rules can create false equivalence. Good exports transfer both data and enough meaning to use it responsibly. A small round-trip example with a correction often reveals more than a large count-only migration report.",
+          "days_ago": 0,
+          "read": false
+        }
+      ]
+    },
+    {
+      "slug": "music-tools-and-listening",
+      "topic": "Music-making, listening, and digital audio tools",
+      "level": "new_to_it",
+      "guidance": "Explore harmony and audio craft on their own terms, with optional connections to measurement. Use accessible listening exercises and no claims about current releases.",
+      "briefs": [
+        {
+          "title": "Louder is an unfair comparison",
+          "body_markdown": "A louder version of a sound can seem more detailed or exciting even when the processing adds no useful musical information. In a fictional home-studio comparison, a compressor's makeup gain raises playback level, so the processed take wins before anyone notices that its transients have become duller.\n\n**Authored demo Brief — not live research.**\n\nMatch perceived listening level as closely as practical and compare at a comfortable volume. Then ask a specific question: does the phrase feel more controlled, less lively, or easier to hear in context? Meters help establish conditions, but the artistic goal remains a listening judgment. This is a useful bridge to experimental design: control an irrelevant difference before attributing preference to the change you intended to evaluate.",
+          "days_ago": 14,
+          "read": false
+        },
+        {
+          "title": "One moving note can reshape a phrase",
+          "body_markdown": "Harmony does not require every voice to move at once. Keeping two notes fixed while changing a third can make a chord transition easy to hear and easy to play. A fictional beginner composition alternates C–E–G and C–E-flat–G, changing major to minor with one semitone movement.\n\n**Authored demo Brief — not live research.**\n\nTry both chords slowly, then keep the notes identical while changing rhythm. The exercise separates harmonic structure from pacing and expression. Next, hum the moving note alone before restoring the full chords. The goal is attentive listening, not a universal emotional label for major or minor. A small constraint can make composition more approachable because it gives the ear one clear relationship to follow instead of demanding many simultaneous decisions.",
+          "days_ago": 7,
+          "read": true
+        },
+        {
+          "title": "A spectrum is not a musical verdict",
+          "body_markdown": "A frequency spectrum describes how signal energy is distributed, but it does not decide whether a musical arrangement works. In a fictional mix, two instruments occupy overlapping frequency ranges yet remain distinct because their rhythms and note lengths differ. Cutting frequencies solely to separate their graphs could make both sound thinner.\n\n**Authored demo Brief — not live research.**\n\nListen in context before reaching for equalization. Arrangement, register, timing, and level may solve a conflict more naturally than a processor. Use visual tools to investigate a question rather than to invent a defect. The wider connection is measurement discipline: a representation emphasizes some properties and omits others. Learning what a tool cannot show is part of learning to use it well, whether the tool is an audio analyzer or a software dashboard.",
+          "days_ago": 0,
+          "read": false
+        }
+      ]
+    },
+    {
+      "slug": "marketplaces-and-healthcare-workflows",
+      "topic": "Marketplace design and healthcare administrative incentives",
+      "level": "new_to_it",
+      "guidance": "Compare economic mechanisms across creative marketplaces and administrative services without claiming they are identical. Keep examples fictional and analysis evergreen.",
+      "briefs": [
+        {
+          "title": "Fast for whom?",
+          "body_markdown": "A workflow can become faster for its owner while shifting work to someone else. In a fictional form portal, the receiving organization removes manual entry by requiring senders to retype information already present in their systems. The receiver's productivity improves, but combined labor may rise.\n\n**Authored demo Brief — not live research.**\n\nMap every handoff and count effort on both sides. Separate elapsed delay from hands-on time, and look at exception cases as well as the median. A similar pattern appears in marketplaces when better buyer filtering requires sellers to complete lengthy unpaid applications. Local optimization is not necessarily system improvement. The useful question is whose time, money, and uncertainty are reduced, and whose are increased by the proposed design.",
+          "days_ago": 14,
+          "read": true
+        },
+        {
+          "title": "Selection can masquerade as better performance",
+          "body_markdown": "An organization can improve its average result by changing the cases it accepts rather than improving its process. In a fictional service marketplace, a new eligibility filter excludes complex requests, and average turnaround falls. That is a real change in the measured average, but not evidence that comparable requests are handled faster.\n\n**Authored demo Brief — not live research.**\n\nTrack acceptance rates, case mix, and outcomes for excluded requests alongside processing metrics. In administrative settings, similar selection can arise from documentation requirements or intake rules even without an explicit intent to exclude. The causal question must specify the target population. A benchmark that follows only successful entrants may miss the burden at the door, where access and measurement are being shaped simultaneously.",
+          "days_ago": 7,
+          "read": false
+        },
+        {
+          "title": "Trust is infrastructure with maintenance costs",
+          "body_markdown": "Trust mechanisms require ongoing work: verifying identities, resolving disputes, correcting records, and explaining decisions. In a fictional musician marketplace, reviews attract buyers, but an unresolved dispute process lets mistaken ratings persist. The visible score looks precise while the supporting institution is weak.\n\n**Authored demo Brief — not live research.**\n\nAdministrative software has analogous needs for audit trails and correction channels, though the stakes and obligations differ. Do not assume that a technical reputation score or immutable log settles questions of accuracy and fairness. Ask who can challenge an entry, who investigates, and how corrections reach downstream users. This connects economics with data provenance: maintaining credible information is a recurring operating cost, not a one-time feature added when the platform first launches.",
+          "days_ago": 0,
+          "read": false
+        }
+      ]
+    }
+  ]
+}
