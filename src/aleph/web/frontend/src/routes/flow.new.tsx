@@ -39,7 +39,7 @@ function lengthFromSearch(value: string | undefined): number | null {
 }
 
 function orderFromSearch(value: string | undefined): FlowOrder {
-  return value === "random" || value === "serial" ? value : "interleave";
+  return value === "interleave" || value === "serial" ? value : "random";
 }
 
 // The setup sheet (flow TDD §5.6, mock screen 02). A route, not an overlay
@@ -52,7 +52,6 @@ function FlowSetup() {
   const search = Route.useSearch();
   const pathsQuery = useQuery(pathsListQueryOptions);
   const paths = pathsQuery.data?.paths;
-  const resumePathId = pathsQuery.data?.resume_path_id;
 
   const [length, setLength] = useState<number | null>(() => lengthFromSearch(search.length));
   const [order, setOrder] = useState<FlowOrder>(() => orderFromSearch(search.order));
@@ -82,18 +81,13 @@ function FlowSetup() {
       setSelectedIds([search.path]);
       return;
     }
-    const resume = paths.find((path) => path.id === resumePathId);
-    if (resume && selectablePaths.some((p) => p.id === resume.id)) {
-      setSelectedIds([resume.id]);
-      return;
-    }
-    setSelectedIds(selectablePaths[0] ? [selectablePaths[0].id] : []);
+    setSelectedIds(selectablePaths.map((p) => p.id));
     // Every dependency below is read fresh on every run, but the `selectedIds
     // !== null` guard above is what actually makes this "derive the initial
     // selection exactly once": once it has set state, every later run
     // (triggered by a refetch reshaping `selectablePaths`, say) returns
     // before touching it, so the learner's own picks are never overwritten.
-  }, [paths, resumePathId, selectedIds, selectablePaths, search.paths, search.path]);
+  }, [paths, selectedIds, selectablePaths, search.paths, search.path]);
 
   if (!flowEnabled) {
     return (

@@ -65,11 +65,8 @@ async function gotoSetup(search = ""): Promise<void> {
 }
 
 /**
- * Force one path's pick to a known pressed state, regardless of whichever
- * path the default-selection effect landed on (`pickResumeTarget` — MID here,
- * since it is the only path with a completion and therefore `last_activity_at`
- * set). Tests that care about an exact scope call this rather than assume
- * which path started selected.
+ * Force one path's pick to a known pressed state. Tests that care about an
+ * exact scope call this rather than depend on the default selection.
  */
 function ensureSelected(pathId: string, want: boolean): void {
   const pick = screen.getByTestId(`flow-path-${pathId}`);
@@ -80,13 +77,15 @@ function ensureSelected(pathId: string, want: boolean): void {
 
 describe("Flow setup — /flow/new", () => {
   it.each([
-    [FRESH_ID, "", FRESH_ID],
-    [null, "", MID_ID],
-    [undefined, "", MID_ID],
-    ["missing-path", "", MID_ID],
-    [DONE_ID, "", MID_ID],
-    [FRESH_ID, `?path=${MID_ID}`, MID_ID],
-    [FRESH_ID, `?paths=${MID_ID}&path=${FRESH_ID}`, MID_ID],
+    [FRESH_ID, "", [MID_ID, FRESH_ID]],
+    [null, "", [MID_ID, FRESH_ID]],
+    [undefined, "", [MID_ID, FRESH_ID]],
+    ["missing-path", "", [MID_ID, FRESH_ID]],
+    [DONE_ID, "", [MID_ID, FRESH_ID]],
+    [FRESH_ID, `?path=${DONE_ID}`, [MID_ID, FRESH_ID]],
+    [FRESH_ID, "?paths=missing-path", [MID_ID, FRESH_ID]],
+    [FRESH_ID, `?path=${MID_ID}`, [MID_ID]],
+    [FRESH_ID, `?paths=${MID_ID}&path=${FRESH_ID}`, [MID_ID]],
   ])("resolves server selection %s with scope %s", async (resumeId, search, expected) => {
     useFlowSession();
     seedThreePaths();
@@ -101,10 +100,29 @@ describe("Flow setup — /flow/new", () => {
     );
     await gotoSetup(search);
     await waitFor(() => {
-      expect(screen.getByTestId(`flow-path-${expected}`).getAttribute("aria-pressed")).toBe("true");
-      const other = expected === MID_ID ? FRESH_ID : MID_ID;
-      expect(screen.getByTestId(`flow-path-${other}`).getAttribute("aria-pressed")).toBe("false");
+      for (const id of [MID_ID, FRESH_ID, DONE_ID]) {
+        expect(screen.getByTestId(`flow-path-${id}`)).toHaveAttribute(
+          "aria-pressed",
+          String(expected.includes(id)),
+        );
+      }
     });
+  });
+
+  it.each([
+    ["", "random"],
+    ["?order=invalid", "random"],
+    ["?order=interleave", "interleave"],
+    ["?order=serial", "serial"],
+    ["?order=random", "random"],
+  ])("uses the requested order or Random by default: %s", async (search, expected) => {
+    useFlowSession();
+    seedThreePaths();
+    await gotoSetup(search);
+    expect(await screen.findByTestId(`flow-order-${expected}`)).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
   });
 
   it("Start reads 'Pick a path to start' and disables with nothing selected", async () => {
@@ -113,9 +131,7 @@ describe("Flow setup — /flow/new", () => {
     await gotoSetup();
     await screen.findByTestId(`flow-path-${FRESH_ID}`);
 
-    // Default selection lands on the resume target (MID) — deselect it to
-    // reach the true empty-selection state.
-    ensureSelected(MID_ID, false);
+    fireEvent.click(screen.getByTestId("flow-select-all"));
 
     const start = screen.getByTestId("flow-start") as HTMLButtonElement;
     expect(start.textContent).toBe("Pick a path to start");
@@ -182,6 +198,8 @@ describe("Flow setup — /flow/new", () => {
     expect(donePick.disabled).toBe(true);
     expect(donePick.textContent).toMatch(/finished/i);
 
+    // Clear the default selection, then select all again.
+    fireEvent.click(screen.getByTestId("flow-select-all"));
     fireEvent.click(screen.getByTestId("flow-select-all"));
     await waitFor(() => {
       expect(screen.getByTestId(`flow-path-${FRESH_ID}`).getAttribute("aria-pressed")).toBe("true");
@@ -191,22 +209,22 @@ describe("Flow setup — /flow/new", () => {
     expect(donePick.getAttribute("aria-pressed")).toBe("false");
   });
 
-  it("Select all flips to Clear once both live paths are selected, and back", async () => {
+  it("Clear deselects both live paths, and Select all restores them", async () => {
     useFlowSession();
     seedThreePaths();
     await gotoSetup();
     await screen.findByTestId(`flow-path-${FRESH_ID}`);
 
     const selectAll = screen.getByTestId("flow-select-all");
-    expect(selectAll.textContent).toBe("Select all");
+    expect(selectAll.textContent).toBe("Clear");
 
     fireEvent.click(selectAll);
-    await waitFor(() => expect(screen.getByTestId("flow-select-all").textContent).toBe("Clear"));
-
-    fireEvent.click(screen.getByTestId("flow-select-all"));
     await waitFor(() =>
       expect(screen.getByTestId("flow-select-all").textContent).toBe("Select all"),
     );
+
+    fireEvent.click(screen.getByTestId("flow-select-all"));
+    await waitFor(() => expect(screen.getByTestId("flow-select-all").textContent).toBe("Clear"));
   });
 
   it("the order control appears only once two paths are selected", async () => {
@@ -215,12 +233,13 @@ describe("Flow setup — /flow/new", () => {
     await gotoSetup();
     await screen.findByTestId(`flow-path-${FRESH_ID}`);
 
-    // One path selected by default (the resume target) — order is hidden.
+    expect(screen.getByTestId("flow-order-random")).toHaveAttribute("aria-pressed", "true");
+    ensureSelected(FRESH_ID, false);
     expect(screen.queryByTestId("flow-order-interleave")).toBeNull();
 
-    fireEvent.click(screen.getByTestId("flow-select-all"));
+    ensureSelected(FRESH_ID, true);
     await waitFor(() => expect(screen.getByTestId("flow-order-interleave")).toBeTruthy());
-    expect(screen.getByTestId("flow-order-interleave").getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByTestId("flow-order-random")).toHaveAttribute("aria-pressed", "true");
   });
 
   it("Start writes the record and lands on the first lesson's route", async () => {
