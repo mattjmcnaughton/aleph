@@ -1,3 +1,10 @@
+## [1.46.3](https://github.com/mattjmcnaughton/aleph/compare/v1.46.2...v1.46.3) (2026-10-31)
+
+
+### Bug Fixes
+
+* **flow:** default to all active paths and random ordering ([6bc653f](https://github.com/mattjmcnaughton/aleph/commit/6bc653f6a821b2004722b8f46a46bb2e09c1b2ab))
+
 ## [1.46.2](https://github.com/mattjmcnaughton/aleph/compare/v1.46.1...v1.46.2) (2026-10-22)
 
 
