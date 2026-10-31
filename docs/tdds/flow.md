@@ -1,5 +1,11 @@
 # TDD — Flow
 
+> **Setup defaults amendment (2026-10-30):** New flows select every active path
+> (`ready` with a non-null `next_lesson`) and use **Random** ordering. Explicit
+> `?path=` links and *Go again* prefills still take precedence. These defaults
+> supersede the original single-path / Interleave defaults below. Setup preferences
+> are not saved in local storage; the per-tab flow record is unchanged.
+
 > **Current amendment:** Flashcard drafting, review links, draft batches, and learner Settings
 > were removed after this design shipped. Clauses D7 and D11 and all draft/settings/review
 > implementation notes below are retained only as historical context. Current Flow is a bounded
