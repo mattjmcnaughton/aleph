@@ -4,8 +4,8 @@
 //
 // Two fresh paths, both with several lessons (`_build_outline`'s own floor:
 // 2-4 units of 3-4 lessons each, well past the two a length-3 interleaved
-// flow needs from the first path). `/flow/new`: pick 3, Select all, leave
-// Interleave (the default), Start. Then three ordinary lesson completions —
+// flow needs from the first path). `/flow/new`: verify the defaults, pick 3,
+// choose Interleave, Start. Then three ordinary lesson completions —
 // Quick check answered, Mark complete — except the door at the end of each
 // is the flow's own advance card, not the usual three-way choice, and the
 // tap through it is `flow-advance-go` rather than a link (§5.3's own rule:
@@ -16,8 +16,7 @@
 // itself chose — never a sentence the stub model wrote.
 //
 // **Isolation.** The shared `aleph_e2e` account is not trusted to be clean:
-// `Select all` is exercised (one click, proving the control itself works),
-// but its result is then trimmed back to exactly this spec's own two paths —
+// The default selection is trimmed back to exactly this spec's own two paths —
 // every other row it selected is clicked off again. So the flow's scope is
 // always `{pathA, pathB}` regardless of whatever else is sitting `ready` in
 // the account from an earlier spec in the same run; the receipt assertions
@@ -44,14 +43,17 @@ test.describe("W34 a flow opens the next lesson on its own", { tag: "@w34" }, ()
     const pathA = await createPath(page, topicA);
     const pathB = await createPath(page, topicB);
 
-    // The setup sheet (mock screen 02): 3 lessons, both paths, Interleave
-    // (already the default — nothing to click for it).
+    // Verify the new-flow defaults before choosing a deterministic order for
+    // this journey: Random could draw the same path for all three lessons.
     await page.goto("/flow/new");
     await waitForSurface(page, "flow-setup");
+    await expect(page.getByTestId("flow-length-5")).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByTestId("flow-select-all")).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByTestId("flow-order-random")).toHaveAttribute("aria-pressed", "true");
     await page.getByTestId("flow-length-3").click();
-    await page.getByTestId("flow-select-all").click();
+    await page.getByTestId("flow-order-interleave").click();
     // Trim the selection back to this spec's own two paths (see the
-    // "Isolation" note above) — anything `Select all` also picked up from
+    // "Isolation" note above) — anything the default selection picked up from
     // the shared account's residue gets clicked off again.
     // Read the pressed ids once, then click each by its own stable testid.
     // Not `locator.all()`: that hands back index-based locators over the
