@@ -241,6 +241,7 @@ export function PathCompleteCard({
   lessonCount,
   days,
   celebrate,
+  showSeal = true,
 }: {
   pathId: string;
   /** The learner-editable display label — never the Topic (CONTEXT.md). */
@@ -256,6 +257,8 @@ export function PathCompleteCard({
    */
   days: number | null;
   celebrate: boolean;
+  /** A simultaneous learning-day milestone supplies the single artwork. */
+  showSeal?: boolean;
 }) {
   const analystEnabled = useFeatureFlag("analyst");
 
@@ -268,7 +271,7 @@ export function PathCompleteCard({
     >
       {celebrate ? <Confetti /> : null}
 
-      <Seal />
+      {showSeal ? <Seal /> : null}
 
       {/* One `rise-in` on the whole block below the seal, rather than a stagger
           per row: the seal is the moment, and four things arriving one after

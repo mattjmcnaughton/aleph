@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { API_V1_BASE, type AuthSession, type PathUnit } from "../lib/api";
@@ -129,6 +129,92 @@ afterEach(() => {
 });
 
 describe("Lesson route in a flow", () => {
+  it.each([false, true])(
+    "milestone pauses Flow and offers the right immediate door (final: %s)",
+    async (final) => {
+      // Own every interval before the advance card can mount. Keep HTTP/query
+      // timeouts real so MSW and findBy retain their ordinary async behavior.
+      vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+      useFlowSession();
+      seedTwoPathFlow();
+      server.use(
+        http.post(`${API_V1_BASE}/lessons/${A[0]}/complete`, () => {
+          applyProgress(PATH_A, "Path A", A, 1);
+          return HttpResponse.json({
+            id: A[0],
+            unlock_state: "complete",
+            path_completion: null,
+            milestones: [
+              { metric: "daily_streak", days: 100 },
+              { metric: "active_days", days: 100 },
+            ],
+          });
+        }),
+      );
+      writeFlow(
+        baseRecord({
+          length: final ? 3 : 5,
+          paths: [PATH_A, PATH_B],
+          current: { lessonId: A[0], pathId: PATH_A },
+          completed: final
+            ? [
+                { lessonId: "earlier-1", pathId: PATH_A, title: "Earlier", outcome: null },
+                { lessonId: "earlier-2", pathId: PATH_B, title: "Earlier", outcome: null },
+              ]
+            : [],
+        }),
+      );
+      window.history.pushState({}, "", `/lessons/${A[0]}`);
+      render(<App />);
+      await workTheLesson();
+      await screen.findByTestId("milestone-celebration");
+      expect(screen.getByText("100-day Daily streak")).toBeTruthy();
+      expect(screen.getByText("100 total Active days")).toBeTruthy();
+      expect(screen.getByTestId("flow-bar")).toBeTruthy();
+      if (final) {
+        expect(screen.queryByTestId("flow-advance")).toBeNull();
+        fireEvent.click(screen.getByRole("button", { name: "See Flow summary" }));
+        await screen.findByTestId("flow-receipt");
+        expect(screen.getByTestId("flow-receipt-strip").getAttribute("data-celebrate")).toBe(
+          "false",
+        );
+        expect(readFlow()?.endedReason).toBe("length");
+      } else {
+        expect(screen.getByTestId("flow-advance-pause").textContent).toBe("Resume");
+        await act(() => vi.advanceTimersByTimeAsync(6000));
+        expect(screen.getByTestId("flow-advance-count").textContent).toBe("5");
+        expect(screen.getByTestId("lesson-view-id").textContent).toBe(A[0]);
+        fireEvent.click(screen.getByTestId("flow-advance-go"));
+        await waitFor(() =>
+          expect(screen.getByTestId("lesson-view-id").textContent).not.toBe(A[0]),
+        );
+      }
+    },
+  );
+
+  it("the same pre-mount interval clock advances an ordinary non-milestone completion", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    useFlowSession();
+    seedTwoPathFlow();
+    writeFlow(
+      baseRecord({
+        length: 5,
+        paths: [PATH_A, PATH_B],
+        current: { lessonId: A[0], pathId: PATH_A },
+      }),
+    );
+    window.history.pushState({}, "", `/lessons/${A[0]}`);
+    render(<App />);
+    await workTheLesson();
+    await screen.findByTestId("flow-advance");
+    expect(screen.queryByTestId("milestone-celebration")).toBeNull();
+    expect(screen.getByTestId("flow-advance-count").textContent).toBe("5");
+    await act(() => vi.advanceTimersByTimeAsync(2000));
+    expect(screen.getByTestId("flow-advance-count").textContent).toBe("3");
+    await act(() => vi.advanceTimersByTimeAsync(4000));
+    await waitFor(() => expect(screen.getByTestId("lesson-view-id").textContent).toBe(B[0]));
+  });
+
   it("the bar is position-based and the advance card opens at 5", async () => {
     useFlowSession();
     seedTwoPathFlow();

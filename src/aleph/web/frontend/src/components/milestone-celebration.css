@@ -1,0 +1,92 @@
+/* Resting states are finished; only motion-safe learners get the one-shot trace. */
+.milestone-connection {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 0;
+}
+.milestone-star,
+.milestone-ripple {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.milestone-traveler,
+.milestone-ripple {
+  display: none;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .milestone-connection {
+    animation: milestone-connect 2.4s linear both;
+  }
+  .milestone-star {
+    animation: milestone-ignite .55s ease-out both;
+  }
+  .milestone-traveler {
+    display: block;
+    fill: #e9e9ed;
+    offset-distance: 100%;
+    animation: milestone-travel 2.4s linear both;
+  }
+  .milestone-ripple {
+    display: block;
+    opacity: 0;
+    animation: milestone-ripple .85s 2.4s ease-out both;
+  }
+  .milestone-number {
+    animation: milestone-land .6s 2.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+}
+@keyframes milestone-connect {
+  from {
+    stroke-dashoffset: 1;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes milestone-ignite {
+  0% {
+    opacity: 0.15;
+    transform: scale(0.6);
+  }
+  45% {
+    opacity: 1;
+    transform: scale(2.3);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+@keyframes milestone-travel {
+  0% {
+    offset-distance: 0%;
+    opacity: 0;
+  }
+  5%,
+  95% {
+    opacity: 1;
+  }
+  100% {
+    offset-distance: 100%;
+    opacity: 0;
+  }
+}
+@keyframes milestone-ripple {
+  from {
+    opacity: 0.8;
+    transform: scale(0.3);
+  }
+  to {
+    opacity: 0;
+    transform: scale(2.8);
+  }
+}
+@keyframes milestone-land {
+  from {
+    opacity: 0.3;
+    transform: translateY(6px) scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}

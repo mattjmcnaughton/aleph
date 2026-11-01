@@ -640,11 +640,18 @@ export interface PathCompletion {
 }
 
 /** `POST /api/v1/lessons/{id}/complete` body — `200 {id, unlock_state, …}`. */
+export interface Milestone {
+  metric: "daily_streak" | "active_days";
+  days: number;
+}
+
 export interface LessonCompleted {
   id: string;
   unlock_state: LessonUnlockState;
   /** Null unless every lesson on the path is now complete. */
   path_completion: PathCompletion | null;
+  /** Transition-only recognition; absent on older servers, empty on retries. */
+  milestones?: Milestone[];
 }
 
 /** Poll a lesson's detail (generation state + content once generated). */
@@ -668,7 +675,10 @@ export function attemptLesson(id: string, selectedIndex: number): Promise<Lesson
 
 /** Mark the lesson complete (non-gating; idempotent on an already-complete one). */
 export function completeLesson(id: string): Promise<LessonCompleted> {
-  return apiFetch<LessonCompleted>(apiV1Path(`/lessons/${id}/complete`), { method: "POST" });
+  return apiFetch<LessonCompleted>(
+    apiV1Path(`/lessons/${id}/complete?tz_offset_minutes=${clientTimezoneOffsetMinutes()}`),
+    { method: "POST" },
+  );
 }
 
 /** TanStack query key for a single lesson's detail poll. */

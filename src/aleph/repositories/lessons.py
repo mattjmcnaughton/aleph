@@ -862,6 +862,28 @@ class LessonRepository:
 
     # -- streaks: the one read (Phase 5 TDD §5.2, D3/D5) -------------------- #
 
+    async def serialize_completions_for_user(self, user_id: uuid.UUID) -> None:
+        """One learner's completions serialize across paths until commit/rollback.
+
+        An advisory transaction lock avoids account-row/FK lock interactions.
+        Hash collisions only serialize extra learners; no state is retained.
+        """
+        await self.session.execute(
+            select(
+                func.pg_advisory_xact_lock(
+                    func.hashtextextended(f"lesson-completion:{user_id}", 0)
+                )
+            )
+        )
+
+    async def completion_instant(
+        self, lesson_id: uuid.UUID
+    ) -> datetime.datetime | None:
+        """Read the persisted completion stamp, without an identity-map stale value."""
+        return await self.session.scalar(
+            select(Lesson.completed_at).where(Lesson.id == lesson_id)
+        )
+
     async def completion_days_for_user(
         self, *, user_id: uuid.UUID, tz_offset_minutes: int
     ) -> list[CompletionDay]:
