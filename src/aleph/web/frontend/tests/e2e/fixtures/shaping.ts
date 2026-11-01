@@ -256,6 +256,7 @@ export function appliedLessons(payload: AppliedPayload): AppliedLesson[] {
 
 /** Open the read-only **Change history** sheet from the rail's header. */
 export async function openChangeHistory(page: Page): Promise<void> {
+  await page.getByLabel("Shaping options", { exact: true }).click();
   await page.getByTestId("shaping-rail-change-history").click();
   await expect(page.getByTestId("shaping-rail-history")).toBeVisible({ timeout: ACTION_TIMEOUT });
 }

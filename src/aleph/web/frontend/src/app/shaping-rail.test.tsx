@@ -222,7 +222,7 @@ describe("Shaping rail — one tree, two CSS presentations (D14)", () => {
     await openShapingRail();
 
     const column = screen.getByTestId("shaping-rail-column");
-    // Below `lg`: a bottom sheet over the path, capped so the path shows behind.
+    // Below `lg`: the same focused sheet used by the lesson Tutor.
     expect(column.className).toMatch(/fixed/);
     expect(column.className).toMatch(/bottom-0/);
     // At `lg`: `lg:sticky` beneath the app header, not a plain flex sibling
@@ -268,6 +268,8 @@ describe("Shaping rail — the conversation surface", () => {
     expect(empty.textContent).toMatch(/remove/i);
     expect(empty.textContent).toMatch(/reorder/i);
 
+    expect(screen.queryAllByTestId("shaping-rail-suggestion")).toHaveLength(0);
+    fireEvent.click(screen.getByLabelText("Suggested changes"));
     expect(screen.getAllByTestId("shaping-rail-suggestion")).toHaveLength(4);
   });
 
@@ -288,6 +290,7 @@ describe("Shaping rail — the conversation surface", () => {
   it("[AL-330] sends a suggestion as `source: suggestion`", async () => {
     await openShapingRail();
 
+    fireEvent.click(screen.getByLabelText("Suggested changes"));
     const suggestions = await screen.findAllByTestId("shaping-rail-suggestion");
     const whatsMissing = suggestions.find((button) =>
       (button.textContent ?? "").includes("What's missing?"),
@@ -306,6 +309,7 @@ describe("Shaping rail — the conversation surface", () => {
     // sentence, not an ask — sending it as-is would be a question with no object.
     await openShapingRail();
 
+    fireEvent.click(screen.getByLabelText("Suggested changes"));
     const suggestions = await screen.findAllByTestId("shaping-rail-suggestion");
     const addPractice = suggestions.find((button) =>
       (button.textContent ?? "").startsWith("Add practice on"),
@@ -313,6 +317,8 @@ describe("Shaping rail — the conversation surface", () => {
     fireEvent.click(addPractice as HTMLElement);
 
     expect(composer().value).toMatch(/^Add practice on/);
+    expect(composer()).toHaveFocus();
+    expect(screen.queryAllByTestId("shaping-rail-suggestion")).toHaveLength(0);
     expect(shapingSendBodies()).toHaveLength(0);
   });
 
@@ -603,6 +609,7 @@ describe("Shaping rail — header controls", () => {
     await openShapingRail();
     await waitFor(() => expect(messages()).toHaveLength(1));
 
+    fireEvent.click(screen.getByLabelText("Shaping options"));
     fireEvent.click(screen.getByTestId("shaping-rail-new-conversation"));
     // Destructive and not undoable: it must never sit under one tap.
     expect(shapingClearCount()).toBe(0);
@@ -616,6 +623,7 @@ describe("Shaping rail — header controls", () => {
     seedShapingConversation(PATH_ID, [{ role: "learner", content: "What's missing?" }]);
     await openShapingRail();
 
+    fireEvent.click(screen.getByLabelText("Shaping options"));
     fireEvent.click(screen.getByTestId("shaping-rail-new-conversation"));
     fireEvent.click(screen.getByTestId("shaping-rail-new-conversation-cancel"));
 
@@ -626,8 +634,17 @@ describe("Shaping rail — header controls", () => {
   it("[AL-330] offers a change-history button — the record is on the path, not the thread", async () => {
     await openShapingRail();
 
-    // AL-331 hangs the read-only sheet off this control; AL-330 owns the header.
-    expect(screen.getByTestId("shaping-rail-change-history")).toBeTruthy();
+    const options = screen.getByLabelText("Shaping options");
+    const history = screen.getByTestId("shaping-rail-change-history");
+    expect(history).not.toBeVisible();
+    fireEvent.click(options);
+    expect(history).toBeVisible();
+    fireEvent.keyDown(options, { key: "Escape" });
+    expect(history).not.toBeVisible();
+    expect(options).toHaveFocus();
+    fireEvent.click(options);
+    fireEvent.click(history);
+    expect(await screen.findByTestId("shaping-rail-history")).toBeVisible();
   });
 
   it("[AL-330] renders no model picker for a non-admin", async () => {
@@ -639,6 +656,7 @@ describe("Shaping rail — header controls", () => {
   it("[AL-330] rides an admin's per-message model override on the send", async () => {
     await openShapingRail(adminShapingSession);
 
+    fireEvent.click(screen.getByLabelText("Shaping options"));
     const picker = screen.getByTestId("shaping-rail-model-picker") as HTMLSelectElement;
     fireEvent.change(picker, { target: { value: ADMIN_MODEL_ALLOWLIST[0] } });
     ask("What's missing?");

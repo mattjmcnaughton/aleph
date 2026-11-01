@@ -217,6 +217,7 @@ test.describe("W19 undo a change", { tag: "@w19" }, () => {
     await applyProposal(page, await askForAddition(page));
 
     // New conversation confirms first, then clears the thread.
+    await page.getByLabel("Shaping options", { exact: true }).click();
     await page.getByTestId("shaping-rail-new-conversation").click();
     await page.getByTestId("shaping-rail-new-conversation-confirm").click();
     await expect(page.getByTestId("shaping-rail-empty")).toBeVisible();

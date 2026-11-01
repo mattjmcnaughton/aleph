@@ -201,6 +201,7 @@ test.describe("W21 shaping is never on the critical path", { tag: "@w21" }, () =
     // "New conversation" on the shaping rail clears the shaping thread. It is
     // per-kind: the in-lesson thread is another conversation entirely and must
     // not notice (TDD D3).
+    await page.getByLabel("Shaping options", { exact: true }).click();
     await page.getByTestId("shaping-rail-new-conversation").click();
     await page.getByTestId("shaping-rail-new-conversation-confirm").click();
     await expect(page.getByTestId("shaping-rail-empty")).toBeVisible();
