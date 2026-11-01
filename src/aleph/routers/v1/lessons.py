@@ -48,15 +48,18 @@ from aleph.dtos.lessons import (
     CompleteLessonResponse,
     GenerateLessonResponse,
     LessonDetailResponse,
+    MilestoneDTO,
     PathCompletionDTO,
     QuickCheckDTO,
 )
+from aleph.dtos.progress import TzOffsetMinutes  # noqa: TC001 - FastAPI annotation.
 from aleph.models import (  # noqa: TC001 - FastAPI resolves annotations.
     Lesson,
     User,
 )
 from aleph.repositories import AttemptRepository, LessonRepository, QuickCheckRepository
 from aleph.services.generation import generation_orchestrator
+from aleph.services.lesson_completion import complete_with_milestones
 from aleph.services.lessons_read import (
     lesson_unlock_state,
     load_lesson_detail,
@@ -64,6 +67,7 @@ from aleph.services.lessons_read import (
 from aleph.services.rate_limit import build_daily_rate_limiter
 
 if TYPE_CHECKING:
+    from aleph.domains.milestones import Milestone
     from aleph.repositories.lessons import PathCompletion
     from aleph.services.lessons_read import LessonDetailView
 
@@ -114,12 +118,18 @@ def _lesson_not_generated() -> HTTPException:
 
 
 def _complete_response(
-    lesson_id: UUID, completion: PathCompletion | None
+    lesson_id: UUID,
+    completion: PathCompletion | None,
+    milestones: list[Milestone] | None = None,
 ) -> CompleteLessonResponse:
     """Translate the repo roll-up to the wire DTO (the one place that mapping lives)."""
     return CompleteLessonResponse(
         id=lesson_id,
         unlock_state=UnlockState.COMPLETE,
+        milestones=[
+            MilestoneDTO(metric=item.metric, days=item.days)
+            for item in milestones or []
+        ],
         path_completion=(
             PathCompletionDTO(
                 lesson_count=completion.lesson_count,
@@ -330,7 +340,10 @@ async def attempt_lesson(
 
 @router.post("/lessons/{lesson_id}/complete")
 async def complete_lesson(
-    lesson: OwnedLesson, user: CurrentUser, session: Session
+    lesson: OwnedLesson,
+    user: CurrentUser,
+    session: Session,
+    tz_offset_minutes: TzOffsetMinutes = 0,
 ) -> CompleteLessonResponse:
     """Mark the available lesson complete (non-gating) → ``200`` (§4/§6).
 
@@ -381,10 +394,14 @@ async def complete_lesson(
         newly_completed,
         path_now_complete,
         lesson_count,
-    ) = await lessons_repo.mark_completed_and_finalize(
-        lesson_id=lesson.id, path_id=lesson.path_id
+        milestones,
+    ) = await complete_with_milestones(
+        session,
+        user_id=user.id,
+        lesson_id=lesson.id,
+        path_id=lesson.path_id,
+        tz_offset_minutes=tz_offset_minutes,
     )
-    await session.commit()
     if newly_completed:
         # Emit the (now durable) transition events BEFORE the prefetch advance:
         # ``on_lesson_completed`` can raise, and a committed completion must never
@@ -419,4 +436,4 @@ async def complete_lesson(
         if path_now_complete
         else None
     )
-    return _complete_response(lesson.id, completion)
+    return _complete_response(lesson.id, completion, milestones)

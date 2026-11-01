@@ -18,9 +18,10 @@ Grading is server-side; the client cannot self-grade.
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from aleph.domains.grading import Outcome
+from aleph.domains.milestones import MilestoneMetric
 from aleph.domains.progression import UnlockState
 from aleph.models import LessonGenerationState
 
@@ -121,15 +122,21 @@ class PathCompletionDTO(BaseModel):
 
     ``first_completed_at``/``completed_at`` are the span of the learner's work
     on this path, sent as instants rather than a day count on purpose: a
-    **Day** is a calendar day in the *learner's* local timezone (CONTEXT.md),
-    and this route — unlike the streak reader — takes no ``tz_offset_minutes``.
-    The client owns the local-day arithmetic, the same way it owns it for the
-    activity strip.
+    **Day** is a calendar day in the *learner's* local timezone (CONTEXT.md).
+    The client owns this span's local-day arithmetic; the completion request's
+    timezone offset only governs milestone derivation, not these instants.
     """
 
     lesson_count: int
     first_completed_at: datetime
     completed_at: datetime
+
+
+class MilestoneDTO(BaseModel):
+    """Recognition earned by this completion, never replayed by reads/retries."""
+
+    metric: MilestoneMetric
+    days: int
 
 
 class CompleteLessonResponse(BaseModel):
@@ -152,3 +159,4 @@ class CompleteLessonResponse(BaseModel):
     id: UUID
     unlock_state: UnlockState
     path_completion: PathCompletionDTO | None = None
+    milestones: list[MilestoneDTO] = Field(default_factory=list)

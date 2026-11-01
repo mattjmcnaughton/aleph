@@ -5,6 +5,27 @@
 > Path streak semantics are unchanged. Brief reads do not count toward any streak. Earlier
 > Phase 3/6 amendments below are retained as historical decision context only.
 >
+> **Milestone amendment (2026-11-01, approved simple version):** the owner selected
+> Constellation recognition for **both** Daily streak and Total Active days at
+> 100/500/1000, derived only from retained lesson completion history. Rebuilding a
+> broken streak or deleting history and recrossing may celebrate again. This
+> extends the brief completion update below, not the daily target or the
+> definition of Active day. A single composed
+> constellation acknowledges simultaneous milestones and path/Flow completion
+> without competing fanfare. Its roughly three-second trace is one-shot, silent,
+> never delays navigation, and becomes finished static art under reduced motion.
+> Mid-Flow auto-advance starts paused with immediate **Go now**; the final Flow
+> lesson offers **See Flow summary**, not another lesson. Outside Flow, ordinary
+> completion navigation remains available. No catalogue, badges, rewards, freezes,
+> notifications, or retroactive milestone sweep is added.
+>
+> Only the first lesson completion of a qualifying local day presents the
+> constellation. Retries, later completions that day, refetch and revisit do not
+> replay it. Total Active days can decrease after path deletion. No lifetime
+> ledger, persisted recognition claims, tables, migration or special deployment
+> procedure is added. Both metrics use the existing request-offset convention
+> for retained history, like Daily/Best/Path streak statistics.
+>
 > **Push amendment (Home Screen app, planned, not shipped):** the "never a push" rule below is **superseded for opt-in push
 > reminders** by the [Home Screen app PRD](home-screen-app.md#execution-amendment-2026-10-20) (§5.4): the web app may send a daily
 > learning reminder and a streak reminder, each **off until the learner turns it on**, **at most

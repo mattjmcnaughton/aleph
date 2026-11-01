@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it, vi } from "vitest";
 import { API_V1_BASE, type AuthSession, type PathUnit } from "../lib/api";
@@ -100,6 +100,44 @@ async function markComplete(): Promise<void> {
 }
 
 describe("Finishing a path — the completion card (AL-420)", () => {
+  it("composes a milestone with the path facts, without a competing seal or confetti", async () => {
+    seedNearlyDone();
+    server.use(
+      http.post(`${API_V1_BASE}/lessons/${LAST_LESSON}/complete`, () => {
+        seedLesson({
+          id: LAST_LESSON,
+          path_id: PATH_ID,
+          title: "Lifetimes",
+          position_in_path: 2,
+          unlock_state: "complete",
+        });
+        return HttpResponse.json({
+          id: LAST_LESSON,
+          unlock_state: "complete",
+          path_completion: {
+            lesson_count: 2,
+            first_completed_at: "2026-01-01T00:00:00Z",
+            completed_at: "2026-01-02T00:00:00Z",
+          },
+          milestones: [{ metric: "active_days", days: 500 }],
+        });
+      }),
+    );
+    await gotoLesson(LAST_LESSON);
+    await markComplete();
+    expect(screen.getAllByTestId("milestone-celebration")).toHaveLength(1);
+    expect(screen.getByText("500 total Active days")).toBeTruthy();
+    expect(screen.getByTestId("path-complete-stats")).toBeTruthy();
+    expect(screen.queryByTestId("path-complete-confetti")).toBeNull();
+    expect(document.querySelector(".motion-safe\\:animate-seal-draw")).toBeNull();
+    fireEvent.click(screen.getByTestId("lesson-completed-back"));
+    await screen.findByTestId("path-view");
+    cleanup();
+    await gotoLesson(LAST_LESSON);
+    await screen.findByTestId("lesson-completed");
+    expect(screen.queryByTestId("milestone-celebration")).toBeNull();
+  });
+
   it("[AL-420] the last Mark complete on a path renders the path-complete card", async () => {
     seedNearlyDone();
     await gotoLesson(LAST_LESSON);

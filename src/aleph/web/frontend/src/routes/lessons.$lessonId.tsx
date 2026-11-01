@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import {
   type LessonAttempt,
   type LessonDetail,
+  type Milestone,
   type PathDetail,
   type PathLesson,
   type PathList,
@@ -26,6 +27,7 @@ import { Breadcrumbs } from "../components/breadcrumbs";
 import { FlowAdvanceCard } from "../components/flow/flow-advance-card";
 import { FlowBar } from "../components/flow/flow-bar";
 import { Markdown } from "../components/markdown";
+import { MilestoneCelebration } from "../components/milestone-celebration";
 import { PathCompleteCard, localDaySpan } from "../components/path-complete";
 import { Sidebar, SwitcherSection, OutlineSection } from "../components/sidebar";
 import {
@@ -50,6 +52,7 @@ import {
   writeFlow,
 } from "../lib/flow";
 import { advanceRecord, eligiblePaths, pickNext } from "../lib/flow-order";
+import { markFlowCelebrated } from "../lib/flow-celebration";
 import { makePollingRefetchInterval } from "../lib/polling";
 import { useRetryGeneration } from "../lib/use-retry-generation";
 
@@ -115,6 +118,9 @@ function LessonContent({ lessonId }: { lessonId: string }) {
   // stalled we stop polling too, so we don't keep spawning backend resumes for a
   // lesson only the path's failed head can unblock.
   const [stalled, setStalled] = useState(false);
+  // Only the successful completion response can earn this moment. Never derive
+  // it from a refetch, cache snapshot, or a reopened completed lesson.
+  const [milestones, setMilestones] = useState<Milestone[]>([]);
 
   // Flow (flow TDD §5.3/§5.4): the live record, or null. `readFlow`/`useFlow`
   // don't care whether `useFeatureFlag("flow")` is on — the flag only gates
@@ -199,7 +205,9 @@ function LessonContent({ lessonId }: { lessonId: string }) {
   function endFlow(pathId: string) {
     if (flow === null) return;
     if (flow.completed.length > 0) {
-      writeFlow({ ...flow, current: null, next: null, endedReason: "ended" });
+      if (flow.endedReason === null) {
+        writeFlow({ ...flow, current: null, next: null, endedReason: "ended" });
+      }
       navigate({ to: "/flow/done" });
     } else {
       clearFlow();
@@ -253,6 +261,7 @@ function LessonContent({ lessonId }: { lessonId: string }) {
     // Same in-flight-GET guard as the Attempt (C8): a late poll must not revert
     // the unlock_state we just wrote.
     onSuccess: async (result, id) => {
+      setMilestones(result.milestones ?? []);
       await queryClient.cancelQueries({ queryKey: lessonQueryKey(id) });
       queryClient.setQueryData<LessonDetail>(lessonQueryKey(id), (old) =>
         old ? { ...old, unlock_state: result.unlock_state } : old,
@@ -320,7 +329,13 @@ function LessonContent({ lessonId }: { lessonId: string }) {
         const updated = advanceRecord(flow, completion, list.paths, Math.random);
         writeFlow(updated);
         if (updated.endedReason !== null) {
-          navigate({ to: "/flow/done" });
+          if ((result.milestones?.length ?? 0) > 0) {
+            // One composed moment; the receipt remains available immediately,
+            // but does not throw a second fanfare after this constellation.
+            markFlowCelebrated(updated);
+          } else {
+            navigate({ to: "/flow/done" });
+          }
         }
         // Else: stays on this route. The render below picks up the new
         // `flow.current` reactively and shows the advance card in place of
@@ -409,6 +424,7 @@ function LessonContent({ lessonId }: { lessonId: string }) {
           detail,
           pathsList: pathsListQuery.data,
           pathCompletion,
+          milestoneEarned: milestones.length > 0,
           tutorOpen: tutor.open,
           onGoNow: () => {
             if (flow.current) {
@@ -498,10 +514,14 @@ function LessonContent({ lessonId }: { lessonId: string }) {
           topic={pathDetail?.topic ?? ""}
           nextLesson={nextLesson}
           flowAdvance={flowAdvance}
+          milestones={milestones}
+          onFlowSummary={
+            inFlow && flow?.endedReason != null ? () => navigate({ to: "/flow/done" }) : null
+          }
         />
       )}
 
-      {detail && readyPathDetail ? (
+      {detail && readyPathDetail && !(inFlow && flow?.endedReason != null) ? (
         <LessonNav pathDetail={readyPathDetail} currentPosition={detail.position_in_path} />
       ) : null}
 
@@ -556,6 +576,7 @@ function buildFlowAdvance({
   detail,
   pathsList,
   pathCompletion,
+  milestoneEarned,
   tutorOpen,
   onGoNow,
   onEnd,
@@ -566,6 +587,7 @@ function buildFlowAdvance({
   /** Non-null exactly when `PathCompleteCard` is also rendering (§9) — the
    *  advance card starts paused so the celebration is not raced by a count. */
   pathCompletion: { lessonCount: number; days: number | null } | null;
+  milestoneEarned: boolean;
   tutorOpen: boolean;
   onGoNow: () => void;
   onEnd: () => void;
@@ -586,7 +608,7 @@ function buildFlowAdvance({
     // path (interleave/random can go anywhere); a same-path advance already
     // says enough with the lesson title alone.
     nextPathTitle: flow.current.pathId !== detail.path_id ? (nextPath?.title ?? null) : null,
-    startPaused: pathCompletion !== null,
+    startPaused: pathCompletion !== null || milestoneEarned,
     tutorOpen,
     onGoNow,
     onEnd,
@@ -680,6 +702,8 @@ function ReadyLesson({
   topic,
   nextLesson,
   flowAdvance,
+  milestones,
+  onFlowSummary,
 }: {
   detail: LessonDetail;
   onAttempt: (index: number) => void;
@@ -699,6 +723,8 @@ function ReadyLesson({
    *  TDD §5.3 step 5) — replaces `CompletedState`, or sits beneath
    *  `PathCompleteCard` when this was also the path's last lesson (§9). */
   flowAdvance: FlowAdvanceProps | null;
+  milestones: Milestone[];
+  onFlowSummary: (() => void) | null;
 }) {
   const quickCheck = detail.quick_check;
   const reveal = detail.attempt;
@@ -735,6 +761,17 @@ function ReadyLesson({
       ) : null}
 
       <div className="mt-8">
+        {isComplete && milestones.length > 0 ? (
+          <MilestoneCelebration milestones={milestones} />
+        ) : null}
+        {isComplete && onFlowSummary ? (
+          <div className="mb-4 text-center">
+            <p className="mb-3 text-sm text-mist">Your Flow is complete. Your progress is saved.</p>
+            <button type="button" className={PRIMARY_CTA_BASE} onClick={onFlowSummary}>
+              See Flow summary
+            </button>
+          </div>
+        ) : null}
         {isComplete ? (
           // The last lesson of a path gets its own card (AL-420). Falls back to
           // the per-lesson one whenever the path is not finished — including the
@@ -748,7 +785,8 @@ function ReadyLesson({
                 topic={topic}
                 lessonCount={pathCompletion.lessonCount}
                 days={pathCompletion.days}
-                celebrate={celebrate}
+                celebrate={celebrate && milestones.length === 0}
+                showSeal={milestones.length === 0}
               />
               {/* Flow TDD §9 "Path completion inside a flow": the card still
                   renders — it replaces `CompletedState` today — with the
@@ -763,7 +801,7 @@ function ReadyLesson({
             </>
           ) : flowAdvance ? (
             <FlowAdvanceCard key={detail.id} {...flowAdvance} />
-          ) : (
+          ) : onFlowSummary ? null : (
             <CompletedState pathId={detail.path_id} nextLesson={nextLesson} />
           )
         ) : completeEligible ? (
