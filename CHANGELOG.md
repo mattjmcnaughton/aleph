@@ -1,3 +1,10 @@
+# [1.47.0](https://github.com/mattjmcnaughton/aleph/compare/v1.46.3...v1.47.0) (2026-11-01)
+
+
+### Features
+
+* **progress:** celebrate constellation learning-day milestones ([f89e499](https://github.com/mattjmcnaughton/aleph/commit/f89e499a5e1d208a0155fc6d4934ad9a3fd5178c))
+
 ## [1.46.3](https://github.com/mattjmcnaughton/aleph/compare/v1.46.2...v1.46.3) (2026-10-31)
 
 
