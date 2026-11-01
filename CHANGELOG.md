@@ -1,3 +1,10 @@
+## [1.47.1](https://github.com/mattjmcnaughton/aleph/compare/v1.47.0...v1.47.1) (2026-11-01)
+
+
+### Bug Fixes
+
+* **shaping:** align path chat with the lesson experience ([1039b60](https://github.com/mattjmcnaughton/aleph/commit/1039b602e5fc41f6ed8ea262f2abccf2c8c2a922))
+
 # [1.47.0](https://github.com/mattjmcnaughton/aleph/compare/v1.46.3...v1.47.0) (2026-11-01)
 
 
