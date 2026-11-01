@@ -18,6 +18,7 @@
 // accent — which is what will let AL-331's iris ghost rows read as *proposed*
 // against the path rail's teal *real* ones.
 
+import { type Ref, useRef, useState } from "react";
 import { AlephGlyph } from "../aleph-logo";
 import { handleComposerKeyDown } from "../../lib/composer-keys";
 import { Markdown } from "../markdown";
@@ -99,6 +100,8 @@ function RailThread({ shaping }: { shaping: ShapingRailState }) {
   // the bottom of it — so on a thread taller than the rail, a question shown
   // the instant it is sent would still be shown off screen.
   const thread = useThreadScroll(live);
+  const [suggestionsOpen, setSuggestionsOpen] = useState(false);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   return (
     <>
@@ -112,68 +115,93 @@ function RailThread({ shaping }: { shaping: ShapingRailState }) {
         // thread announces itself; `polite` because a stream that interrupted
         // the learner on every delta would be unusable.
         aria-live="polite"
-        className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4"
+        className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
       >
-        {shaping.clearError ? (
-          <p
-            data-testid="shaping-rail-clear-error"
-            role="alert"
-            className="rounded-md border border-danger-border/60 bg-danger-bg px-4 py-3 text-sm leading-6 text-porcelain"
-          >
-            {shaping.clearError}
-          </p>
-        ) : null}
+        <div className="space-y-6 px-5 py-6">
+          {shaping.clearError ? (
+            <p
+              data-testid="shaping-rail-clear-error"
+              role="alert"
+              className="rounded-md border border-danger-border/60 bg-danger-bg px-4 py-3 text-sm leading-6 text-porcelain"
+            >
+              {shaping.clearError}
+            </p>
+          ) : null}
 
-        {empty ? <EmptyState /> : null}
+          {empty ? <EmptyState /> : null}
 
-        {shaping.messages.map((message) => (
-          <MessageBubble key={message.id} message={message} shaping={shaping} />
-        ))}
+          {shaping.messages.map((message) => (
+            <MessageBubble key={message.id} message={message} shaping={shaping} />
+          ))}
 
-        {/* The live turn, in the order it happens. The question is the same
+          {/* The live turn, in the order it happens. The question is the same
             bubble the settled message renders, so the handover to the cached
             thread changes nothing on screen. */}
-        {shaping.pendingQuestion !== null ? (
-          <LearnerBubble testid="shaping-rail-pending" content={shaping.pendingQuestion} />
-        ) : null}
+          {shaping.pendingQuestion !== null ? (
+            <LearnerBubble testid="shaping-rail-pending" content={shaping.pendingQuestion} />
+          ) : null}
 
-        {shaping.thinking ? <Thinking /> : null}
+          {shaping.thinking ? <Thinking /> : null}
 
-        {shaping.streamingText !== "" ? (
-          <div className="flex gap-2.5">
-            <ShapingGlyph size="2xs" />
-            <Markdown
-              testid="shaping-rail-streaming"
-              className="min-w-0 flex-1 text-sm [&_p]:text-sm [&_p]:leading-6"
+          {shaping.streamingText !== "" ? (
+            <div>
+              <Markdown
+                testid="shaping-rail-streaming"
+                className="min-w-0 text-base [&_p]:text-base [&_p]:leading-7"
+              >
+                {shaping.streamingText}
+              </Markdown>
+            </div>
+          ) : null}
+
+          {shaping.status === "failed" && shaping.errorMessage ? (
+            <div
+              data-testid="shaping-rail-error"
+              role="alert"
+              className="rounded-md border border-danger-border/60 bg-danger-bg px-4 py-3 text-sm leading-6 text-porcelain"
             >
-              {shaping.streamingText}
-            </Markdown>
-          </div>
-        ) : null}
-
-        {shaping.status === "failed" && shaping.errorMessage ? (
-          <div
-            data-testid="shaping-rail-error"
-            role="alert"
-            className="rounded-md border border-danger-border/60 bg-danger-bg px-4 py-3 text-sm leading-6 text-porcelain"
-          >
-            <p className="font-semibold text-danger">{shaping.errorMessage}</p>
-            {/* Literal, not reassurance: a failed reply puts the question back
+              <p className="font-semibold text-danger">{shaping.errorMessage}</p>
+              {/* Literal, not reassurance: a failed reply puts the question back
                 in the composer below (the same restore stop does). */}
-            <p className="mt-1 text-mist">Your question is still here.</p>
-            <button
-              type="button"
-              data-testid="shaping-rail-retry"
-              onClick={shaping.retry}
-              className="mt-3 inline-flex items-center justify-center rounded-md border border-iris/60 px-3 py-2 text-xs font-semibold text-porcelain transition-colors hover:border-iris hover:bg-iris/10"
-            >
-              Try again
-            </button>
-          </div>
-        ) : null}
+              <p className="mt-1 text-mist">Your question is still here.</p>
+              <button
+                type="button"
+                data-testid="shaping-rail-retry"
+                onClick={shaping.retry}
+                className="mt-3 inline-flex items-center justify-center rounded-md border border-iris/60 px-3 py-2 text-xs font-semibold text-porcelain transition-colors hover:border-iris hover:bg-iris/10"
+              >
+                Try again
+              </button>
+            </div>
+          ) : null}
+        </div>
       </div>
 
-      <Composer shaping={shaping} />
+      {suggestionsOpen && shaping.status !== "streaming" ? (
+        <div className="mx-4 min-h-0 max-h-48 overflow-y-auto overscroll-contain rounded-xl border border-divider bg-surface">
+          {SHAPING_SUGGESTIONS.map((suggestion) => (
+            <button
+              key={suggestion.label}
+              type="button"
+              data-testid="shaping-rail-suggestion"
+              onClick={() => {
+                setSuggestionsOpen(false);
+                shaping.useSuggestion(suggestion);
+                if (suggestion.prefill !== undefined) inputRef.current?.focus();
+              }}
+              className="min-h-11 w-full rounded-lg px-3 py-2 text-left text-sm text-porcelain hover:bg-elevated"
+            >
+              {suggestion.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+      <Composer
+        shaping={shaping}
+        inputRef={inputRef}
+        suggestionsOpen={suggestionsOpen}
+        toggleSuggestions={() => setSuggestionsOpen(!suggestionsOpen)}
+      />
     </>
   );
 }
@@ -184,82 +212,115 @@ function RailHeader({ shaping }: { shaping: ShapingRailState }) {
   return (
     <div
       data-testid="shaping-rail-header"
-      className="flex flex-wrap items-center gap-2 border-b border-divider px-4 py-3"
+      className="relative z-10 shrink-0 border-b border-divider px-5 pb-3 pt-3"
     >
-      <ShapingGlyph />
-      <span className="mr-auto text-sm font-semibold text-porcelain">Shape your path</span>
-
-      <TutorModelPicker
-        isAdmin={shaping.isAdmin}
-        allowlist={shaping.modelAllowlist}
-        value={shaping.model}
-        onChange={shaping.setModel}
-        testid="shaping-rail-model-picker"
-        label="Shaper model (admin)"
-      />
-
-      {/* The **change history** is a record of the *path*, not of this thread —
-          it survives a cleared conversation (TDD D3), which is why it is a
-          header control rather than something inside the message list. AL-330
-          owns this button's place in the header and nothing more: AL-331 hangs
-          the read-only sheet off it, and brings its own open state along with
-          the thing that state would open. */}
-      <button
-        type="button"
-        data-testid="shaping-rail-change-history"
-        onClick={shaping.openHistory}
-        title="Change history"
-        className="rounded-md border border-divider px-2.5 py-1.5 text-xs text-mist transition-colors hover:border-iris/50 hover:text-porcelain"
-      >
-        Changes
-      </button>
-
-      {shaping.confirmingNew ? (
-        // Confirm in place, like the switcher's delete: clearing a thread is
-        // destructive and not undoable, and it must never sit under one tap.
-        <span className="flex items-center gap-2">
-          <span className="text-xs text-mist">Clear this conversation?</span>
-          <button
-            type="button"
-            data-testid="shaping-rail-new-conversation-confirm"
-            onClick={shaping.confirmNewConversation}
-            className="rounded-md border border-danger-border/60 bg-danger-bg px-2.5 py-1.5 text-xs font-semibold text-danger transition-colors hover:border-danger"
+      <div className="grid grid-cols-[auto_1fr_auto_auto] items-center gap-x-2 gap-y-2">
+        <ShapingGlyph />
+        <span className="text-base font-semibold text-porcelain">Shape your path</span>
+        <details
+          className="relative"
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              event.currentTarget.open = false;
+              event.currentTarget.querySelector("summary")?.focus();
+            }
+          }}
+        >
+          <summary
+            aria-label="Shaping options"
+            className="grid h-11 w-11 cursor-pointer list-none place-items-center rounded-lg text-xl text-mist hover:bg-surface focus-visible:outline focus-visible:outline-iris [&::-webkit-details-marker]:hidden"
           >
-            Clear
-          </button>
-          <button
-            type="button"
-            data-testid="shaping-rail-new-conversation-cancel"
-            onClick={shaping.cancelNewConversation}
-            className="rounded-md border border-divider px-2.5 py-1.5 text-xs text-mist transition-colors hover:text-porcelain"
-          >
-            Keep
-          </button>
-        </span>
-      ) : (
+            <span aria-hidden="true">⋯</span>
+          </summary>
+          <div className="absolute right-0 top-full mt-2 w-56 rounded-lg border border-divider bg-surface p-2 shadow-lg">
+            <button
+              type="button"
+              data-testid="shaping-rail-change-history"
+              onClick={shaping.openHistory}
+              className="min-h-11 w-full rounded-md px-3 text-left text-sm text-porcelain hover:bg-elevated"
+            >
+              Changes
+            </button>
+            <button
+              type="button"
+              data-testid="shaping-rail-new-conversation"
+              onClick={(event) => {
+                event.currentTarget.closest("details")?.removeAttribute("open");
+                shaping.askNewConversation();
+              }}
+              className="min-h-11 w-full rounded-md px-3 text-left text-sm text-porcelain hover:bg-elevated"
+            >
+              New conversation
+            </button>
+            <TutorModelPicker
+              isAdmin={shaping.isAdmin}
+              allowlist={shaping.modelAllowlist}
+              value={shaping.model}
+              onChange={shaping.setModel}
+              testid="shaping-rail-model-picker"
+              label="Shaper model (admin)"
+            />
+          </div>
+        </details>
         <button
           type="button"
-          data-testid="shaping-rail-new-conversation"
-          onClick={shaping.askNewConversation}
-          title="New conversation"
-          className="rounded-md border border-divider px-2.5 py-1.5 text-xs text-mist transition-colors hover:border-iris/50 hover:text-porcelain"
+          data-testid="shaping-rail-collapse"
+          onClick={shaping.closeRail}
+          aria-label="Close shaping"
+          title="Back to path"
+          className="grid h-11 w-11 place-items-center rounded-lg text-mist transition-colors hover:bg-surface hover:text-porcelain focus-visible:outline focus-visible:outline-iris"
         >
-          New conversation
+          <svg
+            aria-hidden="true"
+            width="22"
+            height="22"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+          >
+            <path d="m6 6 12 12M18 6 6 18" />
+          </svg>
         </button>
-      )}
-
-      <button
-        type="button"
-        data-testid="shaping-rail-collapse"
-        onClick={shaping.closeRail}
-        aria-label="Close shaping"
-        title="Close shaping"
-        className="grid h-7 w-7 place-items-center rounded-md border border-divider text-mist transition-colors hover:border-iris/50 hover:text-porcelain"
-      >
-        <span aria-hidden="true" className="text-sm leading-none">
-          ×
-        </span>
-      </button>
+        {shaping.confirmingNew ? (
+          // Replace the context row while confirming, rather than stacking
+          // more chrome above a composer already sharing space with a keyboard.
+          <span className="col-span-4 grid grid-cols-[1fr_auto_auto] items-center gap-2">
+            <span className="text-xs text-mist">Clear this conversation?</span>
+            <button
+              type="button"
+              data-testid="shaping-rail-new-conversation-confirm"
+              onClick={shaping.confirmNewConversation}
+              className="min-h-11 rounded-md border border-danger-border/60 bg-danger-bg px-3 text-sm font-semibold text-danger transition-colors hover:border-danger"
+            >
+              Clear
+            </button>
+            <button
+              type="button"
+              data-testid="shaping-rail-new-conversation-cancel"
+              onClick={shaping.cancelNewConversation}
+              className="min-h-11 rounded-md border border-divider px-3 text-sm text-mist transition-colors hover:text-porcelain"
+            >
+              Keep
+            </button>
+          </span>
+        ) : (
+          <span
+            data-testid="shaping-rail-context-chip"
+            title={shaping.title}
+            className="col-span-4 flex items-start gap-2 text-sm leading-5 text-mist"
+          >
+            <span
+              aria-hidden="true"
+              className="mt-[5px] h-1.5 w-1.5 shrink-0 rounded-full bg-iris"
+            />
+            <span className="line-clamp-2">
+              Shaping · <span className="text-porcelain">{shaping.title}</span>
+            </span>
+          </span>
+        )}
+      </div>
     </div>
   );
 }
@@ -276,7 +337,7 @@ function RailHeader({ shaping }: { shaping: ShapingRailState }) {
 function LearnerBubble({ testid, content }: { testid: string; content: string }) {
   return (
     <div data-testid={testid} data-role="learner" className="flex justify-end">
-      <p className="max-w-[85%] whitespace-pre-wrap rounded-lg border border-divider bg-surface px-3 py-2 text-sm leading-6 text-porcelain">
+      <p className="max-w-[90%] whitespace-pre-wrap break-words rounded-2xl bg-surface px-4 py-3 text-base leading-7 text-porcelain">
         {content}
       </p>
     </div>
@@ -337,13 +398,12 @@ function MessageBubble({
       // A produced Proposal rides the cached message, so it survives a collapse,
       // a reopen, and a page revisit — with the resolution the server derived.
       data-proposal={message.proposal ? "true" : undefined}
-      className="flex gap-2.5"
+      className="min-w-0"
     >
-      <ShapingGlyph size="2xs" />
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0">
         {/* Generated prose goes through the one renderer, always (the security
             boundary — no second pipeline, no `dangerouslySetInnerHTML`). */}
-        <Markdown className="text-sm [&_p]:text-sm [&_p]:leading-6">{message.content}</Markdown>
+        <Markdown className="text-base [&_p]:text-base [&_p]:leading-7">{message.content}</Markdown>
         {message.proposal ? (
           <ProposalCard
             messageId={message.id}
@@ -368,69 +428,61 @@ function MessageBubble({
  */
 function EmptyState() {
   return (
-    <div
-      data-testid="shaping-rail-empty"
-      className="rounded-lg border border-divider bg-surface p-4"
-    >
-      <p className="text-sm font-semibold text-porcelain">I can change this path with you.</p>
-      <p className="mt-2 text-sm leading-6 text-mist">
+    <div data-testid="shaping-rail-empty" className="py-6">
+      <p className="text-xl font-semibold text-porcelain">I can change this path with you.</p>
+      <p className="mt-3 text-base leading-7 text-mist">
         I can <span className="text-porcelain">add lessons</span> and{" "}
         <span className="text-porcelain">revise ones you haven't started</span> — and nothing
         happens until you tap Apply.
       </p>
-      <p className="mt-2 text-sm leading-6 text-mist">
+      <p className="mt-3 text-base leading-7 text-mist">
         I can't remove or reorder lessons, change work you've already done, or touch your progress.
       </p>
     </div>
   );
 }
 
-// --- Composer: suggestions, chip, textarea, send/stop -------------------------
+// --- Composer: suggestions, textarea, send/stop -------------------------------
 
-function Composer({ shaping }: { shaping: ShapingRailState }) {
+function Composer({
+  shaping,
+  inputRef,
+  suggestionsOpen,
+  toggleSuggestions,
+}: {
+  shaping: ShapingRailState;
+  inputRef: Ref<HTMLTextAreaElement>;
+  suggestionsOpen: boolean;
+  toggleSuggestions: () => void;
+}) {
   const streaming = shaping.status === "streaming";
 
   return (
     // `pb-[max(...)]`: with `viewport-fit=cover` (index.html) the sheet ends at
     // the physical bottom of a phone, so pad by the home-indicator inset where
     // there is one, and by the ordinary 12px where there isn't.
-    <div className="border-t border-divider px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
-      {/* Suggestions sit with the composer so they are offered in the empty
-          state and again after a reply settles (PRD §5.3) — never mid-stream,
-          when tapping one could only queue a send the server would reject. */}
-      {streaming ? null : (
-        <div className="mb-3 flex flex-wrap gap-2">
-          {SHAPING_SUGGESTIONS.map((suggestion) => (
-            <button
-              key={suggestion.label}
-              type="button"
-              data-testid="shaping-rail-suggestion"
-              onClick={() => shaping.useSuggestion(suggestion)}
-              className="rounded-full border border-divider px-3 py-1.5 text-xs text-mist transition-colors hover:border-iris/50 hover:text-porcelain"
-            >
-              {suggestion.label}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* The scope statement, told once, where the ask is typed. On this surface
-          it is also a warning label: this conversation can change the path. */}
-      <p
-        data-testid="shaping-rail-context-chip"
-        className="mb-2 inline-flex items-center gap-2 rounded-full border border-divider px-3 py-1 text-xs text-mist"
-      >
-        <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-iris" />
-        Shaping · <span className="text-porcelain">{shaping.title}</span>
-      </p>
-
+    <div className="shrink-0 border-t border-divider px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
       <form
+        className="flex items-end gap-1 rounded-2xl border border-divider bg-surface p-1.5 focus-within:border-iris"
         onSubmit={(event) => {
           event.preventDefault();
           shaping.send(shaping.draft, "typed");
         }}
       >
+        {streaming ? null : (
+          <button
+            type="button"
+            aria-label="Suggested changes"
+            aria-expanded={suggestionsOpen}
+            title="Suggested changes"
+            onClick={toggleSuggestions}
+            className="grid h-11 w-11 shrink-0 place-items-center rounded-xl text-xl text-mist hover:bg-elevated focus-visible:outline focus-visible:outline-iris"
+          >
+            <span aria-hidden="true">{suggestionsOpen ? "−" : "+"}</span>
+          </button>
+        )}
         <textarea
+          ref={inputRef}
           data-testid="shaping-rail-input"
           aria-label="Ask to change this path"
           value={shaping.draft}
@@ -439,34 +491,45 @@ function Composer({ shaping }: { shaping: ShapingRailState }) {
             handleComposerKeyDown(event, () => shaping.send(shaping.draft, "typed"))
           }
           disabled={streaming}
-          rows={2}
+          rows={1}
           maxLength={SHAPING_MESSAGE_MAX_LENGTH}
           placeholder="Ask to add or revise lessons…"
-          className="w-full resize-none rounded-md border border-divider bg-surface px-3 py-2 text-sm text-porcelain placeholder:text-slate focus:border-iris focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+          className="min-h-11 min-w-0 flex-1 resize-none [field-sizing:content] max-h-[min(8rem,calc(var(--tutor-viewport-height,100dvh)*0.2))] bg-transparent px-1 py-2.5 text-base leading-6 text-porcelain placeholder:text-mist focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
         />
-        <div className="mt-2 flex justify-end">
-          {streaming ? (
-            // Stop is the *only* control in flight: it aborts the request, and
-            // the question comes back to the composer for editing (TDD §5.6).
-            <button
-              type="button"
-              data-testid="shaping-rail-stop"
-              onClick={shaping.stop}
-              className="inline-flex items-center justify-center rounded-md border border-divider px-4 py-2 text-sm font-semibold text-porcelain transition-colors hover:border-iris/50"
+        {streaming ? (
+          // Stop is the *only* control in flight: it aborts the request, and
+          // the question comes back to the composer for editing (TDD §5.6).
+          <button
+            type="button"
+            data-testid="shaping-rail-stop"
+            onClick={shaping.stop}
+            className="inline-flex h-11 shrink-0 items-center justify-center rounded-xl border border-divider px-3 text-sm font-semibold text-porcelain transition-colors hover:border-iris/50"
+          >
+            Stop
+          </button>
+        ) : (
+          <button
+            type="submit"
+            data-testid="shaping-rail-send"
+            aria-label="Ask"
+            disabled={shaping.draft.trim() === ""}
+            className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-iris text-night transition-colors hover:bg-iris-400 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <svg
+              aria-hidden="true"
+              width="22"
+              height="22"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
             >
-              Stop
-            </button>
-          ) : (
-            <button
-              type="submit"
-              data-testid="shaping-rail-send"
-              disabled={shaping.draft.trim() === ""}
-              className="inline-flex items-center justify-center rounded-md bg-iris px-4 py-2 text-sm font-semibold text-night transition-colors hover:bg-iris-400 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              Ask
-            </button>
-          )}
-        </div>
+              <path d="M12 19V5m-6 6 6-6 6 6" />
+            </svg>
+          </button>
+        )}
       </form>
     </div>
   );

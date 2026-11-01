@@ -37,25 +37,25 @@ export function ChangeHistorySheet({ shaping }: { shaping: ShapingRailState }) {
     <section
       data-testid="shaping-rail-history"
       aria-label="Change history"
-      className="flex h-full min-h-0 flex-col"
+      className="flex min-h-0 flex-1 flex-col"
     >
-      <div className="flex items-center gap-2 border-b border-divider px-4 py-3">
-        <span className="mr-auto text-sm font-semibold text-porcelain">Change history</span>
+      <div className="flex shrink-0 items-center gap-2 border-b border-divider px-5 py-3">
+        <span className="mr-auto text-base font-semibold text-porcelain">Change history</span>
         <button
           type="button"
           data-testid="shaping-rail-history-close"
           onClick={shaping.closeHistory}
           aria-label="Close change history"
           title="Close change history"
-          className="grid h-7 w-7 place-items-center rounded-md border border-divider text-mist transition-colors hover:border-iris/50 hover:text-porcelain"
+          className="grid h-11 w-11 shrink-0 place-items-center rounded-lg text-mist transition-colors hover:bg-surface hover:text-porcelain focus-visible:outline focus-visible:outline-iris"
         >
-          <span aria-hidden="true" className="text-sm leading-none">
+          <span aria-hidden="true" className="text-xl leading-none">
             ×
           </span>
         </button>
       </div>
 
-      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4">
+      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-5 py-6">
         {shaping.changesError ? (
           <p
             data-testid="shaping-rail-history-error"

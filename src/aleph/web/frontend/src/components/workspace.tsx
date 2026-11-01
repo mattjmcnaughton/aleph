@@ -29,12 +29,10 @@ const WIDTH_CAP = {
 } as const;
 
 /**
- * Shaping retains its 75vh sheet and room to scroll the path above it.
- * The focused Tutor is closed to return to the lesson, so it needs no extra
- * document height (which would move the reading position near the page end).
+ * Both conversations use the focused sheet: close it to return to the page.
+ * No extra document height is needed (which would move the reading position
+ * near the page end).
  */
-const RAIL_CLEARANCE = "pb-[75vh] lg:pb-10";
-
 export function Workspace({
   testid,
   width,
@@ -62,7 +60,7 @@ export function Workspace({
    * tree, two CSS presentations: no `matchMedia`, no width-conditional
    * rendering.
    *
-   * Shaping gets bottom clearance below `lg`; the focused lesson Tutor does not.
+   * Both conversations are bounded by the visual viewport below `lg`.
    *
    * **The slot is the rail grammar, not one rail** (Phase 2B D14). The path
    * route mounts the *shaping* rail through the very same slot, which is the
@@ -80,7 +78,7 @@ export function Workspace({
   children: ReactNode;
 }) {
   const railRef = useRef<HTMLElement>(null);
-  const focusedTutor = width === "lesson" && Boolean(tutorRail);
+  const railOpen = Boolean(tutorRail);
 
   // Mobile keyboards may pan/shrink the visual viewport without changing vh.
   // CSS still selects sheet vs desktop column; these values only bound the sheet
@@ -88,7 +86,7 @@ export function Workspace({
   useEffect(() => {
     const rail = railRef.current;
     const viewport = window.visualViewport;
-    if (!focusedTutor || !rail || !viewport) return;
+    if (!railOpen || !rail || !viewport) return;
     const update = () => {
       rail.style.setProperty("--tutor-viewport-height", `${viewport.height}px`);
       rail.style.setProperty("--tutor-viewport-top", `${viewport.offsetTop}px`);
@@ -100,7 +98,7 @@ export function Workspace({
       viewport.removeEventListener("resize", update);
       viewport.removeEventListener("scroll", update);
     };
-  }, [focusedTutor]);
+  }, [railOpen]);
 
   return (
     <div className="lg:flex lg:items-stretch lg:min-h-[calc(100dvh-var(--app-header-h))]">
@@ -115,9 +113,7 @@ export function Workspace({
 
       <main
         data-testid={testid}
-        className={`mx-auto w-full max-w-[480px] px-4 py-8 lg:mx-0 lg:max-w-none lg:flex-1 lg:px-10 lg:py-10 ${
-          tutorRail && !focusedTutor ? RAIL_CLEARANCE : ""
-        }`}
+        className="mx-auto w-full max-w-[480px] px-4 py-8 lg:mx-0 lg:max-w-none lg:flex-1 lg:px-10 lg:py-10"
       >
         <div className={`mx-auto w-full ${WIDTH_CAP[width]}`}>{children}</div>
       </main>
@@ -126,8 +122,8 @@ export function Workspace({
         <aside
           ref={railRef}
           data-testid={railTestid}
-          // Below `lg`: focused Tutor fills the visible viewport minus a small
-          // top inset; shaping retains its shorter bottom sheet.
+          // Below `lg`: either conversation fills the visible viewport minus
+          // a small top inset.
           //
           // At `lg`: sticky beneath the app header, one viewport tall minus the
           // header — rather than a plain flex sibling stretched to `main`'s full
@@ -146,7 +142,7 @@ export function Workspace({
           // real screen (the thread scrolls inside itself), it just keeps a
           // viewport too short to hold the header and composer from spilling
           // the rail's chrome across the lesson.
-          className={`fixed inset-x-0 bottom-0 z-40 flex flex-col rounded-t-lg border-t border-divider bg-night shadow-lg ${focusedTutor ? "tutor-sheet overflow-hidden" : "max-h-[75vh]"} lg:sticky lg:top-[var(--app-header-h)] lg:bottom-auto lg:z-auto lg:h-[calc(100dvh-var(--app-header-h))] lg:max-h-none lg:w-[400px] lg:shrink-0 lg:self-start lg:overflow-hidden lg:rounded-none lg:border-l lg:border-t-0 lg:shadow-none`}
+          className="tutor-sheet fixed inset-x-0 bottom-0 z-40 flex flex-col overflow-hidden rounded-t-lg border-t border-divider bg-night shadow-lg lg:sticky lg:top-[var(--app-header-h)] lg:bottom-auto lg:z-auto lg:h-[calc(100dvh-var(--app-header-h))] lg:max-h-none lg:w-[400px] lg:shrink-0 lg:self-start lg:overflow-hidden lg:rounded-none lg:border-l lg:border-t-0 lg:shadow-none"
         >
           {tutorRail}
         </aside>
