@@ -114,6 +114,8 @@ export function buildCreatePathInput(input: {
   level: Level;
   guidance?: string;
   teachingStyle?: string;
+  searchOutline?: boolean;
+  searchLessons?: boolean;
   modelOutline?: string;
   modelLesson?: string;
 }): CreatePathInput {
@@ -126,6 +128,8 @@ export function buildCreatePathInput(input: {
   if (guidance) body.guidance = guidance;
   const teachingStyle = input.teachingStyle?.trim();
   if (teachingStyle) body.teaching_style = teachingStyle;
+  if (input.searchOutline !== undefined) body.search_outline = input.searchOutline;
+  if (input.searchLessons !== undefined) body.search_lessons = input.searchLessons;
   if (input.modelOutline) body.model_outline = input.modelOutline;
   if (input.modelLesson) body.model_lesson = input.modelLesson;
   return body;

@@ -244,13 +244,16 @@ async def test_lifecycle_binds_a_real_exa_retriever_when_key_configured() -> Non
     # would have caught AL-521/AL-523 leaving `_UnconfiguredRetriever` in
     # place forever.
     config = Settings(exa_api_key="test-exa-key")
-    lifecycle = GenerationLifecycle(GenerationOrchestrator(), config=config)
+    orchestrator = GenerationOrchestrator()
+    lifecycle = GenerationLifecycle(orchestrator, config=config)
 
     await lifecycle.start()
     try:
         assert type(briefing_service._retriever) is ExaRetriever
+        assert type(orchestrator._retriever) is ExaRetriever
     finally:
         await lifecycle.stop()
+    assert orchestrator._retriever is None
 
 
 @pytest.mark.anyio

@@ -50,7 +50,7 @@ import asyncio
 import contextlib
 import time
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 import structlog
@@ -88,6 +88,12 @@ from aleph.repositories import (
 )
 from aleph.services.notifications import NotificationService, notification_service
 from aleph.services.openrouter import resolve_model
+from aleph.services.retrieval import (
+    GENERATION_SEARCH_MAX_DOCUMENTS,
+    QueryPlan,
+    RetrievalUnavailableError,
+    retrieve,
+)
 
 if TYPE_CHECKING:
     import datetime
@@ -101,8 +107,10 @@ if TYPE_CHECKING:
 
     from aleph.agents.lesson import LessonContent
     from aleph.agents.outline import Level as AgentLevel
+    from aleph.agents.researcher import RetrievedDocument
     from aleph.config import Settings
     from aleph.models import Lesson, Path, PathStatus
+    from aleph.services.retrieval import Retriever
 
     SessionFactory = Callable[[], AbstractAsyncContextManager[AsyncSession]]
     Spawn = Callable[[Coroutine[Any, Any, Any]], Any]
@@ -211,6 +219,7 @@ class _LessonContext:
     # falls back to the configured ``MODEL_LESSON`` slot. On the context so it
     # travels with every DB-driven (re)generation, not just the request.
     model_lesson: str | None
+    search_lessons: bool = False
     # A learner-applied **Revision** (Phase 2B D7), or ``None`` — which is every
     # ordinary lesson, and why this pipeline needed no other change to carry it.
     # Loaded from the row's ``revision_instruction`` plus the Change payload's
@@ -243,6 +252,7 @@ class _OutlineClaim:
     level: Level
     model_outline: str | None
     account_id: uuid.UUID
+    search_outline: bool = False
 
 
 class GenerationOrchestrator:
@@ -271,6 +281,7 @@ class GenerationOrchestrator:
         lesson_caps: LessonCaps | None = None,
         model_slot: ModelSlot = contextlib.nullcontext,
         notifications: NotificationService = notification_service,
+        retriever: Retriever | None = None,
     ) -> None:
         self._session_factory = session_factory
         self._notifications = notifications
@@ -286,6 +297,8 @@ class GenerationOrchestrator:
         self._model_slot = model_slot
         self._base_spawn = spawn
         self._base_model_slot = model_slot
+        self._retriever = retriever
+        self._base_retriever = retriever
         self._prefetch_n = prefetch_n if prefetch_n is not None else config.prefetch_n
         self._timeout = (
             generation_timeout_seconds
@@ -311,7 +324,9 @@ class GenerationOrchestrator:
 
     # -- runtime wiring (AL-041 lifespan) ---------------------------------- #
 
-    def bind_runtime(self, *, spawn: Spawn, model_slot: ModelSlot) -> None:
+    def bind_runtime(
+        self, *, spawn: Spawn, model_slot: ModelSlot, retriever: Retriever | None = None
+    ) -> None:
         """Rebind the spawn and model-slot seams for the app's lifetime (§5.4).
 
         The FastAPI lifespan (``services/lifecycle.py``) calls this at startup on
@@ -334,6 +349,8 @@ class GenerationOrchestrator:
         """
         self._spawn = spawn
         self._model_slot = model_slot
+        if retriever is not None:
+            self._retriever = retriever
 
     def reset_runtime(self) -> None:
         """Restore the unbound construction-time seams (lifespan shutdown).
@@ -343,6 +360,20 @@ class GenerationOrchestrator:
         """
         self._spawn = self._base_spawn
         self._model_slot = self._base_model_slot
+        self._retriever = self._base_retriever
+
+    async def _search(self, query: str) -> tuple[RetrievedDocument, ...]:
+        """One bounded teaching query; a missing provider is an outage."""
+        if self._retriever is None:
+            raise RetrievalUnavailableError("Web search is not configured")
+        documents = await retrieve(
+            self._retriever,
+            QueryPlan(queries=(query,)),
+            max_documents=GENERATION_SEARCH_MAX_DOCUMENTS,
+            text_budget_chars=24_000,
+            require_date=False,
+        )
+        return tuple(documents)
 
     # -- repository construction ------------------------------------------- #
 
@@ -362,6 +393,8 @@ class GenerationOrchestrator:
         level: Level,
         guidance: str | None = None,
         teaching_style: str | None = None,
+        search_outline: bool = False,
+        search_lessons: bool = False,
         model_outline: str | None = None,
         model_lesson: str | None = None,
     ) -> Path:
@@ -396,6 +429,8 @@ class GenerationOrchestrator:
                 level=level,
                 guidance=guidance,
                 teaching_style=teaching_style,
+                search_outline=search_outline,
+                search_lessons=search_lessons,
                 model_outline=model_outline,
                 model_lesson=model_lesson,
             )
@@ -499,10 +534,18 @@ class GenerationOrchestrator:
         try:
             # The concurrency permit is already held by ``run_outline_task``
             # (acquired before the claim, §5.4, so queue time never counts against
-            # the per-call budget); here we only bound the model call itself.
+            # the per-call budget); retrieval and the model share one deadline.
             async with asyncio.timeout(self._outline_timeout):
+                documents = ()
+                if claim.search_outline:
+                    documents = await self._search(
+                        f"{claim.topic} {claim.level.value} learning path "
+                        f"prerequisites concepts reference {claim.guidance or ''}"
+                    )
                 run = await agent.run(
-                    build_outline_prompt(claim.topic, claim.guidance),
+                    build_outline_prompt(
+                        claim.topic, claim.guidance, documents=documents
+                    ),
                     deps=deps,
                     model=model,
                 )
@@ -600,6 +643,7 @@ class GenerationOrchestrator:
             # reconcile re-run the outline with the same guidance a crashed
             # attempt saw.
             guidance = path.guidance
+            search_outline = path.search_outline
             # ``user_id`` rides the claim so the fenced ``outline_generated``
             # emissions carry ``account_id`` without a second read.
             account_id = path.user_id
@@ -613,6 +657,7 @@ class GenerationOrchestrator:
             level=level,
             model_outline=model_outline,
             account_id=account_id,
+            search_outline=search_outline,
         )
 
     @staticmethod
@@ -844,8 +889,16 @@ class GenerationOrchestrator:
         try:
             # The concurrency permit is already held by ``_claim_and_generate``
             # (acquired before the claim, §5.4, and released once per lesson so the
-            # serial chain never holds two); here we only bound the model call.
+            # serial chain never holds two); retrieval shares the model deadline.
             async with asyncio.timeout(self._timeout):
+                if context.search_lessons:
+                    query = (
+                        f"{context.topic} {context.unit_title} {context.lesson_title} "
+                        f"{context.level.value} explanation examples reference"
+                    )
+                    if context.revision is not None:
+                        query += f" {context.revision.instruction}"
+                    deps = replace(deps, documents=await self._search(query))
                 run = await build_lesson_agent().run(
                     build_lesson_prompt(deps), deps=deps, model=model
                 )
@@ -1031,6 +1084,7 @@ class GenerationOrchestrator:
             lesson_title=lesson.title,
             prior=prior,
             model_lesson=path.model_lesson,
+            search_lessons=path.search_lessons,
             revision=revision,
             teaching_style=path.teaching_style,
         )

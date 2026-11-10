@@ -8,7 +8,7 @@ from datetime import (
 )
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Index, Text, Uuid
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Index, Text, Uuid, false
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from aleph.db import Base
@@ -73,6 +73,13 @@ class Path(Base, UUIDAuditMixin):
     # the next lesson generated and leaves every already-written lesson as it is
     # (forward-only). The outline agent never reads it. ``NULL`` means none.
     teaching_style: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Independent opt-ins, fixed at creation; persisted for retry and recovery.
+    search_outline: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
+    search_lessons: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
     level: Mapped[Level] = mapped_column(
         Enum(
             Level,

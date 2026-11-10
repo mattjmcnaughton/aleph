@@ -159,6 +159,26 @@ server first to preserve that affordance during a mixed-version rollout.
 | `POST` | `/api/v1/paths/{id}/retry` | — | `202 {id}` | Retry a `failed` outline. Rate-limited by its own daily cap (`check_outline_generation`, reusing `RATE_LIMIT_PATHS_PER_DAY`; admins exempt) → `429 rate_limited` at the cap. **A retry on a terminal path (`ready`/`refused`) or a freshly `generating` one still returns `202` but is a silent no-op** — the claim matches nothing, so nothing is re-run (a refusal is terminal; the learner starts a new topic, §5.5). |
 | `DELETE` | `/api/v1/paths/{id}` | — | `204` | Hard-delete; `ON DELETE CASCADE` tears down units, lessons, quick checks, and attempts. Not undoable (UI confirms); doubles as reset. |
 
+**Optional web search.** `POST /api/v1/paths` also accepts `search_outline`
+and `search_lessons`, independent Booleans defaulting to `false`. Both are
+persisted on the path and returned as Booleans in `PathDetailResponse` (including
+GET, PATCH, Teaching style, and shaping responses). They are fixed at creation;
+no update endpoint changes them. Existing paths default to no search.
+
+Each enabled stage performs one Exa query before its existing generation call:
+topic/Level/Guidance for the outline, topic/unit/lesson/Level plus any Revision
+instruction for a lesson. Retrieval retains at most four non-empty, URL-deduped
+documents with a combined 24,000-character text budget. Undated references are
+allowed, unlike Brief Sources. Search and the model share the existing generation
+timeout. Disabled stages do not contact Exa. Opt-in works without a feature flag
+and is available to every learner. `EXA_API_KEY` is required only when search is
+enabled; startup still succeeds without it. Search outages (including a missing
+key) fail generation retryably rather than silently falling back. A successful
+search with no useful documents allows ordinary generation. There are no new
+citations, Sources fields, or changes to already-written content. Topic, Level,
+Guidance (outline search), and any Revision instruction (lesson search) may be
+sent to Exa when the corresponding setting is enabled.
+
 **Path title vs. Topic (CONTEXT.md).** `topic` is the generation input: it is
 frozen once a path exists (there is no route that writes it after `POST /paths`)
 because the outline, and every lesson/tutor prompt since, were generated from

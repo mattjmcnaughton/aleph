@@ -191,6 +191,24 @@ pass the first assertion and fail only the second. `agents/shaper.py`'s
 scope — it is an already-accepted design elsewhere in `agents/`, not a
 regression the Phase 6 pipeline may repeat.
 
+## Opt-in web search for path generation
+
+Paths persist two independent creation-time Booleans, `search_outline` and
+`search_lessons`, both defaulting false. `GenerationOrchestrator` loads them
+from the outline claim and lesson context, so retry, recovery, prefetch, and
+learner-applied Revisions use the same persisted choices. `GenerationLifecycle`
+binds an Exa retriever with a smaller reference budget than Beat research.
+
+Each enabled stage runs one teaching-focused query outside database transactions,
+inside the existing generation timeout and semaphore. `retrieve(require_date=False)`
+preserves dedupe, non-empty text, document and character caps, but accepts undated
+reference material. Brief retrieval retains its strict dated-only default. A
+missing provider or retrieval failure fails generation retryably; a successful
+empty search may proceed without evidence. Agents receive plain document data
+in a delimited untrusted-evidence block, not a search tool. The outline and lesson
+agents share its formatter in `agents/_evidence.py`. No citations or evidence
+snapshots are persisted, and no published content is refreshed automatically.
+
 ## Frontend
 
 The frontend is scaffolded separately into `src/aleph/web/frontend/` using the `frontend-react` Copier template. In development, the frontend dev server runs independently with API proxying. In production, built static files are served by FastAPI via `web/serve.py`.

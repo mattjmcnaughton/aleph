@@ -89,6 +89,8 @@ function detail(
     title: "TypeScript",
     guidance: null,
     teaching_style: null,
+    search_outline: false,
+    search_lessons: false,
     level: "new_to_it",
     status,
     refusal_message: null,

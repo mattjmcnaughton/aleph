@@ -264,6 +264,9 @@ export interface PathProgress {
 /** `GET /api/v1/paths/{id}` body — the poll target (docs/api.md). */
 export interface PathDetail {
   id: string;
+  /** Web search choices are fixed at path creation. */
+  search_outline: boolean;
+  search_lessons: boolean;
   /**
    * The generation input — frozen after creation, never learner-editable. Kept
    * on the payload for the surfaces that must still read it (e.g. the shaper's
@@ -354,6 +357,9 @@ export interface PathCreated {
 export interface CreatePathInput {
   topic: string;
   level: Level;
+  /** Independent web search choices; omitted values default to false. */
+  search_outline?: boolean;
+  search_lessons?: boolean;
   /**
    * Free-text creation input alongside `topic` (docs/api.md, `GuidanceStr`,
    * 1-4000 chars). **Optional in the absent sense** — `buildCreatePathInput`

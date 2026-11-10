@@ -168,7 +168,11 @@ export function Markdown({
 }) {
   return (
     <div data-testid={testid} className={`space-y-4 ${className}`}>
-      <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={COMPONENTS}>
+      <ReactMarkdown
+        remarkPlugins={REMARK_PLUGINS}
+        components={COMPONENTS}
+        disallowedElements={["img"]}
+      >
         {children}
       </ReactMarkdown>
     </div>

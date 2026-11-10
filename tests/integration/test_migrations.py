@@ -75,7 +75,7 @@ async def _enum_types(database_url: str) -> set[str]:
 # one step below N, so a column some step after N added to a tracked table would
 # otherwise read as "step N's downgrade dropped it". Grows with each such step.
 LATER_COLUMNS: dict[str, set[str]] = {
-    "paths": {"teaching_style"},  # 0015_path_teaching_style
+    "paths": {"teaching_style", "search_outline", "search_lessons"},
     "users": {"time_zone", "time_zone_seen_at"},  # 0017_user_time_zone
     "conversations": {"lesson_id"},  # 0021_lesson_conversations
 }
@@ -487,7 +487,13 @@ def test_earlier_tables_keep_their_columns_through_the_shaping_reversal(
         "conversations": {"kind", "lesson_id"},
         "messages": {"proposal"},
         "lessons": {"revision_instruction"},
-        "paths": {"title", "guidance", "teaching_style"},
+        "paths": {
+            "title",
+            "guidance",
+            "teaching_style",
+            "search_outline",
+            "search_lessons",
+        },
         "users": {"time_zone", "time_zone_seen_at"},
     }
     assert {
@@ -1913,3 +1919,44 @@ def test_lesson_conversation_migration_discards_old_tutor_history_only(
     assert asyncio.run(_retained_conversation_rows(database_url)) == before
     run_alembic(database_url, "0021_lesson_conversations")
     assert asyncio.run(_retained_conversation_rows(database_url)) == before
+
+
+def test_web_search_migration_backfills_false_and_roundtrips(
+    isolated_database: str,
+) -> None:
+    database_url = isolated_database
+    run_alembic(database_url, "0021_lesson_conversations", downgrade=True)
+    before = asyncio.run(_columns(database_url, "paths"))
+    path_id = asyncio.run(_seed_path_row(database_url))
+    run_alembic(database_url, "0022_path_web_search")
+    assert asyncio.run(_columns(database_url, "paths")) == before | {
+        "search_outline",
+        "search_lessons",
+    }
+
+    async def check_defaults() -> None:
+        connection = await connect(database_url)
+        try:
+            row = await connection.fetchrow(
+                "SELECT search_outline, search_lessons FROM paths WHERE id = $1::uuid",
+                path_id,
+            )
+            assert row is not None
+            assert tuple(row) == (False, False)
+            columns = await connection.fetch(
+                "SELECT is_nullable, column_default FROM information_schema.columns "
+                "WHERE table_name = 'paths' AND column_name IN "
+                "('search_outline', 'search_lessons')"
+            )
+            assert len(columns) == 2
+            assert all(tuple(column) == ("NO", "false") for column in columns)
+            with pytest.raises(asyncpg.NotNullViolationError):
+                await connection.execute("UPDATE paths SET search_lessons = NULL")
+        finally:
+            await connection.close()
+
+    asyncio.run(check_defaults())
+    run_alembic(database_url, "0021_lesson_conversations", downgrade=True)
+    assert asyncio.run(_columns(database_url, "paths")) == before
+    run_alembic(database_url, "0022_path_web_search")
+    asyncio.run(check_defaults())

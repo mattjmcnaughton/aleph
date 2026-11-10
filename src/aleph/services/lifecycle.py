@@ -85,7 +85,7 @@ from aleph.config import settings as global_settings
 from aleph.db import new_session
 from aleph.repositories import PathRepository
 from aleph.services.briefing import briefing_service
-from aleph.services.retrieval import ExaRetriever
+from aleph.services.retrieval import GENERATION_SEARCH_MAX_DOCUMENTS, ExaRetriever
 
 if TYPE_CHECKING:
     import uuid
@@ -465,6 +465,14 @@ class GenerationLifecycle:
             if config.exa_api_key
             else None
         )
+        self._generation_retriever: Retriever | None = (
+            ExaRetriever(
+                api_key=config.exa_api_key,
+                max_documents=GENERATION_SEARCH_MAX_DOCUMENTS,
+            )
+            if config.exa_api_key
+            else None
+        )
         self._reconciler = Reconciler(
             orchestrator,
             registry=self._registry,
@@ -496,6 +504,7 @@ class GenerationLifecycle:
         self._orchestrator.bind_runtime(
             spawn=self._registry.spawn,
             model_slot=lambda: self._semaphore,
+            retriever=self._generation_retriever,
         )
         # D14: the SAME registry (background research is cancelled/self-heals
         # exactly like generation, TDD §2), but its OWN semaphore — never

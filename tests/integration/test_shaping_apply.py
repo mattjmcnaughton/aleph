@@ -30,14 +30,17 @@ import uuid
 from typing import TYPE_CHECKING, Any
 
 import pytest
+from pydantic_ai.models.function import FunctionModel
 from sqlalchemy import select
 
 from aleph import db
+from aleph.agents.researcher import RetrievedDocument
 from aleph.config import settings
 from aleph.models import (
     Attempt,
     Lesson,
     LessonGenerationState,
+    Path,
     PathChange,
     PathChangeKind,
     PathChangeStatus,
@@ -51,6 +54,8 @@ from aleph.services.shaping import PathApplyLock
 from aleph.services.stub_model import (
     REVISED_PASSAGE_MARKER,
     SHAPING_REVISION_INSTRUCTION,
+    _stub_respond,
+    _user_text,
 )
 
 from ._shaping_send_harness import (
@@ -434,11 +439,13 @@ async def test_an_addition_with_a_new_unit_lands_in_unit_order(
 
 @pytest.mark.anyio
 @pytest.mark.workflow("W18")
+@pytest.mark.parametrize("search_lessons", [False, True])
 async def test_applying_a_revision_snapshots_resets_and_regenerates(
     app: FastAPI,
     monkeypatch: pytest.MonkeyPatch,
     shaping_flag_enabled: None,
     spawn: CollectingSpawn,
+    search_lessons: bool,
 ) -> None:
     """D7 end to end: snapshot, clear, regenerate with the instruction, clear it.
 
@@ -447,9 +454,41 @@ async def test_applying_a_revision_snapshots_resets_and_regenerates(
     marker below *is* the proof that apply's instruction reached generation — with
     no orchestration change anywhere.
     """
+    queries: list[str] = []
+    prompts: list[str] = []
+
+    class RevisionRetriever:
+        async def search(self, incoming, *, since=None):
+            queries.extend(incoming)
+            return [
+                RetrievedDocument(
+                    url="https://example.com/revision",
+                    publisher="Manual",
+                    title="Revision reference",
+                    published_on=None,
+                    text="Distinctive evidence for the revised lesson.",
+                )
+            ]
+
+    async def respond(messages, info):
+        prompts.append(_user_text(messages))
+        return _stub_respond(messages, info)
+
+    model = FunctionModel(respond)
+    monkeypatch.setattr(
+        gen_module.generation_orchestrator, "_retriever", RevisionRetriever()
+    )
+    monkeypatch.setattr(
+        gen_module.generation_orchestrator, "_resolve_model", lambda _: model
+    )
     async with _client(app) as client:
         user_id = await _sign_in(client, monkeypatch, OWNER)
         path_id, lesson_ids = await _seed_path(user_id)
+        async with db.async_session() as session:
+            path = await session.get(Path, path_id)
+            assert path is not None
+            path.search_lessons = search_lessons
+            await session.commit()
         _learner, message_id = await _seed_shaping_turn(
             path_id=path_id,
             proposal=_proposal(
@@ -483,6 +522,16 @@ async def test_applying_a_revision_snapshots_resets_and_regenerates(
     assert after.read_passage is not None
     assert REVISED_PASSAGE_MARKER in after.read_passage
     assert after.revision_instruction is None, "cleared on generated (D7)"
+    assert bool(queries) is search_lessons
+    if search_lessons:
+        assert SHAPING_REVISION_INSTRUCTION in queries[0]
+    assert (
+        any(
+            "Distinctive evidence for the revised lesson." in prompt
+            for prompt in prompts
+        )
+        is search_lessons
+    )
 
 
 @pytest.mark.anyio

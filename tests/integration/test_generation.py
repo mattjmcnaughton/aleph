@@ -33,6 +33,7 @@ from pydantic_ai.models.function import FunctionModel
 from sqlalchemy import func, select
 
 from aleph import db
+from aleph.agents.researcher import RetrievedDocument
 from aleph.config import Settings
 from aleph.domains.answer_order import shuffle_options
 from aleph.models import (
@@ -46,6 +47,7 @@ from aleph.models import (
 )
 from aleph.repositories import PathRepository
 from aleph.services.generation import GenerationOrchestrator
+from aleph.services.retrieval import RetrievalUnavailableError
 from aleph.services.stub_model import (
     StubModelForcedError,
     force_lesson_failure,
@@ -81,6 +83,157 @@ if TYPE_CHECKING:
     from pydantic_ai.models.function import AgentInfo
 
     from aleph.agents.lesson import QuickCheck as QuickCheckPayload
+
+
+class TeachingRetriever:
+    def __init__(self) -> None:
+        self.queries: list[str] = []
+        self.fail = False
+        self.empty = False
+        self.delay = 0.0
+
+    async def search(self, queries, *, since=None) -> list[RetrievedDocument]:
+        assert since is None
+        self.queries.extend(queries)
+        await asyncio.sleep(self.delay)
+        if self.fail:
+            raise RetrievalUnavailableError("search unavailable")
+        if self.empty:
+            return []
+        return [
+            RetrievedDocument(
+                url="https://example.com/reference",
+                publisher="Reference",
+                title="Manual",
+                published_on=None,
+                text="Distinctive retrieved teaching evidence.",
+            )
+        ]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "outline,lessons", [(False, False), (True, False), (False, True), (True, True)]
+)
+async def test_path_search_settings_independently_supply_evidence(
+    outline: bool, lessons: bool
+) -> None:
+    retrieved = TeachingRetriever()
+    prompts: dict[str, list[str]] = {"outline": [], "lesson": []}
+
+    async def respond(messages, info):
+        text = stub_user_text(messages)
+        tool = stub_tool_with(info.output_tools, "units")
+        kind = "outline" if tool else "lesson"
+        prompts[kind].append(text)
+        if tool:
+            output = stub_build_outline("Rust ownership")
+        else:
+            tool = stub_tool_with(info.output_tools, "read_passage")
+            output = stub_build_lesson("Rust ownership", stub_read_position(text) or 1)
+        assert tool is not None
+        return ModelResponse(
+            parts=[ToolCallPart(tool_name=tool.name, args=output.model_dump())]
+        )
+
+    spawn = CollectingSpawn()
+    model = FunctionModel(respond)
+    orch = GenerationOrchestrator(
+        session_factory=lambda: db.async_session(),
+        spawn=spawn,
+        resolve_model_fn=lambda _: model,
+        retriever=retrieved,
+        prefetch_n=1,
+    )
+    async with db.async_session() as session:
+        user = await create_user(session)
+        await session.commit()
+    path = await orch.create_path(
+        user_id=user.id,
+        topic="Rust ownership",
+        level=Level.SOME_EXPERIENCE,
+        guidance="Focus on borrowing",
+        search_outline=outline,
+        search_lessons=lessons,
+    )
+    await spawn.drain()
+    stored = await _reload_path(path.id)
+    assert stored.search_outline is outline
+    assert stored.search_lessons is lessons
+    assert stored.status is PathStatus.READY
+    assert len(prompts["outline"]) == 1
+    assert len(prompts["lesson"]) == 2  # includes the prefetched lesson
+    for kind, enabled in [("outline", outline), ("lesson", lessons)]:
+        for prompt in prompts[kind]:
+            assert ("Distinctive retrieved teaching evidence." in prompt) is enabled
+    assert len(retrieved.queries) == int(outline) + 2 * int(lessons)
+    if outline:
+        assert "Focus on borrowing" in retrieved.queries[0]
+    if lessons:
+        prefetched = (await _generated_lessons(path.id))[1]
+        assert prefetched.title in retrieved.queries[-1]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("stage", ["outline", "lesson"])
+@pytest.mark.parametrize("failure", ["outage", "timeout", "unconfigured"])
+async def test_search_failure_is_retryable_and_keeps_persisted_opt_in(
+    stage: str, failure: str
+) -> None:
+    retrieved = TeachingRetriever()
+    retrieved.fail = failure == "outage"
+    retrieved.delay = 0.2 if failure == "timeout" else 0
+    spawn = CollectingSpawn()
+    orch = GenerationOrchestrator(
+        session_factory=lambda: db.async_session(),
+        spawn=spawn,
+        resolve_model_fn=stub_resolver(),
+        retriever=None if failure == "unconfigured" else retrieved,
+        prefetch_n=0,
+        outline_timeout_seconds=0.05 if stage == "outline" else 30,
+        generation_timeout_seconds=0.05 if stage == "lesson" else 30,
+    )
+    async with db.async_session() as session:
+        user = await create_user(session)
+        await session.commit()
+    path = await orch.create_path(
+        user_id=user.id,
+        topic="Rust ownership",
+        level=Level.NEW_TO_IT,
+        search_outline=stage == "outline",
+        search_lessons=stage == "lesson",
+    )
+    await spawn.drain()
+    if stage == "outline":
+        assert (await _reload_path(path.id)).status is PathStatus.FAILED
+        assert await _count_units(path.id) == 0
+    else:
+        first = (await _generated_lessons(path.id))[0]
+        assert first.generation_state is LessonGenerationState.FAILED
+        assert first.read_passage is None
+    # A fresh orchestrator models restart: settings come from the database.
+    recovered_spawn = CollectingSpawn()
+    retrieved.fail = False
+    retrieved.delay = 0
+    retrieved.empty = True
+    recovered = GenerationOrchestrator(
+        session_factory=lambda: db.async_session(),
+        spawn=recovered_spawn,
+        resolve_model_fn=stub_resolver(),
+        retriever=retrieved,
+        prefetch_n=0,
+    )
+    before = len(retrieved.queries)
+    if stage == "outline":
+        await recovered.retry_outline(path.id)
+    else:
+        await recovered.retry_lesson(first.id)
+    await recovered_spawn.drain()
+    assert len(retrieved.queries) > before
+    assert (await _reload_path(path.id)).status is PathStatus.READY
+    assert (await _generated_lessons(path.id))[
+        0
+    ].generation_state is LessonGenerationState.GENERATED
 
 
 # --------------------------------------------------------------------------- #

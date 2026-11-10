@@ -38,6 +38,9 @@ if TYPE_CHECKING:
 
 logger = structlog.get_logger(__name__)
 
+# Teaching needs a small reference set, not the Beat's multi-query news survey.
+GENERATION_SEARCH_MAX_DOCUMENTS = 4
+
 
 class RetrievalUnavailableError(RuntimeError):
     """A `Retriever` could not return results for a research run.
@@ -195,6 +198,7 @@ async def retrieve(
     max_documents: int,
     text_budget_chars: int,
     record_raw_count: Callable[[int], None] | None = None,
+    require_date: bool = True,
 ) -> list[RetrievedDocument]:
     """search -> dedupe -> drop undated/empty-text -> cap -> character budget.
 
@@ -205,7 +209,9 @@ async def retrieve(
       plan's queries; a caller that ran each query in the plan and
       concatenated results would double-count it. Keeps the first occurrence
       seen (the plan's query order).
-    - **Drop undated documents.** PRD §4.4 requires a publication date a
+    - **Drop undated documents by default.** Teaching retrieval sets
+      ``require_date=False`` to retain undated reference material. Briefs
+      keep the strict default: PRD §4.4 requires a publication date a
       learner can be shown and can reason about; a document without one
       cannot be a Source, so it must never reach a model (TDD §5.2).
     - **Drop documents with no original text.** PRD §4.4's third retrieval
@@ -282,7 +288,11 @@ async def retrieve(
     if record_raw_count is not None:
         record_raw_count(len(documents))
     deduped = _dedupe_by_url(documents)
-    dated = [document for document in deduped if document.published_on is not None]
+    dated = [
+        document
+        for document in deduped
+        if not require_date or document.published_on is not None
+    ]
     grounded = [document for document in dated if document.text]
     capped = grounded[:max_documents]
     budgeted = _apply_text_budget(capped, text_budget_chars)

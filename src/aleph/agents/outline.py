@@ -24,12 +24,18 @@ out of scope for the agent.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal, get_args
+from typing import TYPE_CHECKING, Literal, get_args
 
 from pydantic import BaseModel
 from pydantic_ai import Agent, ModelRetry, RunContext
 
 from aleph.agents._delimiters import neutralize_delimiters
+from aleph.agents._evidence import web_evidence_block
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from aleph.agents.researcher import RetrievedDocument
 
 
 class LessonOutline(BaseModel):
@@ -189,7 +195,12 @@ def _neutralize_guidance_delimiters(guidance: str) -> str:
     return neutralize_delimiters(guidance, "guidance")
 
 
-def build_outline_prompt(topic: str, guidance: str | None = None) -> str:
+def build_outline_prompt(
+    topic: str,
+    guidance: str | None = None,
+    *,
+    documents: Sequence[RetrievedDocument] = (),
+) -> str:
     """Build the outline agent's user prompt from ``topic`` and optional Guidance.
 
     Lives here, not in the service (``services/generation.py``), so evals and
@@ -214,14 +225,17 @@ def build_outline_prompt(topic: str, guidance: str | None = None) -> str:
     the block.
     """
     stripped_guidance = guidance.strip() if guidance is not None else ""
-    if not stripped_guidance:
-        return topic
-    safe_guidance = _neutralize_guidance_delimiters(stripped_guidance)
-    return (
-        f"Topic: {topic}\n\n"
-        "Additional guidance from the learner (about the shape and emphasis of "
-        f"the path):\n<guidance>\n{safe_guidance}\n</guidance>"
-    )
+    prompt = topic
+    if stripped_guidance:
+        safe_guidance = _neutralize_guidance_delimiters(stripped_guidance)
+        prompt = (
+            f"Topic: {topic}\n\n"
+            "Additional guidance from the learner (about the shape and emphasis of "
+            f"the path):\n<guidance>\n{safe_guidance}\n</guidance>"
+        )
+    if documents:
+        prompt += "\n\n" + web_evidence_block(documents)
+    return prompt
 
 
 # --- system prompt (static role + boundary; level/caps appended dynamically) ---

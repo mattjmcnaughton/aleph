@@ -63,10 +63,13 @@ from pydantic import BaseModel
 from pydantic_ai import Agent, ModelRetry, RunContext
 
 from aleph.agents._delimiters import neutralize_delimiters
+from aleph.agents._evidence import web_evidence_block
 from aleph.agents.outline import Level, PathOutline, require_valid_level
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+
+    from aleph.agents.researcher import RetrievedDocument
 
 
 class QuickCheck(BaseModel):
@@ -300,6 +303,7 @@ class LessonDeps:
     # each time a lesson generates, so an edit reaches every lesson generated
     # after it. Blank collapses to "no style" in :func:`build_lesson_prompt`.
     teaching_style: str | None = None
+    documents: tuple[RetrievedDocument, ...] = ()
 
     def __post_init__(self) -> None:
         """Reject an unknown ``level`` or non-positive position at construction.
@@ -559,6 +563,9 @@ def build_lesson_prompt(deps: LessonDeps) -> str:
             "This is the first lesson in the path; there are no earlier lessons "
             "to build on."
         )
+
+    if deps.documents:
+        sections.append(web_evidence_block(deps.documents))
 
     teaching_style = (
         deps.teaching_style.strip() if deps.teaching_style is not None else ""

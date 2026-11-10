@@ -199,6 +199,8 @@ async def test_create_poll_ready_lifecycle(
         # applies ``Path.display_title``, never the client, CONTEXT.md).
         assert body["title"] == "Rust ownership"
         assert body["guidance"] is None
+        assert body["search_outline"] is False
+        assert body["search_lessons"] is False
         assert body["level"] == "some_experience"
         assert body["status"] == "ready"
         assert body["refusal_message"] is None
@@ -726,6 +728,57 @@ async def test_create_without_guidance_is_null_on_the_wire(
         path_id = await _create(client, spawn, "Rust ownership", "some_experience")
         body = await _poll(client, spawn, path_id)
         assert body["guidance"] is None
+
+
+# --------------------------------------------------------------------------- #
+# Web search: independent opt-ins, immutable after creation
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "outline,lessons", [(True, False), (False, True), (True, True)]
+)
+async def test_create_persists_independent_search_settings(
+    app: FastAPI,
+    spawn: CollectingSpawn,
+    monkeypatch: pytest.MonkeyPatch,
+    outline: bool,
+    lessons: bool,
+) -> None:
+    async with _client(app) as client:
+        await _sign_in(client, monkeypatch, OWNER)
+        response = await client.post(
+            "/api/v1/paths",
+            json={
+                "topic": "Rust ownership",
+                "level": "new_to_it",
+                "search_outline": outline,
+                "search_lessons": lessons,
+            },
+        )
+        assert response.status_code == 202
+        path_id = response.json()["id"]
+        # Read before draining: settings are persisted even before generation.
+        row = await _path_row(path_id)
+        assert row.search_outline is outline
+        assert row.search_lessons is lessons
+        detail = (await client.get(f"/api/v1/paths/{path_id}")).json()
+        assert detail["search_outline"] is outline
+        assert detail["search_lessons"] is lessons
+        # A rename request cannot change generation settings.
+        await client.patch(
+            f"/api/v1/paths/{path_id}",
+            json={
+                "title": "Renamed",
+                "search_outline": not outline,
+                "search_lessons": not lessons,
+            },
+        )
+        row = await _path_row(path_id)
+        assert row.search_outline is outline
+        assert row.search_lessons is lessons
+        await spawn.drain()
 
 
 # --------------------------------------------------------------------------- #

