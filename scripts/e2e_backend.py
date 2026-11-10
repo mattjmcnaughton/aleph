@@ -40,6 +40,7 @@ from aleph.db import get_session
 from aleph.models import Lesson, Level
 from aleph.repositories.beats import BeatRepository
 from aleph.services.briefing import briefing_service
+from aleph.services.generation import generation_orchestrator
 from aleph.services.notifications import notification_service
 from aleph.services.push import InMemoryPushSender, encode_key, public_bytes
 from aleph.services.retrieval import StubRetriever
@@ -196,6 +197,8 @@ def create_stub_app() -> FastAPI:
     # would escape the deterministic stub (empty API key) in e2e (AL-052 note),
     # including via the tutor's per-message model override.
     settings.model_allowlist = STUB_MODEL_ID
+    # Never let lifespan replace either stub retriever with a live provider.
+    settings.exa_api_key = ""
     settings.rate_limit_paths_per_day = 0
     settings.rate_limit_lesson_generations_per_day = 0
     settings.rate_limit_tutor_messages_per_day = 0
@@ -270,6 +273,7 @@ def create_stub_app() -> FastAPI:
     # interaction before touching either side of it.
     retriever = ControlledRetriever()
     briefing_service._retriever = retriever  # noqa: SLF001
+    generation_orchestrator._retriever = retriever  # noqa: SLF001
 
     # Imported lazily so mutating settings above lands before app assembly.
     from aleph.app import create_app

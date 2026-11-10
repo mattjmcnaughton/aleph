@@ -516,6 +516,26 @@ secrets above).
 
 ## Manual redeploy / rollback
 
+### Per-path web search: release prerequisite
+
+Migration `0022_path_web_search` preserves historical paths with both search
+settings false. Before deploying it, establish a stop-old-before-start-new
+cutover: drain traffic and stop all old application processes (including their
+reconcilers) before accepting opt-in creation or generation on the new version.
+Do not use an overlapping rolling rollout: old handlers ignore the new inputs,
+and old workers can generate opted-in paths without searching. Rehearse this
+ordering on disposable infrastructure before production; this PR does not
+authorize or establish production readiness.
+
+After this migration, the previous-image rollback below is **not** a safe rollback
+for this feature. An image lacking revision `0022` cannot run its release migration
+against the newer database. Prepare and rehearse a forward-compatible rollback
+build that retains revision `0022`, both columns and their values, and search-aware
+generation. Alternatively suspend generation until such a build is available.
+Do not downgrade the database to enable an old image: that drops the learner's
+persisted choices. Verify opted-in paths and subsequent lessons after recovery,
+and verify Exa configuration before enabling traffic.
+
 ```sh
 # Redeploy a checked-out tag (Fly rebuilds)
 git checkout vX.Y.Z

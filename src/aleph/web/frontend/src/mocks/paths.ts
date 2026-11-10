@@ -203,6 +203,8 @@ interface StoredPath {
   guidance: string | null;
   /** The path's Teaching style (docs/CONTEXT.md), null when none is set. */
   teachingStyle: string | null;
+  searchOutline: boolean;
+  searchLessons: boolean;
   level: Level;
   /** The terminal status this path resolves to once `pollsRemaining` hits 0. */
   resolution: PathStatus;
@@ -344,6 +346,8 @@ export function seedPath(path: {
   title?: string;
   guidance?: string | null;
   teachingStyle?: string | null;
+  searchOutline?: boolean;
+  searchLessons?: boolean;
   resolution?: PathStatus;
   pollsRemaining?: number;
   /** Custom outline for a `ready` path (the rail fixtures above). */
@@ -363,6 +367,8 @@ export function seedPath(path: {
     title: path.title,
     guidance: path.guidance ?? null,
     teachingStyle: path.teachingStyle ?? null,
+    searchOutline: path.searchOutline ?? false,
+    searchLessons: path.searchLessons ?? false,
     level: path.level,
     resolution: path.resolution ?? "ready",
     pollsRemaining: path.pollsRemaining ?? 0,
@@ -575,6 +581,8 @@ function detailFor(path: StoredPath): PathDetail {
     title: path.title ?? path.topic,
     guidance: path.guidance,
     teaching_style: path.teachingStyle,
+    search_outline: path.searchOutline,
+    search_lessons: path.searchLessons,
     level: path.level,
     status,
     refusal_message: status === "refused" ? REFUSAL_MESSAGE : null,
@@ -705,6 +713,8 @@ export const pathsHandlers = [
       level: Level;
       guidance?: string;
       teaching_style?: string;
+      search_outline?: boolean;
+      search_lessons?: boolean;
     };
     createBodies.push({ ...body });
     // Request-body validation comes first, as Pydantic's does: an over-long
@@ -732,6 +742,8 @@ export const pathsHandlers = [
       topic: body.topic,
       guidance: body.guidance ?? null,
       teachingStyle: body.teaching_style ?? null,
+      searchOutline: body.search_outline ?? false,
+      searchLessons: body.search_lessons ?? false,
       level: body.level,
       resolution: resolutionForTopic(body.topic),
       pollsRemaining: config.pollsBeforeResolve,

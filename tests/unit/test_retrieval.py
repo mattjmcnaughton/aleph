@@ -85,6 +85,36 @@ class _RaisingRetriever:
         raise RetrievalUnavailableError("boom")
 
 
+@pytest.mark.anyio
+async def test_teaching_allows_undated_references_but_briefs_require_dates() -> None:
+    documents = [
+        _doc("https://example.com/manual", text="manual text", published_on=None),
+        _doc("https://example.com/manual", text="duplicate", published_on=None),
+        _doc("https://example.com/empty", text=""),
+        _doc("https://example.com/news", text="news text"),
+    ]
+    plan = QueryPlan(queries=("reference",))
+    teaching = await retrieve(
+        _FakeRetriever(documents),
+        plan,
+        max_documents=2,
+        text_budget_chars=12,
+        require_date=False,
+    )
+    assert [doc.url for doc in teaching] == [
+        "https://example.com/manual",
+        "https://example.com/news",
+    ]
+    assert [doc.text for doc in teaching] == ["manual", "news t"]
+    briefs = await retrieve(
+        _FakeRetriever(documents),
+        plan,
+        max_documents=2,
+        text_budget_chars=12,
+    )
+    assert [doc.url for doc in briefs] == ["https://example.com/news"]
+
+
 class _RecordingRetriever:
     """A `Retriever` that records every `search()` call's arguments —
     exercises `retrieve()`'s contract that `plan.since` is passed straight

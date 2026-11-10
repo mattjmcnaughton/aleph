@@ -66,7 +66,12 @@ describe("Admin model picker — /new", () => {
     const body = lastCreatePathBody() ?? {};
     // Absent keys, not null values — the backend 403s a non-admin *override*,
     // so an explicit `model_outline: null` would be a different payload.
-    expect(Object.keys(body).sort()).toEqual(["level", "topic"]);
+    expect(Object.keys(body).sort()).toEqual([
+      "level",
+      "search_lessons",
+      "search_outline",
+      "topic",
+    ]);
     expect("model_outline" in body).toBe(false);
     expect("model_lesson" in body).toBe(false);
   });
@@ -131,6 +136,8 @@ describe("Admin model picker — /new", () => {
     expect(lastCreatePathBody()).toEqual({
       topic: "Rust ownership",
       level: "new_to_it",
+      search_outline: false,
+      search_lessons: false,
       model_outline: "anthropic/claude-opus-4-8",
       model_lesson: "anthropic/claude-haiku-4-5",
     });
@@ -146,7 +153,13 @@ describe("Admin model picker — /new", () => {
     const body = lastCreatePathBody() ?? {};
     expect(body.model_lesson).toBe("minimax/minimax-m3");
     expect("model_outline" in body).toBe(false);
-    expect(Object.keys(body).sort()).toEqual(["level", "model_lesson", "topic"]);
+    expect(Object.keys(body).sort()).toEqual([
+      "level",
+      "model_lesson",
+      "search_lessons",
+      "search_outline",
+      "topic",
+    ]);
   });
 
   it("[AL-065] returning a slot to the default drops it from the payload again", async () => {

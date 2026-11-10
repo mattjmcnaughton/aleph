@@ -83,6 +83,9 @@ class CreatePathRequest(BaseModel):
     ``teaching_style`` is the learner's optional Teaching style (CONTEXT.md):
     how every lesson on the path should be taught. Omitted means none. Unlike
     ``guidance`` it can be changed later (``UpdateTeachingStyleRequest``).
+
+    ``search_outline`` and ``search_lessons`` independently opt into web
+    retrieval before generation. Both default false and are fixed at creation.
     """
 
     # ``model_outline``/``model_lesson`` start with the ``model_`` prefix pydantic
@@ -95,6 +98,8 @@ class CreatePathRequest(BaseModel):
     level: Level
     guidance: GuidanceStr | None = None
     teaching_style: TeachingStyleStr | None = None
+    search_outline: bool = False
+    search_lessons: bool = False
     model_outline: str | None = None
     model_lesson: str | None = None
 
@@ -258,6 +263,8 @@ class PathDetailResponse(BaseModel):
     title: str
     guidance: str | None
     teaching_style: str | None
+    search_outline: bool
+    search_lessons: bool
     level: Level
     status: PathStatus
     refusal_message: str | None

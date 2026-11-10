@@ -69,6 +69,8 @@ function NewPath() {
   // round trip exactly like topic/level, below.
   const [guidance, setGuidance] = useState("");
   const [teachingStyle, setTeachingStyle] = useState("");
+  const [searchOutline, setSearchOutline] = useState(false);
+  const [searchLessons, setSearchLessons] = useState(false);
   const [pathId, setPathId] = useState<string | null>(null);
   // Admin model slots (§5.3/D14). `MODEL_SLOT_DEFAULT` means "no override" —
   // `buildCreatePathInput` drops the key rather than sending an empty id.
@@ -141,7 +143,16 @@ function NewPath() {
     event.preventDefault();
     if (!canSubmitTopic(topic)) return;
     createMutation.mutate(
-      buildCreatePathInput({ topic, level, guidance, teachingStyle, modelOutline, modelLesson }),
+      buildCreatePathInput({
+        topic,
+        level,
+        guidance,
+        teachingStyle,
+        searchOutline,
+        searchLessons,
+        modelOutline,
+        modelLesson,
+      }),
     );
   }
 
@@ -181,10 +192,14 @@ function NewPath() {
           level={level}
           guidance={guidance}
           teachingStyle={teachingStyle}
+          searchOutline={searchOutline}
+          searchLessons={searchLessons}
           onTopicChange={setTopic}
           onLevelChange={setLevel}
           onGuidanceChange={setGuidance}
           onTeachingStyleChange={setTeachingStyle}
+          onSearchOutlineChange={setSearchOutline}
+          onSearchLessonsChange={setSearchLessons}
           onSubmit={onSubmit}
           submitting={createMutation.isPending}
           rateLimited={rateLimited}
@@ -238,10 +253,14 @@ interface FormProps {
   level: Level;
   guidance: string;
   teachingStyle: string;
+  searchOutline: boolean;
+  searchLessons: boolean;
   onTopicChange: (value: string) => void;
   onLevelChange: (value: Level) => void;
   onGuidanceChange: (value: string) => void;
   onTeachingStyleChange: (value: string) => void;
+  onSearchOutlineChange: (value: boolean) => void;
+  onSearchLessonsChange: (value: boolean) => void;
   onSubmit: (event: React.FormEvent) => void;
   submitting: boolean;
   rateLimited: boolean;
@@ -258,10 +277,14 @@ function OnboardingForm({
   level,
   guidance,
   teachingStyle,
+  searchOutline,
+  searchLessons,
   onTopicChange,
   onLevelChange,
   onGuidanceChange,
   onTeachingStyleChange,
+  onSearchOutlineChange,
+  onSearchLessonsChange,
   onSubmit,
   submitting,
   rateLimited,
@@ -343,6 +366,33 @@ function OnboardingForm({
       </div>
 
       <LevelFieldset level={level} onChange={onLevelChange} idPrefix="level" />
+
+      <fieldset className="mt-6" aria-describedby="onboarding-search-help">
+        <legend className="text-sm font-medium text-porcelain">Web search</legend>
+        <p id="onboarding-search-help" className="mt-1 text-sm leading-6 text-mist">
+          Optional. Search adds time to generation. These settings are fixed at creation.
+        </p>
+        <label className="mt-3 flex min-h-11 cursor-pointer items-center justify-between gap-4 text-sm">
+          <span>Search the web for the outline</span>
+          <input
+            type="checkbox"
+            name="search_outline"
+            className="h-5 w-5 accent-teal"
+            checked={searchOutline}
+            onChange={(event) => onSearchOutlineChange(event.target.checked)}
+          />
+        </label>
+        <label className="flex min-h-11 cursor-pointer items-center justify-between gap-4 text-sm">
+          <span>Search the web for lessons</span>
+          <input
+            type="checkbox"
+            name="search_lessons"
+            className="h-5 w-5 accent-teal"
+            checked={searchLessons}
+            onChange={(event) => onSearchLessonsChange(event.target.checked)}
+          />
+        </label>
+      </fieldset>
 
       {modelPicker}
 

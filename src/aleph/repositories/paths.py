@@ -68,6 +68,8 @@ class PathRepository:
         level: Level,
         guidance: str | None = None,
         teaching_style: str | None = None,
+        search_outline: bool = False,
+        search_lessons: bool = False,
         model_outline: str | None = None,
         model_lesson: str | None = None,
     ) -> Path:
@@ -95,6 +97,8 @@ class PathRepository:
             level=level,
             guidance=guidance,
             teaching_style=teaching_style,
+            search_outline=search_outline,
+            search_lessons=search_lessons,
             model_outline=model_outline,
             model_lesson=model_lesson,
         )

@@ -177,6 +177,40 @@ describe("Onboarding — /new", () => {
     expect(bodies[bodies.length - 1]?.guidance).toBe("Cover conditional types before mapped types");
   });
 
+  it.each([
+    [false, false],
+    [true, false],
+    [false, true],
+    [true, true],
+  ])(
+    "submits independent web search settings: outline=%s, lessons=%s",
+    async (outline, lessons) => {
+      const topic = await gotoNewPath();
+      const outlineCheckbox = screen.getByRole("checkbox", {
+        name: "Search the web for the outline",
+      }) as HTMLInputElement;
+      const lessonsCheckbox = screen.getByRole("checkbox", {
+        name: "Search the web for lessons",
+      }) as HTMLInputElement;
+      expect(outlineCheckbox.checked).toBe(false);
+      expect(lessonsCheckbox.checked).toBe(false);
+      screen.getByText(/search adds time/i);
+      screen.getByText(/settings are fixed at creation/i);
+
+      if (outline) fireEvent.click(outlineCheckbox);
+      if (lessons) fireEvent.click(lessonsCheckbox);
+      fireEvent.change(topic, { target: { value: "TypeScript generics" } });
+      submit();
+
+      await screen.findByTestId("path-view");
+      const bodies = createPathBodies();
+      expect(bodies[bodies.length - 1]).toMatchObject({
+        search_outline: outline,
+        search_lessons: lessons,
+      });
+    },
+  );
+
   it("captures a teaching style and the path view shows it", async () => {
     const topic = await gotoNewPath();
 

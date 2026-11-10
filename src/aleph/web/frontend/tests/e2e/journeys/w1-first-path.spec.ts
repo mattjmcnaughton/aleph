@@ -28,6 +28,24 @@ import {
 test.use({ storageState: DEV_STORAGE_STATE });
 
 test.describe("W1 first path", { tag: "@w1" }, () => {
+  test("opt-in web search generates an outline and lesson", async ({ page }) => {
+    await startPath(page, uniqueTopic("Web references"), "some_experience", async () => {
+      const outline = page.getByRole("checkbox", { name: "Search the web for the outline" });
+      const lessons = page.getByRole("checkbox", { name: "Search the web for lessons" });
+      await expect(outline).not.toBeChecked();
+      await expect(lessons).not.toBeChecked();
+      await outline.check();
+      await lessons.check();
+    });
+    await page.waitForURL(/\/paths\//, { timeout: GENERATION_TIMEOUT });
+    const pathId = pathIdFromUrl(page.url());
+    const detail = await page.request.get(`/api/v1/paths/${pathId}`);
+    expect(detail.ok()).toBe(true);
+    expect(await detail.json()).toMatchObject({ search_outline: true, search_lessons: true });
+    await openLessonAt(page, 0);
+    await expectLessonContent(page);
+  });
+
   test("a new topic becomes a path whose first lesson can be completed", async ({ page }) => {
     const topic = uniqueTopic("Rust ownership");
 
