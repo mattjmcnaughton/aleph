@@ -1,3 +1,10 @@
+# [1.48.0](https://github.com/mattjmcnaughton/aleph/compare/v1.47.1...v1.48.0) (2026-11-10)
+
+
+### Features
+
+* **paths:** add opt-in web search for outlines and lessons ([c474203](https://github.com/mattjmcnaughton/aleph/commit/c474203ac12f86dbbb6ef5362f4f82c77c773ad5))
+
 ## [1.47.1](https://github.com/mattjmcnaughton/aleph/compare/v1.47.0...v1.47.1) (2026-11-01)
 
 
