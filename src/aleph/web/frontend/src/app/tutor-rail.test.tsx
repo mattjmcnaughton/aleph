@@ -944,11 +944,11 @@ describe("Tutor rail — admin model picker (§5.3)", () => {
       ...ADMIN_MODEL_ALLOWLIST,
     ]);
 
-    fireEvent.change(picker, { target: { value: "anthropic/claude-haiku-4-5" } });
+    fireEvent.change(picker, { target: { value: "anthropic/claude-haiku-5.5" } });
     ask("How does this feel at haiku speed?");
 
     await waitFor(() => expect(tutorSendBodies()).toHaveLength(1));
-    expect(tutorSendBodies()[0].model).toBe("anthropic/claude-haiku-4-5");
+    expect(tutorSendBodies()[0].model).toBe("anthropic/claude-haiku-5.5");
   });
 
   it("[AL-230] omits the model key entirely when the slot is left on the server default", async () => {

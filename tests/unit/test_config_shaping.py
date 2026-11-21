@@ -23,7 +23,6 @@ from scripts.e2e_backend import create_stub_app
 # Every env var this block reads, cleared so the "defaults" assertions below
 # describe the code defaults rather than whatever the ambient environment says.
 _SHAPING_ENV_VARS = (
-    "MODEL_SHAPER",
     "MAX_LESSONS_PER_PROPOSAL",
     "RATE_LIMIT_SHAPING_MESSAGES_PER_DAY",
 )
@@ -45,7 +44,6 @@ def test_shaping_defaults_match_tdd_section_13(default_settings: Settings) -> No
     # The per-Proposal lesson cap departs from §13's provisional 5, which could
     # not express one coherent
     # unit-sized edit, so it is 12 (see ``config.py``'s note on what that costs).
-    assert default_settings.model_shaper == "openai/gpt-5.6-luna"
     assert default_settings.max_lessons_per_proposal == 12  # noqa: PLR2004 - the shipped cap
     assert default_settings.rate_limit_shaping_messages_per_day == 0
 
@@ -77,13 +75,11 @@ def test_shaping_block_is_env_overridable(monkeypatch: pytest.MonkeyPatch) -> No
     # change (§5.3's refinement direction for the slot is *up or sideways*). One
     # construction pins §13's env-var **names** for the whole block — a field
     # rename would silently break the documented operator contract.
-    monkeypatch.setenv("MODEL_SHAPER", "anthropic/claude-opus-4-8")
     monkeypatch.setenv("MAX_LESSONS_PER_PROPOSAL", "3")
     monkeypatch.setenv("RATE_LIMIT_SHAPING_MESSAGES_PER_DAY", "25")
 
     settings = Settings(_env_file=None)  # ty: ignore[unknown-argument]
 
-    assert settings.model_shaper == "anthropic/claude-opus-4-8"
     assert settings.max_lessons_per_proposal == 3
     assert settings.rate_limit_shaping_messages_per_day == 25
 
@@ -119,7 +115,7 @@ def test_e2e_backend_boots_with_the_shaper_slot_stubbed_and_the_flag_on(
     """
     create_stub_app()
 
-    assert restored_live_settings.model_shaper == STUB_MODEL_ID
+    assert restored_live_settings.model_default == STUB_MODEL_ID
     # ``tutor``, ``streaks``, and ``analyst`` (Phase 6, ticket
     # AL-560/AL-570) have all since launched and default on in code, which
     # would make an explicit entry here redundant on its own — but this pin is

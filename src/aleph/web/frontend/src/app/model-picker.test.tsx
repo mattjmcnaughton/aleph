@@ -129,8 +129,8 @@ describe("Admin model picker — /new", () => {
     useSession(adminSession);
     await gotoNewPath();
 
-    selectModel("model-picker-outline", "anthropic/claude-opus-4-8");
-    selectModel("model-picker-lesson", "anthropic/claude-haiku-4-5");
+    selectModel("model-picker-outline", "anthropic/claude-opus-5.5");
+    selectModel("model-picker-lesson", "anthropic/claude-haiku-5.5");
     await submitTopic("Rust ownership");
 
     expect(lastCreatePathBody()).toEqual({
@@ -138,8 +138,8 @@ describe("Admin model picker — /new", () => {
       level: "new_to_it",
       search_outline: false,
       search_lessons: false,
-      model_outline: "anthropic/claude-opus-4-8",
-      model_lesson: "anthropic/claude-haiku-4-5",
+      model_outline: "anthropic/claude-opus-5.5",
+      model_lesson: "anthropic/claude-haiku-5.5",
     });
   });
 
@@ -147,11 +147,11 @@ describe("Admin model picker — /new", () => {
     useSession(adminSession);
     await gotoNewPath();
 
-    selectModel("model-picker-lesson", "minimax/minimax-m3");
+    selectModel("model-picker-lesson", "openai/gpt-6-luna");
     await submitTopic("SQL indexes");
 
     const body = lastCreatePathBody() ?? {};
-    expect(body.model_lesson).toBe("minimax/minimax-m3");
+    expect(body.model_lesson).toBe("openai/gpt-6-luna");
     expect("model_outline" in body).toBe(false);
     expect(Object.keys(body).sort()).toEqual([
       "level",
@@ -166,7 +166,7 @@ describe("Admin model picker — /new", () => {
     useSession(adminSession);
     await gotoNewPath();
 
-    selectModel("model-picker-outline", "openai/gpt-5.6-terra");
+    selectModel("model-picker-outline", "openai/gpt-6.2-sol");
     selectModel("model-picker-outline", "");
     await submitTopic("Graph theory");
 
@@ -177,10 +177,10 @@ describe("Admin model picker — /new", () => {
     useSession(adminSession);
     // The allowlist changed after this session was issued: the id the picker
     // still offers is no longer accepted (docs/api.md — 422 validation_error).
-    configurePaths({ modelAllowlist: ["anthropic/claude-sonnet-5"] });
+    configurePaths({ modelAllowlist: ["anthropic/claude-sonnet-5.5"] });
     await gotoNewPath();
 
-    selectModel("model-picker-outline", "anthropic/claude-opus-4-8");
+    selectModel("model-picker-outline", "anthropic/claude-opus-5.5");
     await submitTopic("Kubernetes operators");
 
     const error = await screen.findByTestId("model-picker-error");
@@ -200,11 +200,11 @@ describe("Admin model picker — /new", () => {
     );
 
     // Recoverable: pick an id the server still accepts and the path is created.
-    selectModel("model-picker-outline", "anthropic/claude-sonnet-5");
+    selectModel("model-picker-outline", "anthropic/claude-sonnet-5.5");
     fireEvent.click(screen.getByRole("button", { name: /build my path/i }));
     await screen.findByTestId("path-view");
     expect(createPathBodies()).toHaveLength(2);
-    expect(lastCreatePathBody()?.model_outline).toBe("anthropic/claude-sonnet-5");
+    expect(lastCreatePathBody()?.model_outline).toBe("anthropic/claude-sonnet-5.5");
   });
 
   it("[AL-065] refreshes the stale allowlist, and the rejection outlives the slots", async () => {
@@ -220,7 +220,7 @@ describe("Admin model picker — /new", () => {
     configurePaths({ modelAllowlist: [] });
     await gotoNewPath();
 
-    selectModel("model-picker-outline", "anthropic/claude-opus-4-8");
+    selectModel("model-picker-outline", "anthropic/claude-opus-5.5");
     await submitTopic("Kubernetes operators");
 
     await screen.findByTestId("model-picker-error");

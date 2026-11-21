@@ -8,10 +8,9 @@
 
 /** Bare OpenRouter ids, in the order the picker must render them (TDD §5.3). */
 export const ADMIN_MODEL_ALLOWLIST: readonly string[] = [
-  "openai/gpt-5.6-luna",
-  "anthropic/claude-sonnet-5",
-  "anthropic/claude-haiku-4-5",
-  "anthropic/claude-opus-4-8",
-  "openai/gpt-5.6-terra",
-  "minimax/minimax-m3",
+  "openai/gpt-6-luna",
+  "openai/gpt-6.2-sol",
+  "anthropic/claude-haiku-5.5",
+  "anthropic/claude-sonnet-5.5",
+  "anthropic/claude-opus-5.5",
 ] as const;

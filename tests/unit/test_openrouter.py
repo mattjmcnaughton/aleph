@@ -24,10 +24,9 @@ if TYPE_CHECKING:
 
 
 def test_model_label_maps_known_ids() -> None:
-    assert model_label("openai/gpt-5.6-luna") == "GPT-5.6 Luna"
-    assert model_label("anthropic/claude-sonnet-5") == "Claude Sonnet 5"
-    assert model_label("anthropic/claude-haiku-4-5") == "Claude Haiku 4.5"
-    assert model_label("minimax/minimax-m3") == "MiniMax M3"
+    assert model_label("openai/gpt-6-luna") == "GPT-6 Luna"
+    assert model_label("openai/gpt-6.2-sol") == "GPT-6.2 Sol"
+    assert model_label("anthropic/claude-sonnet-5.5") == "Claude Sonnet 5.5"
 
 
 def test_model_label_falls_back_to_the_id() -> None:
@@ -38,16 +37,16 @@ def test_builder_caches_per_model_id(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(openrouter.settings, "openrouter_api_key", "sk-test")
     monkeypatch.setattr(openrouter, "_model_cache", {})
 
-    first = build_openrouter_model("anthropic/claude-sonnet-5")
-    second = build_openrouter_model("minimax/minimax-m3")
-    again = build_openrouter_model("anthropic/claude-sonnet-5")
+    first = build_openrouter_model("anthropic/claude-sonnet-5.5")
+    second = build_openrouter_model("openai/gpt-6.2-sol")
+    again = build_openrouter_model("anthropic/claude-sonnet-5.5")
 
     # Distinct ids get distinct models; the same id reuses the cached instance
     # (the provider owns an httpx pool, so identity matters, not just equality).
     assert first is not second
     assert first is again
-    assert first.model_name == "anthropic/claude-sonnet-5"
-    assert second.model_name == "minimax/minimax-m3"
+    assert first.model_name == "anthropic/claude-sonnet-5.5"
+    assert second.model_name == "openai/gpt-6.2-sol"
 
 
 def test_resolve_model_returns_cached_openrouter_model(
@@ -56,8 +55,8 @@ def test_resolve_model_returns_cached_openrouter_model(
     monkeypatch.setattr(openrouter.settings, "openrouter_api_key", "sk-test")
     monkeypatch.setattr(openrouter, "_model_cache", {})
 
-    first = resolve_model("anthropic/claude-sonnet-5")
-    again = resolve_model("anthropic/claude-sonnet-5")
+    first = resolve_model("anthropic/claude-sonnet-5.5")
+    again = resolve_model("anthropic/claude-sonnet-5.5")
 
     assert isinstance(first, OpenAIChatModel)
     assert first is again

@@ -18,7 +18,6 @@ from aleph.config import STUB_MODEL_ID, Settings
 # Every env var this block reads, cleared so the "defaults" assertions below
 # describe the code defaults rather than whatever the ambient environment says.
 _TUTOR_ENV_VARS = (
-    "MODEL_TUTOR",
     "TUTOR_CONTEXT_TURNS",
     "TUTOR_REPLY_TIMEOUT",
     "MAX_CONCURRENT_TUTOR_REPLIES",
@@ -40,7 +39,6 @@ def default_settings(monkeypatch: pytest.MonkeyPatch) -> Settings:
 
 
 def test_tutor_defaults_match_tdd_section_13(default_settings: Settings) -> None:
-    assert default_settings.model_tutor == "openai/gpt-5.6-luna"
     assert default_settings.tutor_context_turns == 10
     assert default_settings.tutor_reply_timeout == 90
     assert default_settings.max_concurrent_tutor_replies == 8
@@ -54,7 +52,6 @@ def test_tutor_block_is_env_overridable(monkeypatch: pytest.MonkeyPatch) -> None
     # One construction pins §13's env-var **names** for the whole block — a field
     # rename would silently break the documented operator contract. The name →
     # field mapping itself is pydantic-settings' job and is not retested per key.
-    monkeypatch.setenv("MODEL_TUTOR", "anthropic/claude-haiku-4-5")
     monkeypatch.setenv("TUTOR_CONTEXT_TURNS", "4")
     monkeypatch.setenv("TUTOR_REPLY_TIMEOUT", "30")
     monkeypatch.setenv("MAX_CONCURRENT_TUTOR_REPLIES", "2")
@@ -63,7 +60,6 @@ def test_tutor_block_is_env_overridable(monkeypatch: pytest.MonkeyPatch) -> None
 
     settings = Settings(_env_file=None)  # ty: ignore[unknown-argument]
 
-    assert settings.model_tutor == "anthropic/claude-haiku-4-5"
     assert settings.tutor_context_turns == 4
     assert settings.tutor_reply_timeout == 30
     assert settings.max_concurrent_tutor_replies == 2
@@ -111,11 +107,7 @@ def test_e2e_backend_boots_with_the_tutor_slot_stubbed(
     app = create_stub_app()
 
     assert app.title == "aleph"
-    assert restored_live_settings.model_tutor == STUB_MODEL_ID
-    # The Phase 1 slots stay stubbed too — the tutor assignment is an
-    # addition, not a replacement.
-    assert restored_live_settings.model_outline == STUB_MODEL_ID
-    assert restored_live_settings.model_lesson == STUB_MODEL_ID
+    assert restored_live_settings.model_default == STUB_MODEL_ID
     assert restored_live_settings.model_judge == STUB_MODEL_ID
     # And the tutor message cap is lifted, like the other per-account caps:
     # the e2e projects share one backend + user and would otherwise exhaust

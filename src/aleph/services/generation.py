@@ -216,7 +216,7 @@ class _LessonContext:
     lesson_title: str
     prior: tuple[PriorPassage, ...]
     # The path's admin lesson-model override (§5.3), read from the row; ``None``
-    # falls back to the configured ``MODEL_LESSON`` slot. On the context so it
+    # falls back to the app-wide ``MODEL_DEFAULT``. On the context so it
     # travels with every DB-driven (re)generation, not just the request.
     model_lesson: str | None
     search_lessons: bool = False
@@ -518,7 +518,7 @@ class GenerationOrchestrator:
 
         ``claim.model_outline`` is the path's admin picker override (§5.3), read
         from the row at claim time; ``None`` falls back to the configured
-        ``MODEL_OUTLINE`` slot. Reading it from the row (not the request) is what
+        ``MODEL_DEFAULT``. Reading it from the row (not the request) is what
         makes an override survive resume/reconcile.
         """
         fence = claim.fence
@@ -528,7 +528,7 @@ class GenerationOrchestrator:
         model = self._resolve_model(
             claim.model_outline
             if claim.model_outline is not None
-            else self._config.model_outline
+            else self._config.model_default
         )
         started = time.perf_counter()
         try:
@@ -883,7 +883,7 @@ class GenerationOrchestrator:
         model = self._resolve_model(
             context.model_lesson
             if context.model_lesson is not None
-            else self._config.model_lesson
+            else self._config.model_default
         )
         started = time.perf_counter()
         try:

@@ -35,8 +35,8 @@ Exit codes:
        file says nothing about the models under evaluation, so it must not be
        reported as a failed gate)
 
-Reads ``OPENROUTER_API_KEY`` and the ``MODEL_OUTLINE`` / ``MODEL_LESSON`` /
-``MODEL_JUDGE`` / ``MODEL_RESEARCH`` / ``MODEL_BRIEF``
+Reads ``OPENROUTER_API_KEY`` and the ``MODEL_DEFAULT`` /
+``MODEL_JUDGE``
 slots via ``aleph.config.settings`` (environment or ``.env``) — imported
 lazily, so ``--smoke`` needs no configuration at all. ``MODEL_JUDGE`` is read
 *here and nowhere else in the repo*: the judge is eval-only and never touches
@@ -213,13 +213,8 @@ def _resolve_bindings(args: argparse.Namespace) -> list[ModelBinding] | None:
         if model_id.strip()
     ]
     if not sweep:
-        # Default: the configured slots, exactly as the service would bind them.
-        outline_id, lesson_id = settings.model_outline, settings.model_lesson
-        label = (
-            outline_id
-            if outline_id == lesson_id
-            else f"outline={outline_id} lesson={lesson_id}"
-        )
+        # Default: the app-wide model, exactly as the service would bind it.
+        outline_id = lesson_id = label = settings.model_default
         return [
             ModelBinding(
                 label=label,
@@ -285,13 +280,9 @@ def _resolve_brief_binding(args: argparse.Namespace) -> BriefModelBinding | None
 
     judge = _live_judge(settings.model_judge) if judging else None
     return BriefModelBinding(
-        label=(
-            settings.model_research
-            if settings.model_research == settings.model_brief
-            else f"research={settings.model_research} brief={settings.model_brief}"
-        ),
-        researcher=resolve_model(settings.model_research),
-        brief=resolve_model(settings.model_brief),
+        label=settings.model_default,
+        researcher=resolve_model(settings.model_default),
+        brief=resolve_model(settings.model_default),
         judge=judge,
     )
 
@@ -1139,7 +1130,7 @@ def main(argv: list[str] | None = None) -> int:
         default="",
         help="comma-separated OpenRouter model ids to sweep; each is bound to "
         "both the outline and lesson slots (default: the configured "
-        "MODEL_OUTLINE / MODEL_LESSON). The judge always stays on MODEL_JUDGE.",
+        "MODEL_DEFAULT). The judge always stays on MODEL_JUDGE.",
     )
     parser.add_argument(
         "--smoke",
@@ -1170,7 +1161,7 @@ def main(argv: list[str] | None = None) -> int:
         "outline/lesson seed set. TODAY those fixtures are hand-authored "
         "placeholders, not real recordings (see docs/evals.md; a run says "
         "so). The judge stays MODEL_JUDGE, generation stays the configured "
-        "MODEL_RESEARCH/MODEL_BRIEF.",
+        "MODEL_DEFAULT.",
     )
     parser.add_argument(
         "--full-path-lessons",
@@ -1223,7 +1214,7 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(
             "--models cannot be combined with --briefs: the brief harness "
             "always scores research/writing quality against the configured "
-            "MODEL_RESEARCH/MODEL_BRIEF, not a swept model."
+            "MODEL_DEFAULT, not a swept model."
         )
     if args.agreement:
         return _run_agreement_mode(args)

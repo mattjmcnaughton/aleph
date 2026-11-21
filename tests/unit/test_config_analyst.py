@@ -4,9 +4,8 @@ New file (AL-501) so it never collides with other tickets editing ``test_config`
 the ``test_config_shaping.py`` precedent. This
 ticket is config-only — no retrieval code, no models, no service, no router — so
 the tests here stay narrow: §13's defaults, the §13 env-var names, the stale >
-timeout invariant (mirroring ``_check_generation_timings``), the two new slots'
-membership in ``MODEL_SLOTS`` and their coverage by the production stub guard,
-and that startup succeeds with ``EXA_API_KEY`` unset.
+timeout invariant (mirroring ``_check_generation_timings``), and that startup
+succeeds with ``EXA_API_KEY`` unset.
 """
 
 from __future__ import annotations
@@ -14,14 +13,12 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from aleph.config import MODEL_SLOTS, Settings
+from aleph.config import Settings
 
 # Every env var this block reads, cleared so the "defaults" assertions below
 # describe the code defaults rather than whatever the ambient environment says.
 _ANALYST_ENV_VARS = (
     "EXA_API_KEY",
-    "MODEL_RESEARCH",
-    "MODEL_BRIEF",
     "MAX_BEATS_PER_LEARNER",
     "RATE_LIMIT_BRIEF_RESEARCH_PER_DAY",
     "MAX_CONCURRENT_BRIEF_RESEARCH",
@@ -48,8 +45,6 @@ def default_settings(monkeypatch: pytest.MonkeyPatch) -> Settings:
 
 def test_analyst_defaults_match_tdd_section_13(default_settings: Settings) -> None:
     assert default_settings.exa_api_key == ""
-    assert default_settings.model_research == "openai/gpt-5.6-luna"
-    assert default_settings.model_brief == "openai/gpt-5.6-luna"
     assert default_settings.max_beats_per_learner == 3  # noqa: PLR2004 - TDD §13
     assert default_settings.rate_limit_brief_research_per_day == 5  # noqa: PLR2004
     assert default_settings.max_concurrent_brief_research == 2  # noqa: PLR2004
@@ -64,8 +59,6 @@ def test_analyst_block_is_env_overridable(monkeypatch: pytest.MonkeyPatch) -> No
     # One construction pins §13's env-var **names** for the whole block — a
     # field rename would silently break the documented operator contract.
     monkeypatch.setenv("EXA_API_KEY", "exa-test-key")
-    monkeypatch.setenv("MODEL_RESEARCH", "anthropic/claude-haiku-4-5")
-    monkeypatch.setenv("MODEL_BRIEF", "anthropic/claude-opus-4-8")
     monkeypatch.setenv("MAX_BEATS_PER_LEARNER", "5")
     monkeypatch.setenv("RATE_LIMIT_BRIEF_RESEARCH_PER_DAY", "10")
     monkeypatch.setenv("MAX_CONCURRENT_BRIEF_RESEARCH", "4")
@@ -78,8 +71,6 @@ def test_analyst_block_is_env_overridable(monkeypatch: pytest.MonkeyPatch) -> No
     settings = Settings(_env_file=None)  # ty: ignore[unknown-argument]
 
     assert settings.exa_api_key == "exa-test-key"
-    assert settings.model_research == "anthropic/claude-haiku-4-5"
-    assert settings.model_brief == "anthropic/claude-opus-4-8"
     assert settings.max_beats_per_learner == 5  # noqa: PLR2004
     assert settings.rate_limit_brief_research_per_day == 10  # noqa: PLR2004
     assert settings.max_concurrent_brief_research == 4  # noqa: PLR2004
@@ -139,41 +130,3 @@ def test_stale_after_above_timeout_is_accepted() -> None:
         brief_research_stale_after_seconds=420,
     )
     assert settings.brief_research_stale_after_seconds == 420  # noqa: PLR2004
-
-
-# --- MODEL_SLOTS membership + production stub guard (mirrors test_config_models.py) -
-
-
-@pytest.mark.parametrize("slot", ["model_research", "model_brief"])
-def test_new_slots_are_listed_in_model_slots(slot: str) -> None:
-    # This is what puts each slot behind the production stub guard (D7) — a
-    # slot present as a field but missing from this tuple would silently
-    # escape it.
-    assert slot in MODEL_SLOTS
-
-
-@pytest.mark.parametrize("slot", ["model_research", "model_brief"])
-def test_stub_rejected_in_production_for_new_slots(slot: str) -> None:
-    with pytest.raises(ValidationError, match=rf"not allowed in production.+{slot}"):
-        Settings.model_validate({"env": "production", slot: "stub"})
-
-
-@pytest.mark.parametrize("slot", ["model_research", "model_brief"])
-def test_stub_allowed_outside_production_for_new_slots(slot: str) -> None:
-    settings = Settings.model_validate({"env": "development", slot: "stub"})
-    assert getattr(settings, slot) == "stub"
-
-
-def test_non_stub_production_config_is_fine_for_new_slots() -> None:
-    settings = Settings(
-        env="production",
-        model_research="anthropic/claude-sonnet-5",
-        public_base_url="https://aleph.example",
-        model_brief="anthropic/claude-sonnet-5",
-        session_secret_key="a-real-random-production-secret",
-        oidc_issuer="https://tenant.auth0.com",
-        oidc_client_id="prod-client",
-        oidc_client_secret="prod-secret",
-    )
-    assert settings.model_research == "anthropic/claude-sonnet-5"
-    assert settings.model_brief == "anthropic/claude-sonnet-5"

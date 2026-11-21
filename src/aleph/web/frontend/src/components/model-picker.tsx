@@ -159,7 +159,7 @@ export function ModelPicker({
  * it applies to, and why switching it mid-thread is a legitimate thing to do.
  *
  * **Two rails, one picker** (AL-330): the shaping rail's header carries the same
- * control for the `MODEL_SHAPER` slot (Phase 2B D10), under identical rules and
+ * control for the `MODEL_DEFAULT` model (Phase 2B D10), under identical rules and
  * with identical semantics — a per-message override, resolved per request and
  * persisted nowhere. The only things that differ are the two strings a test and
  * a screen reader need to tell the surfaces apart, so those are the only things

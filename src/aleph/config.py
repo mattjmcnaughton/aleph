@@ -13,21 +13,10 @@ _CLIENT_LABEL = re.compile(r"[a-z][a-z0-9_-]*")
 # model instead of an OpenRouter-backed one. Guarded out of production below.
 STUB_MODEL_ID = "stub"
 
-# Every ``Settings`` field that names a model slot, in declaration order. Single
+# Every ``Settings`` field that names a model, in declaration order. Single
 # source of truth: the production stub guard (``_forbid_stub_in_production``)
-# iterates it, and ``scripts/e2e_backend.py`` stubs each entry. A new slot added
-# to ``Settings`` but missed by a hand-synced copy of this list would silently
-# escape the guard — that is how ``stub`` would end up serving production
-# tutoring. Add the field here and both call sites follow.
-MODEL_SLOTS: tuple[str, ...] = (
-    "model_outline",
-    "model_lesson",
-    "model_judge",
-    "model_tutor",
-    "model_shaper",
-    "model_research",
-    "model_brief",
-)
+# iterates it, and ``scripts/e2e_backend.py`` stubs each entry.
+MODEL_SLOTS: tuple[str, ...] = ("model_default", "model_judge")
 
 
 # The convenient dev default for ``session_secret_key``. It is published in this
@@ -93,7 +82,7 @@ class Settings(BaseSettings):
         return datetime.timedelta(seconds=self.generation_stale_after_seconds)
 
     # --- AL-030: OpenRouter model routing (TDD §5.3, §14) ---------------------
-    # Appended as a self-contained block; the model slots resolve through
+    # Appended as a self-contained block; the models resolve through
     # ``services/openrouter.py``. ``ENV=production`` forbids the ``stub`` id so
     # the deterministic CI/e2e model can never be reached in prod.
 
@@ -105,27 +94,24 @@ class Settings(BaseSettings):
     # OpenRouter credential (empty locally / in CI; the stub needs no key).
     openrouter_api_key: str = ""
 
-    # The three model slots (TDD §8/§5.3). All start on one strong model — no
-    # premature tiering; per-slot refinement is driven by evals + cost data.
-    model_outline: str = "openai/gpt-5.6-luna"
-    model_lesson: str = "openai/gpt-5.6-luna"
+    # The one app-wide model: outline, lesson, tutor, shaper, research and
+    # brief all run on it. An admin's per-request picker override (below) is the
+    # only way a single call uses a different model.
+    model_default: str = "openai/gpt-6-luna"
     # MODEL_JUDGE is **eval-only**: it is read by ``evals/`` (the Layer 2 binary
     # judge, TDD §11) and by nothing on the request path — asserted by
-    # ``tests/unit/test_evals_judge.py``. Its refinement direction differs in
-    # kind from the other two (§5.3): LLM judges show self-preference bias, so
-    # using Luna for both generation and judging requires judge↔human agreement
-    # calibration to keep the ≥ 90% ship gate trustworthy (docs/evals.md).
-    model_judge: str = "openai/gpt-5.6-luna"
+    # ``tests/unit/test_evals_judge.py``.
+    model_judge: str = "openai/gpt-6-luna"
 
     # Comma-separated OpenRouter ids an admin may select per-request for the
-    # outline/lesson slots (the picker allowlist, D14/§5.3), in display order.
+    # outline, lesson, tutor, shaper, research and brief (the picker allowlist,
+    # D14/§5.3), in display order.
     model_allowlist: str = (
-        "openai/gpt-5.6-luna,"
-        "anthropic/claude-sonnet-5,"
-        "anthropic/claude-haiku-4-5,"
-        "anthropic/claude-opus-4-8,"
-        "openai/gpt-5.6-terra,"
-        "minimax/minimax-m3"
+        "openai/gpt-6-luna,"
+        "openai/gpt-6.2-sol,"
+        "anthropic/claude-haiku-5.5,"
+        "anthropic/claude-sonnet-5.5,"
+        "anthropic/claude-opus-5.5"
     )
 
     @property
@@ -408,18 +394,6 @@ class Settings(BaseSettings):
     # (every AL-xxx branch appends its own block; keep them separate to avoid
     # merge conflicts). All numbers here are §13's provisional ones.
 
-    # The fourth model slot, resolved through ``services/openrouter.py`` like the
-    # rest. Starts on the same strong model as every other slot (D4's
-    # uniform-start discipline); §5.3's refinement direction for this one is
-    # *down* (e.g. ``anthropic/claude-haiku-4-5``) once tutor evals hold and TTFT
-    # data favors it — streaming already hides most perceived latency, so the
-    # move waits for evidence. **It is also listed in ``MODEL_SLOTS``** — the
-    # production stub guard iterates that constant, so a slot missing from it
-    # would let the deterministic stub serve production tutoring. Admins may
-    # override it per message (never persisted, §5.3); the override rides the
-    # same shared ``model_allowlist``.
-    model_tutor: str = "openai/gpt-5.6-luna"
-
     # Carried-history window in *turns* (a learner message + its tutor reply, as
     # a unit), most recent first, dropped rather than summarized (D6). Bounded
     # is the invariant — the number is tunable, and the summary upgrade slots in
@@ -495,19 +469,6 @@ class Settings(BaseSettings):
     # (D11). Adding parallel knobs here would be the easy mistake; splitting them
     # is a trivial follow-up if Logfire ever shows contention.
 
-    # The fifth model slot, resolved through ``services/openrouter.py`` like the
-    # rest. Starts on the same strong model as every other slot (the
-    # uniform-start discipline); §5.3's refinement direction for this one is *up
-    # or sideways*, never down — proposal structure quality is the product, and a
-    # bad Proposal burns learner trust plus real generation spend on Apply, while
-    # TTFT matters less than for the tutor (the payoff is a card, not prose).
-    # **It is also listed in ``MODEL_SLOTS``** — the production stub guard
-    # iterates that constant, so a slot missing from it would let the
-    # deterministic stub propose production path edits. Admins may override it
-    # per message (never persisted, §5.3); the override rides the same shared
-    # ``model_allowlist`` as the other slots.
-    model_shaper: str = "openai/gpt-5.6-luna"
-
     # Hard cap on the lessons a single Proposal may add or revise (§13): both the
     # validator's bound and the prompt's instruction, so one Proposal stays small
     # and legible (PRD §5.4) — a bigger ask becomes two Proposals rather than one
@@ -569,7 +530,7 @@ class Settings(BaseSettings):
     # --- Phase 6: the analyst (TDD §13, D6/D7/D12/D14/D14a) -------------------
     # Appended as this phase's self-contained block at the END of Settings
     # (every phase branch appends its own; keep them separate to avoid merge
-    # conflicts). AL-501 is config-only — the two model slots, the caps, the
+    # conflicts). AL-501 is config-only — the caps, the
     # retrieval budget, the timeout/stale pair, and the flag. No retrieval
     # code, no models, no service, no router: those are later tickets in
     # epic #163.
@@ -580,21 +541,6 @@ class Settings(BaseSettings):
     # real value is a Fly secret, set once AL-502 lands (``docs/deploy.md``'s
     # Required row).
     exa_api_key: str = ""
-
-    # The seventh and eighth model slots (D7), resolved through
-    # ``services/openrouter.py`` like the rest. Both start on the same strong
-    # model as every other slot (the uniform-start discipline). Two slots, not
-    # one, because the two calls have opposite profiles: reading retrieved
-    # documents (``model_research``) is mechanical and huge-input, writing the
-    # Brief (``model_brief``) is quality-sensitive and short — the same split
-    # that separated ``outline`` from ``lesson``. **Both are also listed in
-    # ``MODEL_SLOTS``** — the production stub guard iterates that constant, so
-    # a slot missing from it would let the deterministic stub research or write
-    # production Briefs. The admin per-request picker reaches them too, but
-    # stored on the ``beats`` row rather than held on the request (D7) — a
-    # later ticket's concern.
-    model_research: str = "openai/gpt-5.6-luna"
-    model_brief: str = "openai/gpt-5.6-luna"
 
     # PRD §4.7's cap on how many Beats a learner may deploy, as config rather
     # than a constant (D14) — an open question (§15) dogfooding may move.

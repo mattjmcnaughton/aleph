@@ -173,7 +173,7 @@ async def send_shaping_message(
        learns its shape) and allowlist-bound (``422``). It is resolved **per
        request and persisted nowhere**, exactly as 2A's is: a reply is
        request-scoped, so there is nothing to resume and no column to add. It
-       binds the ``MODEL_SHAPER`` slot (D10).
+       binds the ``MODEL_DEFAULT`` slot (D10).
     2. **Admission** (``services/shaping.py``): the path is ``ready`` (``409`` —
        PRD §5.1's rule, server-enforced), the shaping conversation has no reply
        in flight (``409``, D11), the learner is under the daily cap (``429``,
@@ -201,7 +201,7 @@ async def send_shaping_message(
         validate_model_override(
             body.model, is_admin=admin, allowed=settings.allowlist_ids
         )
-        or settings.model_shaper
+        or settings.model_default
     )
     turn = await shaping_turn_service.admit(
         path=path,

@@ -69,7 +69,7 @@ class DeployBeatRequest(BaseModel):
 
     # ``model_research``/``model_brief`` start with the ``model_`` prefix
     # pydantic protects by default; the picker wire contract fixes these
-    # names (parity with the ``MODEL_RESEARCH``/``MODEL_BRIEF`` config
+    # names (parity with the ``MODEL_DEFAULT`` config
     # slots, ``CreatePathRequest``'s own precedent), so opt out of the
     # protected namespace rather than rename.
     model_config = ConfigDict(protected_namespaces=())

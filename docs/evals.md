@@ -51,7 +51,7 @@ two very different mechanisms with a gap in between:
 
 Neither answers the questions that come up every time a prompt, a cap, or a
 model slot changes: does this prompt revision still refuse what it must and
-still teach what it should? Is a cheaper model good enough for `MODEL_LESSON`?
+still teach what it should? Is a cheaper model good enough for `MODEL_DEFAULT`?
 An eval run answers those *before* shipping, by running the agents over a fixed
 seed set and scoring the generations (PRD §9, TDD §11).
 
@@ -322,7 +322,7 @@ this section is historical design context, not a runnable eval or current operat
 > rather than a one-liner riding two existing extensions.
 
 ```
-just evals --flashcards          # live: MODEL_OUTLINE/MODEL_LESSON/MODEL_FLASHCARD + the judge
+just evals --flashcards          # live: MODEL_DEFAULT + the judge
 just evals --flashcards --no-judge
 just evals --smoke --flashcards  # offline plumbing check, no key
 just evals --smoke --flashcards --judge
@@ -336,7 +336,7 @@ agent for the path's first slot (the same probe-lesson generation
 (`aleph.agents.flashcard`) on that lesson's real, freshly-generated Read
 passage and Quick-check stem. `--models` is rejected alongside `--flashcards`
 (one binding, not a sweep): the mode's whole point is scoring drafting quality
-against the configured `MODEL_FLASHCARD` slot, not comparing models in it.
+against the configured `MODEL_DEFAULT`, not comparing models in it.
 
 **There is no refusal branch to score.** Every case in
 `flashcard_seed_set.yaml` is a topic that generates — a refused topic has no
@@ -435,7 +435,7 @@ names).
 > is judged.
 
 ```
-just evals --briefs                # live: MODEL_RESEARCH/MODEL_BRIEF + the judge
+just evals --briefs                # live: MODEL_DEFAULT + the judge
 just evals --briefs --no-judge
 just evals --smoke --briefs         # offline plumbing check, no key, no Exa
 just evals --smoke --briefs --judge
@@ -797,7 +797,7 @@ recorded, with no other change.
 ## Running locally
 
 ```
-just evals                                     # MODEL_OUTLINE / MODEL_LESSON + the judge
+just evals                                     # MODEL_DEFAULT + the judge
 just evals --models anthropic/claude-haiku-4-5,minimax/minimax-m3
 just evals --no-judge                          # Layer 1 only: cheap, structural
 just evals --full-path-lessons 5               # deeper continuity probe (costs more)
@@ -805,7 +805,7 @@ just evals --agreement                         # calibration: judge vs. human la
 just evals --smoke                             # offline plumbing check, no key
 just evals --smoke --judge                     # ... including Layer 2, stub judge
 just evals --smoke --agreement                 # ... including calibration
-just evals --briefs                            # MODEL_RESEARCH / MODEL_BRIEF + the judge
+just evals --briefs                            # MODEL_DEFAULT + the judge
 just evals --smoke --briefs                     # offline plumbing check, no key, no Exa
 just evals --report .artifacts/evals/report.json
 just evals --max-concurrency 2

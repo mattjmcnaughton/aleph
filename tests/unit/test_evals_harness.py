@@ -644,7 +644,7 @@ async def test_the_report_artifact_records_crashes_and_the_lesson_slot() -> None
 def test_smoke_refuses_a_model_sweep() -> None:
     """``--smoke --models …`` would look like an offline sweep of those models."""
     with pytest.raises(SystemExit) as exit_info:
-        main(["--smoke", "--models", "anthropic/claude-haiku-4-5"])
+        main(["--smoke", "--models", "anthropic/claude-haiku-5.5"])
     assert exit_info.value.code == 2
 
 
@@ -1040,7 +1040,7 @@ async def test_brief_generation_task_replays_the_fixture_and_gates_novelty() -> 
 
 def test_brief_smoke_refuses_a_model_sweep() -> None:
     with pytest.raises(SystemExit) as exit_info:
-        main(["--smoke", "--briefs", "--models", "anthropic/claude-haiku-4-5"])
+        main(["--smoke", "--briefs", "--models", "anthropic/claude-haiku-5.5"])
     assert exit_info.value.code == 2  # misconfiguration, same as a missing key
 
 

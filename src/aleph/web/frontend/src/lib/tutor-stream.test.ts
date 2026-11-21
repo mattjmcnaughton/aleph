@@ -107,7 +107,7 @@ describe("streamTutorReply — SSE over a streamed POST", () => {
         lesson_id: LESSON_ID,
         content: "Go deeper",
         source: "suggestion",
-        model: "anthropic/claude-haiku-4-5",
+        model: "anthropic/claude-haiku-5.5",
       },
     });
 
@@ -118,7 +118,7 @@ describe("streamTutorReply — SSE over a streamed POST", () => {
       lesson_id: LESSON_ID,
       content: "Go deeper",
       source: "suggestion",
-      model: "anthropic/claude-haiku-4-5",
+      model: "anthropic/claude-haiku-5.5",
     });
   });
 

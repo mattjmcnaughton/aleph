@@ -949,7 +949,7 @@ async def test_non_admin_model_override_is_403(
             json={
                 "topic": "Rust ownership",
                 "level": "new_to_it",
-                "model_lesson": "anthropic/claude-haiku-4-5",
+                "model_lesson": "anthropic/claude-haiku-5.5",
             },
         )
         assert resp.status_code == 403, resp.text
@@ -1005,8 +1005,8 @@ async def test_admin_model_override_routes_chosen_model(
             json={
                 "topic": "Rust ownership",
                 "level": "some_experience",
-                "model_outline": "anthropic/claude-opus-4-8",
-                "model_lesson": "anthropic/claude-haiku-4-5",
+                "model_outline": "anthropic/claude-opus-5.5",
+                "model_lesson": "anthropic/claude-haiku-5.5",
             },
         )
         assert resp.status_code == 202, resp.text
@@ -1018,11 +1018,11 @@ async def test_admin_model_override_routes_chosen_model(
         await client.get(f"/api/v1/paths/{path_id}")
         await collector.drain()
 
-    assert "anthropic/claude-opus-4-8" in calls, "outline override was not routed"
-    assert "anthropic/claude-haiku-4-5" in calls, "lesson override was not routed"
+    assert "anthropic/claude-opus-5.5" in calls, "outline override was not routed"
+    assert "anthropic/claude-haiku-5.5" in calls, "lesson override was not routed"
     # The configured default was never resolved for this path — the override, not
     # config, chose the models.
-    assert settings.model_outline not in calls  # the config default was never resolved
+    assert settings.model_default not in calls  # the config default was never resolved
 
 
 @pytest.mark.anyio
@@ -1039,8 +1039,8 @@ async def test_admin_override_persists_on_path_row(
             json={
                 "topic": "Rust ownership",
                 "level": "some_experience",
-                "model_outline": "anthropic/claude-opus-4-8",
-                "model_lesson": "anthropic/claude-haiku-4-5",
+                "model_outline": "anthropic/claude-opus-5.5",
+                "model_lesson": "anthropic/claude-haiku-5.5",
             },
         )
         assert resp.status_code == 202, resp.text
@@ -1048,8 +1048,8 @@ async def test_admin_override_persists_on_path_row(
         await spawn.drain()
 
     row = await _path_row(path_id)
-    assert row.model_outline == "anthropic/claude-opus-4-8"
-    assert row.model_lesson == "anthropic/claude-haiku-4-5"
+    assert row.model_outline == "anthropic/claude-opus-5.5"
+    assert row.model_lesson == "anthropic/claude-haiku-5.5"
 
 
 @pytest.mark.anyio
@@ -1261,7 +1261,7 @@ async def test_non_admin_override_at_rate_cap_is_403_not_429(
             json={
                 "topic": "Topic two",
                 "level": "new_to_it",
-                "model_outline": "anthropic/claude-haiku-4-5",
+                "model_outline": "anthropic/claude-haiku-5.5",
             },
         )
         assert resp.status_code == 403, resp.text
@@ -1289,7 +1289,7 @@ async def test_outline_retry_reroutes_the_persisted_override(
             json={
                 "topic": "[force-outline-failure] anything",
                 "level": "new_to_it",
-                "model_outline": "anthropic/claude-opus-4-8",
+                "model_outline": "anthropic/claude-opus-5.5",
             },
         )
         assert resp.status_code == 202
@@ -1301,4 +1301,4 @@ async def test_outline_retry_reroutes_the_persisted_override(
         assert retry.status_code == 202
         await collector.drain()
 
-    assert "anthropic/claude-opus-4-8" in calls, "retry did not re-route the override"
+    assert "anthropic/claude-opus-5.5" in calls, "retry did not re-route the override"

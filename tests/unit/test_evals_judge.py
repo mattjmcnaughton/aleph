@@ -905,7 +905,7 @@ async def test_the_judge_never_sees_the_human_label() -> None:
 @pytest.mark.parametrize(
     "argv",
     [
-        ["--agreement", "--models", "anthropic/claude-haiku-4-5"],
+        ["--agreement", "--models", "anthropic/claude-haiku-5.5"],
         ["--agreement", "--no-judge"],
         ["--full-path-lessons", "0"],
     ],

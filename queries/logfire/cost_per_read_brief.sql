@@ -22,7 +22,7 @@
 -- before trusting this query's dollar figure over any longer horizon; if
 -- they drift, this query's dollars drift with them and stop meaning what
 -- the header claims.
---   * MODEL_RESEARCH / MODEL_BRIEF (config.py) default to Claude Sonnet 5:
+--   * MODEL_DEFAULT (config.py) was Claude Sonnet 5 when this was written:
 --     $3.00 per 1M prompt tokens, $15.00 per 1M completion tokens.
 --   * Exa neuralSearch (services/retrieval.py::ExaRetriever, CONFIRMED FROM
 --     DOCS): $0.005 per query (one Exa `/search` call per plan query, the

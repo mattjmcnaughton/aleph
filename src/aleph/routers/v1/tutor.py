@@ -271,7 +271,7 @@ async def send_message(
         validate_model_override(
             body.model, is_admin=admin, allowed=settings.allowlist_ids
         )
-        or settings.model_tutor
+        or settings.model_default
     )
     turn = await tutor_turn_service.admit(
         path=path,

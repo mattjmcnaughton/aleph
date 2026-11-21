@@ -80,7 +80,7 @@ class ModelOverrides:
     """A create request's validated per-slot model choices (AL-052, §5.3).
 
     ``None`` on a slot means "use the configured default" — the orchestrator
-    falls back to ``MODEL_OUTLINE``/``MODEL_LESSON``.
+    falls back to ``MODEL_DEFAULT``.
     """
 
     model_outline: str | None

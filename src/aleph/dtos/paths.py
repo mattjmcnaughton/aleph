@@ -90,7 +90,7 @@ class CreatePathRequest(BaseModel):
 
     # ``model_outline``/``model_lesson`` start with the ``model_`` prefix pydantic
     # protects by default; the picker wire contract fixes these names (parity with
-    # the ``MODEL_OUTLINE``/``MODEL_LESSON`` config slots), so opt out of the
+    # the ``MODEL_DEFAULT`` config slots), so opt out of the
     # protected namespace rather than rename.
     model_config = ConfigDict(protected_namespaces=())
 

@@ -35,7 +35,7 @@ on:
         description: >-
           seed-set mode only. Comma-separated OpenRouter model ids to sweep;
           each is bound to both the outline and lesson slots (empty = the
-          configured MODEL_OUTLINE / MODEL_LESSON). The judge always stays on
+          configured MODEL_DEFAULT). The judge always stays on
           MODEL_JUDGE — it is the measuring instrument, so it must not vary with
           what is being measured.
         required: false
