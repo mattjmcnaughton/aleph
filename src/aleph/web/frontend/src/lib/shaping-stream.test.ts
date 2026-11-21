@@ -105,7 +105,7 @@ describe("streamShapingReply — the shaping turn's stream", () => {
       input: {
         content: "What's missing?",
         source: "suggestion",
-        model: "anthropic/claude-sonnet-5",
+        model: "anthropic/claude-sonnet-5.5",
       },
     });
 
@@ -117,7 +117,7 @@ describe("streamShapingReply — the shaping turn's stream", () => {
     expect(request.body).toEqual({
       content: "What's missing?",
       source: "suggestion",
-      model: "anthropic/claude-sonnet-5",
+      model: "anthropic/claude-sonnet-5.5",
     });
   });
 

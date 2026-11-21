@@ -306,12 +306,12 @@ class SendShapingMessageRequest(BaseModel):
     ``model`` is the **admin** per-message model override (TDD §5.3/D10),
     enforced exactly as 2A's: ``403`` for a non-admin (checked before the
     allowlist), ``422`` off ``MODEL_ALLOWLIST``, resolved per request and
-    **persisted nowhere**. It binds the shaper slot (AL-301 put ``MODEL_SHAPER``
+    **persisted nowhere**. It binds the shaper slot (AL-301 put ``MODEL_DEFAULT``
     behind the same allowlist), so an A/B of proposal quality costs no deploy.
     """
 
     # ``model`` starts with the ``model_`` prefix pydantic protects by default;
-    # the picker's wire contract fixes the name (parity with ``MODEL_SHAPER``
+    # the picker's wire contract fixes the name (parity with ``MODEL_DEFAULT``
     # and with 2A's ``SendMessageRequest``), so opt out of the protected
     # namespace rather than rename.
     model_config = ConfigDict(protected_namespaces=())

@@ -979,7 +979,7 @@ class BriefingService:
                     model=self._resolve_model(
                         context.model_research
                         if context.model_research is not None
-                        else self._config.model_research
+                        else self._config.model_default
                     ),
                 )
                 stats.add_usage(researcher_run)
@@ -1044,7 +1044,7 @@ class BriefingService:
                     model=self._resolve_model(
                         context.model_brief
                         if context.model_brief is not None
-                        else self._config.model_brief
+                        else self._config.model_default
                     ),
                 )
                 stats.add_usage(analyst_run)

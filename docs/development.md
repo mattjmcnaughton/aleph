@@ -186,7 +186,7 @@ posture is unchanged, it just no longer applies to a launched feature
 that are not flag problems: the rail's entry only renders on a **`ready`** path
 (sending is `409` before the outline exists), and a real model proposes when it
 judges an ask concrete. To force the branches, run the shaper slot on the
-deterministic stub (`MODEL_SHAPER=stub` — what `scripts/e2e_backend.py` wires for
+deterministic stub (`MODEL_DEFAULT=stub` — what `scripts/e2e_backend.py` wires for
 the Playwright suite, and what `ENV=production` forbids) and put a sentinel in
 the message: `[force-proposal-add]`, `[force-proposal-revise]`,
 `[force-shaping-decline]` or `[force-shaping-failure]`

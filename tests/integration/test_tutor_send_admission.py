@@ -189,9 +189,9 @@ async def test_admin_model_override_routes_the_reply_and_persists_nothing(
     app: FastAPI, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The chosen id reaches the model call and is written down nowhere."""
-    override = "anthropic/claude-haiku-4-5"
+    override = "anthropic/claude-haiku-5.5"
     assert override in settings.allowlist_ids
-    assert override != settings.model_tutor
+    assert override != settings.model_default
 
     async with _client(app) as client:
         user_id = await _sign_in(client, monkeypatch, ADMIN)
@@ -225,7 +225,7 @@ async def test_default_reply_routes_the_configured_tutor_slot(
         wire = await _send(client, _send_url(path_id), _body(lesson_id))
 
     assert wire.names[-1] == "done", wire.names
-    assert routed == [settings.model_tutor]
+    assert routed == [settings.model_default]
 
 
 @pytest.mark.anyio

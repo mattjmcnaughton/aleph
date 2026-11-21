@@ -978,7 +978,7 @@ async def test_non_admin_model_override_is_403(
                 "topic": "x",
                 "level": "new_to_it",
                 "anchor_weekday": 0,
-                "model_research": "anthropic/claude-haiku-4-5",
+                "model_research": "anthropic/claude-haiku-5.5",
             },
         )
     assert resp.status_code == 403, resp.text
@@ -1028,8 +1028,8 @@ async def test_admin_model_override_persists_on_the_beat_row(
                 "topic": "x",
                 "level": "new_to_it",
                 "anchor_weekday": 0,
-                "model_research": "anthropic/claude-opus-4-8",
-                "model_brief": "anthropic/claude-haiku-4-5",
+                "model_research": "anthropic/claude-opus-5.5",
+                "model_brief": "anthropic/claude-haiku-5.5",
             },
         )
         assert resp.status_code == 202, resp.text
@@ -1037,8 +1037,8 @@ async def test_admin_model_override_persists_on_the_beat_row(
         await spawn.drain()
 
     beat = await _reload_beat(beat_id)
-    assert beat.model_research == "anthropic/claude-opus-4-8"
-    assert beat.model_brief == "anthropic/claude-haiku-4-5"
+    assert beat.model_research == "anthropic/claude-opus-5.5"
+    assert beat.model_brief == "anthropic/claude-haiku-5.5"
 
 
 # --------------------------------------------------------------------------- #

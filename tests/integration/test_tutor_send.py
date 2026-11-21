@@ -562,7 +562,7 @@ async def test_a_never_started_stream_still_frees_the_conversation(
             lesson_id=lesson_id,
             content="asking again",
             source=MessageSource.TYPED,
-            model_id=settings.model_tutor,
+            model_id=settings.model_default,
         )
     service.release(turn)
     assert await _count(Message) == 0

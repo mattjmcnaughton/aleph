@@ -11,31 +11,25 @@ from pydantic import ValidationError
 from aleph.config import MODEL_SLOTS, Settings
 
 
-def test_model_slots_default_to_luna() -> None:
-    # All generation and conversation slots use the cost-efficient default.
+def test_models_default_to_gpt_6_luna() -> None:
+    # One app-wide model, plus the eval-only judge.
     settings = Settings()
     assert {slot: getattr(settings, slot) for slot in MODEL_SLOTS} == {
-        "model_outline": "openai/gpt-5.6-luna",
-        "model_lesson": "openai/gpt-5.6-luna",
-        "model_judge": "openai/gpt-5.6-luna",
-        "model_tutor": "openai/gpt-5.6-luna",
-        "model_shaper": "openai/gpt-5.6-luna",
-        "model_research": "openai/gpt-5.6-luna",
-        "model_brief": "openai/gpt-5.6-luna",
+        "model_default": "openai/gpt-6-luna",
+        "model_judge": "openai/gpt-6-luna",
     }
 
 
 def test_allowlist_default_and_parsing() -> None:
     settings = Settings()
     ids = settings.allowlist_ids
-    # The default model is first; prior options remain available for comparison.
+    # The default model is first; every entry exists on OpenRouter.
     assert ids == (
-        "openai/gpt-5.6-luna",
-        "anthropic/claude-sonnet-5",
-        "anthropic/claude-haiku-4-5",
-        "anthropic/claude-opus-4-8",
-        "openai/gpt-5.6-terra",
-        "minimax/minimax-m3",
+        "openai/gpt-6-luna",
+        "openai/gpt-6.2-sol",
+        "anthropic/claude-haiku-5.5",
+        "anthropic/claude-sonnet-5.5",
+        "anthropic/claude-opus-5.5",
     )
 
 
@@ -45,18 +39,9 @@ def test_allowlist_parsing_trims_and_drops_empties() -> None:
 
 
 def test_stub_allowed_outside_production() -> None:
-    # The stub is the CI/e2e model (D9); it must be selectable in dev/CI — for
-    # the Phase 2 tutor and Phase 2B shaper slots as much as the Phase 1 ones.
-    settings = Settings(
-        env="development",
-        model_outline="stub",
-        model_lesson="stub",
-        model_tutor="stub",
-        model_shaper="stub",
-    )
-    assert settings.model_outline == "stub"
-    assert settings.model_tutor == "stub"
-    assert settings.model_shaper == "stub"
+    # The stub is the CI/e2e model (D9); it must be selectable in dev/CI.
+    settings = Settings(env="development", model_default="stub")
+    assert settings.model_default == "stub"
 
 
 # Spelled out rather than parametrized over ``config.MODEL_SLOTS``: the point is
@@ -65,11 +50,8 @@ def test_stub_allowed_outside_production() -> None:
 @pytest.mark.parametrize(
     "slot",
     [
-        "model_outline",
-        "model_lesson",
+        "model_default",
         "model_judge",
-        "model_tutor",
-        "model_shaper",
     ],
 )
 def test_stub_rejected_in_production(slot: str) -> None:
@@ -91,7 +73,7 @@ def test_non_stub_production_config_is_fine() -> None:
     # the model-routing happy path must supply them too.
     settings = Settings(
         env="production",
-        model_outline="anthropic/claude-sonnet-5",
+        model_default="anthropic/claude-sonnet-5.5",
         public_base_url="https://aleph.example",
         session_secret_key="a-real-random-production-secret",
         oidc_issuer="https://tenant.auth0.com",

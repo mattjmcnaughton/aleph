@@ -58,7 +58,7 @@ async def test_live_outline_then_lesson_round_trip() -> None:
         outline_run = await build_outline_agent().run(
             _TOPIC,
             deps=OutlineDeps(level=_LEVEL, caps=OutlineCaps()),
-            model=resolve_model(settings.model_outline),
+            model=resolve_model(settings.model_default),
         )
         outline = outline_run.output
         # A structured refusal is a valid outline-agent result, but this topic is
@@ -81,7 +81,7 @@ async def test_live_outline_then_lesson_round_trip() -> None:
         lesson_run = await build_lesson_agent().run(
             build_lesson_prompt(deps),
             deps=deps,
-            model=resolve_model(settings.model_lesson),
+            model=resolve_model(settings.model_default),
         )
 
     # The output schema still binds against the live model: a Read passage plus a

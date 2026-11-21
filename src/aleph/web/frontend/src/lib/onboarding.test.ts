@@ -83,34 +83,34 @@ describe("buildCreatePathInput", () => {
   it("[AL-065] carries the chosen models under the documented field names", () => {
     const input = buildCreatePathInput({
       ...base,
-      modelOutline: "anthropic/claude-opus-4-8",
-      modelLesson: "anthropic/claude-haiku-4-5",
+      modelOutline: "anthropic/claude-opus-5.5",
+      modelLesson: "anthropic/claude-haiku-5.5",
     });
 
     expect(input).toEqual({
       topic: "Rust ownership",
       level: "some_experience",
-      model_outline: "anthropic/claude-opus-4-8",
-      model_lesson: "anthropic/claude-haiku-4-5",
+      model_outline: "anthropic/claude-opus-5.5",
+      model_lesson: "anthropic/claude-haiku-5.5",
     });
   });
 
   it("[AL-065] omits only the slot left at the default", () => {
     const outlineOnly = buildCreatePathInput({
       ...base,
-      modelOutline: "openai/gpt-5.6-terra",
+      modelOutline: "openai/gpt-6.2-sol",
       modelLesson: MODEL_SLOT_DEFAULT,
     });
     expect("model_lesson" in outlineOnly).toBe(false);
-    expect(outlineOnly.model_outline).toBe("openai/gpt-5.6-terra");
+    expect(outlineOnly.model_outline).toBe("openai/gpt-6.2-sol");
 
     const lessonOnly = buildCreatePathInput({
       ...base,
       modelOutline: MODEL_SLOT_DEFAULT,
-      modelLesson: "minimax/minimax-m3",
+      modelLesson: "openai/gpt-6-luna",
     });
     expect("model_outline" in lessonOnly).toBe(false);
-    expect(lessonOnly.model_lesson).toBe("minimax/minimax-m3");
+    expect(lessonOnly.model_lesson).toBe("openai/gpt-6-luna");
   });
 
   it("[AL-065] omits both slots when the picker never rendered at all", () => {

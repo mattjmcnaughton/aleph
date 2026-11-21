@@ -59,7 +59,7 @@ provider.
     agreement — no generation, much cheaper, and the run to dispatch after any
     change to the judge prompt or its calibration examples).
   - `models` — comma-separated OpenRouter ids to sweep in `seed-set` mode; empty
-    uses the configured `MODEL_OUTLINE` / `MODEL_LESSON`. The judge always stays
+    uses the configured `MODEL_DEFAULT`. The judge always stays
     on `MODEL_JUDGE`.
   - `judge` — run Layer 2 (default on). Uncheck for a cheap Layer-1-only
     structural pass; one judge call per artifact is the bulk of a run's cost.

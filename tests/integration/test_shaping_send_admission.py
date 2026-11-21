@@ -431,7 +431,7 @@ async def test_default_reply_routes_the_configured_shaper_slot(
         wire = await _send(client, _send_url(path_id), _body())
 
     assert wire.names[-1] == "done", wire.names
-    assert routed == [settings.model_shaper]
+    assert routed == [settings.model_default]
 
 
 @pytest.mark.anyio
@@ -439,7 +439,7 @@ async def test_admin_model_override_routes_the_reply_and_persists_nothing(
     app: FastAPI, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The chosen id reaches the model call and is written down nowhere."""
-    override = "anthropic/claude-haiku-4-5"
+    override = "anthropic/claude-haiku-5.5"
     assert override in settings.allowlist_ids
 
     async with _client(app) as client:

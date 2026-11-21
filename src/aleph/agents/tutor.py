@@ -611,7 +611,7 @@ def build_tutor_agent() -> Agent[TutorDeps, str]:
     Built WITHOUT a bound model so it can be imported, unit tested, and evaluated
     with no configuration and no network: callers supply the model at run time
     via ``agent.run_stream(question, deps=deps, message_history=..., model=...)``
-    (the service resolves ``MODEL_TUTOR``, a per-message admin override, or the
+    (the service resolves ``MODEL_DEFAULT``, a per-message admin override, or the
     stub), and tests inject a ``FunctionModel`` the same way.
 
     The returned agent holds no per-reply state, so one instance may serve many

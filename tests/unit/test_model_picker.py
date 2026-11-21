@@ -16,7 +16,7 @@ from aleph.dtos.paths import CreatePathRequest
 from aleph.models import Level
 from aleph.routers.v1.paths import resolve_model_overrides
 
-ALLOWED = ("anthropic/claude-sonnet-5", "anthropic/claude-haiku-4-5")
+ALLOWED = ("anthropic/claude-sonnet-5.5", "anthropic/claude-haiku-5.5")
 
 
 def _request(**overrides: str) -> CreatePathRequest:
@@ -32,20 +32,20 @@ def test_no_override_is_allowed_for_anyone() -> None:
 def test_admin_allowlisted_override_passes_through() -> None:
     result = resolve_model_overrides(
         _request(
-            model_outline="anthropic/claude-sonnet-5",
-            model_lesson="anthropic/claude-haiku-4-5",
+            model_outline="anthropic/claude-sonnet-5.5",
+            model_lesson="anthropic/claude-haiku-5.5",
         ),
         is_admin=True,
         allowed=ALLOWED,
     )
-    assert result.model_outline == "anthropic/claude-sonnet-5"
-    assert result.model_lesson == "anthropic/claude-haiku-4-5"
+    assert result.model_outline == "anthropic/claude-sonnet-5.5"
+    assert result.model_lesson == "anthropic/claude-haiku-5.5"
 
 
 def test_non_admin_override_raises_403() -> None:
     with pytest.raises(HTTPException) as exc:
         resolve_model_overrides(
-            _request(model_lesson="anthropic/claude-haiku-4-5"),
+            _request(model_lesson="anthropic/claude-haiku-5.5"),
             is_admin=False,
             allowed=ALLOWED,
         )
