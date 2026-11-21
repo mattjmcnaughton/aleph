@@ -29,6 +29,7 @@ amp orb service start storybook --port 6006 --portal \
 | `src/stories/screens.stories.tsx` | One story per screen and state: Home, Login, New path, Path, Lesson, Flow, Beat, Brief, Settings. |
 | `src/stories/components.stories.tsx` | Shared components in isolation. |
 | `src/stories/foundations.stories.tsx` | The design tokens from `tailwind.config.ts`. |
+| `src/stories/concepts.stories.tsx` | `Concepts/Directions`: the design directions considered for Nocturne, side by side ([`design.md`](design.md)). |
 
 ## Adding a story
 

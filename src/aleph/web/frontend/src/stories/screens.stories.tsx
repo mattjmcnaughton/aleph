@@ -102,6 +102,16 @@ export const PathInProgress: Story = {
   args: { url: `/paths/${IDS.rust}` },
 };
 
+export const PathShaping: Story = {
+  name: "Path — shaping rail open (pending Proposal)",
+  args: { url: `/paths/${IDS.rust}` },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(await canvas.findByTestId("shaping-rail-mark"));
+    await expect(await canvas.findByTestId("shaping-rail")).toBeInTheDocument();
+  },
+};
+
 export const PathFresh: Story = { name: "Path — fresh", args: { url: `/paths/${IDS.k8s}` } };
 
 export const PathComplete: Story = {
@@ -130,6 +140,17 @@ export const PathFailed: Story = {
 export const Lesson: Story = {
   name: "Lesson — ready (tutor thread seeded)",
   args: { url: `/lessons/${IDS.rustCurrentLesson}` },
+};
+
+export const LessonTutorOpen: Story = {
+  name: "Lesson — tutor open",
+  args: { url: `/lessons/${IDS.rustCurrentLesson}` },
+  // The rail opens from its mark: a sheet on a phone, a docked column at `lg`.
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(await canvas.findByTestId("tutor-rail-mark"));
+    await expect(await canvas.findByTestId("tutor-rail")).toBeInTheDocument();
+  },
 };
 
 export const LessonRevealed: Story = {
