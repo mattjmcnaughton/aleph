@@ -114,14 +114,6 @@ screenshots:
 test-external:
     uv run pytest -m external
 
-# Run the agent eval harness (needs OPENROUTER_API_KEY; `--smoke` offline, `--agreement` calibration). See docs/evals.md
-evals *ARGS:
-    uv run python -m evals {{ARGS}}
-
-# Record evals/fixtures/retrieval/*.yaml from the live Exa API (opt-in, costs money; needs EXA_API_KEY). Idempotent — see docs/evals.md
-record-retrieval-fixtures *ARGS:
-    uv run python -m scripts.record_retrieval_fixtures {{ARGS}}
-
 # Fast pre-push check (backend + frontend)
 gate: gate-be gate-fe
 

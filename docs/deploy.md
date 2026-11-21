@@ -129,13 +129,12 @@ forgetting it would silently *disable* the guards it arms — the `stub` model b
 unreachable, real auth secrets become mandatory, and the session cookie is forced
 `Secure` regardless of the supplied flag.
 
-Everything else in `Settings` (model slots and the admin `MODEL_ALLOWLIST`,
+Everything else in `Settings` (`MODEL_DEFAULT` and the admin `MODEL_ALLOWLIST`,
 `ADMIN_EMAIL_DOMAINS`, the §14 caps and timings, `OTEL_EXPORTER_OTLP_ENDPOINT`) has a
 production-ready default and only needs an `[env]` entry to override it.
 `ADMIN_EMAIL_DOMAINS` already defaults to `mattjmcnaughton.com`, which is what makes
 derived admin (D14) work for the operator's own Auth0 login with no extra
-configuration. `MODEL_JUDGE` is eval-only and is never read on the request path — it
-does not belong in production config at all.
+configuration.
 
 ## One-time cutover (order matters)
 

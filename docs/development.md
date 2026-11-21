@@ -206,19 +206,12 @@ research run fails immediately and visibly (`research_state: "failed"`,
 retryable) — correct behavior (TDD §12: startup must still succeed without
 the key, and research must fail visibly rather than publish uncited), but it
 means a plain `just dev-be` never produces a real Brief. There is no dev-mode
-wiring that points the ordinary app factory at `FixtureRetriever` or
-`StubRetriever` instead — both exist only in other harnesses:
+wiring that points the ordinary app factory at `StubRetriever` instead — it
+exists only in the e2e harness:
 
-- **The eval harness, offline** — `just evals --smoke --briefs` runs the
-  actual researcher/analyst agents against `FixtureRetriever` replaying
-  `evals/fixtures/retrieval/*.yaml` (today, hand-authored placeholders — see
-  [`evals.md`](evals.md)), with no key and no network call. This exercises the
-  pipeline's logic end to end, but it is the eval CLI, not the web app — there
-  is no Beat row, no rail, nothing to click through.
 - **The Playwright e2e suite** — `just test-e2e` boots
-  `scripts/e2e_backend.py`, which wires `StubRetriever` (not
-  `FixtureRetriever`) into `briefing_service` in place of the lifespan's own
-  binding, alongside the stub model on every slot. This is the one path that
+  `scripts/e2e_backend.py`, which wires `StubRetriever` into `briefing_service` in place of the lifespan's own
+  binding, alongside the stub model. This is the one path that
   produces an actual, clickable Beat/Brief through the real HTTP API with no
   key: sign in, deploy a Beat, and its research resolves deterministically
   against the stub's synthetic documents. Two sentinels in the Beat's topic

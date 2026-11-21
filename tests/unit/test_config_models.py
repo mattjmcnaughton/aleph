@@ -12,11 +12,10 @@ from aleph.config import MODEL_SLOTS, Settings
 
 
 def test_models_default_to_gpt_6_luna() -> None:
-    # One app-wide model, plus the eval-only judge.
+    # One app-wide model.
     settings = Settings()
     assert {slot: getattr(settings, slot) for slot in MODEL_SLOTS} == {
         "model_default": "openai/gpt-6-luna",
-        "model_judge": "openai/gpt-6-luna",
     }
 
 
@@ -51,7 +50,6 @@ def test_stub_allowed_outside_production() -> None:
     "slot",
     [
         "model_default",
-        "model_judge",
     ],
 )
 def test_stub_rejected_in_production(slot: str) -> None:

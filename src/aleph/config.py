@@ -16,7 +16,7 @@ STUB_MODEL_ID = "stub"
 # Every ``Settings`` field that names a model, in declaration order. Single
 # source of truth: the production stub guard (``_forbid_stub_in_production``)
 # iterates it, and ``scripts/e2e_backend.py`` stubs each entry.
-MODEL_SLOTS: tuple[str, ...] = ("model_default", "model_judge")
+MODEL_SLOTS: tuple[str, ...] = ("model_default",)
 
 
 # The convenient dev default for ``session_secret_key``. It is published in this
@@ -98,10 +98,6 @@ class Settings(BaseSettings):
     # brief all run on it. An admin's per-request picker override (below) is the
     # only way a single call uses a different model.
     model_default: str = "openai/gpt-6-luna"
-    # MODEL_JUDGE is **eval-only**: it is read by ``evals/`` (the Layer 2 binary
-    # judge, TDD §11) and by nothing on the request path — asserted by
-    # ``tests/unit/test_evals_judge.py``.
-    model_judge: str = "openai/gpt-6-luna"
 
     # Comma-separated OpenRouter ids an admin may select per-request for the
     # outline, lesson, tutor, shaper, research and brief (the picker allowlist,

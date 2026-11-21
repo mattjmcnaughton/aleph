@@ -339,7 +339,7 @@ class _UnconfiguredRetriever:
         msg = (
             "BriefingService has no live Retriever configured — AL-523's "
             "ExaRetriever has not shipped yet. Construct "
-            "BriefingService(retriever=...) explicitly (a FixtureRetriever/"
+            "BriefingService(retriever=...) explicitly (a "
             "StubRetriever in tests, ExaRetriever in production once it lands)."
         )
         raise RetrievalUnavailableError(msg)
@@ -542,7 +542,7 @@ class BriefingService:
     ``GenerationOrchestrator``'s shape (TDD §2:
     "reuse the pattern, not the code"), so tests swap ``_spawn`` for a
     drainable collector, ``_resolve_model`` for the deterministic stub, and
-    ``_retriever`` for a ``FixtureRetriever``/``StubRetriever``/fake, the same
+    ``_retriever`` for a ``StubRetriever``/fake, the same
     way ``tests/integration/conftest.py``'s ``CollectingSpawn``/``stub_resolver``
     already do for lesson generation.
     """

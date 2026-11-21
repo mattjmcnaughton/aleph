@@ -3,9 +3,8 @@
 Four things live here: the `Retriever` `Protocol` every provider implements,
 the pure query planner, `retrieve()` — the single entry point that owns every
 invariant a Brief's retrieved text must satisfy, so a second provider can
-never ship without them — and the three implementations D6 names: `ExaRetriever`
-(live, ticket AL-523), `FixtureRetriever` (evals + integration), and
-`StubRetriever` (e2e, beside `services/stub_model.py`).
+never ship without them — and the two implementations: `ExaRetriever`
+(live, ticket AL-523), and `StubRetriever` (e2e, beside `services/stub_model.py`).
 
 **Purity note, carried from the TDD verbatim.** `build_query_plan` is a pure
 function but lives here rather than in `domains/`, because it encodes
@@ -34,7 +33,6 @@ from aleph.agents.researcher import RetrievedDocument
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
-    from pathlib import Path
 
 logger = structlog.get_logger(__name__)
 
@@ -76,9 +74,8 @@ class QueryPlan:
     documents, not the provider's date filter — but the STRUCTURED value a
     provider can filter on (Exa's `startPublishedDate`) now has exactly one
     source of truth: this field, read by `retrieve()` and passed to
-    `Retriever.search(queries, since=...)`. `FixtureRetriever` and
-    `StubRetriever` accept the parameter and ignore it (D10: fixture replay
-    is keyed on the RECORDED queries, never re-derived from a live `since`).
+    `Retriever.search(queries, since=...)`. `StubRetriever` accepts the
+    parameter and ignores it.
     """
 
     queries: tuple[str, ...]
@@ -157,8 +154,7 @@ def build_query_plan(
 class Retriever(Protocol):
     """The retrieval seam every provider implements.
 
-    Three implementations across the phase (D6): `ExaRetriever` (live,
-    below), `FixtureRetriever` (evals + integration, below), and
+    Two implementations (D6): `ExaRetriever` (live, below) and
     `StubRetriever` (e2e, below). An agent never sees a `Retriever` — it
     receives `RetrievedDocument`s as plain data in its `Deps` (TDD §3).
     """
@@ -179,8 +175,8 @@ class Retriever(Protocol):
         (`build_query_plan`) — passed again here, structured, so a provider
         with its own date filter (`ExaRetriever`'s `startPublishedDate`) has
         somewhere to put it that does not require a fresh instance per call.
-        A provider with no such filter (`FixtureRetriever`, `StubRetriever`)
-        is free to ignore it; neither derives a second value from it.
+        A provider with no such filter (`StubRetriever`) is free to ignore
+        it, and never derives a second value from it.
         `retrieve()` (the only production call site) always passes it
         explicitly; the default here exists only so a test can construct a
         `Retriever` and call `search()` directly without caring about it.
@@ -227,10 +223,9 @@ async def retrieve(
       query order, most-valuable-angle-first). That selection rule is
       **deterministic and stable**: it depends only on the retriever's own
       result order, which is fixed for every implementation here
-      (`FixtureRetriever` replays a recorded order, `StubRetriever` derives
-      its output purely from query text) — never on a runtime detail like
-      dict iteration or a random tiebreak — so two runs of the same fixture
-      keep the same documents, byte-identical (§11).
+      (`StubRetriever` derives its output purely from query text) — never on
+      a runtime detail like dict iteration or a random tiebreak — so two runs
+      over the same results keep the same documents, byte-identical (§11).
     - **Apply the character budget** (D14a). Even shares across the
       documents that survive the cap, then redistributes what short
       documents leave unused to the documents that need it — see
@@ -604,7 +599,7 @@ class ExaRetriever:
     `httpx` itself is not a new dependency at runtime — it already resolves
     transitively via `logfire[httpx]`/`pydantic-ai` — but this ticket
     promotes it to a direct dependency in `pyproject.toml`, on the same
-    reasoning `_load_fixture`'s pyyaml note below records: a top-level
+    reasoning that a top-level
     `import httpx` reachable from production should not depend on some other
     package's extra staying exactly as configured.
 
@@ -650,7 +645,7 @@ class ExaRetriever:
 
     **`since` rides on each `search()` call, not on the instance** (corrected
     from an earlier version of this docstring, which bound it at
-    construction "matching `FixtureRetriever`'s `beat`" — that shape only
+    construction — that shape only
     produces the right per-Beat date filter if a fresh instance is built per
     Beat, and nothing did: `services/lifecycle.py` binds ONE `ExaRetriever`
     for the whole process's lifetime, so a construction-time `since` was
@@ -774,9 +769,6 @@ class ExaRetriever:
         return documents
 
 
-# --- FixtureRetriever — evals + integration replay (TDD §5.2, §10, D10) --------
-
-
 def _seed(text: str) -> int:
     """A stable (cross-process) integer seed from `text` (`stub_model.py`'s trick).
 
@@ -784,190 +776,6 @@ def _seed(text: str) -> int:
     across the pytest and Playwright/server processes alike.
     """
     return int.from_bytes(hashlib.sha256(text.encode("utf-8")).digest()[:8], "big")
-
-
-class FixtureRetriever:
-    """Replays a recorded retrieval fixture — evals + integration (TDD §10, D10).
-
-    **Keyed on the Beat**: constructed with the Beat's fixture key (`beat`)
-    and the directory holding recorded fixtures, it loads
-    `{fixtures_dir}/{beat}.yaml` once, at construction. On `search()` it
-    **ignores both the `queries` and the `since` arguments it is called
-    with** and instead executes the fixture's own recorded `queries` list
-    against its `results` mapping — D10's correction to D6a: "replay executes
-    the RECORDED queries and never re-derives them." `since` joined `search`'s
-    signature after this class was written (the AL-521/AL-523 handoff gap:
-    threading the period start through as a per-call parameter rather than
-    `ExaRetriever`'s own since-abandoned per-instance construction) and is
-    ignored for the identical reason — a live `since` must not change what a
-    fixture replays, or replay would stop being byte-identical. Today
-    `build_query_plan` is pure, so a plan built live and the fixture's
-    recorded plan are identical strings; this is written the way it is
-    anyway so that D6a's named upgrade (a model query-proposer) costs no
-    fixture re-record — the recorded queries stay frozen at the moment the
-    fixture was captured, whatever a proposer would
-    ask for today.
-
-    **The load-bearing behavior: a miss RAISES `RetrievalUnavailableError`,
-    never returns `[]`.** Five ways a fixture can miss, all treated
-    identically: the fixture file does not exist for this `beat` (a stale or
-    mistyped seed-set/integration-test key); the file exists but is keyed for
-    a different Beat (a copy-paste mistake); the fixture recorded no queries
-    at all — an empty, missing, or misspelled `queries` key (`build_query_plan`
-    always emits at least one query, so this can never be a legitimate
-    recording); the fixture's `results` mapping is itself missing, `null`, or
-    empty (no query has anything recorded for it); or a query the fixture
-    *did* record has no matching entry under `results` (a malformed or
-    hand-edited fixture missing just that one key). Downstream, an empty
-    document list and "nothing material happened this week" are the same
-    value — the novelty gate would find no survivors and the analyst would
-    publish Skipped either way — so a miss that quietly returned `[]` would
-    manufacture a Skipped Brief that has nothing to do with the subject
-    actually going quiet (§5.2's load-bearing rule, exactly as it applies to
-    `RetrievalUnavailableError` in production).
-
-    **The one shape that is NOT a miss:** an explicit `results: {"some
-    query": []}` entry. That is an affirmative recording — a query that was
-    actually executed and genuinely returned nothing — and replays as an
-    empty list for that query, same as it would live. A missing/absent key is
-    not a statement about anything; an explicit `[]` is. Do not "fix" that
-    distinction into a raise (FIX 1, ticket AL-512 review).
-
-    YAML parsing (`pyyaml`) is imported **inside** `_load_fixture`, not at
-    module level. **This is not because pyyaml is absent from the production
-    image** — verified via `uv export --no-dev --frozen | grep -i pyyaml`:
-    `pyyaml==6.0.3` IS resolved into the production dependency set today, a
-    transitive dependency of `pydantic-settings` and `uvicorn[standard]`,
-    both direct `[project].dependencies` (not the `evals` dev group). A
-    top-level `import yaml` here would work in production as shipped right
-    now. The import is still deferred, deliberately: depending on a
-    transitive extra of two other packages — neither of which owes this
-    fixture parser a YAML dependency — is fragile in a way a direct
-    dependency is not. Either package could drop pyyaml between versions
-    (`uvicorn`'s `standard` extra in particular is exactly the kind of grab
-    bag that trims sub-dependencies across majors) with nothing in `just
-    gate` noticing, since `FixtureRetriever` is eval/integration-only and not
-    exercised there. Keeping the import local means that if pyyaml ever does
-    disappear from the resolved set, only `FixtureRetriever` (and only when
-    actually used) breaks loudly with an `ImportError` — not this whole
-    module's importability from `services/briefing.py`, which is reachable
-    from production. `FixtureRetriever` is a test/eval-only adapter that
-    nonetheless lives in `services/` and ships inside the production wheel
-    (`tests/unit/test_packaging.py`), which is what makes that blast radius
-    worth containing.
-    """
-
-    def __init__(self, fixtures_dir: Path, beat: str) -> None:
-        self._beat = beat
-        self._path = fixtures_dir / f"{beat}.yaml"
-        self._queries, self._results = _load_fixture(self._path, beat)
-
-    async def search(
-        self, queries: Sequence[str], *, since: date | None = None
-    ) -> list[RetrievedDocument]:
-        # Both intentionally ignored — see the class docstring (D10): replay
-        # executes the RECORDED queries and never re-derives them, so a live
-        # `since` (like a live `queries`) must not change what comes back.
-        del queries, since
-        documents: list[RetrievedDocument] = []
-        for query in self._queries:
-            results = self._results.get(query)
-            if results is None:
-                msg = (
-                    f"retrieval fixture {self._path} (beat {self._beat!r}) "
-                    f"recorded the query {query!r} but has no matching entry "
-                    "under 'results' — raising rather than replaying [] so a "
-                    "malformed fixture cannot manufacture a Skipped Brief "
-                    "(TDD §5.2)."
-                )
-                raise RetrievalUnavailableError(msg)
-            documents.extend(results)
-        return documents
-
-
-def _load_fixture(
-    path: Path, beat: str
-) -> tuple[list[str], dict[str, list[RetrievedDocument]]]:
-    """Parse `path`'s YAML into `(queries, results)`, raising on any miss.
-
-    See `FixtureRetriever`'s docstring for the miss cases this guards. Two
-    rules worth restating here, at the point they are enforced:
-
-    - **Zero recorded queries is always corrupt.** `build_query_plan` rejects
-      `max_queries < 1` and always emits at least one query, so an empty,
-      missing, or misspelled `queries` key can never be a legitimate
-      recording — whatever produced it, it raises.
-    - **An explicit `results: {"q": []}` entry is legitimate** and is
-      replayed as `[]` for that query. Only a `results` mapping that is
-      itself missing, `null`, or empty (`{}`) is corrupt — a fixture where no
-      query has anything recorded. Do not collapse this into a raise; it is
-      the one case this function must NOT treat as a miss.
-    """
-    if not path.is_file():
-        msg = (
-            f"no retrieval fixture recorded for beat {beat!r} at {path} — "
-            "raising rather than returning [] so a stale or mistyped fixture "
-            "key cannot silently manufacture a Skipped Brief (TDD §5.2)."
-        )
-        raise RetrievalUnavailableError(msg)
-
-    import yaml  # local import — see the class docstring's dependency note.
-
-    raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    recorded_beat = raw.get("beat")
-    if recorded_beat != beat:
-        msg = (
-            f"retrieval fixture {path} is recorded for beat {recorded_beat!r}, "
-            f"not the requested beat {beat!r} — refusing to replay a "
-            "mismatched fixture rather than silently returning its (wrong) "
-            "documents."
-        )
-        raise RetrievalUnavailableError(msg)
-
-    queries_raw = raw.get("queries")
-    if not queries_raw:
-        msg = (
-            f"retrieval fixture {path} (beat {beat!r}) recorded no queries — "
-            "the 'queries' key is missing, misspelled, or empty. "
-            "`build_query_plan` always emits at least one query, so this "
-            "fixture cannot be a legitimate recording; raising rather than "
-            "replaying [] so a malformed fixture cannot manufacture a "
-            "Skipped Brief (TDD §5.2)."
-        )
-        raise RetrievalUnavailableError(msg)
-    # FIX 9 (ticket AL-512 review): normalize the same way `results` keys
-    # are normalized below, so an unquoted numeric query (`- 2026`) does not
-    # raise a spurious str/int mismatch against its `results` entry.
-    queries: list[str] = [str(query) for query in queries_raw]
-
-    raw_results: Mapping[str, object] = raw.get("results") or {}
-    if not raw_results:
-        msg = (
-            f"retrieval fixture {path} (beat {beat!r}) has no 'results' "
-            "mapping — it is missing, null, or empty, so no query has "
-            "anything recorded for it. Raising rather than replaying [] so "
-            "a malformed fixture cannot manufacture a Skipped Brief (TDD "
-            '§5.2). (An explicit `results: {"some query": []}` entry is '
-            "different and legitimate — see this function's docstring.)"
-        )
-        raise RetrievalUnavailableError(msg)
-    results = {
-        str(query): [_document_from_mapping(item) for item in (items or [])]
-        for query, items in raw_results.items()
-    }
-    return queries, results
-
-
-def _document_from_mapping(item: Mapping[str, object]) -> RetrievedDocument:
-    """One `RetrievedDocument` from a fixture's `results[query][i]` mapping."""
-    published_on = item.get("published_on")
-    return RetrievedDocument(
-        url=str(item["url"]),
-        publisher=str(item["publisher"]),
-        title=str(item["title"]),
-        published_on=date.fromisoformat(str(published_on)) if published_on else None,
-        text=str(item["text"]),
-    )
 
 
 # --- StubRetriever — deterministic replacement for e2e (TDD §5.2, §11) ---------

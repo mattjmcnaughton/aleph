@@ -28,8 +28,7 @@
 -- this phase (D5, PRD §5.7b). So failure_rate means "the shaper broke", never
 -- "the shaper declined" — the declines are visible only as successes with
 -- has_proposal = false, which is also what an ordinary conversational turn looks
--- like. That conflation is accepted, not overlooked; the evals police decline
--- quality (docs/evals.md).
+-- like. That conflation is accepted, not overlooked.
 --
 -- Logfire cannot carry a null OTEL attribute, so a missing TTFT arrives as the
 -- JSON text `null`; the nullif() is what keeps the cast honest either way.

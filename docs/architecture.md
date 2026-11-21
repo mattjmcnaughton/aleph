@@ -36,8 +36,6 @@ tests/
   unit/                # Fast, isolated unit tests
   integration/         # Tests with real dependencies (Postgres, Keycloak)
   external/            # Live-provider contract tests (opt-in, @pytest.mark.external)
-evals/                 # Agent eval harness — a peer of tests/, dev-only and
-                       # never packaged; opt-in runs (docs/evals.md)
 scripts/
   e2e_backend.py       # Stub-model app factory the Playwright harness boots
 src/aleph/web/frontend/
@@ -56,8 +54,6 @@ routers (HTTP endpoints, parse requests into DTOs)
 ```
 
 DTOs (Pydantic models) are used at the router and service level for API I/O. They are always separate from database models.
-
-`evals/` sits outside this stack entirely: it is development tooling that imports the `agents/` factories (which is what their no-model, no-config purity is *for*) and is excluded from the wheel — see [`docs/evals.md`](evals.md). It reaches into `services/` and `config` only to bind a model — `services/openrouter.resolve_model` plus `config.settings` for the key and slot ids (lazily, so `--smoke` needs no configuration), and `services/stub_model` for the offline stub. The direction is one-way: nothing under `src/aleph/` imports `evals/`.
 
 ## Streaming and feature flags (Phase 2)
 
@@ -105,7 +101,7 @@ tap on a stored, re-validated **Proposal** is the sole trigger.
 
 The surface reuses rather than rebuilds. `agents/shaper.py` obeys the same
 no-model/no-config purity as every other agent and exports the proposal
-predicates, so the agent (at draft time), the evals and the apply-time
+predicates, so the agent (at draft time) and the apply-time
 re-validation run *the same* functions. The turn lifecycle, the SSE framing and
 the rail component tree are 2A's, extended by one named event (`proposal`), one
 mount (`shaping-rail` on the path route) and one payload column; shaping replies
@@ -161,9 +157,8 @@ extension map). Three pieces are genuinely new.
   entry point that owns every invariant a Brief's retrieved text must satisfy
   (dedupe by URL, drop undated/empty-text documents, cap at
   `BRIEF_RETRIEVAL_MAX_DOCUMENTS`, apply the character budget) so a second
-  provider can never ship without them. Three implementations: `ExaRetriever`
-  (live), `FixtureRetriever` (evals + integration, keyed on the Beat and
-  replaying a recorded query plan), and `StubRetriever` (e2e). It lives in
+  provider can never ship without them. Two implementations: `ExaRetriever`
+  (live) and `StubRetriever` (e2e). It lives in
   `services/`, not `agents/`, on the same reasoning as every seam in this
   codebase an agent must not see directly: an agent receives documents as
   plain frozen data in its `Deps` and never learns a provider exists.

@@ -43,14 +43,13 @@ ENV UV_PYTHON_DOWNLOADS=never \
 
 WORKDIR /app
 # Dependencies as their own layer: they churn far less often than source.
-# `--no-dev` installs the project's runtime dependencies only — the `dev` group
-# (and the `evals` group it includes) is a non-default group, so the eval harness
-# never reaches the image, mirroring the `evals/` never-ships guarantee that
+# `--no-dev` installs the project's runtime dependencies only, so dev tooling
+# never reaches the image, mirroring the never-ships guarantee that
 # tests/unit/test_packaging.py pins for the wheel.
 COPY pyproject.toml uv.lock README.md ./
 RUN uv sync --no-dev --frozen --no-install-project
 
-# Only what production runs: migrations, the package, and the built SPA. `evals/`,
+# Only what production runs: migrations, the package, and the built SPA.
 # `tests/`, `docs/`, `queries/` and `scripts/` are peers of `src/` and are simply
 # never copied.
 COPY alembic.ini ./
