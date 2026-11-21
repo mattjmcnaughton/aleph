@@ -1,3 +1,10 @@
+# [1.50.0](https://github.com/mattjmcnaughton/aleph/compare/v1.49.0...v1.50.0) (2026-11-21)
+
+
+### Features
+
+* **frontend:** drag the docked rail's edge to resize it ([309c9c5](https://github.com/mattjmcnaughton/aleph/commit/309c9c577fa6182b21dc0d38885ed9b85bc138d7))
+
 # [1.49.0](https://github.com/mattjmcnaughton/aleph/compare/v1.48.0...v1.49.0) (2026-11-21)
 
 
