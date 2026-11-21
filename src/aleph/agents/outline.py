@@ -203,10 +203,9 @@ def build_outline_prompt(
 ) -> str:
     """Build the outline agent's user prompt from ``topic`` and optional Guidance.
 
-    Lives here, not in the service (``services/generation.py``), so evals and
-    tests build the same *user* prompt the orchestrator does — one function,
-    not two hand-synced copies of the same string (``evals/generation.py``
-    calls this too, on the bare topic, since no seed case carries Guidance).
+    Lives here, not in the service (``services/generation.py``), so tests
+    build the same *user* prompt the orchestrator does — one function, not two
+    hand-synced copies of the same string.
     This claim is scoped to the **user** prompt only: the **system** prompt
     (``SYSTEM_PROMPT`` below) changed for every run when Guidance shipped — it
     gained the guidance-weighing paragraph and a reworded sizing block —

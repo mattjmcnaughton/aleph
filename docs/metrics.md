@@ -235,8 +235,7 @@ unchanged — Phase 2 watches it as the answer-leak counter-metric (a sharp rise
 is a §10 leak to investigate, not a win), and it is not sliced by tutor use:
 `quick_check_attempted` carries no tutor dimension, so the split is an ad-hoc
 join against `tutor_message_sent` on `lesson_id` rather than a saved tile. And
-**eval pass rate** is not event-derived at all — it comes from the eval harness
-([`docs/evals.md`](evals.md)), not from Logfire records.
+there is no eval pass rate: the eval harness was removed.
 
 ### Phase 2B — shaping (PRD §7)
 
@@ -267,9 +266,7 @@ revised lessons** stays Phase 1's
 [`quick_check_correctness.sql`](../queries/logfire/quick_check_correctness.sql),
 sliced ad hoc by the revised lesson ids in `change_applied.lesson_ids` — a
 revision that makes checks trivially easy would inflate a Phase 1 guardrail, and
-the ids to slice on are already on the event. **Eval pass rate** is not
-event-derived at all (see [`docs/evals.md`](evals.md)), and this phase's evals
-run post-launch.
+the ids to slice on are already on the event.
 
 ### Phase 5 — streaks (PRD §5, TDD §9)
 

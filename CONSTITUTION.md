@@ -115,7 +115,8 @@ committed schema, any generated clients, and documentation consistent.
 Validate generated content before accepting it as application state. Render it
 without executable HTML or dangerous URL schemes. A valid schema does not establish
 accuracy, teaching quality, or grounding. Deterministic tests verify application
-behavior; evaluations assess generated-content quality. Neither replaces the other.
+behavior, not generated-content quality; a passing suite is no claim that content
+is good. Quality is judged by reviewing real output in use.
 
 The analyst cites only sources it actually received as evidence. Missing evidence
 is not permission to publish unsupported claims as researched findings.
@@ -125,10 +126,10 @@ is not permission to publish unsupported claims as researched findings.
 Tests exercise observable behavior with independently derived expectations. Prefer
 fakes over mocks of implementation details. Use the cheapest test level that can
 establish the claim: database guarantees need database-backed verification, client
-behavior needs client-level verification, and model quality needs evaluations.
+behavior needs client-level verification. Tests do not claim model quality.
 
 Behavior changes follow red-green TDD. Required CI checks are the merge gate.
-Live-provider tests and paid evaluations remain explicit, opt-in operations.
+Live-provider tests remain explicit, opt-in operations.
 
 ## Governance and use
 
@@ -157,3 +158,7 @@ rather than silently rewriting another authoritative document.
   ([PRD](docs/prds/home-screen-app.md)) makes the web app the phone client and
   delivers Notifications through Web Push, with the native iOS app parked. The
   parity obligation is unchanged whenever more than one learner client exists.
+- 2026-11-21: §9 and §10 no longer require automated evaluations for model quality.
+  Rationale: the eval harness was never run and was removed with its judge model;
+  generation now runs on one app-wide model. Tests still verify behavior only, and
+  quality is judged by reviewing real output.

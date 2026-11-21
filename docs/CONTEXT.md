@@ -54,7 +54,7 @@ synonym (say **path**, not "course"; **Quick check**, not "quiz question").
 | **On-demand generation** | Generating a lesson's content when the learner reaches it, rather than all up front. |
 | **Prefetch (+N)** | Generating the next *N* lessons ahead of where the learner is, to hide generation latency. |
 | **Continuity** | The rule that lesson *N+1* is generated with awareness of the content of lessons *1…N*, so the path builds on itself and never re-teaches or contradicts earlier lessons. |
-| **Multi-model architecture** | More than one model is used across generation. Realized as configurable **model slots** — *outline*, *lesson*, *judge* (Phase 1 TDD §5.3), *tutor* (Phase 2 TDD §5.3), plus *shaper* (Phase 2B TDD §5.3) — each an OpenRouter model id. |
+| **App-wide model** | The one OpenRouter model id (`MODEL_DEFAULT`) every generation and conversation call runs on. An admin may override it per request from `MODEL_ALLOWLIST`; nothing else selects a model. Replaced the earlier per-feature **model slots**. |
 | **Path status** | The lifecycle of a path's outline generation: *pending* → *generating* → *ready*, with *failed* (retryable) and *refused* (terminal, safety) branches (TDD §4). |
 | **Refused** | The path status when the outline agent declines an over-the-boundary topic via its structured refusal output. A first-class result with a graceful message — never conflated with *failed* (TDD D12). |
 | **Trigger + poll** | The delivery model for generated content: a POST triggers generation and returns immediately; the client polls a GET until the state resolves (TDD D5, §5.4). |
@@ -159,10 +159,6 @@ Spec: [Flow TDD](tdds/flow.md), mock: [Flow mode](mocks/aleph-flow-mode.html).
 
 | Term | Meaning |
 | --- | --- |
-| **Eval** | An automated quality check on generated content, run as a regression suite over a seed set. |
-| **Judge** | The model that scores a generation **binary pass/fail** against the eval rubric. In MVP a prompted frontier model calibrated with few-shot examples (not fine-tuned). |
-| **Seed set** | The fixed set of representative topics × levels the eval regenerates and judges on every change. |
-| **Rubric** | The dimensions a generation must satisfy: accurate, level-appropriate, in scope, continuous, check-valid, safe. |
 | **Refusal boundary** | The safety line: any genuine learning topic is allowed; content that materially aids serious harm is refused. |
 | **Activated learner** | A learner who has completed **more than 3 lessons** (≥ 4) **on a single path**, each with a recorded **Attempt**, within **7 days** of signup. The unit behind the north-star **Activation rate** (% of new accounts that activate). Signals real value, not curiosity. |
 | **Session** | A run of learner activity with no gap longer than 30 minutes. Used in metrics. |

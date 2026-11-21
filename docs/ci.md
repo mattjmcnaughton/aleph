@@ -1,17 +1,14 @@
 # Continuous Integration
 
-Three GitHub Actions workflows. [`ci.yml`](../.github/workflows/ci.yml) runs on every
+Two GitHub Actions workflows. [`ci.yml`](../.github/workflows/ci.yml) runs on every
 push/PR to `main` or `feature/home-screen-app`;
 [`release.yml`](../.github/workflows/release.yml) runs after a
-green CI on `main` (and can be dispatched as a dry run);
-[`evals.yml`](../.github/workflows/evals.yml) is dispatch-only because it spends
-money.
+green CI on `main` (and can be dispatched as a dry run).
 
 | Workflow | Trigger | Purpose |
 | -------- | ------- | ------- |
 | **CI** | push/PR to `main` or `feature/home-screen-app` | Correctness gates (below) |
 | **Release** | after a green CI on `main`, or `workflow_dispatch` | semantic-release → GHCR image → Fly deploy ([deploy.md](deploy.md)) |
-| **Evals** | `workflow_dispatch` only | Agent quality measurement ([evals.md](evals.md)) |
 
 Home Screen app ticket PRs target `feature/home-screen-app`. A green CI run on
 that integration branch does not release or deploy: the Release workflow and
@@ -37,50 +34,10 @@ asserts, and why it cannot touch a developer's database — lives in
 
 No job calls an LLM provider: the stub model (`services/stub_model.py`) is
 deterministic and offline, the live-provider contract tests (`tests/external/`)
-are reachable only via `just test-external`, which CI never invokes, and the
-eval harness has its own dispatch-only workflow (below) that no required check
-depends on.
+are reachable only via `just test-external`, which CI never invokes.
 
 Runs on the same ref cancel their predecessors (`concurrency`), and each job
 uploads its JUnit / Playwright report as an artifact.
-
-## The Evals workflow (opt-in, never required)
-
-[`.github/workflows/evals.yml`](../.github/workflows/evals.yml) runs the agent
-eval harness (`evals/`, [docs/evals.md](evals.md)) against the live OpenRouter
-provider.
-
-- **`workflow_dispatch` only.** No `push`, no `pull_request`, no `schedule`
-  trigger — an eval run costs real money, so it happens only when a human
-  dispatches it (Actions tab → Evals → Run workflow). It is never a required
-  check and nothing in the CI gate depends on it. Three inputs:
-  - `mode` — `seed-set` (generate the seed set and gate on it) or `agreement`
-    (calibration only: judge `evals/human_labels.yaml` and report judge↔human
-    agreement — no generation, much cheaper, and the run to dispatch after any
-    change to the judge prompt or its calibration examples).
-  - `models` — comma-separated OpenRouter ids to sweep in `seed-set` mode; empty
-    uses the configured `MODEL_DEFAULT`. The judge always stays
-    on `MODEL_JUDGE`.
-  - `judge` — run Layer 2 (default on). Uncheck for a cheap Layer-1-only
-    structural pass; one judge call per artifact is the bulk of a run's cost.
-- **Secret:** `OPENROUTER_API_KEY`, a repository secret (**AL-080 — not
-  uploaded yet**). Until it lands, a dispatched run fails immediately with the
-  harness's exit-2 message.
-- **Environment:** `uv sync --frozen --no-dev --group evals` — project deps plus
-  the `evals` dependency group only. No Node, no Postgres, no Keycloak: the
-  harness is database-free and never boots the app.
-- **Results:** the per-case report table and the gate summary land in the job log
-  and the job summary (`$GITHUB_STEP_SUMMARY`), and the JSON is uploaded as the
-  `eval-report` artifact. The job fails on a harness error, a hard floor
-  (Layer 1's refusal-branch correctness / outline caps / lesson bands, or
-  Layer 2's `safe` rubric item), or a seed-set pass rate below the ≥ 90% gate.
-
-The harness's *own* plumbing is covered for free in the gate:
-`tests/unit/test_evals_harness.py` runs the offline smoke path (real agents,
-stub model), `tests/unit/test_evals_judge.py` runs the whole Layer 2 path
-against the deterministic stub judge (rubric, prompts, gate arithmetic,
-agreement), and `tests/unit/test_packaging.py` proves `evals/` never ships in
-the wheel.
 
 ## Test layers and markers (TDD §12)
 
@@ -91,11 +48,7 @@ the wheel.
   for the OIDC flow. Migrations are owned by the conftest.
 - **E2E** — the Playwright suite (below).
 - **External** (`tests/external/`) — one live outline + one live lesson round
-  trip against real OpenRouter models: a drift canary, not a quality measure
-  (quality is the §11 eval harness's job).
-- **Evals** (`evals/`) — not a pytest layer at all: a separate harness with its
-  own runner (`just evals`) and its own dispatch-only workflow. See
-  [docs/evals.md](evals.md).
+  trip against real OpenRouter models: a drift canary, not a quality measure.
 
 Two pytest markers are registered in `pyproject.toml`:
 

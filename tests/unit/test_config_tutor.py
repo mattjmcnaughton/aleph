@@ -108,7 +108,6 @@ def test_e2e_backend_boots_with_the_tutor_slot_stubbed(
 
     assert app.title == "aleph"
     assert restored_live_settings.model_default == STUB_MODEL_ID
-    assert restored_live_settings.model_judge == STUB_MODEL_ID
     # And the tutor message cap is lifted, like the other per-account caps:
     # the e2e projects share one backend + user and would otherwise exhaust
     # it.
