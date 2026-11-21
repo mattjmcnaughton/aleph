@@ -149,3 +149,4 @@ front-loading. Start with:
 - [`docs/api.md`](docs/api.md) — API endpoint reference.
 - [`docs/evals.md`](docs/evals.md) — the agent eval harness (`evals/`) and evaluation strategy.
 - [`docs/deploy.md`](docs/deploy.md) — the Fly.io/Neon runbook, the release pipeline, and every production secret.
+- [`docs/storybook.md`](docs/storybook.md) — the Storybook design sandbox: every screen and state on realistic mock data.

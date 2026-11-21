@@ -13,7 +13,9 @@
     "lint": "biome lint .",
     "lint-fix": "biome lint . --write",
     "typecheck": "tsr generate && tsc -b --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "storybook": "storybook dev -p 6006 --no-open",
+    "build-storybook": "storybook build"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.75",
@@ -28,6 +30,7 @@
   "devDependencies": {
     "@biomejs/biome": "^1.9",
     "@playwright/test": "^1.49",
+    "@storybook/react-vite": "^10.6.8",
     "@tanstack/router-cli": "^1.120",
     "@tanstack/router-devtools": "^1.120",
     "@tanstack/router-plugin": "^1.120",
@@ -39,7 +42,9 @@
     "autoprefixer": "^10.4",
     "jsdom": "^26.0",
     "msw": "^2.7",
+    "msw-storybook-addon": "^3.0.3",
     "postcss": "^8.4",
+    "storybook": "^10.6.8",
     "tailwindcss": "^3.4",
     "typescript": "^5.7",
     "vite": "^6.3",

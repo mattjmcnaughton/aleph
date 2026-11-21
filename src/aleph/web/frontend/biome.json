@@ -22,7 +22,9 @@
       "src/routeTree.gen.ts",
       "test-results",
       "playwright-report",
-      "tests/e2e/.auth"
+      "tests/e2e/.auth",
+      ".storybook/public",
+      "storybook-static"
     ]
   }
 }

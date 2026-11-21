@@ -49,3 +49,11 @@ gate-external: gate-expensive test-external
 # Start dev server
 dev:
     pnpm vite
+
+# Start the design sandbox (Storybook) on :6006
+storybook:
+    pnpm storybook
+
+# Build the static design sandbox into storybook-static/
+build-storybook:
+    pnpm build-storybook
