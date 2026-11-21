@@ -1,3 +1,10 @@
+# [1.49.0](https://github.com/mattjmcnaughton/aleph/compare/v1.48.0...v1.49.0) (2026-11-21)
+
+
+### Features
+
+* **frontend:** redesign Nocturne as a reading-first study ([f6f50c2](https://github.com/mattjmcnaughton/aleph/commit/f6f50c234dd8154e97ae6d760814aa49aaa3de34))
+
 # [1.48.0](https://github.com/mattjmcnaughton/aleph/compare/v1.47.1...v1.48.0) (2026-11-10)
 
 
