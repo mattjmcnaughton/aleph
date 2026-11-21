@@ -145,6 +145,10 @@ dev-be:
 dev-fe:
     cd {{fe_dir}} && pnpm run dev
 
+# Start the Storybook design sandbox (docs/storybook.md)
+storybook:
+    cd {{fe_dir}} && pnpm run storybook
+
 # Start both dev servers
 dev:
     #!/usr/bin/env bash
