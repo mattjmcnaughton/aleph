@@ -232,7 +232,7 @@ describe("Shaping rail — one tree, two CSS presentations (D14)", () => {
     expect(column.className).not.toMatch(/\blg:static\b/);
     expect(column.className).toMatch(/lg:top-\[var\(--app-header-h\)\]/);
     expect(column.className).toMatch(/lg:h-\[calc\(100dvh-var\(--app-header-h\)\)\]/);
-    expect(column.className).toMatch(/lg:w-\[400px\]/);
+    expect(column.className).toMatch(/lg:w-\[var\(--rail-width\)\]/);
     // Exactly one rail in the tree at any width — never a second mount.
     expect(screen.getAllByTestId("shaping-rail")).toHaveLength(1);
   });
