@@ -153,6 +153,19 @@ export const LessonTutorOpen: Story = {
   },
 };
 
+export const LessonTutorWidened: Story = {
+  name: "Lesson — tutor widened (desktop)",
+  args: { url: `/lessons/${IDS.rustCurrentLesson}` },
+  globals: { viewport: { value: "desktop", isRotated: false } },
+  // The docked rail is dragged wider from its left edge; the width is
+  // remembered, so seeding it is the same state a learner returns to.
+  beforeEach: () => {
+    localStorage.setItem("aleph:rail-width", "640");
+    return () => localStorage.removeItem("aleph:rail-width");
+  },
+  play: LessonTutorOpen.play,
+};
+
 export const LessonRevealed: Story = {
   name: "Lesson — completed, Quick check revealed",
   args: { url: `/lessons/${IDS.rustDoneLesson}` },

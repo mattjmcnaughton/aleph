@@ -1,7 +1,7 @@
 import { notifyManager } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { API_V1_BASE, type AuthSession } from "../lib/api";
 import { adminSession, learnerUser } from "../mocks/handlers";
 import { seedLesson } from "../mocks/lessons";
@@ -103,7 +103,10 @@ function releaseCacheNotifications(): void {
 }
 
 // Never leave a frozen cache behind for the next test, however a test ended.
-afterEach(releaseCacheNotifications);
+afterEach(() => {
+  releaseCacheNotifications();
+  vi.unstubAllGlobals();
+});
 
 /**
  * Give the thread a scrollable shape. jsdom does no layout, so `scrollHeight`
@@ -197,9 +200,42 @@ describe("Tutor rail — one tree, two CSS presentations (D12)", () => {
     expect(column.className).not.toMatch(/\blg:static\b/);
     expect(column.className).toMatch(/lg:top-\[var\(--app-header-h\)\]/);
     expect(column.className).toMatch(/lg:h-\[calc\(100dvh-var\(--app-header-h\)\)\]/);
-    expect(column.className).toMatch(/lg:w-\[400px\]/);
+    expect(column.className).toMatch(/lg:w-\[var\(--rail-width\)\]/);
+    expect(column.style.getPropertyValue("--rail-width")).toBe("400px");
     // One tree, not one per presentation.
     expect(screen.getAllByTestId("tutor-rail")).toHaveLength(1);
+  });
+
+  it("the docked column is resizable from its left edge and remembers the width", async () => {
+    const stored = new Map<string, string>();
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => stored.get(key) ?? null,
+      setItem: (key: string, value: string) => stored.set(key, value),
+    });
+    // Wide enough that the lesson column does not cap the rail below 432px.
+    vi.stubGlobal("innerWidth", 1600);
+    useSession(flagOnSession);
+    seedReadyLesson();
+    await gotoLesson();
+    await openRail();
+
+    const handle = screen.getByRole("separator", { name: "Resize panel" });
+    // Default 400px; the handle is on the left edge, so ArrowLeft widens.
+    fireEvent.keyDown(handle, { key: "ArrowLeft" });
+    fireEvent.keyDown(handle, { key: "ArrowLeft" });
+    const column = screen.getByTestId("tutor-rail-column");
+    expect(column.style.getPropertyValue("--rail-width")).toBe("432px");
+    // Never narrower than 320px, however far it is pushed.
+    for (let i = 0; i < 20; i++) fireEvent.keyDown(handle, { key: "ArrowRight" });
+    expect(column.style.getPropertyValue("--rail-width")).toBe("320px");
+    expect(handle).toHaveAttribute("aria-valuenow", "320");
+
+    fireEvent.click(screen.getByTestId("tutor-rail-collapse"));
+    await waitFor(() => expect(screen.queryByTestId("tutor-rail-column")).toBeNull());
+    await openRail();
+    expect(screen.getByTestId("tutor-rail-column").style.getPropertyValue("--rail-width")).toBe(
+      "320px",
+    );
   });
 
   it("secondary actions stay behind Tutor options and Escape returns to the disclosure", async () => {

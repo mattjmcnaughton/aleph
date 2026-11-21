@@ -16,7 +16,35 @@
 // the offset it sticks under is `--app-header-h` (`index.css`), not a value
 // read from the DOM.
 
-import { type ReactNode, useEffect, useRef } from "react";
+import { type CSSProperties, type ReactNode, useEffect, useRef, useState } from "react";
+
+/**
+ * The docked rail's width at `lg`, which the learner drags from its left edge.
+ * It reaches the `<aside>` only as `--rail-width`, read by an `lg:` utility, so
+ * the sheet below `lg` ignores it and no JS branches on viewport width. One
+ * remembered width serves both rails: they fill the same column.
+ */
+const RAIL_WIDTH_KEY = "aleph:rail-width";
+const RAIL_WIDTH_DEFAULT = 400;
+const RAIL_WIDTH_MIN = 320;
+const RAIL_WIDTH_STEP = 16;
+
+/** Up to 960px, leaving room for the 288px sidebar and a readable lesson
+ * column — but never forced below the default. */
+function clampRailWidth(width: number): number {
+  const max = Math.max(RAIL_WIDTH_DEFAULT, Math.min(960, window.innerWidth - 720));
+  return Math.round(Math.min(max, Math.max(RAIL_WIDTH_MIN, width)));
+}
+
+function readRailWidth(): number {
+  try {
+    const stored = Number(localStorage.getItem(RAIL_WIDTH_KEY));
+    if (stored > 0) return clampRailWidth(stored);
+  } catch {
+    // Storage is optional; the rail just opens at the default width.
+  }
+  return RAIL_WIDTH_DEFAULT;
+}
 
 /** Per-route content cap at `lg`, straight from the mock (#2a/#2b/#2c). */
 const WIDTH_CAP = {
@@ -79,6 +107,18 @@ export function Workspace({
 }) {
   const railRef = useRef<HTMLElement>(null);
   const railOpen = Boolean(tutorRail);
+  const [railWidth, setRailWidth] = useState(readRailWidth);
+  const drag = useRef<{ x: number; width: number } | null>(null);
+
+  const resizeRail = (width: number) => {
+    const next = clampRailWidth(width);
+    setRailWidth(next);
+    try {
+      localStorage.setItem(RAIL_WIDTH_KEY, String(next));
+    } catch {
+      // Optional: the width still applies for this visit.
+    }
+  };
 
   // Mobile keyboards may pan/shrink the visual viewport without changing vh.
   // CSS still selects sheet vs desktop column; these values only bound the sheet
@@ -113,7 +153,7 @@ export function Workspace({
 
       <main
         data-testid={testid}
-        className="mx-auto w-full max-w-[560px] px-5 pb-28 pt-6 lg:mx-0 lg:max-w-none lg:flex-1 lg:px-10 lg:pb-20 lg:pt-10"
+        className="mx-auto w-full max-w-[560px] px-5 pb-28 pt-6 lg:mx-0 lg:min-w-0 lg:max-w-none lg:flex-1 lg:px-10 lg:pb-20 lg:pt-10"
       >
         <div className={`mx-auto w-full ${WIDTH_CAP[width]}`}>{children}</div>
       </main>
@@ -142,8 +182,44 @@ export function Workspace({
           // real screen (the thread scrolls inside itself), it just keeps a
           // viewport too short to hold the header and composer from spilling
           // the rail's chrome across the lesson.
-          className="tutor-sheet fixed inset-x-0 bottom-0 z-40 flex flex-col overflow-hidden rounded-t-xl border-t border-divider bg-night shadow-lg lg:sticky lg:top-[var(--app-header-h)] lg:bottom-auto lg:z-auto lg:h-[calc(100dvh-var(--app-header-h))] lg:max-h-none lg:w-[400px] lg:shrink-0 lg:self-start lg:overflow-hidden lg:rounded-none lg:border-l lg:border-t-0 lg:shadow-none"
+          className="tutor-sheet fixed inset-x-0 bottom-0 z-40 flex flex-col overflow-hidden rounded-t-xl border-t border-divider bg-night shadow-lg lg:sticky lg:top-[var(--app-header-h)] lg:bottom-auto lg:z-auto lg:h-[calc(100dvh-var(--app-header-h))] lg:max-h-none lg:w-[var(--rail-width)] lg:shrink-0 lg:self-start lg:overflow-hidden lg:rounded-none lg:border-l lg:border-t-0 lg:shadow-none"
+          style={{ "--rail-width": `${railWidth}px` } as CSSProperties}
         >
+          {/* Drag (or arrow-key) handle over the column's left border; desktop
+              only, since the sheet below `lg` is always full width. */}
+          <div
+            data-testid="rail-resize-handle"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize panel"
+            aria-valuenow={railWidth}
+            aria-valuemin={RAIL_WIDTH_MIN}
+            tabIndex={0}
+            className="absolute inset-y-0 left-0 z-10 hidden w-1.5 cursor-col-resize touch-none transition-colors hover:bg-iris/40 focus-visible:bg-iris/70 focus-visible:outline-none lg:block"
+            onPointerDown={(event) => {
+              event.preventDefault();
+              event.currentTarget.setPointerCapture(event.pointerId);
+              drag.current = { x: event.clientX, width: railWidth };
+            }}
+            onPointerMove={(event) => {
+              if (!drag.current) return;
+              // The handle sits on the rail's left edge: moving left widens it.
+              resizeRail(drag.current.width + drag.current.x - event.clientX);
+            }}
+            onPointerUp={() => {
+              drag.current = null;
+            }}
+            onPointerCancel={() => {
+              drag.current = null;
+            }}
+            onDoubleClick={() => resizeRail(RAIL_WIDTH_DEFAULT)}
+            onKeyDown={(event) => {
+              const delta = { ArrowLeft: RAIL_WIDTH_STEP, ArrowRight: -RAIL_WIDTH_STEP }[event.key];
+              if (delta === undefined) return;
+              event.preventDefault();
+              resizeRail(railWidth + delta);
+            }}
+          />
           {tutorRail}
         </aside>
       ) : null}
