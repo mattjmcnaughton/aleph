@@ -106,6 +106,10 @@ test-e2e:
     fi
     cd {{fe_dir}} && pnpm exec playwright test
 
+# Recapture the README screenshots (docs/screenshots/readme/) from demo data; no backend needed
+screenshots:
+    cd {{fe_dir}} && pnpm exec playwright test -c tests/screenshots/playwright.config.ts
+
 # Run tests that hit external services
 test-external:
     uv run pytest -m external
