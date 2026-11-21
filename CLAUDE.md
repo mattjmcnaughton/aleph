@@ -35,6 +35,7 @@ Python web application using FastAPI, uvicorn, OpenTelemetry, uv, ruff, ty, and 
 | `just dev` | Start backend and frontend dev servers |
 | `just dev-be` | Start backend dev server only |
 | `just dev-fe` | Start frontend dev server only |
+| `just storybook` | Start the Storybook design sandbox on :6006 (see `docs/storybook.md`) |
 
 All formatting, linting, typecheck, test-unit, and gate targets have `-be` and `-fe` variants (e.g. `just fmt-be`, `just fmt-fe`).
 
@@ -85,6 +86,11 @@ src/aleph/web/frontend/tests/e2e/  # Playwright browser suite (E2E, phone viewpo
   part of `just gate` or the CI gate. See `docs/evals.md`.
 - All Python tool config is in `pyproject.toml`.
 - Backend: `just dev-be`. Frontend: `just dev-fe`. Both: `just dev`.
+- **UI changes** follow [`docs/design.md`](docs/design.md) and are judged in Storybook
+  ([`docs/storybook.md`](docs/storybook.md)): add or update a story in
+  `src/aleph/web/frontend/src/stories/` for each new screen or state, check it at the
+  iPhone and desktop viewports, and attach screenshots (or a recording for interaction)
+  to the PR. Stories are for judging design; behavior is still proven by tests.
 
 <!-- Preserve historical native-spec links to the former guidance heading. -->
 <a id="two-clients-web-and-ios"></a>
