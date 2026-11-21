@@ -18,7 +18,22 @@
 
 import { Link, useNavigate } from "@tanstack/react-router";
 import { type RefObject, useEffect, useId, useRef, useState } from "react";
-import { PRIMARY_CTA_BASE } from "./state-card";
+
+/**
+ * Compact and secondary, at every width. Starting a ninth path is not what a
+ * returning learner came to do, so this no longer takes the full-width primary
+ * slot above Continue; the first-run empty state carries its own primary CTA.
+ */
+const NEW_TRIGGER =
+  "inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-md border border-faint px-3.5 text-sm font-semibold text-porcelain transition-colors hover:border-mist";
+
+function PlusIcon() {
+  return (
+    <svg viewBox="0 0 16 16" width="14" height="14" fill="none" aria-hidden="true">
+      <path d="M8 3v10M3 8h10" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    </svg>
+  );
+}
 
 export interface NewMenuItem {
   /** A literal route TanStack has already generated (`/new`, `/beats/new`). */
@@ -86,8 +101,9 @@ export function NewMenu({
         ref={buttonRef}
         data-testid={single.testid}
         onClick={() => navigate({ to: single.to as never })}
-        className={`mt-6 ${PRIMARY_CTA_BASE} lg:mt-0 lg:w-auto lg:shrink-0`}
+        className={NEW_TRIGGER}
       >
+        <PlusIcon />
         {single.label}
       </button>
     );
@@ -110,7 +126,7 @@ export function NewMenu({
   }
 
   return (
-    <div ref={containerRef} className="relative mt-6 lg:mt-0 lg:shrink-0">
+    <div ref={containerRef} className="relative shrink-0">
       <button
         type="button"
         ref={buttonRef}
@@ -125,8 +141,9 @@ export function NewMenu({
             setOpen(true);
           }
         }}
-        className={`${PRIMARY_CTA_BASE} gap-2 lg:w-auto`}
+        className={NEW_TRIGGER}
       >
+        <PlusIcon />
         New
         <CaretIcon />
       </button>
@@ -142,7 +159,7 @@ export function NewMenu({
           // positioned menu sized to its widest item would otherwise hang off
           // the screen and give home a horizontal scrollbar (the phone rule
           // every surface here is held to).
-          className="absolute right-0 z-20 mt-2 w-full min-w-[16rem] overflow-hidden rounded-lg border border-divider bg-surface py-1 shadow-lg lg:w-auto"
+          className="absolute right-0 z-20 mt-2 w-72 max-w-[calc(100vw-2.5rem)] overflow-hidden rounded-lg border border-divider bg-surface p-1.5 shadow-lg"
           onKeyDown={(event) => {
             const active = document.activeElement as HTMLElement | null;
             if (event.key === "Escape") {
@@ -166,10 +183,10 @@ export function NewMenu({
               role="menuitem"
               data-testid={item.testid}
               onClick={() => setOpen(false)}
-              className="block px-4 py-3 text-left transition-colors hover:bg-porcelain/5 focus-visible:bg-porcelain/5 focus-visible:outline-none"
+              className="block rounded-md px-3 py-2.5 text-left transition-colors hover:bg-elevated focus-visible:bg-elevated focus-visible:outline-none"
             >
               <span className="block text-sm font-semibold text-porcelain">{item.label}</span>
-              <span className="mt-0.5 block text-xs leading-5 text-mist">{item.description}</span>
+              <span className="mt-0.5 block text-sm leading-5 text-mist">{item.description}</span>
             </Link>
           ))}
         </div>

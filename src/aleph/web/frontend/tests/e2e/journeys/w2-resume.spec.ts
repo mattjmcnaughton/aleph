@@ -35,6 +35,8 @@ test.describe("W2 resume across sessions", { tag: "@w2" }, () => {
     await expectRailState(page, 0, "data-unlock-state", "complete");
 
     // --- leave -----------------------------------------------------------------
+    // Sign out lives in the header's account menu.
+    await page.getByTestId("account-menu").click();
     await page.getByRole("button", { name: "Sign out" }).click();
     await expect(page).toHaveURL(/\/login$/);
     await expect(page.getByRole("heading", { name: "Sign in to Aleph" })).toBeVisible();

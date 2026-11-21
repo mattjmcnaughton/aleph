@@ -20,12 +20,12 @@ import { type ReactNode, useEffect, useRef } from "react";
 
 /** Per-route content cap at `lg`, straight from the mock (#2a/#2b/#2c). */
 const WIDTH_CAP = {
-  lesson: "lg:max-w-[680px]",
-  path: "lg:max-w-[900px]",
+  lesson: "lg:max-w-[660px]",
+  path: "lg:max-w-[720px]",
   // Widened from 1100 once home became two real columns: 1100 was sized for a
   // single stack, and a work column plus a 260px rail inside it left the row
   // grid too little for a path title to survive untruncated.
-  switcher: "lg:max-w-[1280px]",
+  switcher: "lg:max-w-[1040px]",
 } as const;
 
 /**
@@ -105,7 +105,7 @@ export function Workspace({
       {sidebar ? (
         <aside
           data-testid="desktop-sidebar"
-          className="hidden shrink-0 border-r border-divider lg:block lg:w-[300px]"
+          className="hidden shrink-0 border-r border-divider lg:block lg:w-[288px]"
         >
           {sidebar}
         </aside>
@@ -113,7 +113,7 @@ export function Workspace({
 
       <main
         data-testid={testid}
-        className="mx-auto w-full max-w-[480px] px-4 py-8 lg:mx-0 lg:max-w-none lg:flex-1 lg:px-10 lg:py-10"
+        className="mx-auto w-full max-w-[560px] px-5 pb-28 pt-6 lg:mx-0 lg:max-w-none lg:flex-1 lg:px-10 lg:pb-20 lg:pt-10"
       >
         <div className={`mx-auto w-full ${WIDTH_CAP[width]}`}>{children}</div>
       </main>
@@ -142,7 +142,7 @@ export function Workspace({
           // real screen (the thread scrolls inside itself), it just keeps a
           // viewport too short to hold the header and composer from spilling
           // the rail's chrome across the lesson.
-          className="tutor-sheet fixed inset-x-0 bottom-0 z-40 flex flex-col overflow-hidden rounded-t-lg border-t border-divider bg-night shadow-lg lg:sticky lg:top-[var(--app-header-h)] lg:bottom-auto lg:z-auto lg:h-[calc(100dvh-var(--app-header-h))] lg:max-h-none lg:w-[400px] lg:shrink-0 lg:self-start lg:overflow-hidden lg:rounded-none lg:border-l lg:border-t-0 lg:shadow-none"
+          className="tutor-sheet fixed inset-x-0 bottom-0 z-40 flex flex-col overflow-hidden rounded-t-xl border-t border-divider bg-night shadow-lg lg:sticky lg:top-[var(--app-header-h)] lg:bottom-auto lg:z-auto lg:h-[calc(100dvh-var(--app-header-h))] lg:max-h-none lg:w-[400px] lg:shrink-0 lg:self-start lg:overflow-hidden lg:rounded-none lg:border-l lg:border-t-0 lg:shadow-none"
         >
           {tutorRail}
         </aside>

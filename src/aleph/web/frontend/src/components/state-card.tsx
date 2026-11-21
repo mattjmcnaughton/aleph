@@ -8,14 +8,14 @@ import type { ReactNode } from "react";
 
 /** Teal primary CTA, sans disabled styling — for links (which never disable). */
 export const PRIMARY_CTA_BASE =
-  "inline-flex w-full items-center justify-center rounded-md bg-teal px-4 py-3 text-sm font-semibold text-night transition-colors hover:bg-teal-bright";
+  "inline-flex min-h-12 w-full items-center justify-center rounded-md bg-teal px-5 py-3 text-[15px] font-semibold text-night transition-colors hover:bg-teal-bright";
 
 /** Teal primary CTA for buttons (adds the disabled treatment). */
-export const PRIMARY_CTA = `${PRIMARY_CTA_BASE} disabled:cursor-not-allowed disabled:opacity-50`;
+export const PRIMARY_CTA = `${PRIMARY_CTA_BASE} disabled:cursor-not-allowed disabled:bg-elevated disabled:text-slate`;
 
 /** Outline/secondary CTA (divider border) — the "back to your path" links. */
 export const SECONDARY_CTA =
-  "inline-flex w-full items-center justify-center rounded-md border border-divider px-4 py-3 text-sm font-semibold text-porcelain transition-colors hover:border-teal/40";
+  "inline-flex min-h-12 w-full items-center justify-center rounded-md border border-faint px-5 py-3 text-[15px] font-semibold text-porcelain transition-colors hover:border-mist";
 
 const CARD_VARIANT = {
   /** Ordinary status (generating / locked / unavailable / stalled). */
@@ -51,7 +51,7 @@ export function StateCard({
       data-testid={testid}
       data-variant={dataVariant}
       aria-live={ariaLive}
-      className={`${spacing} rounded-lg border ${CARD_VARIANT[variant]} p-6 text-center shadow-sm`}
+      className={`${spacing} rounded-lg border ${CARD_VARIANT[variant]} px-6 py-8 text-center`}
     >
       {children}
     </section>

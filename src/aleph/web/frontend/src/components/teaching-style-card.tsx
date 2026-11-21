@@ -62,7 +62,7 @@ export function TeachingStyleCard({ detail }: { detail: PathDetail }) {
       <section
         data-testid="teaching-style"
         aria-labelledby="teaching-style-heading"
-        className="mt-5 rounded-lg bg-surface px-4 py-3 shadow-sm"
+        className="mt-6 border-y border-divider py-3"
       >
         <div className="flex items-center justify-between gap-4">
           <h2 id="teaching-style-heading" className="kicker">
@@ -72,14 +72,14 @@ export function TeachingStyleCard({ detail }: { detail: PathDetail }) {
             type="button"
             onClick={startEditing}
             data-testid="teaching-style-edit"
-            className="text-sm font-medium text-teal transition-colors hover:text-teal-bright focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal"
+            className="-my-2 inline-flex min-h-11 items-center px-2 text-sm font-semibold text-porcelain transition-colors hover:text-teal-bright"
           >
             {current ? "Edit" : "Add"}
           </button>
         </div>
         <p
           data-testid="teaching-style-text"
-          className={`mt-1.5 whitespace-pre-line text-sm leading-6 ${current ? "text-porcelain" : "text-slate"}`}
+          className={`mt-1 whitespace-pre-line text-[15px] leading-6 ${current ? "text-porcelain" : "text-slate"}`}
         >
           {current ?? "None yet. Tell Aleph how you like lessons taught."}
         </p>
@@ -91,7 +91,7 @@ export function TeachingStyleCard({ detail }: { detail: PathDetail }) {
   return (
     <form
       data-testid="teaching-style-form"
-      className="mt-5 rounded-lg bg-surface px-4 py-4 shadow-sm"
+      className="mt-6 rounded-lg border border-divider bg-surface px-4 py-4"
       onSubmit={(event) => {
         event.preventDefault();
         save();

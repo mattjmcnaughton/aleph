@@ -54,7 +54,7 @@ export function SwitcherSection({ currentPathId }: { currentPathId?: string }) {
           data-testid="sidebar-switcher-toggle"
           aria-expanded={open}
           onClick={() => setOpen((wasOpen) => !wasOpen)}
-          className="inline-flex items-center gap-1.5 font-mono text-[11px] font-medium uppercase tracking-kicker text-mist transition-colors hover:text-porcelain"
+          className="inline-flex items-center gap-1.5 text-xs font-medium text-mist transition-colors hover:text-porcelain"
         >
           <ChevronIcon open={open} />
           Your paths
@@ -96,17 +96,13 @@ export function SwitcherSection({ currentPathId }: { currentPathId?: string }) {
                   data-current={current || undefined}
                   className={
                     current
-                      ? // `colors.teal.DEFAULT`, not `colors.teal`: the token is an object
-                        // (DEFAULT/bright/dim), and `theme()` resolves an object to nothing
-                        // — Tailwind then drops the whole utility silently, with no build
-                        // error and nothing for jsdom to catch. Spell the leaf.
-                        "flex items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium text-porcelain shadow-[inset_2px_0_0_theme(colors.teal.DEFAULT)]"
+                      ? "flex items-center gap-2.5 rounded-md bg-surface px-3 py-2 text-sm font-semibold text-porcelain"
                       : "flex items-center gap-2.5 rounded-md px-3 py-2 text-sm text-mist transition-colors hover:bg-surface hover:text-porcelain"
                   }
                 >
                   <span className="min-w-0 flex-1 truncate">{path.title}</span>
                   <span
-                    className={`shrink-0 font-mono text-[11px] ${current ? "text-teal" : "text-slate"}`}
+                    className={`shrink-0 text-xs tabular-nums ${current ? "text-mist" : "text-slate"}`}
                   >
                     {path.progress.completed_lessons}/{path.progress.total_lessons}
                   </span>
@@ -143,9 +139,9 @@ export function OutlineSection({
     <div>
       <div className="mb-1.5 flex items-baseline justify-between gap-2">
         <p className="min-w-0 truncate text-sm font-semibold text-porcelain">{detail.title}</p>
-        <span className="shrink-0 font-mono text-[11px] text-slate">{percent}%</span>
+        <span className="shrink-0 text-xs tabular-nums text-slate">{percent}%</span>
       </div>
-      <div className="mb-5 h-[5px] overflow-hidden rounded-full bg-porcelain/10">
+      <div className="mb-5 h-1 overflow-hidden rounded-full bg-porcelain/10">
         <span className="block h-full bg-teal" style={{ width: `${percent}%` }} />
       </div>
 
@@ -155,11 +151,11 @@ export function OutlineSection({
           return (
             <div key={unit.id}>
               <p
-                className={`mb-2 font-mono text-[11px] font-medium uppercase tracking-kicker ${
-                  holdsActive ? "text-teal" : "text-slate"
+                className={`mb-2 text-xs font-medium ${
+                  holdsActive ? "text-porcelain" : "text-slate"
                 }`}
               >
-                Unit {String(index + 1).padStart(2, "0")} · {unit.title}
+                Unit {index + 1}: {unit.title}
               </p>
               <div className="flex flex-col gap-0.5">
                 {unit.lessons.map((lesson) => (
@@ -189,7 +185,7 @@ function OutlineLessonRow({ lesson, active }: { lesson: PathLesson; active: bool
   const generating = lesson.generation_state === "generating";
 
   const rowClassName = active
-    ? `${OUTLINE_ROW_BASE} border border-teal bg-teal/10 font-medium text-porcelain`
+    ? `${OUTLINE_ROW_BASE} bg-teal/[0.08] font-semibold text-porcelain shadow-[inset_2px_0_0_theme(colors.teal.DEFAULT)]`
     : locked
       ? `${OUTLINE_ROW_BASE} cursor-not-allowed text-slate`
       : `${OUTLINE_ROW_BASE} text-mist transition-colors hover:bg-surface hover:text-porcelain`;
@@ -199,11 +195,7 @@ function OutlineLessonRow({ lesson, active }: { lesson: PathLesson; active: bool
       <LessonMarker state={lesson.unlock_state} size="sm" />
       <span className="sr-only">{UNLOCK_STATE_LABEL[lesson.unlock_state]}: </span>
       <span className="min-w-0 flex-1 truncate">{lesson.title}</span>
-      {locked && generating ? (
-        <span className="shrink-0 font-mono text-[10px] uppercase tracking-kicker text-slate">
-          Prep
-        </span>
-      ) : null}
+      {locked && generating ? <span className="shrink-0 text-xs text-slate">Prep</span> : null}
     </>
   );
 

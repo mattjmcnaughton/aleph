@@ -29,38 +29,39 @@ interface BreadcrumbsProps {
  * to assistive technology and in the native title tooltip.
  */
 export function Breadcrumbs({ current, path, root = "Your paths" }: BreadcrumbsProps) {
+  // On a phone the trail is the way back: the ancestors only, at a real touch
+  // height. The current page is dropped there (`hidden sm:block`) because the
+  // page title directly beneath says the same thing, and squeezing three
+  // truncated labels into 390px left none of them readable.
   return (
-    <nav aria-label="Breadcrumb" className="mb-6 min-w-0">
-      <ol className="flex min-w-0 items-center gap-2 font-mono text-[11px] tracking-[0.08em]">
-        <li className="shrink-0">
-          <Link
-            to="/"
-            className="rounded-sm text-slate transition-colors hover:text-teal focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal"
-          >
+    <nav aria-label="Breadcrumb" className="-mt-2 mb-4 min-w-0 lg:mb-6">
+      <ol className="flex min-w-0 items-center gap-1.5 text-sm">
+        <li className="flex shrink-0 items-center">
+          <BackChevron />
+          <Link to="/" className={CRUMB_LINK}>
             {root}
           </Link>
         </li>
 
-        <Separator />
-
         {path ? (
           <>
-            <li className="min-w-0 max-w-[42%]">
+            <Separator />
+            <li className="min-w-0 sm:max-w-[42%]">
               <Link
                 to="/paths/$pathId"
                 params={{ pathId: path.id }}
                 title={path.title}
-                className="block truncate rounded-sm text-slate transition-colors hover:text-teal focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal"
+                className={`${CRUMB_LINK} max-w-full`}
               >
-                {path.title}
+                <span className="truncate">{path.title}</span>
               </Link>
             </li>
-            <Separator />
           </>
         ) : null}
 
-        <li className="min-w-0 flex-1">
-          <span aria-current="page" title={current} className="block truncate text-mist">
+        <Separator currentOnly />
+        <li className="hidden min-w-0 flex-1 sm:block">
+          <span aria-current="page" title={current} className="block truncate text-slate">
             {current}
           </span>
         </li>
@@ -69,10 +70,38 @@ export function Breadcrumbs({ current, path, root = "Your paths" }: BreadcrumbsP
   );
 }
 
-function Separator() {
+const CRUMB_LINK =
+  "inline-flex min-h-11 items-center rounded-sm text-mist transition-colors hover:text-porcelain";
+
+/** Phone only: the trail reads as "back to", so it leads with a chevron. */
+function BackChevron() {
   return (
-    <li aria-hidden="true" className="shrink-0 text-teal/60">
-      ›
+    <svg
+      viewBox="0 0 16 16"
+      width="14"
+      height="14"
+      fill="none"
+      aria-hidden="true"
+      className="-ml-1 mr-1 shrink-0 text-slate sm:hidden"
+    >
+      <path
+        d="M10 3.5L5.5 8l4.5 4.5"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function Separator({ currentOnly = false }: { currentOnly?: boolean }) {
+  return (
+    <li
+      aria-hidden="true"
+      className={`shrink-0 text-faint ${currentOnly ? "hidden sm:block" : ""}`}
+    >
+      /
     </li>
   );
 }

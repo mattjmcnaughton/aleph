@@ -518,6 +518,7 @@ function LessonContent({ lessonId }: { lessonId: string }) {
           onFlowSummary={
             inFlow && flow?.endedReason != null ? () => navigate({ to: "/flow/done" }) : null
           }
+          positionLabel={readyPathDetail ? lessonPositionLabel(readyPathDetail, detail) : null}
         />
       )}
 
@@ -526,7 +527,7 @@ function LessonContent({ lessonId }: { lessonId: string }) {
       ) : null}
 
       {/* Stable id seam the path-view + e2e suites key on (keep this testid). */}
-      <p data-testid="lesson-view-id" className="mt-10 font-mono text-xs text-slate">
+      <p data-testid="lesson-view-id" aria-hidden="true" className="sr-only">
         {lessonId}
       </p>
 
@@ -545,6 +546,14 @@ function LessonContent({ lessonId }: { lessonId: string }) {
  * completed card's "Next lesson" both walk the same cached outline, so they can
  * never disagree about which lesson comes next.
  */
+/** The lesson's place in its path, in words: its number, the total, its unit. */
+function lessonPositionLabel(pathDetail: PathDetail, detail: LessonDetail): string {
+  const total = pathDetail.units.reduce((count, unit) => count + unit.lessons.length, 0);
+  const unit = pathDetail.units.find((u) => u.lessons.some((lesson) => lesson.id === detail.id));
+  const place = `Lesson ${detail.position_in_path} of ${total}`;
+  return unit ? `${place}, ${unit.title}` : place;
+}
+
 function lessonAtPosition(pathDetail: PathDetail, position: number): PathLesson | undefined {
   return pathDetail.units
     .flatMap((unit) => unit.lessons)
@@ -654,9 +663,7 @@ function LessonNav({
       ) : null}
 
       {next?.unlock_state === "locked" ? (
-        <span className="font-mono text-[11px] uppercase tracking-kicker text-slate">
-          Answer to continue
-        </span>
+        <span className="text-xs text-slate">Answer to continue</span>
       ) : null}
 
       {next ? (
@@ -704,8 +711,11 @@ function ReadyLesson({
   flowAdvance,
   milestones,
   onFlowSummary,
+  positionLabel,
 }: {
   detail: LessonDetail;
+  /** "Lesson 5 of 11, Lifetimes in practice", once the path has loaded. */
+  positionLabel: string | null;
   onAttempt: (index: number) => void;
   attempting: boolean;
   attemptErrored: boolean;
@@ -738,15 +748,17 @@ function ReadyLesson({
 
   return (
     <>
-      <p className="kicker">Lesson</p>
-      <h1 className="mt-2 text-3xl font-semibold leading-tight tracking-tight">{detail.title}</h1>
+      {/* Where this lesson sits, rather than the word "Lesson": the label earns
+          its line by saying something the title does not. */}
+      <p className="kicker">{positionLabel ?? "Lesson"}</p>
+      <h1 className="mt-2 page-title">{detail.title}</h1>
 
       {/* The Read passage is Markdown (the lesson agent writes GFM), so it is
           rendered rather than printed: headings, lists, tables, and fenced code
           blocks all carry structure the old `whitespace-pre-line` text node
           flattened. `read_passage` is null only while ungenerated, a state this
           branch never renders — the `?? ""` is a type narrowing, not a case. */}
-      <Markdown testid="lesson-read-passage" className="mt-5 text-base">
+      <Markdown testid="lesson-read-passage" className="reading mt-6">
         {detail.read_passage ?? ""}
       </Markdown>
 
@@ -826,7 +838,7 @@ function ReadyLesson({
             </button>
           </>
         ) : (
-          <p className="text-center text-sm leading-6 text-slate">
+          <p className="text-sm leading-6 text-slate">
             Answer the Quick check to finish this lesson.
           </p>
         )}
@@ -852,9 +864,12 @@ function QuickCheckBlock({
   const revealed = reveal !== null;
 
   return (
-    <section data-testid="quick-check" className="mt-8">
+    <section data-testid="quick-check" className="mt-12 border-t border-divider pt-8">
       <p className="kicker">Quick check</p>
-      <p data-testid="quick-check-stem" className="mt-2 text-lg font-semibold leading-snug">
+      <p
+        data-testid="quick-check-stem"
+        className="mt-2 font-serif text-xl font-medium leading-snug tracking-[-0.01em]"
+      >
         {quickCheck.stem}
       </p>
 
@@ -865,7 +880,7 @@ function QuickCheckBlock({
           a screen-reader user can still tab through and inspect which was
           correct. The reveal locks the answer (first-wins); the `revealed` guard
           in onChange enforces it while keeping the inputs focusable. */}
-      <fieldset className="mt-4">
+      <fieldset className="mt-5">
         <legend className="sr-only">Choose one answer</legend>
         <div className="space-y-2">
           {quickCheck.options.map((option, index) => {
@@ -898,12 +913,27 @@ function QuickCheckBlock({
                 {revealed && isSelected && !isCorrect ? (
                   <span className="sr-only">Your answer: </span>
                 ) : null}
-                <span className="min-w-0 flex-1">{option}</span>
-                {isCorrect ? (
-                  <span aria-hidden="true" className="shrink-0 text-teal">
+                <span
+                  aria-hidden="true"
+                  className={`grid h-5 w-5 shrink-0 place-items-center rounded-full border ${
+                    isCorrect
+                      ? "border-teal bg-teal text-night"
+                      : isSelected && !revealed
+                        ? "border-teal"
+                        : isSelected
+                          ? "border-danger"
+                          : "border-faint"
+                  }`}
+                >
+                  {isCorrect ? (
                     <CheckIcon />
-                  </span>
-                ) : null}
+                  ) : isSelected ? (
+                    <span
+                      className={`h-2.5 w-2.5 rounded-full ${revealed ? "bg-danger" : "bg-teal"}`}
+                    />
+                  ) : null}
+                </span>
+                <span className="min-w-0 flex-1">{option}</span>
               </label>
             );
           })}
@@ -939,23 +969,23 @@ function QuickCheckBlock({
 }
 
 const OPTION_BASE =
-  "flex w-full cursor-pointer items-center gap-3 rounded-md border px-4 py-3 text-left text-sm transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-teal has-[:focus-visible]:ring-offset-2 has-[:focus-visible]:ring-offset-night";
+  "flex min-h-[52px] w-full cursor-pointer items-center gap-3 rounded-md border px-4 py-3 text-left text-[15px] leading-snug transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-teal has-[:focus-visible]:ring-offset-2 has-[:focus-visible]:ring-offset-night";
 
 function optionClass(selected: boolean, revealed: boolean, correct: boolean): string {
   // Teal highlight: the keyed-correct option after reveal, or the learner's live
   // pick before reveal (`correct` is only ever set once revealed, so the two
   // never collide). These two states share one treatment.
   if (correct || (selected && !revealed)) {
-    return `${OPTION_BASE} border-teal bg-teal/10 text-porcelain`;
+    return `${OPTION_BASE} border-teal bg-teal/[0.08] text-porcelain`;
   }
   if (revealed && selected) {
     // The learner's pick, now shown to be wrong (the correct one is highlighted).
     return `${OPTION_BASE} border-danger-border/60 bg-danger-bg text-porcelain`;
   }
   if (revealed) {
-    return `${OPTION_BASE} border-divider bg-surface/50 text-slate`;
+    return `${OPTION_BASE} border-divider text-slate`;
   }
-  return `${OPTION_BASE} border-divider bg-surface text-mist hover:border-teal/40 hover:text-porcelain`;
+  return `${OPTION_BASE} border-divider text-porcelain hover:border-faint hover:bg-surface`;
 }
 
 function OutcomeReveal({ reveal }: { reveal: LessonAttempt }) {
@@ -965,17 +995,19 @@ function OutcomeReveal({ reveal }: { reveal: LessonAttempt }) {
       data-testid="outcome-reveal"
       data-outcome={reveal.outcome}
       aria-live="polite"
-      className={`mt-5 rounded-lg border p-5 ${
-        correct ? "border-teal/40 bg-teal/10" : "border-iris-700 bg-iris-900"
+      className={`mt-5 rounded-md bg-surface p-5 ${
+        correct
+          ? "shadow-[inset_2px_0_0_theme(colors.teal.DEFAULT)]"
+          : "shadow-[inset_2px_0_0_theme(colors.mist)]"
       }`}
     >
-      <p className={`text-sm font-semibold ${correct ? "text-teal" : "text-iris-300"}`}>
+      <p className={`text-[15px] font-semibold ${correct ? "text-teal" : "text-porcelain"}`}>
         {correct ? "Correct." : "Not quite."}
       </p>
       {/* Inline Markdown only here (the prompt asks for no block structure in an
           explanation), but it goes through the same renderer so an agent's
           `inline code` and emphasis read as such instead of as stray backticks. */}
-      <Markdown testid="outcome-explanation" className="mt-2 text-sm [&_p]:text-sm [&_p]:leading-6">
+      <Markdown testid="outcome-explanation" className="mt-2 text-[15px] [&_p]:leading-6">
         {reveal.explanation}
       </Markdown>
     </div>
@@ -1008,16 +1040,18 @@ function CompletedState({ pathId, nextLesson }: { pathId: string; nextLesson: Pa
   return (
     <section
       data-testid="lesson-completed"
-      className="rounded-lg border border-teal/40 bg-teal/10 p-5 text-center shadow-sm"
+      className="rounded-lg border border-divider bg-surface p-5 lg:p-6"
     >
-      <span
-        aria-hidden="true"
-        className="mx-auto grid h-8 w-8 place-items-center rounded-full border border-teal text-teal"
-      >
-        <CheckIcon />
-      </span>
-      <h2 className="mt-3 text-lg font-semibold text-porcelain">Lesson complete.</h2>
-      <p className="mx-auto mt-2 max-w-[24rem] text-sm leading-6 text-mist">
+      <h2 className="flex items-center gap-2.5 font-serif text-xl font-medium text-porcelain">
+        <span
+          aria-hidden="true"
+          className="grid h-6 w-6 place-items-center rounded-full bg-teal text-night"
+        >
+          <CheckIcon />
+        </span>
+        Lesson complete.
+      </h2>
+      <p className="mt-2 text-[15px] leading-6 text-mist">
         {nextLesson ? (
           <>
             Nice work. Next up: <span className="text-porcelain">{nextLesson.title}</span>.
@@ -1027,7 +1061,7 @@ function CompletedState({ pathId, nextLesson }: { pathId: string; nextLesson: Pa
         )}
       </p>
 
-      <div className="mt-5 flex flex-col gap-2">
+      <div className="mt-5 flex flex-col gap-2 lg:flex-row lg:[&>a]:w-auto">
         {nextLesson ? (
           <Link
             to="/lessons/$lessonId"
@@ -1055,7 +1089,7 @@ function CompletedState({ pathId, nextLesson }: { pathId: string; nextLesson: Pa
       <Link
         to="/"
         data-testid="lesson-completed-home"
-        className="mt-4 block text-sm text-mist transition-colors hover:text-porcelain"
+        className="mt-2 inline-flex min-h-11 items-center text-sm text-mist transition-colors hover:text-porcelain"
       >
         Home
       </Link>
@@ -1068,10 +1102,7 @@ function CompletedState({ pathId, nextLesson }: { pathId: string; nextLesson: Pa
 function LoadingState() {
   return (
     <>
-      <p className="kicker">Lesson</p>
-      <h1 className="mt-2 text-3xl font-semibold leading-tight tracking-tight">
-        Loading your lesson…
-      </h1>
+      <h1 className="page-title text-mist">Loading your lesson…</h1>
     </>
   );
 }
@@ -1080,7 +1111,7 @@ function GeneratingState() {
   return (
     <StateCard testid="lesson-generating" ariaLive="polite">
       <Spinner />
-      <h1 className="mt-4 text-lg font-semibold">Preparing your lesson…</h1>
+      <h1 className="mt-4 text-xl leading-snug">Preparing your lesson…</h1>
       <p className="mx-auto mt-2 max-w-[22rem] text-sm leading-6 text-mist">
         Aleph is writing the Read passage and Quick check. This page updates itself when it's ready.
       </p>
@@ -1091,7 +1122,7 @@ function GeneratingState() {
 function StalledState({ pathId }: { pathId: string }) {
   return (
     <StateCard testid="lesson-generation-stalled" ariaLive="polite">
-      <h1 className="text-lg font-semibold">This lesson isn't ready yet.</h1>
+      <h1 className="text-xl leading-snug">This lesson isn't ready yet.</h1>
       <p className="mx-auto mt-2 max-w-[24rem] text-sm leading-6 text-mist">
         It's taking longer than expected. Head back to your path — if an earlier lesson failed to
         generate, retrying it there unblocks this one.
@@ -1123,7 +1154,7 @@ function FailedState({
 }) {
   return (
     <StateCard testid="lesson-failed" variant="error" dataVariant="error" ariaLive="assertive">
-      <h1 className="text-lg font-semibold text-danger">This lesson didn't generate.</h1>
+      <h1 className="text-xl leading-snug text-danger">This lesson didn't generate.</h1>
       <p className="mx-auto mt-2 max-w-[24rem] text-sm leading-6 text-porcelain">
         {message ?? "We couldn't write this lesson. Retry when you're ready."}
       </p>
@@ -1155,7 +1186,7 @@ function LockedState({ pathId }: { pathId: string }) {
       >
         <LockIcon />
       </span>
-      <h1 className="mt-3 text-lg font-semibold">This lesson is locked.</h1>
+      <h1 className="mt-3 text-xl leading-snug">This lesson is locked.</h1>
       <p className="mx-auto mt-2 max-w-[24rem] text-sm leading-6 text-mist">
         Finish the earlier lessons first — they unlock this one in order.
       </p>
@@ -1174,7 +1205,7 @@ function LockedState({ pathId }: { pathId: string }) {
 function UnavailableState() {
   return (
     <StateCard testid="lesson-unavailable">
-      <h1 className="text-lg font-semibold">We couldn't load this lesson.</h1>
+      <h1 className="text-xl leading-snug">We couldn't load this lesson.</h1>
       <p className="mx-auto mt-2 max-w-[24rem] text-sm leading-6 text-mist">
         It may have been deleted, or something went wrong. Head back to your paths and try again.
       </p>

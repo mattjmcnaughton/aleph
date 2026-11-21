@@ -29,46 +29,42 @@ export const ROW_STATUS_TONE = {
 
 export type RowVariant = keyof typeof ROW_STATUS_TONE;
 
-// Phone: a full card fill per status. Desktop (`lg:`): the row becomes a
-// table-ish line and the tint becomes a 2px inset bar instead (mock #2c rows
-// 4-5) — `lg:shadow-none` for the ordinary row, an inset `lg:shadow-[...]` for
-// refusal/error, so exactly one `lg:shadow-*` utility is ever active per row.
+// A ruled row at every width: a hairline beneath, no box. A status that needs
+// attention (refusal, failure, an unread Brief) is marked by a 2px inset bar on
+// the leading edge plus its status line's colour, never by tinting the whole
+// row, so a list of eight paths reads as a list rather than as eight cards.
 const ROW_TONE = {
-  neutral: "border-divider bg-surface lg:shadow-none",
-  refusal: "border-iris-700 bg-iris-900 lg:shadow-[inset_2px_0_0_theme(colors.iris.700)]",
-  error:
-    "border-danger-border/60 bg-danger-bg lg:shadow-[inset_2px_0_0_theme(colors.danger.DEFAULT)]",
-  unread:
-    "border-iris/50 bg-iris/[0.06] shadow-glow-iris lg:shadow-[inset_2px_0_0_theme(colors.iris.DEFAULT)]",
+  neutral: "",
+  refusal: "pl-4 shadow-[inset_2px_0_0_theme(colors.iris.600)]",
+  error: "pl-4 shadow-[inset_2px_0_0_theme(colors.danger.DEFAULT)]",
+  unread: "pl-4 shadow-[inset_2px_0_0_theme(colors.iris.DEFAULT)]",
 } as const;
 
 // `group` is what lets a row's Delete button reveal on hover (see `RowActions`).
+// Below `lg` the row is a two-column grid so its actions sit at the top right,
+// beside the title, instead of as a button stacked under every row.
 const ROW_BASE =
-  "group relative rounded-lg border p-4 shadow-sm lg:grid lg:items-center lg:gap-x-5 lg:rounded-none lg:border-0 lg:border-b lg:border-divider lg:bg-transparent lg:px-2 lg:py-4";
+  "group relative grid grid-cols-[minmax(0,1fr)_auto] gap-x-2 border-b border-divider py-4 lg:items-center lg:gap-x-5 lg:px-2";
 
-// The shared track template, and the reason every row lines up:
-//   title (flexible) | meta (210px) | status (110px) | chip (76px) | actions (84px)
+// The shared track template, and the reason every row lines up at `lg`:
+//   title (flexible) | meta (190px) | status (104px) | actions (76px)
 //
 // **Every track except the title is a fixed width, and that is load-bearing.**
 // Each row is its own grid element, so tracks resolve per row, not across the
-// list — CSS Grid aligns cells within one grid, and sibling grids share
-// nothing. What makes the columns line up anyway is that every row is the same
-// outer width and every non-flexible track is a constant, so `minmax(0,1fr)`
-// resolves to the identical number in each of them. An `auto` track would
-// break exactly that: a row with no review chip would size its chip track to
-// zero and pull the four columns after it leftward, which is the original
-// misalignment bug wearing a grid costume (it is visible in the very first
-// screenshot of this layout, where the two chipless rows sat visibly right of
-// the rest). `minmax(0,1fr)` rather than a bare `1fr` is what keeps a long
-// title truncating inside its track instead of widening the grid.
+// list: CSS Grid aligns cells within one grid, and sibling grids share nothing.
+// What makes the columns line up anyway is that every row is the same outer
+// width and every non-flexible track is a constant, so `minmax(0,1fr)` resolves
+// to the identical number in each of them. An `auto` track would break exactly
+// that. `minmax(0,1fr)` rather than a bare `1fr` is what keeps a long title
+// clamping inside its track instead of widening the grid.
 //
 // Rows are implicit rather than declared: `footer` flows into a second one
 // when a row has it, and no row is reserved when it does not.
-const ROW_GRID = "lg:grid-cols-[minmax(0,1fr)_210px_110px_88px_84px]";
+const ROW_GRID = "lg:grid-cols-[minmax(0,1fr)_190px_104px_76px]";
 
 /**
  * One row of a home list. Every cell is optional so a Beat (title + state, no
- * progress, no chip) and a path (all five) share one set of tracks.
+ * progress) and a path share one set of tracks.
  *
  * `main` is the row's own link — the whole title/meta block — and the caller
  * owns it rather than this primitive, because a path links to `/paths/$id`
@@ -83,7 +79,6 @@ export function ListRow({
   main,
   meta,
   status,
-  chip,
   actions,
   footer,
 }: {
@@ -96,8 +91,6 @@ export function ListRow({
   meta?: ReactNode;
   /** The one-line state readout. */
   status?: ReactNode;
-  /** A call to action that is not the row's own destination (e.g. `Review 7`). */
-  chip?: ReactNode;
   /** Destructive/secondary controls, always a sibling of `main`'s link. */
   actions?: ReactNode;
   /**
@@ -115,20 +108,23 @@ export function ListRow({
       {...dataAttrs}
       className={`${ROW_BASE} ${ROW_GRID} ${ROW_TONE[variant]}`}
     >
-      {main}
+      <div className="col-start-1 row-start-1 min-w-0 lg:col-start-auto lg:row-start-auto">
+        {main}
+      </div>
       {/* Empty cells are rendered, not omitted: an omitted cell would let the
           following ones slide up a track and re-create the misalignment this
           grid exists to prevent. Below `lg` the grid is off and an empty div
           costs nothing. */}
-      <div className="lg:min-w-0">{meta}</div>
-      <div className={`mt-1 text-sm lg:mt-0 ${ROW_STATUS_TONE[variant]}`}>{status}</div>
-      <div>{chip}</div>
+      <div className="col-span-2 lg:col-span-1 lg:min-w-0">{meta}</div>
+      <div className={`col-span-2 text-sm lg:col-span-1 ${ROW_STATUS_TONE[variant]}`}>{status}</div>
       {/* `lg:justify-end`: a path row's actions are Delete + chevron and a
           Beat row's are the chevron alone, so left-packing would land the two
           sections' chevrons at different x positions — the one thing a shared
           row grammar cannot afford to get wrong. */}
-      <div className="mt-3 flex items-center gap-2 lg:mt-0 lg:justify-end">{actions}</div>
-      {footer ? <div className="lg:col-span-full">{footer}</div> : null}
+      <div className="col-start-2 row-start-1 -my-2 -mr-2 flex items-start gap-2 lg:col-start-auto lg:row-start-auto lg:m-0 lg:items-center lg:justify-end">
+        {actions}
+      </div>
+      {footer ? <div className="col-span-2 lg:col-span-full">{footer}</div> : null}
     </div>
   );
 }
@@ -150,13 +146,19 @@ export function RowTitle({
 }) {
   return (
     <div className="min-w-0">
-      {/* `truncate` is the project's convention for learner text (`sidebar.tsx`,
-          `paths.$pathId.tsx`): a pasted URL or an over-long topic must not
-          widen the row at 390px. */}
-      <p data-testid={titleTestid} className="truncate text-base font-semibold leading-snug">
+      {/* Learner text must not widen the row at 390px (a pasted URL, an
+          over-long topic). On a phone it wraps to two lines before clipping,
+          because a title cut to "Kubernetes for application develo…" hides
+          the one thing the row is for; the desktop table keeps one line. */}
+      <p
+        data-testid={titleTestid}
+        className="line-clamp-2 break-words text-base font-semibold leading-snug"
+      >
         {title}
       </p>
-      {children ? <div className="mt-1 flex items-center gap-2">{children}</div> : null}
+      {children ? (
+        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">{children}</div>
+      ) : null}
     </div>
   );
 }
@@ -181,5 +183,20 @@ export function RowActions({ children }: { children: ReactNode }) {
     <div className="flex items-center gap-1 lg:opacity-0 lg:transition-opacity lg:group-hover:opacity-100 lg:group-focus-within:opacity-100 lg:[@media(hover:none)]:opacity-100">
       {children}
     </div>
+  );
+}
+
+/** The desktop row's trailing chevron: decorative, the row's link is its title. */
+export function RowChevron() {
+  return (
+    <svg viewBox="0 0 16 16" width="14" height="14" fill="none" aria-hidden="true">
+      <path
+        d="M6 3.5L10.5 8 6 12.5"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
   );
 }

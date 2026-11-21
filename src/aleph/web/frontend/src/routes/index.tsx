@@ -17,7 +17,7 @@ import { ActivityStrip } from "../components/activity-strip";
 import { BeatCard, hasUnreadBriefs } from "../components/beat-card";
 import { ContinueCard } from "../components/continue-card";
 import { FlowDoor } from "../components/flow/flow-door";
-import { ListRow, type RowVariant, RowTitle, RowActions } from "../components/list-row";
+import { ListRow, RowActions, RowChevron, RowTitle, type RowVariant } from "../components/list-row";
 import { type NewMenuItem, NewMenu } from "../components/new-menu";
 import { SectionHeader } from "../components/section-header";
 import { PRIMARY_CTA_BASE, StateCard } from "../components/state-card";
@@ -264,10 +264,7 @@ function Home() {
             No Beats yet. Deploy one from New above, to keep watch on a topic that's still moving.
           </p>
         ) : (
-          <ul
-            data-testid="beats-list"
-            className="mt-3 space-y-3 lg:space-y-0 lg:border-t lg:border-divider"
-          >
+          <ul data-testid="beats-list">
             {sortedBeats.map((beat) => (
               <li key={beat.id}>
                 <BeatCard beat={beat} />
@@ -281,9 +278,9 @@ function Home() {
 
   return (
     <Workspace testid="paths-switcher" width="switcher">
-      <div className="lg:flex lg:items-end lg:justify-between lg:gap-8">
+      <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <h1 className="text-3xl font-semibold leading-tight tracking-tight">
+          <h1 className="page-title max-lg:text-2xl max-lg:leading-[2.75rem]">
             Welcome back, {firstName}.
           </h1>
           {/* Onboarding copy, shown once it can still teach something. A
@@ -291,7 +288,10 @@ function Home() {
               was being told every visit; the empty state below says the same
               thing where it is genuinely the first thing on the screen. */}
           {paths !== undefined && paths.length === 0 ? (
-            <p data-testid="home-intro" className="mt-3 text-base leading-6 text-mist">
+            <p
+              data-testid="home-intro"
+              className="mt-3 max-w-[34rem] text-base leading-6 text-mist"
+            >
               Name a topic and Aleph drafts a learning path you can work through, lesson by lesson.
             </p>
           ) : null}
@@ -306,37 +306,41 @@ function Home() {
         />
       </div>
 
-      {/* One tap back into yesterday's work, above everything else on the page
-          — and outside the two-column split below, so it stays first at every
-          width rather than sliding into a rail. */}
       <InstallCard />
-      <ContinueCard path={resumeTarget} />
-      {flowEnabled ? <FlowDoor paths={paths} /> : null}
-      {beatsPromoted ? beatsSection : null}
 
-      <div className="mt-2 flex flex-col lg:mt-6 lg:flex-row lg:items-start lg:gap-8">
-        {/* The day's state. `order-first`/`lg:order-last` is the whole of the
-            desktop rail: on a phone this stays exactly where it has always
-            been (above the paths list), and at `lg` it moves to a column
-            beside the work instead of pushing it further down the page. */}
+      {/* One grid at `lg`: the work on the left, the day's state in a rail that
+          starts level with Continue. In DOM order (which is the phone's order)
+          it reads Continue, Flow, any unread Briefs, the day's state, then
+          the lists. */}
+      <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_16rem] lg:items-start lg:gap-x-12">
+        <div className="min-w-0 lg:col-start-1">
+          {/* One tap back into yesterday's work, above everything else. */}
+          <ContinueCard path={resumeTarget} />
+          {flowEnabled ? <FlowDoor paths={paths} /> : null}
+        </div>
+
+        {/* A Brief waiting to be read outranks the day's state, so a promoted
+            Beats section comes before the rail in the DOM (and on a phone). */}
+        {beatsPromoted ? <div className="min-w-0 lg:col-start-1">{beatsSection}</div> : null}
+
         <aside
           data-testid="today-rail"
-          className="order-first lg:order-last lg:w-[260px] lg:shrink-0"
+          className="lg:col-start-2 lg:row-span-3 lg:row-start-1 lg:mt-6"
         >
           {/* Both read straight off `progressQuery.data` and render nothing
-              when it is `undefined` — loading, flag off, or a failed GET all
+              when it is `undefined`: loading, flag off, or a failed GET all
               look the same to the paths list, which is the whole point. No
-              wrapper margin when there is nothing to show: an empty decoration
-              must not even cost the layout a gap. */}
+              wrapper when there is nothing to show: an empty decoration must
+              not even cost the layout a gap. */}
           {progressQuery.data !== undefined ? (
-            <div className="mt-6 lg:mt-0">
+            <div className="mt-7 flex items-center justify-between gap-6 lg:mt-0 lg:block">
               <StreakLine summary={progressQuery.data} />
               <ActivityStrip activity={progressQuery.data.activity} />
             </div>
           ) : null}
         </aside>
 
-        <div className="min-w-0 lg:flex-1">
+        <div className="min-w-0 lg:col-start-1">
           {/* Collapsible (both lists are): a learner with eight paths and a
               handful of Beats has a long page, and the section they are not
               working in today is pure scroll. Collapsed, the header still says
@@ -344,7 +348,7 @@ function Home() {
               as the rows makes you open it just to find out. */}
           <SectionHeader
             kicker="Your paths"
-            spacing="mt-8 lg:mt-0"
+            spacing="mt-8"
             summary={!pathsOpen && paths !== undefined ? countSummary(paths.length, "path") : null}
             collapse={{
               open: pathsOpen,
@@ -372,10 +376,7 @@ function Home() {
               <EmptyState />
             ) : (
               <>
-                <ul
-                  data-testid="paths-list"
-                  className="mt-3 space-y-3 lg:space-y-0 lg:border-t lg:border-divider"
-                >
+                <ul data-testid="paths-list">
                   {(activePaths ?? []).map((path) => (
                     <li key={path.id}>
                       <PathRow path={path} deletion={deletion} streak={pathStreaks.get(path.id)} />
@@ -389,7 +390,7 @@ function Home() {
                     {/* Dimmed as a group rather than per row: nothing here is
                         asking for anything, and `hover:opacity-100` keeps it
                         fully legible the moment the learner goes looking. */}
-                    <ul className="mt-3 space-y-3 opacity-60 transition-opacity hover:opacity-100 lg:space-y-0 lg:border-t lg:border-divider">
+                    <ul className="opacity-70 transition-opacity hover:opacity-100">
                       {finishedPaths.map((path) => (
                         <li key={path.id}>
                           <PathRow
@@ -497,10 +498,7 @@ function PathRow({
           className="block min-w-0 rounded-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-teal"
         >
           <RowTitle title={path.title} titleTestid="path-item-topic">
-            <p
-              data-testid="path-item-level"
-              className="font-mono text-[11px] uppercase tracking-kicker text-slate"
-            >
+            <p data-testid="path-item-level" className="text-sm text-mist">
               {levelLabel(path.level)}
             </p>
             {/* Hidden below 2 days by the chip itself (PRD §4.3) — `?? 0`
@@ -511,7 +509,7 @@ function PathRow({
       }
       meta={
         total > 0 ? (
-          <div className="mt-3 lg:mt-0">
+          <div className="mt-3 flex items-center gap-3 lg:mt-0 lg:block">
             {/* Decorative bar; the text below is the accessible readout.
                   Neutral fill, not teal (design critique, theme 4): teal was
                   marking the primary CTA, progress, the review chip, section
@@ -520,17 +518,26 @@ function PathRow({
                   progress is a fact, not an invitation. */}
             <div
               aria-hidden="true"
-              className="h-[6px] overflow-hidden rounded-full bg-porcelain/10"
+              className="h-1 min-w-0 flex-1 overflow-hidden rounded-full bg-porcelain/10"
             >
               <span className="block h-full bg-porcelain/45" style={{ width: `${percent}%` }} />
             </div>
-            <p data-testid="path-item-progress" className="mt-2 text-sm text-mist">
+            <p data-testid="path-item-progress" className="shrink-0 text-sm text-mist lg:mt-2">
               {done} of {total} {total === 1 ? "lesson" : "lessons"} complete
             </p>
           </div>
         ) : null
       }
-      status={<span data-testid="path-item-status">{statusLabel(path)}</span>}
+      status={
+        // A ready path's status ("In progress") repeats what its progress line
+        // already says, so on a phone only the states that need saying show.
+        <span
+          data-testid="path-item-status"
+          className={path.status === "ready" ? "hidden lg:inline" : "mt-2 block lg:mt-0"}
+        >
+          {statusLabel(path)}
+        </span>
+      }
       // A sibling of the row's own link, not nested inside it (a link inside
       actions={
         confirming ? null : (
@@ -542,15 +549,15 @@ function PathRow({
                 data-testid="path-delete-button"
                 aria-label={`Delete ${path.title}`}
                 onClick={() => deletion.ask(path.id)}
-                className="rounded-md border border-divider px-3 py-1.5 text-sm text-mist transition-colors hover:border-danger-border hover:text-danger focus-visible:outline focus-visible:outline-2 focus-visible:outline-teal lg:border-0 lg:px-2"
+                className="grid h-11 w-11 place-items-center rounded-md text-slate transition-colors hover:bg-danger-bg hover:text-danger"
               >
-                Delete
+                <TrashIcon />
               </button>
             </RowActions>
             {/* Desktop-only row chevron (mock #2c) — decorative, the whole
                   row is a link via `path-item-open`. */}
             <span aria-hidden="true" className="hidden shrink-0 text-slate lg:block">
-              ›
+              <RowChevron />
             </span>
           </>
         )
@@ -640,15 +647,29 @@ function DeleteConfirm({
   );
 }
 
+function TrashIcon() {
+  return (
+    <svg viewBox="0 0 16 16" width="16" height="16" fill="none" aria-hidden="true">
+      <path
+        d="M3 4.5h10M6.5 4.5V3h3v1.500M4.500 4.500l.5 8.500h6l.5-8.500M6.700 7v3.500M9.300 7v3.500"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 // --- Empty / loading / error ------------------------------------------------
 
 function EmptyState() {
   return (
-    <StateCard testid="paths-empty" spacing="mt-3">
+    <StateCard testid="paths-empty" spacing="mt-5">
       <div className="flex justify-center">
         <AlephGlyph size="md" />
       </div>
-      <h2 className="mt-4 text-lg font-semibold">No paths yet</h2>
+      <h2 className="mt-4 font-serif text-xl font-medium">No paths yet</h2>
       <p className="mx-auto mt-2 max-w-[22rem] text-sm leading-6 text-mist">
         Start your first path — pick something you want to learn and choose how much you already
         know.

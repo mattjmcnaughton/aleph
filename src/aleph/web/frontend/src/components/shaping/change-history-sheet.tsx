@@ -106,15 +106,12 @@ function ChangeRow({ change, shaping }: { change: Change; shaping: ShapingRailSt
           <span
             key={kind}
             data-testid="shaping-rail-history-kind"
-            className="font-mono text-[10px] uppercase tracking-kicker text-iris-300"
+            className="text-xs text-iris-300"
           >
             {KIND_LABEL[kind]}
           </span>
         ))}
-        <span
-          data-testid="shaping-rail-history-when"
-          className="ml-auto font-mono text-[10px] uppercase tracking-kicker text-slate"
-        >
+        <span data-testid="shaping-rail-history-when" className="ml-auto text-xs text-slate">
           {formatApplied(change.applied_at)}
         </span>
       </div>

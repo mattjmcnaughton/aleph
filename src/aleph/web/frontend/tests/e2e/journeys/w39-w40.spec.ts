@@ -31,6 +31,7 @@ test(
     expect(
       (await page.request.put("/api/v1/notification-preferences", { data: initial })).ok(),
     ).toBe(true);
+    await page.getByTestId("account-menu").click();
     await page.getByRole("link", { name: "Notifications", exact: true }).click();
     const reminder = page.getByRole("checkbox", { name: "Reminder", exact: true });
     await expect(reminder).not.toBeChecked();

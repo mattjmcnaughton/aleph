@@ -13,8 +13,8 @@ function Swatch({ name, value }: { name: string; value: string }) {
   return (
     <div className="w-28">
       <div className="h-14 rounded-md border border-divider" style={{ background: value }} />
-      <p className="mt-1 font-mono text-[11px] text-porcelain">{name}</p>
-      <p className="font-mono text-[11px] text-slate">{value}</p>
+      <p className="mt-1 text-xs tabular-nums text-porcelain">{name}</p>
+      <p className="text-xs tabular-nums text-slate">{value}</p>
     </div>
   );
 }
@@ -40,25 +40,40 @@ function Tokens() {
       </section>
       <section>
         <h2 className="kicker">Type</h2>
-        <div className="mt-4 space-y-3">
-          <p className="text-3xl font-semibold">Rust ownership &amp; lifetimes</p>
-          <p className="text-xl font-semibold">Reading lifetime annotations</p>
-          <p className="text-base text-porcelain">
-            A lifetime is the compiler's name for how long a reference is guaranteed to point at
-            valid data.
-          </p>
-          <p className="text-sm text-mist">Rust ownership &amp; lifetimes · 4 of 11 complete</p>
-          <p className="kicker">Kicker · Your paths</p>
-          <p className="font-mono text-sm">
-            fn longest&lt;'a&gt;(x: &amp;'a str) -&gt; &amp;'a str
-          </p>
+        <div className="mt-4 max-w-[40rem] space-y-4">
+          <div>
+            <p className="kicker">Page title: Literata 500, .page-title</p>
+            <p className="page-title mt-1">Rust ownership &amp; lifetimes</p>
+          </div>
+          <div>
+            <p className="kicker">Section title: Literata 500, 20px</p>
+            <p className="mt-1 font-serif text-xl font-medium">Lifetimes in practice</p>
+          </div>
+          <div>
+            <p className="kicker">Reading: Literata, 17px / 1.7, .reading</p>
+            <p className="reading mt-1">
+              A <strong>lifetime</strong> is the compiler's name for{" "}
+              <em>how long a reference is guaranteed to point at valid data</em>.
+            </p>
+          </div>
+          <div>
+            <p className="kicker">UI: Instrument Sans, 15px</p>
+            <p className="mt-1 text-[15px]">Pick up where you left off</p>
+            <p className="text-sm text-mist">Rust ownership &amp; lifetimes · 4 of 11 complete</p>
+          </div>
+          <div>
+            <p className="kicker">Code: JetBrains Mono, code only</p>
+            <p className="mt-1 font-mono text-sm">
+              fn longest&lt;'a&gt;(x: &amp;'a str) -&gt; &amp;'a str
+            </p>
+          </div>
         </div>
       </section>
       <section>
         <h2 className="kicker">Elevation</h2>
         <div className="mt-4 flex flex-wrap gap-6">
           {["shadow-sm", "shadow-md", "shadow-lg", "shadow-glow", "shadow-glow-iris"].map((s) => (
-            <div key={s} className={`h-20 w-32 rounded-lg bg-surface p-3 font-mono text-xs ${s}`}>
+            <div key={s} className={`h-20 w-32 rounded-lg bg-surface p-3 text-xs ${s}`}>
               {s}
             </div>
           ))}

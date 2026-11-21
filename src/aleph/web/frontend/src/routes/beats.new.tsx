@@ -77,7 +77,7 @@ function DeployAnalyst() {
   // than never rendering the form at all.
   if (!analystEnabled) {
     return (
-      <main className="mx-auto w-full max-w-[480px] px-4 py-8">
+      <main className="page">
         <Breadcrumbs current="Deploy analyst" root="Your beats" />
         <StateCard testid="beats-new-unavailable">
           <h2 className="text-lg font-semibold">Deploying an analyst isn't available.</h2>
@@ -105,13 +105,11 @@ function DeployAnalyst() {
   }
 
   return (
-    <main className="mx-auto w-full max-w-[480px] px-4 py-8">
+    <main className="page">
       <Breadcrumbs current="Deploy analyst" root="Your beats" />
 
       <p className="kicker">New beat</p>
-      <h1 className="mt-2 text-3xl font-semibold leading-tight tracking-tight">
-        What should Aleph keep watch on?
-      </h1>
+      <h1 className="mt-2 page-title">What should Aleph keep watch on?</h1>
       <p className="mt-3 text-base leading-6 text-mist">
         Name a topic and Aleph reports on what changed, on the day you pick.
       </p>

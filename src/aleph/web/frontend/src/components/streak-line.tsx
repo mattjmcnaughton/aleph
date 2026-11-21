@@ -1,5 +1,5 @@
 // The one line above "Your paths" (PRD §3, Streaks TDD §8):
-//   🔥 5-day streak · best 12 · 1 lesson today
+//   (flame) 5-day streak · best 12 · 1 lesson today
 // Home-only (TDD §14 R6) — this is the sole caller of `progressSummaryQueryOptions`
 // on any route besides `lessons.$lessonId.tsx`'s D10 patch.
 
@@ -37,18 +37,59 @@ export function StreakLine({ summary }: { summary: ProgressSummary | undefined }
   // scold. So it is stated as an aim — `mist`, never the flame's teal.
   const showBest = best > current;
 
+  const today =
+    completedToday > 0
+      ? `${completedToday} ${completedToday === 1 ? "lesson" : "lessons"} today`
+      : null;
+
+  // Two lines to the eye, one sentence to a screen reader and to the tests:
+  // the separators that would start or split a visual line are `sr-only`, so
+  // the text still reads "5-day streak · best 12 · 1 lesson today".
   return (
-    <p data-testid="streak-line" className="text-sm leading-6 text-porcelain">
-      <span aria-hidden="true">🔥</span> {current}-day streak
-      {showBest ? (
-        <span data-testid="streak-best" className="text-mist">
-          {" "}
-          · best {best}
+    <p data-testid="streak-line" className="leading-6 text-porcelain">
+      <span className="block whitespace-nowrap text-base font-semibold">
+        <FlameIcon />
+        {current}-day streak
+      </span>
+      {showBest || today ? (
+        <span className="block text-sm text-mist first-letter:uppercase">
+          {showBest ? (
+            <span data-testid="streak-best" className="text-mist">
+              <span className="sr-only"> · </span>
+              best {best}
+            </span>
+          ) : null}
+          {today ? (
+            <>
+              <span className={showBest ? undefined : "sr-only"}> · </span>
+              {today}
+            </>
+          ) : null}
         </span>
       ) : null}
-      {completedToday > 0
-        ? ` · ${completedToday} ${completedToday === 1 ? "lesson" : "lessons"} today`
-        : null}
     </p>
+  );
+}
+
+/**
+ * The streak's flame (CONTEXT: the Daily streak is "the one with the flame").
+ * Drawn rather than the emoji: an emoji renders in each platform's own
+ * cartoon style and was the one full-colour sticker on the page. `ember` is
+ * used for this and nothing else.
+ */
+function FlameIcon() {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width="15"
+      height="15"
+      aria-hidden="true"
+      className="mr-1.5 inline-block -translate-y-px text-ember"
+    >
+      <path
+        fill="currentColor"
+        d="M8.4 1.2c.3 2-.6 3-1.7 4.1C5.5 6.500 4 7.900 4 10.200 4 12.700 5.800 14.500 8 14.500s4-1.800 4-4.300c0-1.400-.6-2.600-1.400-3.600-.2 1-.7 1.600-1.300 1.900.3-2.500-.2-5-0.900-7.300z"
+      />
+    </svg>
   );
 }

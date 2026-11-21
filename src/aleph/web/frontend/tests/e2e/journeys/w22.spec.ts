@@ -99,7 +99,7 @@ test.describe("W22 completing a lesson visibly advances the streak", { tag: "@w2
       // does not need to rule that out to prove the two numbers this branch is
       // actually about.
       await expect(page.getByTestId("streak-line")).toContainText(
-        `🔥 ${before.current_streak + 1}-day streak`,
+        `${before.current_streak + 1}-day streak`,
       );
       await expect(page.getByTestId("streak-line")).toContainText("1 lesson today");
 

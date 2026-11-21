@@ -38,7 +38,7 @@ export function LessonMarker({
     return (
       <span
         aria-hidden="true"
-        className={`grid ${dimensions} shrink-0 place-items-center rounded-full border border-divider text-teal`}
+        className={`grid ${dimensions} shrink-0 place-items-center text-mist`}
       >
         <CheckIcon />
       </span>
@@ -48,7 +48,7 @@ export function LessonMarker({
     return (
       <span
         aria-hidden="true"
-        className={`grid ${dimensions} shrink-0 place-items-center rounded-full border border-divider text-slate`}
+        className={`grid ${dimensions} shrink-0 place-items-center text-faint`}
       >
         <LockIcon />
       </span>
@@ -57,7 +57,7 @@ export function LessonMarker({
   return (
     <span
       aria-hidden="true"
-      className={`grid ${dimensions} shrink-0 place-items-center rounded-full border border-teal text-teal`}
+      className={`grid ${dimensions} shrink-0 place-items-center rounded-full bg-teal text-night`}
     >
       <PlayIcon />
     </span>

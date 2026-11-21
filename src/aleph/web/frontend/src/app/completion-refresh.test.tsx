@@ -278,7 +278,7 @@ describe("Streaks — the optimistic cache patch (D10)", () => {
     window.history.pushState({}, "", "/");
     render(<App />);
     await screen.findByTestId("streak-line");
-    expect(screen.getByTestId("streak-line").textContent).toBe("🔥 5-day streak · 1 lesson today");
+    expect(screen.getByTestId("streak-line").textContent).toBe("5-day streak · 1 lesson today");
 
     // Park the next GET: the streak line's value right after this can only be
     // read off the cache the mutation itself wrote.
@@ -289,7 +289,7 @@ describe("Streaks — the optimistic cache patch (D10)", () => {
     // (`old.completed_today > 0`) must have returned `old` untouched — not
     // "happens to still read the same number after a lucky fast refetch",
     // since that refetch is still parked.
-    expect(screen.getByTestId("streak-line").textContent).toBe("🔥 5-day streak · 1 lesson today");
+    expect(screen.getByTestId("streak-line").textContent).toBe("5-day streak · 1 lesson today");
     expect(todayActivityCell().getAttribute("data-intensity")).toBe("dim");
 
     // Release with the server's own count for a genuine second same-day
@@ -302,9 +302,7 @@ describe("Streaks — the optimistic cache patch (D10)", () => {
     releaseProgress();
 
     await waitFor(() => {
-      expect(screen.getByTestId("streak-line").textContent).toBe(
-        "🔥 5-day streak · 2 lessons today",
-      );
+      expect(screen.getByTestId("streak-line").textContent).toBe("5-day streak · 2 lessons today");
     });
   });
 
@@ -318,7 +316,7 @@ describe("Streaks — the optimistic cache patch (D10)", () => {
     window.history.pushState({}, "", "/");
     render(<App />);
     await screen.findByTestId("streak-line");
-    expect(screen.getByTestId("streak-line").textContent).toBe("🔥 4-day streak");
+    expect(screen.getByTestId("streak-line").textContent).toBe("4-day streak");
 
     configureProgress({ hang: true });
     await completeStreakLesson();
@@ -326,7 +324,7 @@ describe("Streaks — the optimistic cache patch (D10)", () => {
     // The "Day 6 🔥" beat (PRD §3) fires off this value, in this interaction —
     // the GET that would otherwise be needed to learn it is still parked, so
     // this can only be the optimistic patch, not a lucky fast round trip.
-    expect(screen.getByTestId("streak-line").textContent).toBe("🔥 5-day streak · 1 lesson today");
+    expect(screen.getByTestId("streak-line").textContent).toBe("5-day streak · 1 lesson today");
     // The activity strip's last cell (today) moves with the same patch, so the
     // grid and the number never disagree mid-flight.
     expect(todayActivityCell().getAttribute("data-intensity")).toBe("dim");
@@ -340,9 +338,7 @@ describe("Streaks — the optimistic cache patch (D10)", () => {
     releaseProgress();
 
     await waitFor(() => {
-      expect(screen.getByTestId("streak-line").textContent).toBe(
-        "🔥 6-day streak · 2 lessons today",
-      );
+      expect(screen.getByTestId("streak-line").textContent).toBe("6-day streak · 2 lessons today");
     });
   });
 });

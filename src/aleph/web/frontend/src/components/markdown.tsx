@@ -56,41 +56,37 @@ const COMPONENTS: Components = {
   // The lesson title is the page's h1, so Markdown headings start a level down:
   // an agent-emitted `#` renders at h2's weight to keep the outline honest.
   h1: ({ children }) => (
-    <h2 className="mt-6 text-xl font-semibold leading-snug tracking-tight text-porcelain first:mt-0">
+    <h2 className="!mt-9 font-serif text-[1.3125rem] font-semibold leading-snug tracking-[-0.01em] text-porcelain first:!mt-0">
       {children}
     </h2>
   ),
   h2: ({ children }) => (
-    <h2 className="mt-6 text-xl font-semibold leading-snug tracking-tight text-porcelain first:mt-0">
+    <h2 className="!mt-9 font-serif text-[1.3125rem] font-semibold leading-snug tracking-[-0.01em] text-porcelain first:!mt-0">
       {children}
     </h2>
   ),
   h3: ({ children }) => (
-    <h3 className="mt-5 text-lg font-semibold leading-snug text-porcelain first:mt-0">
+    <h3 className="!mt-7 font-serif text-lg font-semibold leading-snug text-porcelain first:!mt-0">
       {children}
     </h3>
   ),
   h4: ({ children }) => (
-    <h4 className="mt-4 text-base font-semibold leading-snug text-porcelain first:mt-0">
+    <h4 className="!mt-6 text-base font-semibold leading-snug text-porcelain first:!mt-0">
       {children}
     </h4>
   ),
-  p: ({ children }) => <p className="leading-7 text-porcelain">{children}</p>,
+  p: ({ children }) => <p className="text-porcelain">{children}</p>,
   strong: ({ children }) => <strong className="font-semibold text-porcelain">{children}</strong>,
   em: ({ children }) => <em className="italic">{children}</em>,
   ul: ({ children }) => (
-    <ul className="list-disc space-y-2 pl-5 leading-7 text-porcelain marker:text-teal">
-      {children}
-    </ul>
+    <ul className="list-disc space-y-1.5 pl-5 text-porcelain marker:text-slate">{children}</ul>
   ),
   ol: ({ children }) => (
-    <ol className="list-decimal space-y-2 pl-5 leading-7 text-porcelain marker:text-mist">
-      {children}
-    </ol>
+    <ol className="list-decimal space-y-1.5 pl-5 text-porcelain marker:text-slate">{children}</ol>
   ),
   li: ({ children }) => <li className="pl-1">{children}</li>,
   blockquote: ({ children }) => (
-    <blockquote className="border-l-2 border-teal/60 pl-4 text-mist [&>p]:text-mist">
+    <blockquote className="border-l-2 border-faint pl-5 text-mist [&>p]:text-mist">
       {children}
     </blockquote>
   ),
@@ -102,7 +98,7 @@ const COMPONENTS: Components = {
       href={href}
       target="_blank"
       rel="noopener noreferrer"
-      className="text-teal underline underline-offset-2 transition-colors hover:text-teal-bright"
+      className="text-porcelain underline decoration-teal decoration-1 underline-offset-[3px] transition-colors hover:text-teal-bright"
     >
       {children}
     </a>
@@ -110,7 +106,7 @@ const COMPONENTS: Components = {
   // Inline code. Fenced blocks reach here too, but wrapped in `pre`, whose
   // descendant selectors below neutralise this chip treatment.
   code: ({ children }) => (
-    <code className="rounded-sm bg-elevated px-1.5 py-0.5 font-mono text-[0.9em] text-teal">
+    <code className="rounded bg-porcelain/[0.09] px-[0.35em] py-[0.12em] font-mono text-[0.82em] text-porcelain">
       {children}
     </code>
   ),
@@ -125,7 +121,7 @@ const COMPONENTS: Components = {
     const chart = mermaidSource(children);
     if (chart !== null) return <Mermaid source={chart} />;
     return (
-      <pre className="overflow-x-auto rounded-md border border-divider bg-elevated p-4 font-mono text-[13px] leading-6 text-porcelain [&_code]:bg-transparent [&_code]:p-0 [&_code]:text-[inherit] [&_code]:text-porcelain">
+      <pre className="overflow-x-auto rounded-md bg-surface p-4 font-mono text-[13px] leading-6 text-porcelain [&_code]:bg-transparent [&_code]:p-0 [&_code]:text-[inherit] [&_code]:text-porcelain">
         {children}
       </pre>
     );
@@ -133,18 +129,22 @@ const COMPONENTS: Components = {
   // GFM tables (remark-gfm). Same reflow problem as code blocks: the wrapper owns
   // the horizontal scroll so a wide table never widens the page on a phone.
   table: ({ children }) => (
-    <div className="overflow-x-auto rounded-md border border-divider">
-      <table className="w-full border-collapse text-sm">{children}</table>
+    <div className="overflow-x-auto border-y border-divider font-sans">
+      <table className="w-full border-collapse text-[15px] leading-6 [&_tr:last-child>td]:border-b-0">
+        {children}
+      </table>
     </div>
   ),
-  thead: ({ children }) => <thead className="bg-surface">{children}</thead>,
+  thead: ({ children }) => <thead>{children}</thead>,
   th: ({ children }) => (
-    <th className="border-b border-divider px-3 py-2 text-left font-semibold text-porcelain">
+    <th className="border-b border-divider py-2.5 pr-4 text-left text-[13px] font-semibold text-mist last:pr-0">
       {children}
     </th>
   ),
   td: ({ children }) => (
-    <td className="border-b border-divider/50 px-3 py-2 align-top text-mist">{children}</td>
+    <td className="border-b border-divider/60 py-2.5 pr-4 align-top text-porcelain last:pr-0">
+      {children}
+    </td>
   ),
 };
 
@@ -167,7 +167,7 @@ export function Markdown({
   testid?: string;
 }) {
   return (
-    <div data-testid={testid} className={`space-y-4 ${className}`}>
+    <div data-testid={testid} className={`space-y-[1.05em] ${className}`}>
       <ReactMarkdown
         remarkPlugins={REMARK_PLUGINS}
         components={COMPONENTS}

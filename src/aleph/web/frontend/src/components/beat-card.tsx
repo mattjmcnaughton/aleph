@@ -1,7 +1,7 @@
 import { Link } from "@tanstack/react-router";
 import type { BeatResearchState, BeatSummary } from "../lib/api";
 import { formatElapsed } from "../lib/beats";
-import { ListRow, type RowVariant, RowTitle } from "./list-row";
+import { ListRow, RowChevron, type RowVariant, RowTitle } from "./list-row";
 
 /** Card treatment per research state — refusal is iris, failure is danger
  *  (CONTEXT.md), the identical mapping `routes/index.tsx`'s `PathRow` uses
@@ -94,7 +94,7 @@ export function BeatCard({ beat, now = new Date() }: { beat: BeatSummary; now?: 
               <span
                 aria-hidden="true"
                 data-testid="beat-unread-dot"
-                className="h-2 w-2 shrink-0 rounded-full bg-iris-400 ring-4 ring-iris/20"
+                className="h-2 w-2 shrink-0 rounded-full bg-iris-400"
               />
             ) : null}
             <RowTitle title={beat.topic} titleTestid="beat-item-topic" />
@@ -102,14 +102,14 @@ export function BeatCard({ beat, now = new Date() }: { beat: BeatSummary; now?: 
         </Link>
       }
       meta={
-        <p data-testid="beat-item-cadence" className="mt-1 text-sm text-mist lg:mt-0">
+        <p data-testid="beat-item-cadence" className="mt-1 text-sm capitalize text-mist lg:mt-0">
           {beat.cadence}
         </p>
       }
       status={<span data-testid="beat-item-status">{beatStatusLabel(beat, now)}</span>}
       actions={
         <span aria-hidden="true" className="hidden shrink-0 text-slate lg:block">
-          ›
+          <RowChevron />
         </span>
       }
     />

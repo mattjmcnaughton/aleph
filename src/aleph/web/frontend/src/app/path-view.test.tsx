@@ -92,9 +92,9 @@ describe("Path view — /paths/$pathId", () => {
     const rail = await screen.findByTestId("path-rail");
     expect(
       within(rail)
-        .getAllByText(/^Unit \d\d$/)
+        .getAllByText(/^Unit \d+$/)
         .map((kicker) => kicker.textContent),
-    ).toEqual(["Unit 01", "Unit 02"]);
+    ).toEqual(["Unit 1", "Unit 2"]);
   });
 
   it("[AL-062] renders a complete path: every lesson complete + completion treatment", async () => {

@@ -40,7 +40,7 @@ describe("StreakLine", () => {
       <StreakLine summary={summary({ current_streak: 1, best_streak: 1, completed_today: 1 })} />,
     );
 
-    expect(screen.getByTestId("streak-line").textContent).toBe("🔥 1-day streak · 1 lesson today");
+    expect(screen.getByTestId("streak-line").textContent).toBe("1-day streak · 1 lesson today");
     // best never shows when it equals current — naming it would be noise.
     expect(screen.queryByTestId("streak-best")).toBeNull();
   });
@@ -50,7 +50,7 @@ describe("StreakLine", () => {
       <StreakLine summary={summary({ current_streak: 5, best_streak: 5, completed_today: 2 })} />,
     );
 
-    expect(screen.getByTestId("streak-line").textContent).toBe("🔥 5-day streak · 2 lessons today");
+    expect(screen.getByTestId("streak-line").textContent).toBe("5-day streak · 2 lessons today");
   });
 
   it("with best above current: names the aim, in `mist`, never the flame's colour (TDD §14 R5)", () => {
@@ -59,7 +59,7 @@ describe("StreakLine", () => {
     );
 
     const line = screen.getByTestId("streak-line");
-    expect(line.textContent).toBe("🔥 5-day streak · best 12");
+    expect(line.textContent).toBe("5-day streak · best 12");
     const best = screen.getByTestId("streak-best");
     expect(best.className).toContain("text-mist");
     expect(best.className).not.toContain("text-teal");
@@ -71,7 +71,7 @@ describe("StreakLine", () => {
     );
 
     expect(screen.getByTestId("streak-line").textContent).toBe(
-      "🔥 5-day streak · best 12 · 1 lesson today",
+      "5-day streak · best 12 · 1 lesson today",
     );
   });
 });

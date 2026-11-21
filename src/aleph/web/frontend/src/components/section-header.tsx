@@ -43,7 +43,7 @@ function SectionAction({
       // >=44px touch target: `min-h-[44px]` alone is not enough on an inline
       // link whose box is only as tall as its text, so `inline-flex
       // items-center` is what gives the padding somewhere to expand into.
-      className="inline-flex min-h-[44px] shrink-0 items-center rounded-md px-2 text-sm font-semibold text-teal transition-colors hover:text-teal-bright focus-visible:outline focus-visible:outline-2 focus-visible:outline-teal"
+      className="inline-flex min-h-[44px] shrink-0 items-center rounded-md px-2 text-sm font-semibold text-porcelain transition-colors hover:text-teal-bright"
     >
       {children}
     </Link>
@@ -99,7 +99,7 @@ export function SectionHeader({
   spacing?: string;
 }) {
   return (
-    <div className={`${spacing} flex items-center justify-between gap-4`}>
+    <div className={`${spacing} flex items-center justify-between gap-4 border-b border-divider`}>
       <div className="min-w-0">
         <div className="flex items-center gap-1">
           {collapse ? (
@@ -113,24 +113,26 @@ export function SectionHeader({
               aria-expanded={collapse.open}
               aria-controls={collapse.controls}
               onClick={collapse.onToggle}
-              className="kicker inline-flex min-h-[44px] items-center gap-1.5 rounded-md pr-2 transition-colors hover:text-porcelain focus-visible:outline focus-visible:outline-2 focus-visible:outline-teal"
+              className="inline-flex min-h-[44px] items-center gap-1.5 rounded-md pr-2 text-[15px] font-semibold text-porcelain transition-colors hover:text-teal-bright"
             >
               <ChevronIcon open={collapse.open} />
               {kicker}
             </button>
           ) : (
-            <p className="kicker">{kicker}</p>
+            <p className="flex min-h-[44px] items-center text-[15px] font-semibold text-porcelain">
+              {kicker}
+            </p>
           )}
           {badge ? (
             <span
               data-testid={badge.testid}
-              className="inline-flex shrink-0 items-center rounded-full bg-iris-400 px-2 py-0.5 text-xs font-semibold text-night"
+              className="inline-flex shrink-0 items-center rounded-full bg-iris/20 px-2 py-0.5 text-xs font-semibold text-iris-300"
             >
               {badge.label}
             </span>
           ) : null}
         </div>
-        {summary ? <p className="mt-1 text-sm text-mist">{summary}</p> : null}
+        {summary ? <p className="text-sm text-mist">{summary}</p> : null}
       </div>
       {action ? (
         <SectionAction to={action.to} testid={action.testid}>

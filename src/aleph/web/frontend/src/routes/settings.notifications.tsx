@@ -13,7 +13,7 @@ function Settings() {
   return (
     <Workspace testid="notification-settings" width="lesson">
       <Breadcrumbs current="Notifications" />
-      <h1 className="mb-6 text-2xl font-semibold">Notifications</h1>
+      <h1 className="mb-6 page-title">Notifications</h1>
       {account ? <NotificationSettings key={account} account={account} /> : null}
     </Workspace>
   );

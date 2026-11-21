@@ -175,13 +175,11 @@ function NewPath() {
   const createFailed = createMutation.isError && !rateLimited && !modelRejected;
 
   return (
-    <main className="mx-auto w-full max-w-[480px] px-4 py-8">
+    <main className="page">
       <Breadcrumbs current="New path" />
 
       <p className="kicker">New path</p>
-      <h1 className="mt-2 text-3xl font-semibold leading-tight tracking-tight">
-        What do you want to learn?
-      </h1>
+      <h1 className="mt-2 page-title">What do you want to learn?</h1>
       <p className="mt-3 text-base leading-6 text-mist">
         Name a topic or a goal and Aleph drafts a path you can work through, lesson by lesson.
       </p>

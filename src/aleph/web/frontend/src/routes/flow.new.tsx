@@ -91,7 +91,7 @@ function FlowSetup() {
 
   if (!flowEnabled) {
     return (
-      <main className="mx-auto w-full max-w-[480px] px-4 py-8">
+      <main className="page">
         <Breadcrumbs current="Start a flow" />
         <StateCard testid="flow-new-unavailable">
           <h2 className="text-lg font-semibold">Flow isn't available.</h2>

@@ -25,7 +25,10 @@ export function BeatRail({ entries }: { entries: BriefEntry[] }) {
     );
   }
   return (
-    <ol data-testid="beat-rail" className="mt-8 space-y-3">
+    <ol
+      data-testid="beat-rail"
+      className="mt-8 border-t border-divider [&>li]:border-b [&>li]:border-divider"
+    >
       {entries.map((entry) =>
         entry.kind === "skipped" ? (
           <SkippedRow key={entry.id} entry={entry} />
@@ -56,20 +59,20 @@ function PublishedRow({ entry }: { entry: Extract<BriefEntry, { kind: "published
       <Link
         to="/briefs/$briefId"
         params={{ briefId: entry.id }}
-        className="flex min-h-[44px] items-center gap-3 rounded-lg border border-divider bg-surface px-4 py-3 transition-colors hover:border-teal/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-teal"
+        className="flex min-h-[44px] items-center gap-3 px-1 py-3.5 transition-colors hover:bg-surface focus-visible:outline focus-visible:outline-2 focus-visible:outline-teal"
       >
         {/* Decorative unread marker; the sr-only text below is the
             accessible readout — the dot itself carries no independent
             meaning to AT. */}
         <span
           aria-hidden="true"
-          className={`h-2 w-2 shrink-0 rounded-full ${unread ? "bg-teal" : "bg-transparent"}`}
+          className={`h-2 w-2 shrink-0 rounded-full ${unread ? "bg-iris-400" : "bg-transparent"}`}
         />
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-semibold leading-snug text-porcelain">
+          <p className="text-sm leading-snug text-mist">
             Brief #{entry.number} · {formatBriefDate(entry.published_on)}
           </p>
-          <p className="mt-0.5 truncate text-sm text-mist">{entry.title}</p>
+          <p className="mt-0.5 truncate text-base font-semibold text-porcelain">{entry.title}</p>
         </div>
         <span className="sr-only">{unread ? "Unread" : "Read"}</span>
       </Link>

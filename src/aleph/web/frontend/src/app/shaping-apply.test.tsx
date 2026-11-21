@@ -276,11 +276,11 @@ describe("Ghost rows", () => {
       ],
     });
 
-    const kickers = within(pathRail()).getAllByText(/^(Unit \d\d|Proposed unit)$/);
+    const kickers = within(pathRail()).getAllByText(/^(Unit \d+|Proposed unit)$/);
     expect(kickers.map((kicker) => kicker.textContent)).toEqual([
-      "Unit 01",
+      "Unit 1",
       "Proposed unit",
-      "Unit 02",
+      "Unit 2",
     ]);
   });
 

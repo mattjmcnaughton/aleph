@@ -30,7 +30,7 @@ export function FlowBar({
       data-testid="flow-bar"
       className="sticky top-[var(--app-header-h)] z-20 -mx-4 mb-4 flex items-center gap-2.5 border-b border-divider bg-night px-4 py-2 lg:-mx-10 lg:px-10"
     >
-      <span className="whitespace-nowrap font-mono text-[11.5px] font-semibold tabular-nums text-teal-bright">
+      <span className="whitespace-nowrap text-xs font-semibold tabular-nums text-teal-bright">
         {label}
       </span>
       <FlowSegments states={segments(flow, position)} />

@@ -168,43 +168,22 @@ function ReadyPath({
 
   return (
     <>
-      <div className="lg:flex lg:items-end lg:justify-between lg:gap-8">
-        <div className="min-w-0">
-          <p className="kicker">Path</p>
-          {/* `key={detail.id}`: `/paths/A` -> `/paths/B` via the sidebar switcher
-              re-renders this route rather than remounting it (same hazard
-              `use-shaping-rail.ts`'s `currentPathRef` comment documents), so
-              without a key `PathTitle`'s in-progress `draft`/`editing` state
-              would survive the switch — open a rename on A, switch to B while
-              still editing, press Save, and it PATCHes B with A's typed title.
-              The key forces React to remount (and reset that state) on every
-              path change instead of hand-rolling a reset effect. */}
-          <PathTitle key={detail.id} pathId={detail.id} title={detail.title} />
-        </div>
-        {/* The percentage alone, and only at `lg` (mock #2b). Deliberately not
-            the "n of m complete" sentence too: `path-progress` below already
-            carries it at every width, and printing it twice on one screen reads
-            as a mistake. `aria-hidden` because this is the same number said a
-            second way — `path-progress` stays the one announced readout. */}
-        <p
-          data-testid="path-progress-percent"
+      <PathTitle key={detail.id} pathId={detail.id} title={detail.title} />
+
+      {/* Progress sits directly under the title: it is the first thing a
+          returning learner wants to know about a path. */}
+      <div className="mt-5 flex items-center gap-4">
+        <div
           aria-hidden="true"
-          className="hidden shrink-0 font-mono text-[28px] leading-none text-teal lg:block"
+          className="h-1 min-w-0 flex-1 overflow-hidden rounded-full bg-porcelain/10"
         >
-          {percent}
-          <span className="text-base text-mist">%</span>
-        </p>
-      </div>
-
-      <TeachingStyleCard key={detail.id} detail={detail} />
-
-      <div className="mt-4">
-        {/* Decorative bar; the text below is the accessible progress readout. */}
-        <div aria-hidden="true" className="h-[7px] overflow-hidden rounded-full bg-porcelain/10">
-          <span className="block h-full bg-teal" style={{ width: `${percent}%` }} />
+          <span className="block h-full rounded-full bg-teal" style={{ width: `${percent}%` }} />
         </div>
-        <p data-testid="path-progress" className="mt-2 text-sm text-mist">
+        <p data-testid="path-progress" className="shrink-0 text-sm text-mist">
           {complete} of {total} {total === 1 ? "lesson" : "lessons"} complete
+        </p>
+        <p data-testid="path-progress-percent" aria-hidden="true" className="sr-only">
+          {percent}%
         </p>
       </div>
 
@@ -218,15 +197,12 @@ function ReadyPath({
             total={total}
             started={complete > 0}
           />
-          {/* Beside the continue panel at both widths (flow TDD §2/§6) — a
-              quiet link, not a second CTA: Continue is still the one-tap
-              answer, Flow is the same tap with a length attached. */}
           {flowEnabled ? (
             <Link
               to="/flow/new"
               search={{ path: detail.id }}
               data-testid="flow-path-link"
-              className="mt-3 inline-block text-sm text-teal-bright transition-colors hover:text-teal-dim"
+              className="mt-1 inline-flex min-h-11 items-center px-5 text-sm font-semibold text-porcelain transition-colors hover:text-teal-bright lg:px-6"
             >
               Start a flow
             </Link>
@@ -234,10 +210,10 @@ function ReadyPath({
         </>
       ) : null}
 
-      <ol
-        data-testid="path-rail"
-        className="mt-8 space-y-8 lg:grid lg:grid-cols-2 lg:gap-x-8 lg:gap-y-7 lg:space-y-0"
-      >
+      {/* `key` remounts the card per path, like the title above. */}
+      <TeachingStyleCard key={detail.id} detail={detail} />
+
+      <ol data-testid="path-rail" className="mt-10 space-y-10">
         {numberUnits(mergeProposalIntoOutline(detail.units, ghostProposal)).map(
           ({ unit, number }) => (
             <UnitBlock key={unit.id} unit={unit} number={number} onOpenLesson={onOpenLesson} />
@@ -303,15 +279,13 @@ function PathTitle({ pathId, title }: { pathId: string; title: string }) {
   if (!editing) {
     return (
       <div className="flex items-start gap-1.5">
-        <h1 className="mt-2 min-w-0 text-3xl font-semibold leading-tight tracking-tight">
-          {title}
-        </h1>
+        <h1 className="min-w-0 page-title">{title}</h1>
         <button
           type="button"
           onClick={startEditing}
           aria-label="Rename path"
           data-testid="path-title-edit"
-          className="mt-2 shrink-0 rounded-md p-1.5 text-slate transition-colors hover:text-porcelain focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal"
+          className="-mr-2 grid h-11 w-11 shrink-0 place-items-center rounded-md text-slate transition-colors hover:text-porcelain"
         >
           <PencilIcon />
         </button>
@@ -321,7 +295,7 @@ function PathTitle({ pathId, title }: { pathId: string; title: string }) {
 
   return (
     <form
-      className="mt-2 max-w-[28rem]"
+      className="max-w-[28rem]"
       onSubmit={(event) => {
         event.preventDefault();
         save();
@@ -351,7 +325,7 @@ function PathTitle({ pathId, title }: { pathId: string; title: string }) {
         maxLength={PATH_TITLE_MAX_LENGTH}
         autoComplete="off"
         data-testid="path-title-input"
-        className="w-full rounded-md border border-teal bg-surface px-3 py-1.5 text-2xl font-semibold leading-tight tracking-tight text-porcelain focus:outline-none"
+        className="w-full rounded-md border border-teal bg-surface px-3 py-1.5 font-serif text-2xl font-medium leading-tight text-porcelain focus:outline-none"
       />
       <div className="mt-2 flex gap-2">
         <button
@@ -386,7 +360,7 @@ function PathTitle({ pathId, title }: { pathId: string; title: string }) {
 
 function PencilIcon() {
   return (
-    <svg viewBox="0 0 16 16" width="13" height="13" fill="none" aria-hidden="true">
+    <svg viewBox="0 0 16 16" width="15" height="15" fill="none" aria-hidden="true">
       <path
         d="M11.4 2.4l2.2 2.2-7.7 7.7H3.5v-2.4l7.9-7.5z"
         stroke="currentColor"
@@ -443,17 +417,22 @@ function ContinueCard({
   total: number;
   started: boolean;
 }) {
+  // Shown at every width. It used to be desktop-only, which left a phone (the
+  // primary client) with no Continue action on a path at all: the learner had
+  // to find the one highlighted row in the list.
   return (
     <div
       data-testid="path-continue"
       data-started={started || undefined}
-      className="mt-6 hidden items-center justify-between gap-6 rounded-lg border border-teal bg-teal/10 px-6 py-5 lg:flex"
+      className="mt-6 rounded-lg border border-divider bg-surface p-5 lg:flex lg:items-center lg:justify-between lg:gap-6 lg:p-6"
     >
       <div className="min-w-0">
-        <p className="font-mono text-[11px] font-medium uppercase tracking-kicker text-teal">
+        <p className="text-sm leading-5 text-mist">
           {started ? "Pick up where you left off" : "Start your path"}
         </p>
-        <p className="mt-1.5 text-lg font-semibold leading-snug">{lesson.title}</p>
+        <p className="mt-1.5 font-serif text-xl font-medium leading-snug tracking-[-0.01em]">
+          {lesson.title}
+        </p>
         <p className="mt-1 text-sm text-mist">
           {unit.title} — lesson {lesson.position_in_path} of {total}
         </p>
@@ -462,9 +441,9 @@ function ContinueCard({
         to="/lessons/$lessonId"
         params={{ lessonId: lesson.id }}
         data-testid="path-continue-link"
-        className="inline-flex shrink-0 items-center gap-2 rounded-md bg-teal px-5 py-3 text-sm font-semibold text-night transition-colors hover:bg-teal-bright"
+        className="mt-4 inline-flex min-h-11 w-full shrink-0 items-center justify-center gap-2 rounded-md bg-teal px-5 text-[15px] font-semibold text-night transition-colors hover:bg-teal-bright lg:mt-0 lg:w-auto"
       >
-        Continue
+        {started ? "Continue" : "Start"}
         <PlayIcon />
       </Link>
     </div>
@@ -488,37 +467,31 @@ function UnitBlock({
 
   return (
     <li data-testid={unit.ghost ? "path-rail-ghost-unit" : undefined}>
-      <div className="flex items-baseline justify-between">
-        {/* A ghost unit has no number: it has no place in the path's ordering
-            until Apply gives it one, and taking one would renumber every real
-            unit after it for something the learner has not consented to. */}
-        <p className={unit.ghost ? "kicker text-iris-400" : "kicker"}>
-          {number === null ? "Proposed unit" : `Unit ${String(number).padStart(2, "0")}`}
+      <div className="flex items-baseline justify-between gap-4">
+        <p className={unit.ghost ? "kicker text-iris-300" : "kicker"}>
+          {number === null ? "Proposed unit" : `Unit ${number}`}
         </p>
         {inProgress ? (
-          <span className="font-mono text-[11px] uppercase tracking-kicker text-teal">
-            In progress
-          </span>
+          <span className="text-[13px] font-medium text-teal">In progress</span>
         ) : unitComplete ? (
-          <span className="font-mono text-[11px] uppercase tracking-kicker text-slate">
-            Complete
-          </span>
+          <span className="text-[13px] text-slate">Complete</span>
         ) : null}
       </div>
       <h2
-        className={`mt-1 text-lg font-semibold leading-snug${unit.ghost ? " text-iris-300" : ""}`}
+        className={`mt-1 font-serif text-xl font-medium leading-snug tracking-[-0.01em]${unit.ghost ? " text-iris-300" : ""}`}
       >
         {unit.title}
       </h2>
-
-      <ul className="mt-3 space-y-2">
+      {/* A ruled list, not a stack of boxed buttons: the syllabus reads as a
+          table of contents, and only the lesson the learner is on is marked. */}
+      <ul className="mt-3 border-t border-divider">
         {unit.lessons.map((row) =>
           row.kind === "ghost" ? (
-            <li key={row.key}>
+            <li key={row.key} className="border-b border-divider">
               <GhostRow title={row.title} />
             </li>
           ) : (
-            <li key={row.lesson.id}>
+            <li key={row.lesson.id} className="border-b border-divider">
               <LessonRow lesson={row.lesson} revising={row.revising} onOpen={onOpenLesson} />
             </li>
           ),
@@ -528,20 +501,11 @@ function UnitBlock({
   );
 }
 
-/**
- * A **ghost row** (CONTEXT.md): a proposed lesson previewed in place, iris and
- * dashed against the rail's teal real rows (PRD §5.10 — teal is the path's
- * colour, iris is the tutor's, and the difference is the whole message).
- *
- * Deliberately not a `<button>`: there is nothing to open. A lesson exists when
- * a Change creates it, and until the learner taps **Apply** this row is a
- * drawing of an offer — "see it before you say yes", not a thing you can enter.
- */
 function GhostRow({ title }: { title: string }) {
   return (
     <div
       data-testid="path-rail-ghost"
-      className="flex w-full items-center gap-3 rounded-md border border-dashed border-iris/60 bg-iris/[0.07] px-4 py-3 text-left text-sm text-porcelain"
+      className="flex min-h-[52px] w-full items-center gap-3 bg-iris/[0.07] px-2 py-3 text-left text-[15px] text-porcelain shadow-[inset_2px_0_0_theme(colors.iris.DEFAULT)]"
     >
       <span
         aria-hidden="true"
@@ -550,21 +514,20 @@ function GhostRow({ title }: { title: string }) {
         <span className="text-xs leading-none">+</span>
       </span>
       <span className="sr-only">Proposed: </span>
-      <span className="min-w-0 flex-1 truncate font-medium">{title}</span>
-      <span className="shrink-0 font-mono text-[10px] uppercase tracking-kicker text-iris-300">
-        Proposed
-      </span>
+      <span className="min-w-0 flex-1 font-medium">{title}</span>
+      <span className="shrink-0 text-xs text-iris-300">Proposed</span>
     </div>
   );
 }
 
 const LESSON_ROW_BASE =
-  "flex w-full items-center gap-3 rounded-md border px-4 py-3 text-left text-sm transition-colors";
+  "flex min-h-[52px] w-full items-center gap-3 px-2 py-3 text-left text-[15px] leading-snug transition-colors";
 
 const LESSON_ROW_STATE: Record<PathLesson["unlock_state"], string> = {
-  complete: "border-divider bg-surface text-mist hover:text-porcelain hover:border-teal/40",
-  available: "border-teal bg-teal/10 text-porcelain hover:bg-teal/15",
-  locked: "cursor-not-allowed border-divider bg-surface/50 text-slate",
+  complete: "text-mist hover:bg-surface hover:text-porcelain",
+  available:
+    "bg-teal/[0.08] font-semibold text-porcelain shadow-[inset_2px_0_0_theme(colors.teal.DEFAULT)] hover:bg-teal/[0.13]",
+  locked: "cursor-not-allowed text-slate",
 };
 
 function LessonRow({
@@ -601,24 +564,19 @@ function LessonRow({
       // path rail says an offer is standing on it.
       className={`${LESSON_ROW_BASE} ${
         revising
-          ? "border-iris/60 bg-iris/[0.07] text-porcelain"
+          ? "bg-iris/[0.07] text-porcelain shadow-[inset_2px_0_0_theme(colors.iris.DEFAULT)]"
           : LESSON_ROW_STATE[lesson.unlock_state]
       }`}
     >
       <LessonMarker state={lesson.unlock_state} />
       <span className="sr-only">{UNLOCK_STATE_LABEL[lesson.unlock_state]}: </span>
-      <span className="min-w-0 flex-1 truncate font-medium">{lesson.title}</span>
+      <span className="min-w-0 flex-1">{lesson.title}</span>
       {revising ? (
-        <span
-          data-testid="path-rail-revising"
-          className="shrink-0 font-mono text-[10px] uppercase tracking-kicker text-iris-300"
-        >
+        <span data-testid="path-rail-revising" className="shrink-0 text-xs text-iris-300">
           Will be revised
         </span>
       ) : generating ? (
-        <span className="shrink-0 font-mono text-[10px] uppercase tracking-kicker text-slate">
-          Preparing
-        </span>
+        <span className="shrink-0 text-xs text-slate">Preparing</span>
       ) : null}
     </button>
   );
@@ -628,10 +586,10 @@ function CompleteBanner() {
   return (
     <section
       data-testid="path-complete"
-      className="mt-6 rounded-lg border border-teal/40 bg-teal/10 p-5 text-center shadow-sm"
+      className="mt-6 rounded-lg border border-divider bg-surface p-5"
     >
-      <h2 className="text-lg font-semibold text-porcelain">Path complete.</h2>
-      <p className="mx-auto mt-2 max-w-[24rem] text-sm leading-6 text-mist">
+      <h2 className="font-serif text-xl font-medium text-porcelain">Path complete.</h2>
+      <p className="mt-2 max-w-[32rem] text-sm leading-6 text-mist">
         You've finished every lesson. Revisit any lesson below, start another path, or keep it as a
         reference.
       </p>
@@ -644,10 +602,7 @@ function CompleteBanner() {
 function LoadingState() {
   return (
     <>
-      <p className="kicker">Path</p>
-      <h1 className="mt-2 text-3xl font-semibold leading-tight tracking-tight">
-        Loading your path…
-      </h1>
+      <h1 className="page-title text-mist">Loading your path…</h1>
     </>
   );
 }
@@ -656,7 +611,7 @@ function GeneratingState() {
   return (
     <StateCard testid="path-generating" ariaLive="polite">
       <Spinner />
-      <h1 className="mt-4 text-lg font-semibold">Drafting your path…</h1>
+      <h1 className="mt-4 text-xl leading-snug">Drafting your path…</h1>
       <p className="mx-auto mt-2 max-w-[22rem] text-sm leading-6 text-mist">
         Aleph is generating an outline of units and lessons. This page updates itself when it's
         ready.
@@ -668,7 +623,7 @@ function GeneratingState() {
 function RefusedState({ message }: { message?: string }) {
   return (
     <StateCard testid="path-refused" variant="refusal" dataVariant="refusal">
-      <h1 className="text-lg font-semibold text-iris-300">This topic is out of scope.</h1>
+      <h1 className="text-xl leading-snug text-iris-300">This topic is out of scope.</h1>
       <p className="mx-auto mt-2 max-w-[24rem] text-sm leading-6 text-porcelain">
         {message ??
           "Aleph can't build a path on this topic. Try a different topic and we'll draft one."}
@@ -690,7 +645,7 @@ function FailedState({
 }) {
   return (
     <StateCard testid="path-failed" variant="error" dataVariant="error" ariaLive="assertive">
-      <h1 className="text-lg font-semibold text-danger">Generation didn't finish.</h1>
+      <h1 className="text-xl leading-snug text-danger">Generation didn't finish.</h1>
       <p className="mx-auto mt-2 max-w-[24rem] text-sm leading-6 text-porcelain">
         We couldn't draft this path. Retry when you're ready.
       </p>
@@ -710,7 +665,7 @@ function FailedState({
 function UnavailableState() {
   return (
     <StateCard testid="path-unavailable">
-      <h1 className="text-lg font-semibold">We couldn't load this path.</h1>
+      <h1 className="text-xl leading-snug">We couldn't load this path.</h1>
       <p className="mx-auto mt-2 max-w-[24rem] text-sm leading-6 text-mist">
         It may have been deleted, or something went wrong. Head back to your paths and try again.
       </p>

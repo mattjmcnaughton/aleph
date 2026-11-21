@@ -34,33 +34,32 @@ export function InstallCard() {
   return (
     <section
       aria-label="Add aleph to your Home Screen"
-      className="mt-6 rounded-lg border border-divider bg-surface p-5"
+      className="mt-5 flex items-start gap-3.5 rounded-lg border border-divider p-4"
     >
-      <div className="flex items-start gap-4">
-        <AlephGlyph size="md" />
-        <div className="min-w-0">
-          <h2 className="text-lg font-semibold">Add aleph to your Home Screen</h2>
-          <p className="mt-2 text-sm leading-6 text-porcelain">
-            Tap <strong>Share</strong>, then <strong>Add to Home Screen</strong>.
-          </p>
-          <p className="mt-2 text-sm leading-6 text-mist">
-            Reminders and other Notifications only work from there.
-          </p>
-          <button
-            type="button"
-            className="mt-3 min-h-11 rounded-md px-3 text-sm text-mist hover:text-porcelain focus-visible:outline focus-visible:outline-2 focus-visible:outline-teal"
-            onClick={() => {
-              setVisible(false);
-              try {
-                localStorage.setItem(DISMISSED_KEY, String(Date.now()));
-              } catch {
-                /* Hidden for this visit even if storage is blocked. */
-              }
-            }}
-          >
-            Not now
-          </button>
-        </div>
+      <AlephGlyph size="sm" />
+      <div className="min-w-0">
+        <h2 className="text-[15px] font-semibold leading-6">Add aleph to your Home Screen</h2>
+        <p className="mt-0.5 text-sm leading-6 text-mist">
+          Tap <strong className="font-semibold text-porcelain">Share</strong>, then{" "}
+          <strong className="font-semibold text-porcelain">Add to Home Screen</strong>.
+        </p>
+        <p className="text-sm leading-6 text-mist">
+          Reminders and other Notifications only work from there.
+        </p>
+        <button
+          type="button"
+          className="-ml-3 mt-1 min-h-11 rounded-md px-3 text-sm font-semibold text-porcelain hover:text-teal-bright"
+          onClick={() => {
+            setVisible(false);
+            try {
+              localStorage.setItem(DISMISSED_KEY, String(Date.now()));
+            } catch {
+              /* Hidden for this visit even if storage is blocked. */
+            }
+          }}
+        >
+          Not now
+        </button>
       </div>
     </section>
   );

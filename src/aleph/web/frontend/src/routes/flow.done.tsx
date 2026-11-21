@@ -123,7 +123,7 @@ function FlowReceipt() {
 
   if (!flowEnabled) {
     return (
-      <main className="mx-auto w-full max-w-[480px] px-4 py-8">
+      <main className="page">
         <Breadcrumbs current="Flow" />
         <StateCard testid="flow-done-unavailable">
           <h2 className="text-lg font-semibold">Flow isn't available.</h2>
@@ -183,7 +183,7 @@ function FlowReceipt() {
           className={`mb-4 flex items-center gap-2.5 ${rise(0).className}`}
           style={rise(0).style}
         >
-          <span className="whitespace-nowrap font-mono text-[11.5px] font-semibold tabular-nums text-teal-bright">
+          <span className="whitespace-nowrap text-xs font-semibold tabular-nums text-teal-bright">
             Flow · {completed.length} of {completed.length}
           </span>
           <FlowSegments states={segments(flow, completed.length)} lightUp={celebrate} />
@@ -191,17 +191,15 @@ function FlowReceipt() {
       ) : null}
 
       <div className={rise(1).className} style={rise(1).style}>
-        <p className="kicker text-teal-bright">{endedKicker(flow.endedReason)}</p>
-        <h1 className="mt-2 text-2xl font-semibold leading-tight tracking-tight">
-          {countHeadline(completed.length)}
-        </h1>
+        <p className="kicker">{endedKicker(flow.endedReason)}</p>
+        <h1 className="mt-2 page-title">{countHeadline(completed.length)}</h1>
       </div>
 
       {/* Two columns, not three (flow-fix plan item 7), when the Quick
           checks stat is hidden below — three slots for two stats leaves a
           visibly empty cell rather than a clean row. */}
       <div
-        className={`mt-5 grid gap-2 ${withOutcome.length > 0 ? "grid-cols-3" : "grid-cols-2"} ${rise(2).className}`}
+        className={`mt-6 grid gap-4 border-y border-divider py-4 ${withOutcome.length > 0 ? "grid-cols-3" : "grid-cols-2"} ${rise(2).className}`}
         style={rise(2).style}
       >
         <Stat testid="flow-receipt-lessons" value={lessonsShown} label="lessons" />
@@ -222,21 +220,18 @@ function FlowReceipt() {
       ) : null}
 
       {rows.length > 0 ? (
-        <div
-          className={`mt-6 rounded-lg bg-surface p-4 ring-1 ring-inset ring-[#3f424d] ${rise(4).className}`}
-          style={rise(4).style}
-        >
+        <div className={`mt-8 ${rise(4).className}`} style={rise(4).style}>
           <p className="kicker">Where it landed</p>
           <ul
             data-testid="flow-receipt-ledger"
-            className="mt-2 flex flex-col divide-y divide-divider"
+            className="mt-2 flex flex-col divide-y divide-divider border-y border-divider"
           >
             {rows.map((row, index) => {
               const progress = pathProgress(row.pathId);
               return (
                 <li
                   key={row.pathId}
-                  className={`flex items-center justify-between gap-3 py-2 text-sm ${rise(5 + index).className}`}
+                  className={`flex items-center justify-between gap-3 py-3 text-[15px] ${rise(5 + index).className}`}
                   style={rise(5 + index).style}
                 >
                   <span className="min-w-0 truncate">{pathTitle(row.pathId)}</span>
@@ -275,11 +270,14 @@ function FlowReceipt() {
 
 function Stat({ testid, value, label }: { testid: string; value: number | string; label: string }) {
   return (
-    <div className="rounded-lg bg-surface p-3 text-center ring-1 ring-inset ring-[#3f424d]">
-      <p data-testid={testid} className="text-2xl font-semibold tabular-nums text-teal-bright">
+    <div className="border-l border-divider pl-4 first:border-l-0 first:pl-0">
+      <p
+        data-testid={testid}
+        className="font-serif text-[1.75rem] font-medium leading-none tabular-nums text-porcelain"
+      >
         {value}
       </p>
-      <p className="mt-1 text-[11.5px] text-slate">{label}</p>
+      <p className="mt-1.5 text-sm text-mist">{label}</p>
     </div>
   );
 }

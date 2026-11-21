@@ -44,14 +44,21 @@ function TutorGlyph({ size = "xs" }: { size?: "xs" | "2xs" }) {
 export function TutorMark({ tutor }: { tutor: TutorRailState }) {
   if (!tutor.showMark) return null;
   return (
+    // On a phone this is a docked bar that looks like the composer it opens: it
+    // says what the tutor is for and never floats over the Read passage. At
+    // `lg`, where the page has margins to spare, it is a pill in the corner.
     <button
       type="button"
       data-testid="tutor-rail-mark"
+      aria-label="Tutor"
       onClick={tutor.openRail}
-      className="fixed bottom-[max(1.25rem,env(safe-area-inset-bottom))] right-5 z-30 inline-flex items-center gap-2 rounded-full border border-iris/60 bg-surface px-4 py-3 text-sm font-semibold text-porcelain shadow-glow-iris transition-colors hover:border-iris hover:bg-elevated"
+      className="fixed inset-x-0 bottom-0 z-30 flex border-t border-divider bg-night/95 px-5 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 backdrop-blur lg:inset-x-auto lg:bottom-6 lg:right-6 lg:border-0 lg:bg-transparent lg:p-0 lg:backdrop-blur-none"
     >
-      <TutorGlyph size="2xs" />
-      Tutor
+      <span className="flex h-12 w-full items-center gap-2.5 rounded-xl border border-divider bg-surface px-3.5 text-left text-[15px] text-mist transition-colors lg:h-11 lg:w-auto lg:rounded-full lg:border-iris/50 lg:pr-4 lg:font-semibold lg:text-porcelain lg:shadow-md lg:hover:border-iris">
+        <TutorGlyph size="2xs" />
+        <span className="lg:hidden">Ask the tutor about this lesson</span>
+        <span className="hidden lg:inline">Tutor</span>
+      </span>
     </button>
   );
 }
@@ -304,7 +311,7 @@ function RailHeader({ tutor }: { tutor: TutorRailState }) {
 function LearnerBubble({ testid, content }: { testid: string; content: string }) {
   return (
     <div data-testid={testid} data-role="learner" className="flex justify-end">
-      <p className="max-w-[90%] whitespace-pre-wrap break-words rounded-2xl bg-surface px-4 py-3 text-base leading-7 text-porcelain">
+      <p className="max-w-[90%] whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-elevated px-4 py-2.5 text-base leading-7 text-porcelain">
         {content}
       </p>
     </div>
@@ -392,7 +399,9 @@ function MessageBubble({
 function EmptyState({ tutor }: { tutor: TutorRailState }) {
   return (
     <div data-testid="tutor-rail-empty" className="py-6">
-      <p className="text-xl font-semibold text-porcelain">What would you like to unpack?</p>
+      <p className="font-serif text-xl font-medium text-porcelain">
+        What would you like to unpack?
+      </p>
       <p className="mt-3 text-base leading-7 text-mist">
         Ask about this lesson’s Read passage or Quick check.
       </p>

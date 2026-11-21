@@ -1,22 +1,34 @@
+@import "@fontsource-variable/instrument-sans/wght.css";
+@import "@fontsource-variable/literata/wght.css";
+@import "@fontsource-variable/literata/wght-italic.css";
+@import "@fontsource-variable/jetbrains-mono/wght.css";
+
+/* Instrument Sans draws its interpunct (U+00B7) hairline-thin and tight, so the
+   " · " that joins short facts ("4 of 11 · In progress") reads as a smudge.
+   This sends that one character to a system face with an ordinary dot. */
+@font-face {
+  font-family: "Aleph Interpunct";
+  src: local("Helvetica Neue"), local("Arial"), local("Roboto"), local("DejaVu Sans");
+  unicode-range: U+00B7;
+}
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
   :root {
-    /* The app header's total outer height, border included: a 36px brand
-       lockup (`AlephGlyph size="sm"`) centred in a 60px content box, plus the
-       1px bottom border, plus the Home Screen status-bar safe area. The one
-       number both the header (`app-header.tsx`) and
-       the docked rail (`components/workspace.tsx`) build from, so the rail's
-       `lg:sticky` top offset can never drift out of step with what it is
-       docking beneath.
+    /* The app header's total outer height, border included: a 60px content
+       box holding the brand lockup and the 44px account control, plus the 1px
+       bottom border, plus the Home Screen status-bar safe area. The one number
+       both the header (`app-header.tsx`) and the docked rail
+       (`components/workspace.tsx`) build from, so the rail's `lg:sticky` top
+       offset can never drift out of step with what it is docking beneath.
 
        Note which way that dependency runs: the header *imposes* this height
        rather than reporting it, so header content taller than 60px would
-       overflow the border instead of growing the bar. Nothing comes close
-       today (the tallest thing in it is the 34px sign-out button) — but this
-       number is load-bearing for the rail, so raise it here if that changes. */
+       overflow the border instead of growing the bar. This number is
+       load-bearing for the rail, so raise it here if that changes. */
     --app-header-h: calc(3.8125rem + env(safe-area-inset-top, 0px));
   }
 
@@ -29,8 +41,21 @@
     padding-bottom: env(safe-area-inset-bottom, 0px);
   }
 
+  /* Titles are set in the reading face. A page title is quiet and literate
+     rather than loud: medium weight, slightly tightened. Components that need
+     another weight still say so with a utility. */
+  h1 {
+    @apply font-serif font-medium tracking-[-0.015em];
+  }
+
+  /* One focus ring everywhere, so keyboard focus never depends on a component
+     remembering to style it. */
+  :focus-visible {
+    @apply outline outline-2 outline-offset-2 outline-teal;
+  }
+
   ::selection {
-    background: rgba(79, 184, 196, 0.3);
+    background: rgba(86, 179, 171, 0.3);
   }
 }
 
@@ -44,8 +69,33 @@
     }
   }
 
-  /* Uppercase mono section kicker, e.g. "NEW PATH" / "YOUR PATHS" in the mocks. */
+  /* A section label: small, sentence case, secondary. It used to be tracked-out
+     mono capitals above every block; a label now only appears where it tells
+     the learner something the content below does not. */
   .kicker {
-    @apply font-mono text-[11px] font-medium uppercase tracking-kicker text-mist;
+    @apply font-sans text-[13px] font-medium leading-5 text-mist;
+  }
+
+  /* The single-column page shell for routes without a sidebar or rail (Flow,
+     Brief, Beat, the creation forms). One definition, so those routes share
+     the workspace's gutters and get a real desktop measure instead of a
+     480px phone column centred on a wide screen. */
+  .page {
+    @apply mx-auto w-full max-w-[560px] px-5 pb-24 pt-6 lg:max-w-[700px] lg:px-10 lg:pb-20 lg:pt-10;
+  }
+
+  /* The page title: one per screen, in the reading face. */
+  .page-title {
+    @apply font-serif text-[1.75rem] font-medium leading-[1.16] tracking-[-0.015em] lg:text-[2.125rem];
+    text-wrap: balance;
+  }
+
+  /* The reading surface (Read passages and Briefs): serif, a little larger and
+     looser than UI text, and capped near 68 characters. */
+  .reading {
+    @apply font-serif text-[1.0625rem] leading-[1.7];
+    font-optical-sizing: auto;
+    text-wrap: pretty;
+    hanging-punctuation: first;
   }
 }

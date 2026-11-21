@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, createFileRoute, useRouterState } from "@tanstack/react-router";
-import { AlephGlyph, AlephLogo } from "../components/aleph-logo";
+import { AlephGlyph } from "../components/aleph-logo";
+import { PRIMARY_CTA_BASE } from "../components/state-card";
 import { AUTH_LOGIN_PATH } from "../lib/api";
 import { sessionQueryOptions } from "../lib/auth";
 
@@ -26,18 +27,14 @@ function Login() {
   const providerLabel = formatProviderLabel(session.data?.provider ?? "keycloak");
 
   return (
-    <main className="min-h-screen bg-night px-4 pb-6 pt-[calc(1.5rem+env(safe-area-inset-top))] text-porcelain">
-      <div className="mx-auto flex min-h-[calc(100vh-3rem)] w-full max-w-[440px] flex-col justify-center">
-        <section className="rounded-lg border border-divider bg-surface p-6 text-center shadow-md">
-          <div className="flex justify-center">
-            <AlephLogo />
-          </div>
-
-          <div className="mt-8 flex justify-center">
-            <AlephGlyph size="lg" />
-          </div>
-          <h1 className="mt-7 text-2xl font-semibold leading-tight">Sign in to Aleph</h1>
-          <p className="mx-auto mt-3 max-w-[19rem] text-sm leading-6 text-mist">
+    <main className="min-h-screen bg-night px-6 pb-6 pt-[calc(1.5rem+env(safe-area-inset-top))] text-porcelain">
+      <div className="mx-auto flex min-h-[calc(100vh-3rem)] w-full max-w-[400px] flex-col justify-center">
+        {/* No card and one mark: the sign-in screen is the first thing a new
+            learner sees, so it is a title, a sentence and one action. */}
+        <section>
+          <AlephGlyph size="lg" />
+          <h1 className="mt-8 page-title">Sign in to Aleph</h1>
+          <p className="mt-3 max-w-[22rem] text-base leading-7 text-mist">
             Name a topic, get a generated learning path. Your paths and progress sync to your
             account.
           </p>
@@ -52,13 +49,10 @@ function Login() {
               </Link>
             </div>
           ) : null}
-          <a
-            href={AUTH_LOGIN_PATH}
-            className="mt-6 inline-flex w-full items-center justify-center rounded-md bg-teal px-4 py-3 text-sm font-semibold text-night transition-colors hover:bg-teal-bright"
-          >
+          <a href={AUTH_LOGIN_PATH} className={`mt-8 ${PRIMARY_CTA_BASE}`}>
             Continue with {providerLabel}
           </a>
-          <p className="mx-auto mt-4 max-w-[18rem] text-xs leading-5 text-slate">
+          <p className="mt-4 text-sm leading-6 text-slate">
             We only read your public profile and email.
           </p>
         </section>

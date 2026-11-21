@@ -23,7 +23,7 @@ function intensityFor(count: number): Intensity {
 }
 
 const INTENSITY_CLASS: Record<Intensity, string> = {
-  empty: "bg-surface",
+  empty: "bg-porcelain/[0.07]",
   dim: "bg-teal-dim",
   mid: "bg-teal",
   bright: "bg-teal-bright",
@@ -99,11 +99,11 @@ export function ActivityStrip({ activity }: { activity: ActivityCell[] | undefin
       data-testid="activity-strip"
       role="img"
       aria-label={summaryLabel}
-      className="mt-4 grid gap-1"
+      className="mt-3 grid w-max gap-[3px]"
       style={{
         gridTemplateRows: `repeat(${ROWS}, minmax(0, 1fr))`,
         gridAutoFlow: "column",
-        gridAutoColumns: "minmax(0, 1fr)",
+        gridAutoColumns: "max-content",
       }}
     >
       {activity.map((cell) => (
@@ -116,7 +116,7 @@ export function ActivityStrip({ activity }: { activity: ActivityCell[] | undefin
           // re-deriving it from `aria-label` prose.
           data-weekday={localDateFromISO(cell.date).getDay()}
           aria-label={cellLabel(cell)}
-          className={`h-3.5 w-3.5 rounded-sm ${INTENSITY_CLASS[intensityFor(cell.count)]}`}
+          className={`h-3.5 w-3.5 rounded-[3px] ${INTENSITY_CLASS[intensityFor(cell.count)]}`}
         />
       ))}
     </div>

@@ -68,17 +68,12 @@ export function ProposalCard({
       data-operations={proposal.operations.length}
       className="mt-3 rounded-lg border border-iris/50 bg-iris/5 px-4 py-3"
     >
-      <p className="font-mono text-[11px] font-medium uppercase tracking-kicker text-iris-300">
-        Proposal
-      </p>
+      <p className="text-xs font-medium text-iris-300">Proposal</p>
       {/* The agent's own plain-language statement of the edit (TDD §5.1). */}
       <p className="mt-1.5 text-sm leading-6 text-porcelain">{proposal.summary}</p>
 
       {/* The scale, derived from the operations — the part a learner can check. */}
-      <p
-        data-testid="shaping-rail-proposal-cost"
-        className="mt-1 font-mono text-[11px] uppercase tracking-kicker text-iris-400"
-      >
+      <p data-testid="shaping-rail-proposal-cost" className="mt-1 text-xs text-iris-400">
         {proposalCostLine(proposal)}
       </p>
 

@@ -1,78 +1,92 @@
 import type { Config } from "tailwindcss";
 
-// Nocturne — Aleph's dark/teal, mobile-first visual system. Most tokens are
-// lifted directly from the CSS custom properties in docs/mocks/aleph-mvp-*.html
-// so the app and the mocks stay one system. A few are Nocturne extensions with
-// no mock counterpart — the hover/dim teal ramp (teal.bright, teal.dim) and the
-// accent glow (shadow.glow) — derived from the accent to fill interaction states
-// the static mocks don't cover.
+// Nocturne: Aleph's dark, teal, mobile-first visual system. This is its second
+// pass ("a study, not an arcade"): the token *names* are unchanged so every
+// surface keeps working, but the values moved from a violet-navy with neon
+// accents to a neutral ink with warm paper text, a serif reading face, and
+// accents that each mean one thing. docs/design.md records the reasoning.
 export default {
   content: ["./index.html", "./src/**/*.{ts,tsx}"],
   theme: {
     extend: {
       colors: {
-        // Surfaces (--color-bg / --color-surface / neutral-900 inset).
-        night: "#161826",
-        surface: "#232532",
-        elevated: "#292b31",
-        // Text (--color-text + neutral scale).
-        porcelain: "#e9e9ed",
-        mist: "#9397ab", // neutral-500 — muted body / kickers
-        slate: "#75798c", // neutral-600 — dimmer captions
-        faint: "#595d6c", // neutral-700 — hairline borders
-        // Primary accent — Nocturne teal (--color-accent override in the mocks).
+        // Surfaces: a deep, neutral-cool ink (a room at night, not a purple
+        // "dark mode"), with two raised steps.
+        night: "#11161b",
+        surface: "#182027",
+        elevated: "#202a32",
+        // Text: warm paper on the cool ink (lamplight on a page). Each step
+        // down is a role, not a tint: body / secondary / tertiary / hairline.
+        porcelain: "#ebe6da",
+        mist: "#a5a89f",
+        slate: "#7f847d",
+        faint: "#49535a",
+        // Teal means "forward": the primary action, the learner's position and
+        // their progress. Nothing else is teal.
         teal: {
-          DEFAULT: "#4fb8c4",
-          bright: "#6fced9",
-          dim: "#3f959f",
+          DEFAULT: "#56b3ab",
+          bright: "#7dcdc5",
+          dim: "#3f8d86",
         },
-        // Secondary accent — the iris/violet scale (--color-accent-*), used for
-        // section glows and the aleph watermark texture.
+        // Iris marks the tutor and what it proposes (ghost rows, Proposals,
+        // unread Briefs). Never an action colour.
         iris: {
-          DEFAULT: "#9184d9",
-          300: "#d2cefd",
-          400: "#b5abfc",
-          500: "#968ae0",
-          600: "#796cbf",
-          700: "#5d5294",
-          900: "#2b2741",
+          DEFAULT: "#9a92d8",
+          300: "#cfcaf2",
+          400: "#b3acea",
+          500: "#9a92d8",
+          600: "#7b73b8",
+          700: "#575088",
+          900: "#24223a",
         },
         section: {
           DEFAULT: "#262a60",
           glow: "#353b80",
           ghost: "#4c5397",
         },
-        // Hairline divider — --color-divider (porcelain @ 16%).
-        divider: "#e9e9ed29",
-        // Error surface (--color error tokens in the mocks).
+        // The streak's flame, and only that.
+        ember: "#e3a35a",
+        // Hairline divider: paper at 12%.
+        divider: "#ebe6da1f",
         danger: {
-          DEFAULT: "#ff8a80",
-          bg: "#2a1215",
-          border: "#5c2b2e",
+          DEFAULT: "#ef8f82",
+          bg: "#2a1614",
+          border: "#5e2e29",
         },
       },
       fontFamily: {
-        sans: ["Inter", "system-ui", "-apple-system", "sans-serif"],
-        mono: ["ui-monospace", "SFMono-Regular", "Menlo", "monospace"],
+        // UI: Instrument Sans. Reading and titles: Literata, a face drawn for
+        // long-form reading on screens. Mono is for code, never for labels.
+        sans: [
+          '"Aleph Interpunct"',
+          '"Instrument Sans Variable"',
+          "system-ui",
+          "-apple-system",
+          "sans-serif",
+        ],
+        serif: ['"Aleph Interpunct"', '"Literata Variable"', "Charter", "Georgia", "serif"],
+        mono: ['"JetBrains Mono Variable"', "ui-monospace", "SFMono-Regular", "Menlo", "monospace"],
       },
       borderRadius: {
-        sm: "4px", // --radius-sm
-        md: "8px", // --radius-md
-        lg: "14px", // --radius-lg
-        xl: "20px",
+        // Radius follows hierarchy: controls 8, cards 12, sheets 16.
+        sm: "4px",
+        md: "8px",
+        lg: "12px",
+        xl: "16px",
       },
       boxShadow: {
-        sm: "0 0 0 1px #3f424d", // --shadow-sm
-        md: "0 0 0 1px #595d6c, 0 6px 18px rgba(0,0,0,0.55)", // --shadow-md
-        lg: "0 0 0 1px #9397ab, 0 16px 40px rgba(0,0,0,0.65)", // --shadow-lg
-        glow: "0 0 0 1px rgba(79,184,196,0.45), 0 10px 34px rgba(79,184,196,0.16)",
-        // The tutor's glow, iris to teal's (Phase 2 PRD §5.10 — iris marks the
-        // tutor, teal the path). Same recipe as `glow`, derived from iris
-        // DEFAULT (#9184d9) so the two accents read as one system.
-        "glow-iris": "0 0 0 1px rgba(145,132,217,0.45), 0 10px 34px rgba(145,132,217,0.16)",
+        // Elevation is for things that float (menus, sheets), not for cards:
+        // a card is separated by its border, so `sm` is deliberately nothing.
+        sm: "0 0 #0000",
+        md: "0 8px 24px rgba(0,0,0,0.4)",
+        lg: "0 20px 56px rgba(0,0,0,0.55)",
+        // The "glow" tokens are now plain accent rings. The blurred halo read
+        // as decoration; a ring still marks the tutor (iris) and the path (teal).
+        glow: "0 0 0 1px rgba(86,179,171,0.35)",
+        "glow-iris": "0 0 0 1px rgba(154,146,216,0.4)",
       },
       letterSpacing: {
-        kicker: "0.14em", // uppercase mono section kickers
+        kicker: "0", // labels are no longer tracked-out capitals
       },
       // The tutor's "thinking" dots — the one motion the mocks don't cover,
       // because no mock surface waits on a token. Three dots share the cycle and
@@ -112,12 +126,12 @@ export default {
         // and the last cell then pulses once. `to` is the cell's resting
         // colour, so an un-animated cell looks exactly like a finished one.
         "seg-light": {
-          from: { backgroundColor: "rgb(233 233 237 / 0.1)" },
-          to: { backgroundColor: "#4fb8c4" },
+          from: { backgroundColor: "rgb(235 230 218 / 0.1)" },
+          to: { backgroundColor: "#56b3ab" },
         },
         "seg-pulse": {
-          from: { boxShadow: "0 0 0 0 rgb(111 206 217 / 0.55)" },
-          to: { boxShadow: "0 0 0 9px rgb(111 206 217 / 0)" },
+          from: { boxShadow: "0 0 0 0 rgb(125 205 197 / 0.55)" },
+          to: { boxShadow: "0 0 0 9px rgb(125 205 197 / 0)" },
         },
         // One piece of confetti. The distance, drift and spin are per-particle
         // custom properties the component sets inline; only the shape of the

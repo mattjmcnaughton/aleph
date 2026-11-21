@@ -31,20 +31,20 @@ import { useEffect, useRef, useState } from "react";
 // Nocturne, expressed in the theme variables mermaid understands. Colours are the
 // same tokens tailwind.config.ts defines; mermaid needs literals, not classes.
 const THEME_VARIABLES = {
-  background: "#161826", // night
-  primaryColor: "#232532", // surface — node fill
-  primaryTextColor: "#e9e9ed", // porcelain
-  primaryBorderColor: "#4fb8c4", // teal
-  secondaryColor: "#2b2741", // iris-900
-  tertiaryColor: "#292b31", // elevated
-  lineColor: "#9397ab", // mist — edges
-  textColor: "#e9e9ed",
-  mainBkg: "#232532",
-  nodeBorder: "#4fb8c4",
-  clusterBkg: "#161826",
-  clusterBorder: "#e9e9ed29", // divider
-  titleColor: "#e9e9ed",
-  edgeLabelBackground: "#161826",
+  background: "#11161b", // night
+  primaryColor: "#182027", // surface — node fill
+  primaryTextColor: "#ebe6da", // porcelain
+  primaryBorderColor: "#56b3ab", // teal
+  secondaryColor: "#24223a", // iris-900
+  tertiaryColor: "#202a32", // elevated
+  lineColor: "#a5a89f", // mist — edges
+  textColor: "#ebe6da",
+  mainBkg: "#182027",
+  nodeBorder: "#56b3ab",
+  clusterBkg: "#11161b",
+  clusterBorder: "#ebe6da1f", // divider
+  titleColor: "#ebe6da",
+  edgeLabelBackground: "#11161b",
   fontSize: "14px",
 } as const;
 
@@ -60,7 +60,7 @@ function loadMermaid(): Promise<typeof import("mermaid").default> {
         securityLevel: "strict",
         theme: "dark",
         themeVariables: THEME_VARIABLES,
-        fontFamily: "Inter, system-ui, -apple-system, sans-serif",
+        fontFamily: "'Instrument Sans Variable', system-ui, -apple-system, sans-serif",
         // We render the fallback ourselves; mermaid must not inject its own
         // error graphic into the page when a chart doesn't parse.
         suppressErrorRendering: true,
@@ -126,7 +126,7 @@ export function Mermaid({ source }: { source: string }) {
         // A diagram has a natural width the 480px lesson column can't reflow, so
         // like code blocks and tables it scrolls on its own axis. `[&_svg]` caps
         // the height on a phone without distorting the aspect ratio.
-        className="overflow-x-auto rounded-md border border-divider bg-night p-3 [&_svg]:mx-auto [&_svg]:h-auto [&_svg]:max-w-none"
+        className="overflow-x-auto rounded-md border border-divider p-4 [&_svg]:mx-auto [&_svg]:h-auto [&_svg]:max-w-none"
         // Mermaid's own DOMPurify-sanitised output (securityLevel: "strict") —
         // never the raw chart source. See the module header.
         // biome-ignore lint/security/noDangerouslySetInnerHtml: mermaid returns a sanitised SVG string, not nodes
@@ -142,7 +142,7 @@ export function Mermaid({ source }: { source: string }) {
     <pre
       data-testid="mermaid-diagram"
       data-mermaid-status={status}
-      className="overflow-x-auto rounded-md border border-divider bg-elevated p-4 font-mono text-[13px] leading-6 text-porcelain"
+      className="overflow-x-auto rounded-md bg-surface p-4 font-mono text-[13px] leading-6 text-porcelain"
     >
       <code>{source}</code>
     </pre>

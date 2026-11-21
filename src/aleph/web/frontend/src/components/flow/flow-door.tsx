@@ -21,36 +21,30 @@ export function FlowDoor({ paths }: { paths: PathSummary[] | undefined }) {
     <Link
       to="/flow/new"
       data-testid="flow-door"
-      className="mt-3 flex items-center gap-3 rounded-lg border border-divider bg-transparent px-4 py-3 text-porcelain no-underline transition-colors hover:border-teal-dim focus-visible:outline focus-visible:outline-2 focus-visible:outline-teal"
+      className="mt-2 flex min-h-14 items-center gap-3 rounded-lg px-5 py-3 text-porcelain no-underline transition-colors hover:bg-surface lg:px-6"
     >
-      <span
+      <div className="min-w-0 flex-1">
+        <p className="text-[15px] font-semibold">Start a flow</p>
+        <p className="mt-0.5 text-sm leading-5 text-mist">
+          A few lessons, back to back. You pick how many.
+        </p>
+      </div>
+      <svg
+        viewBox="0 0 16 16"
+        width="14"
+        height="14"
+        fill="none"
         aria-hidden="true"
-        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-teal/10 text-teal-bright"
+        className="shrink-0 text-slate"
       >
-        <svg
-          viewBox="0 0 16 16"
-          width="16"
-          height="16"
-          fill="none"
+        <path
+          d="M6 3.5L10.5 8 6 12.5"
           stroke="currentColor"
           strokeWidth="1.6"
           strokeLinecap="round"
           strokeLinejoin="round"
-          aria-hidden="true"
-        >
-          <path d="M2 8h9M8 4l4 4-4 4" />
-          <path d="M2 3.5h4M2 12.5h4" opacity={0.5} />
-        </svg>
-      </span>
-      <div className="min-w-0 flex-1">
-        <p className="text-sm font-semibold">Start a flow</p>
-        <p className="mt-0.5 truncate text-xs text-mist">
-          A few lessons, back to back. You pick how many.
-        </p>
-      </div>
-      <span aria-hidden="true" className="shrink-0 text-lg text-slate">
-        ›
-      </span>
+        />
+      </svg>
     </Link>
   );
 }

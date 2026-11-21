@@ -34,7 +34,7 @@ const SEAL_DASH = 302;
 /** How many pieces the burst throws. Sparse on purpose (mock direction C). */
 const CONFETTI_COUNT = 22;
 
-const CONFETTI_COLORS = ["#4fb8c4", "#6fced9", "#9184d9", "#b5abfc", "#e9e9ed"];
+const CONFETTI_COLORS = ["#56b3ab", "#7dcdc5", "#9a92d8", "#b3acea", "#ebe6da"];
 
 /**
  * Whole **Days**, in the learner's local timezone, spanned by a path's work —
@@ -172,7 +172,7 @@ function Stat({ value, label }: { value: number; label: string }) {
       <p className="text-2xl font-semibold leading-tight tracking-tight tabular-nums text-porcelain">
         {value}
       </p>
-      <p className="mt-0.5 font-mono text-[11px] uppercase tracking-kicker text-slate">{label}</p>
+      <p className="mt-0.5 text-xs text-slate">{label}</p>
     </div>
   );
 }

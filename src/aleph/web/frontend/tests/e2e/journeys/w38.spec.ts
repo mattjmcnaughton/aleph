@@ -103,6 +103,7 @@ test(
         response.url().endsWith(`/api/v1/devices/${device.id}`) &&
         response.request().method() === "DELETE",
     );
+    await page.getByTestId("account-menu").tap();
     await page.getByRole("button", { name: "Sign out" }).tap();
     expect((await removed).status()).toBe(204);
     await page.waitForURL("**/login");

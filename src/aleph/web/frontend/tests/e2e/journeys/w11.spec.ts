@@ -122,6 +122,7 @@ test.describe("W11 the conversation persists", { tag: "@w11" }, () => {
 
     // --- leave ---------------------------------------------------------------
     await closeRail(page);
+    await page.getByTestId("account-menu").click();
     await page.getByRole("button", { name: "Sign out" }).click();
     await expect(page).toHaveURL(/\/login$/);
     // Every cookie, Keycloak's SSO session included (W2's teardown).

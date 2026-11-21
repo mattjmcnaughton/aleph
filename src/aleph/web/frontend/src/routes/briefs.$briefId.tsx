@@ -107,7 +107,7 @@ function BriefView() {
   // "Loading your Brief…" forever instead of a real dead end.
   if (!analystEnabled) {
     return (
-      <main className="mx-auto w-full max-w-[480px] px-4 py-8">
+      <main className="page">
         <StateCard testid="brief-unavailable">
           <h2 className="text-lg font-semibold">This Brief isn't available.</h2>
           <p className="mx-auto mt-2 max-w-[24rem] text-sm leading-6 text-mist">
@@ -119,7 +119,7 @@ function BriefView() {
   }
 
   return (
-    <main className="mx-auto w-full max-w-[480px] px-4 py-8">
+    <main className="page">
       {detail ? <Breadcrumbs current={detail.title ?? "Brief"} root="Your beats" /> : null}
 
       {detail === undefined ? (
@@ -139,15 +139,13 @@ function BriefView() {
           <p className="kicker">
             Brief #{detail.number} · {formatBriefDate(detail.published_on)}
           </p>
-          <h1 className="mt-2 text-3xl font-semibold leading-tight tracking-tight">
-            {detail.title}
-          </h1>
+          <h1 className="mt-2 page-title">{detail.title}</h1>
           <BuildsOnLine buildsOn={detail.builds_on} />
 
           {/* The body is model-written text; it goes through `markdown.tsx`
               exactly as a lesson's Read passage does, and this route
               configures no second rendering or sanitization path. */}
-          <Markdown testid="brief-body" className="mt-6 text-base">
+          <Markdown testid="brief-body" className="reading mt-8">
             {detail.body_markdown}
           </Markdown>
 
@@ -182,9 +180,7 @@ function LoadingState() {
   return (
     <>
       <p className="kicker">Brief</p>
-      <h1 className="mt-2 text-3xl font-semibold leading-tight tracking-tight">
-        Loading your Brief…
-      </h1>
+      <h1 className="mt-2 page-title">Loading your Brief…</h1>
     </>
   );
 }

@@ -84,7 +84,7 @@ test.describe(
       // more). `toContainText` above already covers the general case; this is
       // the stronger, exact pin for the common one.
       if (base.current_streak === 0 && base.best_streak <= 1 && base.completed_today === 0) {
-        await expect(page.getByTestId("streak-line")).toHaveText("🔥 1-day streak");
+        await expect(page.getByTestId("streak-line")).toHaveText("1-day streak");
       }
       // This path's own row cannot lie about its single completion, wherever
       // it is dated: no other spec ever holds this path's freshly minted id.

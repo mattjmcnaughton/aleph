@@ -80,9 +80,9 @@ export function BriefSources({
       ref={containerRef}
       data-testid="brief-sources"
       aria-label="Sources"
-      className="mt-10 rounded-lg border border-divider bg-elevated p-5"
+      className="mt-12 rounded-lg bg-elevated px-5 pb-2 pt-5"
     >
-      <p className="kicker">Sources</p>
+      <h2 className="font-serif text-xl font-medium">Sources</h2>
       {/* `list-none` (code-review FIX 7): makes "deliberately unnumbered"
           (PRD Appendix A) an explicit, testable CSS decision on this
           element, rather than something that happened to be true only
@@ -90,20 +90,24 @@ export function BriefSources({
           text — a test asserting the *intent* should assert on this class,
           not on `textContent` never containing a marker it was never going
           to contain regardless of list-style. */}
-      <ol className="mt-4 list-none space-y-4">
+      <ol className="mt-3 list-none">
         {sources.map((source) => (
-          <li key={source.position} data-testid="brief-source" className="min-w-0">
+          <li
+            key={source.position}
+            data-testid="brief-source"
+            className="min-w-0 border-b border-divider py-3 last:border-b-0"
+          >
             <a
               href={source.url}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex min-h-[44px] flex-col justify-center text-base font-semibold leading-6 text-porcelain underline-offset-2 hover:text-teal hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-teal"
+              className="flex min-h-[44px] flex-col justify-center text-[15px] font-semibold leading-6 text-porcelain underline-offset-[3px] hover:underline hover:decoration-teal focus-visible:outline focus-visible:outline-2 focus-visible:outline-teal"
             >
               {source.title}
             </a>
             {/* Publisher and date beside the title (PRD §3), truncated so a
                 long publisher name can't push the row past 390px. */}
-            <p className="mt-1 min-w-0 truncate text-sm leading-6 text-mist">
+            <p className="min-w-0 truncate text-sm leading-6 text-mist">
               {source.publisher} · {formatBriefDate(source.published_on)}
             </p>
           </li>

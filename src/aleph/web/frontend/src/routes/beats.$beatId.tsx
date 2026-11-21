@@ -64,7 +64,7 @@ function BeatView() {
   // Beat…" forever instead of a real dead end.
   if (!analystEnabled) {
     return (
-      <main className="mx-auto w-full max-w-[480px] px-4 py-8">
+      <main className="page">
         <StateCard testid="beat-unavailable">
           <h2 className="text-lg font-semibold">This Beat isn't available.</h2>
           <p className="mx-auto mt-2 max-w-[24rem] text-sm leading-6 text-mist">
@@ -81,7 +81,7 @@ function BeatView() {
   const detail = beatQuery.data;
 
   return (
-    <main className="mx-auto w-full max-w-[480px] px-4 py-8">
+    <main className="page">
       {detail ? <Breadcrumbs current={detail.topic} root="Your beats" /> : null}
 
       {detail === undefined ? (
@@ -92,13 +92,9 @@ function BeatView() {
         )
       ) : (
         <>
-          <p className="kicker">Beat</p>
-          {/* min-w-0 + truncate (code-review FIX 6): the project's
-              convention for user text (`paths.$pathId.tsx`, `sidebar.tsx`)
-              — a pasted URL as a Topic must not overflow 390px. */}
-          <h1 className="mt-2 min-w-0 truncate text-3xl font-semibold leading-tight tracking-tight">
-            {detail.topic}
-          </h1>
+          {/* `break-words`: a pasted URL as a Topic must not overflow 390px.
+              It wraps rather than truncating, like every other page title. */}
+          <h1 className="min-w-0 break-words page-title">{detail.topic}</h1>
           <div className="mt-3">
             <StandingOrders beat={detail} />
           </div>
@@ -291,10 +287,7 @@ function FailedState({
 function LoadingState() {
   return (
     <>
-      <p className="kicker">Beat</p>
-      <h1 className="mt-2 text-3xl font-semibold leading-tight tracking-tight">
-        Loading your Beat…
-      </h1>
+      <h1 className="page-title text-mist">Loading your Beat…</h1>
     </>
   );
 }

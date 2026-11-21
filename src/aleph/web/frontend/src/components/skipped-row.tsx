@@ -12,15 +12,9 @@ import { formatBriefDate } from "../lib/beats";
  */
 export function SkippedRow({ entry }: { entry: SkippedEntry }) {
   return (
-    <li
-      data-testid="beat-rail-skipped"
-      data-entry-id={entry.id}
-      className="rounded-lg border border-divider bg-surface px-4 py-3"
-    >
-      <p className="font-mono text-[11px] uppercase tracking-kicker text-slate">
-        {formatBriefDate(entry.published_on)}
-      </p>
-      <p className="mt-1 text-sm leading-6 text-mist">{entry.skip_line}</p>
+    <li data-testid="beat-rail-skipped" data-entry-id={entry.id} className="py-3.5 pl-6 pr-1">
+      <p className="text-sm text-slate">{formatBriefDate(entry.published_on)}</p>
+      <p className="mt-0.5 text-[15px] leading-6 text-mist">{entry.skip_line}</p>
     </li>
   );
 }

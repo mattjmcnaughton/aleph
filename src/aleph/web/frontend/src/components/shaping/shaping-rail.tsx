@@ -51,14 +51,19 @@ function ShapingGlyph({ size = "xs" }: { size?: "xs" | "2xs" }) {
 export function ShapingMark({ shaping }: { shaping: ShapingRailState }) {
   if (!shaping.showMark) return null;
   return (
+    // The same dock-on-a-phone, pill-at-`lg` control as the tutor's mark.
     <button
       type="button"
       data-testid="shaping-rail-mark"
+      aria-label="Shape your path"
       onClick={shaping.openRail}
-      className="fixed bottom-[max(1.25rem,env(safe-area-inset-bottom))] right-5 z-30 inline-flex items-center gap-2 rounded-full border border-iris/60 bg-surface px-4 py-3 text-sm font-semibold text-porcelain shadow-glow-iris transition-colors hover:border-iris hover:bg-elevated"
+      className="fixed inset-x-0 bottom-0 z-30 flex border-t border-divider bg-night/95 px-5 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 backdrop-blur lg:inset-x-auto lg:bottom-6 lg:right-6 lg:border-0 lg:bg-transparent lg:p-0 lg:backdrop-blur-none"
     >
-      <ShapingGlyph size="2xs" />
-      Shape your path
+      <span className="flex h-12 w-full items-center gap-2.5 rounded-xl border border-divider bg-surface px-3.5 text-left text-[15px] text-mist transition-colors lg:h-11 lg:w-auto lg:rounded-full lg:border-iris/50 lg:pr-4 lg:font-semibold lg:text-porcelain lg:shadow-md lg:hover:border-iris">
+        <ShapingGlyph size="2xs" />
+        <span className="lg:hidden">Ask the tutor to add or revise lessons</span>
+        <span className="hidden lg:inline">Shape your path</span>
+      </span>
     </button>
   );
 }
