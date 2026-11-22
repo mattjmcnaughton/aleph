@@ -113,7 +113,9 @@ committed schema, any generated clients, and documentation consistent.
 ## 9. Generated content is untrusted; quality needs separate evidence
 
 Validate generated content before accepting it as application state. Render it
-without executable HTML or dangerous URL schemes. A valid schema does not establish
+without executable HTML or dangerous URL schemes. Generated executable content
+may run only inside an opaque-origin sandbox with no network access, and only
+with a non-executable fallback the learner sees when it cannot run. A valid schema does not establish
 accuracy, teaching quality, or grounding. Deterministic tests verify application
 behavior, not generated-content quality; a passing suite is no claim that content
 is good. Quality is judged by reviewing real output in use.
@@ -162,3 +164,10 @@ rather than silently rewriting another authoritative document.
   Rationale: the eval harness was never run and was removed with its judge model;
   generation now runs on one app-wide model. Tests still verify behavior only, and
   quality is judged by reviewing real output.
+- 2026-11-22: §9 permits generated executable content in one bounded form.
+  Rationale: interactive lesson **Visuals** ([TDD](docs/tdds/lesson-visuals.md))
+  teach by manipulation, which prose and Mermaid cannot. The owner approved
+  running agent-written HTML only inside an opaque-origin (`sandbox` without
+  `allow-same-origin`), no-network (CSP `default-src 'none'`) frame, never in
+  the application's own document, with stored alt text as the non-executable
+  fallback. Everything else in §9 is unchanged.
