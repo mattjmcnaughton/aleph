@@ -73,6 +73,7 @@ test("home", async ({ page }) => {
 test("new path", async ({ page }) => {
   await page.setViewportSize(PHONE);
   await page.goto("/new");
+  await page.getByRole("button", { name: "I'll fill in the form myself" }).click();
   await page.locator("#onboarding-topic").fill("How the Fed sets interest rates");
   await page.locator('label[for="level-new_to_it"]').click();
   await page.evaluate(() => window.scrollTo(0, 0));

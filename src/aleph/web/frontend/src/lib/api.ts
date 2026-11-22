@@ -1291,3 +1291,65 @@ export function getLearningSummary(): Promise<LearningSummary> {
 export function triggerLearningSummary(): Promise<LearningSummary> {
   return apiFetch<LearningSummary>(apiV1Path("/learning-summary"), { method: "POST" });
 }
+
+// --- Path drafts (docs/api.md "Path drafts") -------------------------------
+//
+// An Idea into a Path draft, and the Interview that sharpens it (CONTEXT.md).
+// Stateless: the client holds the idea, the answers and the previous draft and
+// resends them on every call. Nothing is stored or created; "Use this draft"
+// only fills the New path form.
+
+/** A Path draft: values for the New path form's creation inputs. */
+export interface PathDraft {
+  topic: string;
+  level: Level;
+  /** Newline-separated sentences; `""` for none. */
+  guidance: string;
+  /** `""` for none. */
+  teaching_style: string;
+}
+
+/** One Interview question the learner answered, and their answer, as text. */
+export interface InterviewAnswer {
+  question: string;
+  answer: string;
+}
+
+export interface InterviewQuestion {
+  prompt: string;
+  why: string;
+  options: string[];
+  multi: boolean;
+}
+
+export interface CreatePathDraftInput {
+  idea: string;
+  answers?: InterviewAnswer[];
+  previous?: PathDraft;
+}
+
+export interface CreateDraftQuestionsInput {
+  idea: string;
+  draft: PathDraft;
+  answers?: InterviewAnswer[];
+}
+
+/** Draft (or, with answers, redraft) from an idea. `502 draft_failed` on failure. */
+export function createPathDraft(input: CreatePathDraftInput): Promise<PathDraft> {
+  return apiFetch<PathDraft>(apiV1Path("/path-drafts"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+}
+
+/** One Interview round (2-5 questions) about the current draft. */
+export function createDraftQuestions(
+  input: CreateDraftQuestionsInput,
+): Promise<{ questions: InterviewQuestion[] }> {
+  return apiFetch<{ questions: InterviewQuestion[] }>(apiV1Path("/path-drafts/questions"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+}

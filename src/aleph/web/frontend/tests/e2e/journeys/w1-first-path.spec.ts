@@ -144,6 +144,7 @@ test.describe("W1 first path with the admin model picker", { tag: "@w1" }, () =>
 test.describe("W1 the model picker is admin-only", { tag: "@w1" }, () => {
   test("a regular learner is offered no model slots", async ({ page }) => {
     await page.goto("/new");
+    await page.getByRole("button", { name: "I'll fill in the form myself" }).click();
     await expect(page.locator("#onboarding-topic")).toBeVisible();
     await expect(page.getByTestId("model-picker")).toHaveCount(0);
   });

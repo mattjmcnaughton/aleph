@@ -7,6 +7,7 @@ import { handlers } from "../src/mocks/handlers";
 import { resetAccount } from "../src/mocks/account";
 import { resetBeats } from "../src/mocks/beats";
 import { resetLessons } from "../src/mocks/lessons";
+import { resetPathDrafts } from "../src/mocks/path-drafts";
 import { resetPaths } from "../src/mocks/paths";
 import { resetProgress } from "../src/mocks/progress";
 import { resetShaping } from "../src/mocks/shaping";
@@ -30,6 +31,7 @@ const preview: Preview = {
   // (tests/setup.ts); a story's own `beforeEach` then seeds the data it shows.
   beforeEach: () => {
     resetPaths();
+    resetPathDrafts();
     resetLessons();
     resetTutor();
     resetShaping();

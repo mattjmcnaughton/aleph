@@ -57,6 +57,7 @@ test.describe("W7 refusal", { tag: "@w7" }, () => {
 
     // --- the app is still usable: a different topic builds a real path -------
     await page.goto("/new");
+    await page.getByRole("button", { name: "I'll fill in the form myself" }).click();
     await expect(page.locator("#onboarding-topic")).toBeVisible();
     await createPath(page, uniqueTopic("Mycology basics"));
     await expect(page.getByTestId("path-rail")).toBeVisible();

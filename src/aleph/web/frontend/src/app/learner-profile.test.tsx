@@ -46,6 +46,7 @@ describe("About you", () => {
   it("is named on New path when set", async () => {
     configureAccount({ aboutYou: "Use clinical examples where they fit." });
     goto("/new");
+    fireEvent.click(await screen.findByRole("button", { name: "I'll fill in the form myself" }));
     const applies = await screen.findByTestId("about-you-applies");
     expect(applies.textContent).toContain("About you applies");
     expect(applies.textContent).toContain("Use clinical examples where they fit.");
@@ -76,6 +77,8 @@ describe("New path prefill", () => {
 
   it("ignores an unknown level", async () => {
     goto("/new?level=expert");
+    // An invalid level is no prefill at all, so the page opens on the idea step.
+    fireEvent.click(await screen.findByRole("button", { name: "I'll fill in the form myself" }));
     await screen.findByRole("textbox", { name: /topic/i });
     expect((screen.getByRole("radio", { name: /New to it/i }) as HTMLInputElement).checked).toBe(
       true,

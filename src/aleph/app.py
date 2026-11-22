@@ -20,6 +20,7 @@ from aleph.routers.v1 import beats as v1_beats
 from aleph.routers.v1 import feature_flags as v1_feature_flags
 from aleph.routers.v1 import lessons as v1_lessons
 from aleph.routers.v1 import notifications as v1_notifications
+from aleph.routers.v1 import path_drafts as v1_path_drafts
 from aleph.routers.v1 import paths as v1_paths
 from aleph.routers.v1 import progress as v1_progress
 from aleph.routers.v1 import shaping as v1_shaping
@@ -83,6 +84,7 @@ def create_app() -> FastAPI:
     app.include_router(health.router)
     app.include_router(auth.router)
     app.include_router(v1_paths.router)
+    app.include_router(v1_path_drafts.router)
     app.include_router(v1_lessons.router)
     app.include_router(v1_notifications.router)
     app.include_router(v1_account.router)

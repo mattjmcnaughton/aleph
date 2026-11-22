@@ -193,6 +193,14 @@ from aleph.agents.learning_summary import (
 )
 from aleph.agents.lesson import LessonContent, QuickCheck, Visual
 from aleph.agents.outline import LessonOutline, PathOutline, Refusal, UnitOutline
+from aleph.agents.path_draft import (
+    ANSWERS_BLOCK,
+    IDEA_BLOCK,
+    MIN_QUESTIONS,
+    InterviewQuestion,
+    InterviewQuestions,
+    PathDraft,
+)
 from aleph.agents.researcher import Finding, Findings
 from aleph.agents.shaper import (
     PROPOSE_PATH_EDIT_TOOL_NAME as AGENT_PROPOSE_PATH_EDIT_TOOL_NAME,
@@ -1066,6 +1074,20 @@ def _stub_respond(messages: Sequence[ModelMessage], info: AgentInfo) -> ModelRes
     brief_tool = _tool_with(info.output_tools, "cited_urls")
     skipped_tool = _tool_with(info.output_tools, "detail")
     summary_tool = _tool_with(info.output_tools, "suggestions")
+    draft_tool = _tool_with(info.output_tools, "teaching_style")
+    questions_tool = _tool_with(info.output_tools, "questions")
+    if draft_tool is not None:
+        draft = _build_path_draft(text)
+        return ModelResponse(
+            parts=[ToolCallPart(tool_name=draft_tool.name, args=draft.model_dump())]
+        )
+    if questions_tool is not None:
+        round_ = _build_interview_questions(text)
+        return ModelResponse(
+            parts=[
+                ToolCallPart(tool_name=questions_tool.name, args=round_.model_dump())
+            ]
+        )
     if summary_tool is not None:
         body = _build_learning_summary(text)
         return ModelResponse(
@@ -1240,6 +1262,114 @@ def _build_learning_summary(text: str) -> LearningSummaryBody:
         )
     ]
     return LearningSummaryBody(areas=areas, suggestions=suggestions)
+
+
+def _block_text(text: str, tag: str) -> str:
+    """The body of the first ``<tag>`` data block in ``text`` (empty if none)."""
+    match = re.search(rf"<{tag}>\n(.*?)\n</{tag}>", text, re.DOTALL)
+    return match.group(1) if match else ""
+
+
+_ANSWER_RE = re.compile(r"^Q: (?P<question>.*)\nA: (?P<answer>.*)$", re.MULTILINE)
+
+
+def _stub_answers(text: str) -> list[tuple[str, str]]:
+    return [
+        (m.group("question"), m.group("answer"))
+        for m in _ANSWER_RE.finditer(_block_text(text, ANSWERS_BLOCK))
+    ]
+
+
+def _build_path_draft(text: str) -> PathDraft:
+    """A deterministic Path draft from the idea in its own prompt.
+
+    The topic names the idea's first words. A redraft (answers present) adds
+    one guidance line per answer and tightens the topic, so the client's
+    "changed" markers have something to mark.
+    """
+    idea = _collapse_ws(_block_text(text, IDEA_BLOCK)) or "the topic"
+    head = " ".join(idea.rstrip(".!?").split()[:8])
+    answers = _stub_answers(text)
+    guidance = [
+        f"Start from the basics of {head}.",
+        "Build up one idea per lesson, in order.",
+        "Finish with a worked, realistic example.",
+    ]
+    topic = head
+    if answers:
+        topic = f"{head}, focused"
+        guidance = [
+            f"You said “{answer}” to “{question}”: shape the path around it."[:300]
+            for question, answer in answers
+        ] + guidance
+    return PathDraft(
+        topic=topic[:200],
+        level="some_experience",
+        guidance="\n".join(guidance)[:4000],
+        teaching_style="Use concrete, everyday examples.",
+    )
+
+
+_STUB_QUESTIONS: tuple[tuple[str, str, tuple[str, ...], bool], ...] = (
+    (
+        "What will you mostly use this for?",
+        "Decides what the path ends on.",
+        ("Work", "A personal project", "Curiosity"),
+        False,
+    ),
+    (
+        "How much do you know already?",
+        "Sets where the path starts.",
+        ("Nothing yet", "The basics", "Quite a lot"),
+        False,
+    ),
+    (
+        "How big should the path be?",
+        "Shapes how many lessons the outline gets.",
+        ("Short, about 8 lessons", "Medium, about 15", "Thorough, 25 or more"),
+        False,
+    ),
+    (
+        "Anything to leave out?",
+        "Pick any, or none.",
+        ("History", "Theory", "Tooling"),
+        True,
+    ),
+    (
+        "How do you like to learn?",
+        "Sets the teaching style.",
+        ("Examples first", "Theory first"),
+        False,
+    ),
+    (
+        "How much time do you have each day?",
+        "Sets how long each lesson runs.",
+        ("Ten minutes", "Half an hour"),
+        False,
+    ),
+)
+
+
+def _build_interview_questions(text: str) -> InterviewQuestions:
+    """Four deterministic questions, skipping any the prompt says were asked."""
+    asked = {question for question, _ in _stub_answers(text)}
+    fresh = [q for q in _STUB_QUESTIONS if q[0] not in asked]
+    round_ = len(asked) + 1
+    while len(fresh) < MIN_QUESTIONS:
+        fresh.append(
+            (
+                f"What else should change? ({round_}.{len(fresh) + 1})",
+                "Anything the draft still misses.",
+                ("Nothing more", "Make it shorter"),
+                False,
+            )
+        )
+    return InterviewQuestions(
+        questions=[
+            InterviewQuestion(prompt=p, why=w, options=list(o), multi=m)
+            for p, w, o, m in fresh[:4]
+        ]
+    )
 
 
 # --- the streamed (tutor) branch — Phase 2, TDD §11 (D10) ----------------------
