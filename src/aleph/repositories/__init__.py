@@ -23,6 +23,7 @@ from aleph.repositories.conversations import (
     ThreadMessage,
 )
 from aleph.repositories.feature_flags import FeatureFlagRepository
+from aleph.repositories.lesson_visuals import LessonVisualRepository
 from aleph.repositories.lessons import (
     CompletionDay,
     LessonDigestRow,
@@ -51,6 +52,7 @@ __all__ = [
     "LessonOutlineRow",
     "LessonProgressRow",
     "LessonRepository",
+    "LessonVisualRepository",
     "LocatedMessage",
     "NewSource",
     "OwnedChange",

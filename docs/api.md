@@ -239,12 +239,16 @@ disclosed). Same **trigger + poll** model: `POST /lessons/{id}/generate` returns
   "quick_check": { "stem": "…", "options": ["…", "…", "…"] } | null,
   "attempt": { "selected_index": 0, "outcome": "correct|incorrect",
                "correct_index": 2, "explanation": "…" } | null,
-  "generation_error": "generic message | null"
+  "generation_error": "generic message | null",
+  "visuals": [
+    { "id": "uuid", "kind": "interactive", "title": "…", "alt": "…",
+      "source": "…HTML body…", "kit_version": 1 }
+  ]
 }
 ```
 
 - `read_passage` / `quick_check` are non-null **only** when `generation_state ==
-  generated`. `generation_error` is non-null **only** when `generation_state ==
+  generated`; `visuals` is `[]` otherwise (and for most generated lessons). `generation_error` is non-null **only** when `generation_state ==
   failed` (a generic, learner-safe message — never raw provider text).
 - **`read_passage` is GitHub-Flavored Markdown**, served as source and rendered
   at the edge (`web/frontend/src/components/markdown.tsx`). The agent is
@@ -261,6 +265,17 @@ disclosed). Same **trigger + poll** model: `POST /lessons/{id}/generate` returns
   a client that renders diagrams needs that fallback. The prompt also requires the
   surrounding prose to explain the diagram, so a client that renders it as plain
   source loses nothing but the picture.
+- **A ` ```visual <id> ` fence places an interactive Visual**, at most one per
+  lesson. The fence is empty and its info string is exactly `visual` plus the
+  UUID of an entry in `visuals`; ids are always UUIDs (the agent's placeholder
+  ref is rewritten at persist). `source` is untrusted, agent-written HTML. A
+  client must never insert it into its own document: the web client wraps it
+  in kit `kit_version` (a no-network CSP, the Nocturne tokens, and `window.kit`)
+  and runs it in `<iframe sandbox="allow-scripts" srcdoc=…>` with **no**
+  `allow-same-origin`, accepting only `{type:"status"}` / `{type:"height"}`
+  messages from that frame. On a reported error, or no `ok` status within ~3 s,
+  it shows `alt` as plain text instead. A fence naming no listed visual renders
+  nothing. See [lesson-visuals TDD](tdds/lesson-visuals.md).
 - **Answer-hiding (W6, TDD §6).** `quick_check` carries **only** `stem` +
   `options` — never the keyed answer. `correct_index` and `explanation` live
   **only** inside `attempt`, which is `null` until the learner records an

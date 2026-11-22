@@ -276,3 +276,34 @@ def test_the_revision_snapshot_for_a_lesson_is_findable_by_id() -> None:
     assert found is not None
     assert found.read_passage == "The old passage."
     assert ChangeInverse.from_payload(payload).revision_for("nobody") is None
+
+
+def test_a_revision_snapshot_round_trips_its_visuals_with_their_ids() -> None:
+    """Undo re-creates a visual under the id its restored passage fences."""
+    from dataclasses import replace
+
+    from aleph.domains.changes import VisualSnapshot
+
+    visual = VisualSnapshot(
+        visual_id="0b6c1f6e-3d1a-4a8e-9a8b-2f6d3c1e9a10",
+        kind="interactive",
+        title="Compound interest",
+        alt="Two bars.",
+        source="<script>kit.ready()</script>",
+        kit_version=1,
+    )
+    snapshot = replace(_snapshot(), visuals=(visual,))
+    payload = change_payload(
+        operations=[], summary="s", inverse=ChangeInverse(revisions=(snapshot,))
+    )
+
+    assert ChangeInverse.from_payload(payload).revisions == (snapshot,)
+
+
+def test_a_snapshot_written_before_visuals_existed_reads_with_none() -> None:
+    payload = change_payload(
+        operations=[], summary="s", inverse=ChangeInverse(revisions=(_snapshot(),))
+    )
+    del payload["inverse"]["revisions"][0]["visuals"]
+
+    assert ChangeInverse.from_payload(payload).revisions[0].visuals == ()

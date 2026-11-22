@@ -23,7 +23,7 @@ from pydantic import BaseModel, Field
 from aleph.domains.grading import Outcome
 from aleph.domains.milestones import MilestoneMetric
 from aleph.domains.progression import UnlockState
-from aleph.models import LessonGenerationState
+from aleph.models import LessonGenerationState, LessonVisualKind
 
 
 class AttemptRequest(BaseModel):
@@ -70,6 +70,23 @@ class AttemptResultDTO(BaseModel):
     explanation: str
 
 
+class VisualDTO(BaseModel):
+    """One interactive **Visual** attached to the Read passage (CONTEXT.md).
+
+    ``id`` is what the passage's ```visual <id> fence names. ``source`` is
+    agent-written HTML: untrusted, and the client runs it only inside an
+    opaque-origin, no-network sandbox wrapped in kit ``kit_version``
+    (docs/tdds/lesson-visuals.md). ``alt`` is the plain-text fallback.
+    """
+
+    id: UUID
+    kind: LessonVisualKind
+    title: str
+    alt: str
+    source: str
+    kit_version: int
+
+
 class LessonDetailResponse(BaseModel):
     """``GET /api/v1/lessons/{id}`` body — the lesson poll target (§5.4/§6).
 
@@ -81,7 +98,7 @@ class LessonDetailResponse(BaseModel):
     Content fields are populated by state:
 
     * ``read_passage`` / ``quick_check`` are non-null **only** when
-      ``generation_state == generated``.
+      ``generation_state == generated``; ``visuals`` is empty otherwise.
     * ``attempt`` is non-null **only** after the learner has recorded an Attempt
       — it is the sole carrier of the keyed answer (``correct_index`` /
       ``explanation``), so a pre-Attempt payload hides the answer (W6).
@@ -100,6 +117,7 @@ class LessonDetailResponse(BaseModel):
     quick_check: QuickCheckDTO | None
     attempt: AttemptResultDTO | None
     generation_error: str | None
+    visuals: list[VisualDTO] = Field(default_factory=list)
 
 
 class GenerateLessonResponse(BaseModel):

@@ -13,7 +13,7 @@ teach without it and state the key numbers.
 
 ## Decisions
 
-- **D1 Stored beside the passage.** Table `lesson_visuals` (migration 0023):
+- **D1 Stored beside the passage.** Table `lesson_visuals` (migration 0024):
   `id` (UUID, the visual's identifier), `lesson_id` → `lessons` `ON DELETE
   CASCADE`, `kind` (`interactive`), `title`, `alt`, `source`, `kit_version`.
   The passage places it with an empty fence: ```` ```visual <uuid> ````.

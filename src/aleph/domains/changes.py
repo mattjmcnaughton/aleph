@@ -123,6 +123,46 @@ class QuickCheckSnapshot:
 
 
 @dataclass(frozen=True)
+class VisualSnapshot:
+    """A lesson **Visual** exactly as it was, **including its id**.
+
+    The id is load-bearing: the snapshotted passage's ```visual fence names it,
+    so undo must re-create the row under the same id for the restored passage
+    to resolve (docs/tdds/lesson-visuals.md).
+    """
+
+    visual_id: str
+    kind: str
+    title: str
+    alt: str
+    source: str
+    kit_version: int
+
+    def as_payload(self) -> dict[str, Any]:
+        return {
+            "id": self.visual_id,
+            "kind": self.kind,
+            "title": self.title,
+            "alt": self.alt,
+            "source": self.source,
+            "kit_version": self.kit_version,
+        }
+
+    @classmethod
+    def from_payload(cls, payload: Any) -> VisualSnapshot | None:
+        if not isinstance(payload, dict) or not payload.get("id"):
+            return None
+        return cls(
+            visual_id=str(payload["id"]),
+            kind=str(payload.get("kind", "interactive")),
+            title=str(payload.get("title", "")),
+            alt=str(payload.get("alt", "")),
+            source=str(payload.get("source", "")),
+            kit_version=int(payload.get("kit_version", 1)),
+        )
+
+
+@dataclass(frozen=True)
 class RevisionSnapshot:
     """A lesson's pre-**Revision** state, plus the instruction that replaced it.
 
@@ -163,6 +203,9 @@ class RevisionSnapshot:
     generated_at: str | None
     instruction: str
     quick_check: QuickCheckSnapshot | None = None
+    # Empty for a lesson without visuals, and for every snapshot written before
+    # visuals existed (``from_payload`` defaults the key away).
+    visuals: tuple[VisualSnapshot, ...] = ()
 
     def as_payload(self) -> dict[str, Any]:
         return {
@@ -174,6 +217,7 @@ class RevisionSnapshot:
             "quick_check": (
                 None if self.quick_check is None else self.quick_check.as_payload()
             ),
+            "visuals": [visual.as_payload() for visual in self.visuals],
         }
 
     @classmethod
@@ -189,6 +233,14 @@ class RevisionSnapshot:
             generated_at=None if generated_at is None else str(generated_at),
             instruction=str(payload.get("instruction", "")),
             quick_check=QuickCheckSnapshot.from_payload(payload.get("quick_check")),
+            visuals=tuple(
+                visual
+                for visual in (
+                    VisualSnapshot.from_payload(entry)
+                    for entry in payload.get("visuals") or ()
+                )
+                if visual is not None
+            ),
         )
 
 

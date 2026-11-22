@@ -26,6 +26,7 @@ from aleph.models.base import UUIDAuditMixin
 from aleph.models.enums import LessonGenerationState
 
 if TYPE_CHECKING:
+    from aleph.models.lesson_visual import LessonVisual
     from aleph.models.path import Path
     from aleph.models.quick_check import QuickCheck
     from aleph.models.unit import Unit
@@ -118,4 +119,13 @@ class Lesson(Base, UUIDAuditMixin):
         cascade="all, delete-orphan",
         passive_deletes=True,
         uselist=False,
+    )
+    # At most one in practice (the lesson agent's validator); a list because the
+    # passage references visuals by id, not by position, and the table carries
+    # no uniqueness on ``lesson_id`` that a second kind would have to undo.
+    visuals: Mapped[list[LessonVisual]] = relationship(
+        back_populates="lesson",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="LessonVisual.created_at",
     )

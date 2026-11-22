@@ -1972,3 +1972,18 @@ def test_learner_profile_migration_is_reversible(isolated_database: str) -> None
     assert "about_you" not in asyncio.run(_columns(database_url, "users"))
     run_alembic(database_url, "head")
     assert "learning_summaries" in asyncio.run(_tables(database_url))
+
+
+def test_lesson_visuals_migration_downgrades_and_reapplies_cleanly(
+    isolated_database: str,
+) -> None:
+    """0024 adds ``lesson_visuals`` (and its enum) and nothing else."""
+    database_url = isolated_database
+    at_head = asyncio.run(_tables(database_url))
+    assert "lesson_visuals" in at_head
+    run_alembic(database_url, "0023_learner_profile", downgrade=True)
+    assert asyncio.run(_tables(database_url)) == at_head - {"lesson_visuals"}
+    assert "lesson_visual_kind" not in asyncio.run(_enum_types(database_url))
+    run_alembic(database_url, "0024_lesson_visuals")
+    assert asyncio.run(_tables(database_url)) == at_head
+    assert "lesson_visual_kind" in asyncio.run(_enum_types(database_url))

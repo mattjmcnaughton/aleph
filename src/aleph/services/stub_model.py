@@ -20,6 +20,19 @@ lesson agent registers one carrying ``read_passage``.
   ``position_in_path == N`` (lesson N → ``failed``).
 - ``[force-lesson-error]`` — the generated passage embeds a canonical *false*
   claim and keys its Quick check to it (Phase 2, W16; see below).
+- ``[force-visual-probe]`` — lesson 1's **Visual** is a hostile sandbox probe
+  (:data:`VISUAL_PROBE_SOURCE`) instead of the compound-interest slider.
+
+**Lesson visuals (docs/tdds/lesson-visuals.md).** Lesson **1** of every stub
+path — and only lesson 1 — carries one interactive visual
+(:data:`COMPOUND_VISUAL_SOURCE`, a compound-interest slider) fenced as
+```visual visual-1 in place of one body paragraph, so the word band and every
+other passage construct hold. Position 1 rather than every lesson keeps later
+lessons byte-identical to before and gives Playwright and local dev a
+deterministic visual on the first lesson any journey opens. Under
+``[force-visual-probe]`` the same slot carries a probe that tries to reach the
+parent page, cookies, storage and the network from inside the sandbox and
+writes what happened into its own DOM for the e2e suite to read.
 
 **Phase 2 — the streamed branch (TDD §11, D10).** The tutor runs the streaming
 path exclusively, so the same model also carries a ``stream_function``
@@ -178,7 +191,7 @@ from aleph.agents.learning_summary import (
     Suggestion,
     SummaryArea,
 )
-from aleph.agents.lesson import LessonContent, QuickCheck
+from aleph.agents.lesson import LessonContent, QuickCheck, Visual
 from aleph.agents.outline import LessonOutline, PathOutline, Refusal, UnitOutline
 from aleph.agents.researcher import Finding, Findings
 from aleph.agents.shaper import (
@@ -214,6 +227,8 @@ FORCE_SHAPING_FAILURE = "[force-shaping-failure]"
 # Phase 6 (TDD §11, ticket AL-560) — a topic sentinel on the researcher branch.
 # See the module docstring's "Phase 6" section for the full mechanism.
 FORCE_NO_FINDINGS = "[force-no-findings]"
+# Lesson visuals — a topic sentinel on the lesson branch (see the docstring).
+FORCE_VISUAL_PROBE = "[force-visual-probe]"
 
 
 def _marker_re(name: str, value: str) -> re.Pattern[str]:
@@ -254,6 +269,7 @@ _SENTINEL_RE = re.compile(
     r"|\[force-shaping-failure\]"
     r"|\[force-no-findings\]"
     r"|\[force-retrieval-failure\]"
+    r"|\[force-visual-probe\]"
 )
 
 
@@ -489,8 +505,146 @@ _REVISION_SECTION = (
 )
 
 
+# --- the stub's Visual (docs/tdds/lesson-visuals.md) ---------------------------
+
+# Lesson 1's visual: one placeholder ref, rewritten to the row's UUID at persist.
+STUB_VISUAL_REF = "visual-1"
+STUB_VISUAL_TITLE = "Simple and compound interest on $1,000"
+STUB_VISUAL_ALT = (
+    "Two sliders set an interest rate from 1% to 12% a year and a term from 1 to "
+    "40 years. Two bars compare $1,000 grown with simple interest against "
+    "compound interest; the compound bar pulls further ahead the longer the term."
+)
+# Plain JavaScript against the kit's tokens and classes, sized for a phone. The
+# element ids (``rate``, ``years``, ``compound-v`` …) are what the e2e suite
+# drives through ``frameLocator``.
+COMPOUND_VISUAL_SOURCE = """\
+<style>
+  .field{display:grid;grid-template-columns:1fr auto;gap:2px 8px;margin-bottom:10px}
+  .field input{grid-column:1/-1}
+  .field b{font-variant-numeric:tabular-nums}
+  .bars{display:grid;grid-template-columns:72px 1fr 76px;gap:10px 8px;
+    align-items:center;margin-top:6px}
+  .track{height:14px;border-radius:4px;background:var(--elevated);overflow:hidden}
+  .bar{height:100%;border-radius:4px;transition:width .15s}
+  .bars b{text-align:right;font-variant-numeric:tabular-nums}
+  #gap{margin:12px 0 0}
+</style>
+<div class="field"><label for="rate">Interest rate</label><b id="rate-v"></b>
+  <input id="rate" type="range" min="1" max="12" step="1" value="7"></div>
+<div class="field"><label for="years">Years</label><b id="years-v"></b>
+  <input id="years" type="range" min="1" max="40" step="1" value="10"></div>
+<div class="bars" role="img" aria-label="Simple and compound balances">
+  <span class="muted">Simple</span>
+  <div class="track">
+    <div id="simple-bar" class="bar" style="background:var(--mist)"></div>
+  </div>
+  <b id="simple-v"></b>
+  <span class="muted">Compound</span>
+  <div class="track">
+    <div id="compound-bar" class="bar" style="background:var(--teal)"></div>
+  </div>
+  <b id="compound-v"></b>
+</div>
+<p id="gap" class="muted"></p>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const money = (n) => "$" + Math.round(n).toLocaleString("en-US");
+  function draw() {
+    const rate = Number($("rate").value) / 100;
+    const years = Number($("years").value);
+    const simple = 1000 * (1 + rate * years);
+    const compound = 1000 * Math.pow(1 + rate, years);
+    $("rate-v").textContent = $("rate").value + "% a year";
+    $("years-v").textContent = years + (years === 1 ? " year" : " years");
+    $("simple-v").textContent = money(simple);
+    $("compound-v").textContent = money(compound);
+    $("simple-bar").style.width = (100 * simple / compound).toFixed(1) + "%";
+    $("compound-bar").style.width = "100%";
+    $("gap").textContent = "Compounding earns " + money(compound - simple) +
+      " more: interest on the interest.";
+  }
+  $("rate").addEventListener("input", draw);
+  $("years").addEventListener("input", draw);
+  draw();
+  kit.ready();
+</script>
+"""
+
+# ``[force-visual-probe]``'s visual: it tries each way out of the sandbox and
+# writes the result into its own DOM (``li[data-probe]``), which the e2e suite
+# reads through ``frameLocator``. Every line must read ``blocked``.
+VISUAL_PROBE_SOURCE = """\
+<p class="muted">Sandbox probe: each line reports what this frame could reach.</p>
+<ul id="out"></ul>
+<script>
+  const out = document.getElementById("out");
+  function report(name, outcome) {
+    const li = document.createElement("li");
+    li.dataset.probe = name;
+    li.textContent = name + ": " + outcome;
+    out.appendChild(li);
+  }
+  function attempt(name, fn) {
+    try {
+      report(name, "allowed " + String(fn()).slice(0, 60));
+    } catch (error) {
+      report(name, "blocked");
+    }
+  }
+  attempt("parent.document", () => parent.document.title);
+  attempt("parent.document.title", () => {
+    parent.document.title = "escaped";
+    return "wrote";
+  });
+  attempt("top.location", () => top.location.href);
+  attempt("document.cookie", () => document.cookie);
+  attempt("localStorage", () => localStorage.getItem("probe"));
+  fetch("/api/v1/paths", { credentials: "include" })
+    .then((response) => report("fetch", "allowed " + response.status),
+          () => report("fetch", "blocked"))
+    .finally(() => kit.ready());
+</script>
+"""
+
+# The prose half of the visual: it states the key numbers itself, as the real
+# prompt requires, so the lesson teaches without the visual. Substituted for a
+# body paragraph like the two blocks above, to keep the word band.
+_VISUAL_SECTION = (
+    "### Try it\n\n"
+    "At 7% a year, $1,000 grows to about $1,967 after 10 years with compound "
+    "interest, against $1,700 with simple interest; after 40 years it is "
+    "$14,974 against $3,800. Move the sliders to watch the gap widen.\n\n"
+    f"```visual {STUB_VISUAL_REF}\n```"
+)
+
+
+def _build_visual(*, probe: bool) -> Visual:
+    if probe:
+        return Visual(
+            ref=STUB_VISUAL_REF,
+            title="Sandbox probe",
+            alt=(
+                "A list of what this sandboxed frame tried to reach, and "
+                "whether it could."
+            ),
+            source=VISUAL_PROBE_SOURCE,
+        )
+    return Visual(
+        ref=STUB_VISUAL_REF,
+        title=STUB_VISUAL_TITLE,
+        alt=STUB_VISUAL_ALT,
+        source=COMPOUND_VISUAL_SOURCE,
+    )
+
+
 def _build_read_passage(
-    topic: str, position: int, *, lesson_error: bool = False, revised: bool = False
+    topic: str,
+    position: int,
+    *,
+    lesson_error: bool = False,
+    revised: bool = False,
+    visual: bool = False,
 ) -> str:
     """A deterministic Markdown Read passage (~200-500 words, §14 band).
 
@@ -512,8 +666,10 @@ def _build_read_passage(
     ``lesson_error`` plants :data:`LESSON_ERROR_FALSE_CLAIM` in place of one body
     paragraph (``[force-lesson-error]``, W16); ``revised`` plants
     :data:`REVISED_PASSAGE_MARKER` in place of another (Phase 2B, D7/W18).
+    ``visual`` plants :data:`_VISUAL_SECTION` (the ```visual fence and the
+    prose that states its numbers) in place of a third.
     Substituting rather than appending keeps the word band intact for any topic
-    length and for any combination of the two.
+    length and for any combination of them.
     """
     seed = _seed(f"{topic}|passage|{position}")
     topic = _passage_topic(topic)
@@ -528,6 +684,7 @@ def _build_read_passage(
         for section, present in (
             (_LESSON_ERROR_SECTION, lesson_error),
             (_REVISION_SECTION, revised),
+            (_VISUAL_SECTION, visual),
         )
         if present
     ]
@@ -581,7 +738,12 @@ def _build_read_passage(
 
 
 def _build_lesson(
-    topic: str, position: int, *, lesson_error: bool = False, revised: bool = False
+    topic: str,
+    position: int,
+    *,
+    lesson_error: bool = False,
+    revised: bool = False,
+    visual_probe: bool = False,
 ) -> LessonContent:
     """A deterministic, schema-valid lesson for ``topic`` at ``position``.
 
@@ -594,12 +756,18 @@ def _build_lesson(
     D7) the passage carries :data:`REVISED_PASSAGE_MARKER`. Only the passage
     changes: a Revision regenerates the lesson, and the Quick check is rebuilt
     from the same deterministic seed as any other generation of this slot.
+
+    Lesson 1 carries the stub's one **Visual** (see the module docstring);
+    ``visual_probe`` (``[force-visual-probe]``) makes it the sandbox probe.
     """
+    visual = position == 1
+    visuals = [_build_visual(probe=visual_probe)] if visual else []
     if lesson_error:
         return LessonContent(
             read_passage=_build_read_passage(
-                topic, position, lesson_error=True, revised=revised
+                topic, position, lesson_error=True, revised=revised, visual=visual
             ),
+            visuals=visuals,
             quick_check=QuickCheck(
                 stem=(
                     "According to this lesson, at what temperature does water "
@@ -623,7 +791,10 @@ def _build_lesson(
     ]
     correct_index = seed % len(options)
     return LessonContent(
-        read_passage=_build_read_passage(topic, position, revised=revised),
+        read_passage=_build_read_passage(
+            topic, position, revised=revised, visual=visual
+        ),
+        visuals=visuals,
         quick_check=QuickCheck(
             stem=f"Which statement best captures lesson {position} on {topic}?",
             options=options,
@@ -981,6 +1152,7 @@ def _stub_respond(messages: Sequence[ModelMessage], info: AgentInfo) -> ModelRes
             position,
             lesson_error=FORCE_LESSON_ERROR in text,
             revised=_revision_requested(_prompt_text(messages, info)),
+            visual_probe=FORCE_VISUAL_PROBE in text,
         )
         return ModelResponse(
             parts=[ToolCallPart(tool_name=lesson_tool.name, args=lesson.model_dump())]
