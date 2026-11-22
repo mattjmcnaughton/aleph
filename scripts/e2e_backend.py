@@ -2,11 +2,11 @@
 
 The real Aleph app — its routers, services, orchestrator and DB — booted with
 **one** substitution: the deterministic stub model (``services/stub_model.py``)
-in place of every OpenRouter slot, so the browser suite runs offline and
-deterministically. This is the same seam habagou's ``scripts/e2e_backend.py``
-uses: the settings mutation happens in :func:`create_stub_app` (invoked by
-uvicorn's ``--factory``), not at import time, so importing this module has no
-global side effects.
+in place of the OpenRouter-backed ``MODEL_DEFAULT``, so the browser suite runs
+offline and deterministically. This is the same seam habagou's
+``scripts/e2e_backend.py`` uses: the settings mutation happens in
+:func:`create_stub_app` (invoked by uvicorn's ``--factory``), not at import
+time, so importing this module has no global side effects.
 
 Boot it exactly as the Playwright ``webServer`` block does::
 
@@ -16,7 +16,7 @@ Boot it exactly as the Playwright ``webServer`` block does::
 ``ENV=test`` keeps the production stub-guard (``config._forbid_stub_in_production``)
 satisfied. The caller is responsible for pointing ``DATABASE_URL`` at a migrated
 database (the ``webServer`` command runs ``alembic upgrade head`` first) — this
-factory only swaps the model slots and lifts the per-account rate limits so the
+factory only swaps the model and lifts the per-account rate limits so the
 two Playwright projects sharing one backend never trip a cap.
 """
 
@@ -179,7 +179,7 @@ async def shift_completions(body: ShiftRequest, session: Session) -> None:
 
 
 def create_stub_app() -> FastAPI:
-    """Assemble the real app with the stub model wired into every slot.
+    """Assemble the real app with the stub model wired in as ``MODEL_DEFAULT``.
 
     Mutates the module-level ``settings`` singleton *before* ``create_app`` runs,
     so the generation orchestrator (which reads the same singleton) resolves
@@ -188,9 +188,9 @@ def create_stub_app() -> FastAPI:
     projects share one backend + user and would otherwise exhaust the daily
     quota.
     """
-    # Every slot, from the one list ``config`` also guards production with — a
-    # slot stubbed there but missed here would send that surface's calls at a
-    # live provider, the one thing this factory exists to prevent.
+    # Every model setting, from the one list ``config`` also guards production
+    # with — one guarded there but missed here would send calls at a live
+    # provider, the one thing this factory exists to prevent.
     for slot in MODEL_SLOTS:
         setattr(settings, slot, STUB_MODEL_ID)
     # Keep the admin picker inside the stub too: an allowlisted real model id

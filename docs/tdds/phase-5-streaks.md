@@ -1,9 +1,8 @@
 # TDD — Phase 5, slice 1: Streaks
 
-> **Planned push amendment:** the [Home Screen app TDD](home-screen-app.md#execution-amendment-2026-10-20)
+> **Push amendment (shipped in v1.46.0):** the [Home Screen app TDD](home-screen-app.md#execution-amendment-2026-10-20)
 > owns opt-in Reminders, including streak wording, local-hour scheduling and
-> suppression on an Active day. This does not change streak derivation. Native is
-> conditionally parked; T0 and device/operational acceptance remain outstanding.
+> suppression on an Active day. This does not change streak derivation.
 
 > **Current amendment:** The live progress reader derives Daily and Best streaks only from lesson
 > completions. The former review-day union and its stored source data were removed; no Brief-read

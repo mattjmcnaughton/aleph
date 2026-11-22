@@ -134,7 +134,7 @@ class SendMessageRequest(BaseModel):
 
     # ``model`` starts with the ``model_`` prefix pydantic protects by default;
     # the picker wire contract fixes the name (parity with the ``MODEL_DEFAULT``
-    # config slot and Phase 1's ``model_outline``/``model_lesson``), so opt out
+    # setting and Phase 1's ``model_outline``/``model_lesson``), so opt out
     # of the protected namespace rather than rename.
     model_config = ConfigDict(protected_namespaces=())
 

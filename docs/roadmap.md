@@ -34,30 +34,32 @@ afterthought.
 | **4 — Adaptive paths** | ⬜ Not started — **no PRD yet** (2B pre-built the proposal/apply machinery) | — |
 | **5 — Momentum** | 🟡 In progress — streaks shipped **and launched**; goal ring and daily minutes unbuilt | streaks: [PRD](prds/phase-5-streaks.md) · [TDD](tdds/phase-5-streaks.md) |
 | **6 — The analyst** | ✅ Shipped & launched (`analyst` flag on) — a second pillar beside paths, not a deepening of one | [PRD](prds/phase-6-analyst.md) · [TDD](tdds/phase-6-analyst.md) |
-| **Flow** | Default on in this feature branch, unshipped; `flow` remains a kill switch | [TDD](tdds/flow.md) · [mock](mocks/aleph-flow-mode.html) |
-| **Home Screen app** | Accepted for provisional feature-branch implementation; not shipped, T0 deferred to end | [PRD](prds/home-screen-app.md) · [TDD](tdds/home-screen-app.md) |
-| **Native iOS app** | Conditionally parked; historical reference/fallback, not active delivery | [parked PRD](prds/ios-app.md) · [parked TDD](tdds/ios-app.md) |
+| **Flow** | ✅ Shipped & default on (v1.46.0); `flow` remains a kill switch | [TDD](tdds/flow.md) · [mock](mocks/aleph-flow-mode.html) |
+| **Home Screen app** | ✅ Shipped (v1.46.0); real-iPhone acceptance never recorded | [PRD](prds/home-screen-app.md) · [TDD](tdds/home-screen-app.md) |
+| **Native iOS app** | ⛔ Abandoned 2026-11-22; specifications retained as archives | [abandoned PRD](prds/ios-app.md) · [abandoned TDD](tdds/ios-app.md) |
 | **Beyond** | ⬜ Unscoped, sequenced against real usage | — |
 
-Three tails hang off the shipped phases and are tracked as open issues rather than
-here: the **eval artifact kinds** and their labelled calibration sets (AL-083/AL-091
-for Phase 1, AL-250/AL-251 for Phase 2, AL-350/AL-351 for Phase 2B) and the
-**ship-verification sweeps** (AL-270, AL-370) whose flag flips have already landed.
-The Phase 2 and 2B epics (#82, #114) stay open until those close.
+Smaller features have shipped outside the numbered phases since: the Nocturne
+reading-first redesign ([design.md](design.md)), opt-in per-path web search,
+constellation milestones, **About you** and the admin-only **Learning summary**
+([TDD](tdds/learner-profile.md)), and interactive lesson **Visuals**
+([TDD](tdds/lesson-visuals.md)). Every model call runs on one app-wide model, and
+the eval harness was removed (constitution §9, §10); quality is judged by reviewing
+real output. All earlier tracking issues, including the eval and ship-verification
+tails, were closed on 2026-11-22.
 
 So, concretely, what is left to build: **the rest of Phase 5** — the goal ring and
 the daily-minutes target, now that streaks are launched — then **all of Phase 4**,
-plus the Phase 2 slices listed as deferred below. Phase 3 has shipped and launched
-too, so within that numbered sequence no phase is waiting on a flag flip anymore —
-only on code not yet built. **Phase 6 sits outside that sequence**: it is a second
+plus the Phase 2 slices listed as deferred below. Phase 3 was retired, so within
+that numbered sequence no phase is waiting on a flag flip anymore — only on code not
+yet built. **Phase 6 sits outside that sequence**: it is a second
 pillar rather than the next rung of the first one, so it was sequenced by appetite
 rather than by dependency — nothing above it blocked it, and it blocked nothing
 above it. It has since shipped in full (epic #163) and launched — the `analyst`
-flag flip landed ahead of the rest of AL-570's ship-verification, which stays
-open on [#180](https://github.com/mattjmcnaughton/aleph/issues/180): the
-guardrail reads, the retrieval-quality ritual, production smoke, and the
-Logfire import. No phase in either sequence is waiting on a flag flip
-anymore, though AL-570 itself is not done.
+flag flip landed ahead of the rest of AL-570's ship-verification. That issue
+([#180](https://github.com/mattjmcnaughton/aleph/issues/180)) was closed without
+the guardrail reads or the retrieval-quality ritual being done; they remain worth
+running before any spend-limit work.
 
 ## Phase 1 — The generated path (MVP)
 
@@ -291,12 +293,9 @@ feature is not a broken trigger but Brief #7 confidently restating Brief #6, so 
 period with no novel findings publishes a dated **Skipped** entry rather than
 filler.
 
-Two things the PRD deliberately leaves open. The **retrieval provider is
-unnamed** — the document states three product constraints (URLs that resolve, a
-usable publication date, enough text to ground a quote) and leaves the choice to
-the TDD. And the phase adds a constraint the eval harness has never faced: live
-retrieval makes an eval non-deterministic by construction, so the seed set has to
-pin recorded retrieval fixtures or it measures the news rather than the agent.
+The PRD deliberately left the **retrieval provider unnamed** — it states three
+product constraints (URLs that resolve, a usable publication date, enough text to
+ground a quote) and leaves the choice to the TDD, which picked Exa.
 
 The convergence with paths — the tutor rail on a
 Brief, "teach me the fundamentals of what I keep reading about", a Brief feeding a
@@ -306,9 +305,8 @@ one. The PRD's historical suggestion of drafting flashcards from Briefs is retir
 
 ## Flow
 
-> **Status:** built, default on in this feature branch, unshipped (#262).
-> `FEATURE_FLAG_DEFAULTS=flow:off` remains the kill switch; production configuration
-> is unchanged. Unlike the flags above,
+> **Status:** ✅ shipped and default on (v1.46.0, #262).
+> `FEATURE_FLAG_DEFAULTS=flow:off` remains the kill switch. Unlike the flags above,
 > Flow is **100% client-side**: no table, no route, no migration; the flag is a
 > plain client check rather than a router `404`.
 > 📄 **Full spec:** [Flow TDD](tdds/flow.md), mock: [Flow mode](mocks/aleph-flow-mode.html)
@@ -321,22 +319,18 @@ completed lesson simply opens the next until the count is reached, the scope
 runs dry, or you end it. Nothing new is counted — every completion inside a
 flow is an ordinary Mark complete, so streaks and Activation see exactly what
 they always have — and nothing new is stored, since a flow is a small record
-kept in the browser tab that runs it. Flashcard drafting is unchanged; only the
-keep/discard moment moves, from every lesson to one batch on the flow's receipt.
+kept in the browser tab that runs it.
 
 ## Home Screen app
 
 One learner client: the existing web app made installable on the iPhone Home
 Screen, with Web Push Notifications, a longer session, stored Learner time zone
 and an hourly job for Reminders and away-time Briefs. No offline cache or native
-implementation. [Epic #257](https://github.com/mattjmcnaughton/aleph/issues/257)
-delivers only into `feature/home-screen-app`; it does not authorize main merges
-or production changes. P1–P6 and constitution §8 are approved; native parking is
-conditional. The owner deferred the real-iPhone spike to the end and accepted
-provisional/rework risk. Device and operational gates remain unverified, not
-waived. See the [current execution amendment](tdds/home-screen-app.md#execution-amendment-2026-10-20)
-for mapping #258–#270 and dependencies. Earlier phase descriptions of arrival-only
-Briefs describe the current shipped baseline, not the planned scheduled behavior.
+implementation. **Shipped in v1.46.0** ([epic #257](https://github.com/mattjmcnaughton/aleph/issues/257),
+promoted to `main` in #286). The real-iPhone sign-in and Web Push check (#259) and
+the device and operations handoff (#270) were never recorded and were closed as not
+planned. It replaced the native iOS app, which was abandoned on 2026-11-22. Earlier
+phase descriptions of arrival-only Briefs predate the hourly job.
 
 ## Beyond
 
@@ -345,7 +339,7 @@ Briefs describe the current shipped baseline, not the planned scheduled behavior
 > 📄 **Full spec:** none, deliberately.
 
 Once the core loop is proven end to end, natural extensions open up: richer lesson
-formats (diagrams, worked examples, code you can run), cross-device sync, sharing or
+formats (worked examples, code you can run; interactive Visuals have shipped), cross-device sync, sharing or
 importing paths, and deeper analytics on how a learner is progressing. (Accounts
 themselves are no longer here — Phase 1 pulls them forward, since the learning loop
 needs durable per-learner data from the start.) These are deliberately out of scope
@@ -355,10 +349,11 @@ guessed at now.
 ## Cross-cutting concerns
 
 A few things span every phase rather than living in one. The visual system is
-**Nocturne** — the dark, teal, mobile-first design language already established in
-the mocks — and new surfaces should extend it rather than reinvent it. **AI content
-quality** is a first-class concern from Phase 1: generated lessons and cards need to
-be accurate, appropriately scoped, and safe, so evaluation and guardrails grow
-alongside the features that generate content. And because the audience is
+**Nocturne** — the dark, teal, mobile-first design language described in
+[design.md](design.md) — and new surfaces should extend it rather than reinvent it.
+**AI content quality** is a first-class concern from Phase 1: generated lessons need
+to be accurate, appropriately scoped, and safe, so validators and guardrails grow
+alongside the features that generate content, and quality is judged by reviewing
+real output. And because the audience is
 **mobile-first self-directed learners**, every phase is designed for a phone first
 and a desktop second, matching the two mocks that already exist side by side.

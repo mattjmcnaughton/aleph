@@ -5,10 +5,9 @@
 to run", it is "the analyst found nothing" — is not a `services/` `if`
 statement; it is the empty list :func:`filter_new` returns. Every caller that
 needs to know whether a research run is Skipped asks this function the same
-question, once: ``services/briefing.py`` (AL-521) and the eval harness's
-layer-1 pre-filters (AL-550) both import :func:`filter_new` **unchanged** —
-two spellings of the novelty gate would be a bug (TDD D9's whole argument for
-making this a `domains/` module rather than judge spend).
+question, once: ``services/briefing.py`` (AL-521) imports :func:`filter_new`
+**unchanged** — two spellings of the novelty gate would be a bug (TDD D9's
+whole argument for making this a `domains/` module).
 
 Stdlib only, frozen inputs, no ORM, no I/O, no session — the
 ``domains/__init__.py`` contract verbatim.

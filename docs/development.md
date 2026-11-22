@@ -185,7 +185,7 @@ posture is unchanged, it just no longer applies to a launched feature
 ([deploy.md](deploy.md#launching-a-flagged-phase-al-270--al-370)). Two things
 that are not flag problems: the rail's entry only renders on a **`ready`** path
 (sending is `409` before the outline exists), and a real model proposes when it
-judges an ask concrete. To force the branches, run the shaper slot on the
+judges an ask concrete. To force the branches, run on the
 deterministic stub (`MODEL_DEFAULT=stub` — what `scripts/e2e_backend.py` wires for
 the Playwright suite, and what `ENV=production` forbids) and put a sentinel in
 the message: `[force-proposal-add]`, `[force-proposal-revise]`,
@@ -384,19 +384,17 @@ real push-service receipt or OS-level taps. Production exposes no test fixture o
 job-trigger routes. Real-iPhone receipt/tap-through and deferred T0, device and
 operational gates remain unaccepted.
 
-### Feature-branch acceptance and handoff (#270)
+### Real-device checks
 
-Implementation PRs target `feature/home-screen-app`, never `main`. Record the
-exact integrated revision and its gate, integration, full Playwright and
-production-image smoke results on #270. A green feature branch is code
-integration evidence, not device acceptance or deployment authorization.
-Counterfactual tests distinguish cancellation from confirmation, configured
+The Home Screen app shipped in v1.46.0 without these checks being recorded
+(#259 and #270 were closed as not planned). Automated tests cover the logic, not
+the phone. Counterfactual tests distinguish cancellation from confirmation, configured
 generation concurrency, obsolete notification fences and notification failure
 containment. Controlled clocks prove session expiry and local-day rules; they
 do not establish real elapsed-time use or operating-system delivery.
 
-Before release, the owner must complete and record these checks on the intended
-origin, with the app revision and iOS version:
+To check the app on a real phone, run these on the production origin and note the
+app revision and iOS version:
 
 - Install from Safari; inspect the icon, launch presentation and safe areas.
 - Sign in, force-quit and reopen; verify navigation stays usable without browser
@@ -404,12 +402,10 @@ origin, with the app revision and iOS version:
 - Receive Path ready, Reminder and Brief published Notifications and tap each
   through to authorized content. Include denied permission and recovery guidance.
 
-Operational acceptance needs separate environment/deployment permission. Confirm
+Operational checks touch production, so they need the owner's permission. Confirm
 the public origin, push configuration, migration order, scheduled-machine image
 and environment, job cost bounds, attempt-row retention and failure alerts using
 the [deployment runbook](deploy.md#scheduled-machines).
 Live push receipt and scheduled-machine behavior remain unverified here; fake
 Fly CLI proof is excluded by owner decision. Do not treat local model/push fakes
-as provider acceptance. Keep #259 and #270 open until their outstanding human
-and operational criteria are satisfied. Promotion to main, production activation
-and removal of production Flow overrides require a separate approved release plan.
+as provider acceptance.

@@ -66,9 +66,9 @@ class CreatePathRequest(BaseModel):
 
     ``model_outline``/``model_lesson`` are the **admin** model-picker overrides
     (AL-052, TDD §5.3/D14): optional bare OpenRouter ids the frontend picker
-    (AL-065) sends, one per generation slot, selected from the ``MODEL_ALLOWLIST``
+    (AL-065) sends, one per generation stage, selected from the ``MODEL_ALLOWLIST``
     the session endpoint exposes to admins. Omitted (the common case) means the
-    configured slot default. They are *authorization-* and *allowlist-*enforced
+    app-wide ``MODEL_DEFAULT``. They are *authorization-* and *allowlist-*enforced
     server-side at the route (403 non-admin, 422 off-allowlist) — the field
     merely carries the request; the wire field being present is never itself a
     grant.
@@ -90,7 +90,7 @@ class CreatePathRequest(BaseModel):
 
     # ``model_outline``/``model_lesson`` start with the ``model_`` prefix pydantic
     # protects by default; the picker wire contract fixes these names (parity with
-    # the ``MODEL_DEFAULT`` config slots), so opt out of the
+    # the ``MODEL_DEFAULT`` setting), so opt out of the
     # protected namespace rather than rename.
     model_config = ConfigDict(protected_namespaces=())
 

@@ -160,6 +160,9 @@ rather than silently rewriting another authoritative document.
   ([PRD](docs/prds/home-screen-app.md)) makes the web app the phone client and
   delivers Notifications through Web Push, with the native iOS app parked. The
   parity obligation is unchanged whenever more than one learner client exists.
+- 2026-11-22: The native iOS app is abandoned, not parked; the web client
+  (including the Home Screen app) is the only learner client. §8's text is
+  unchanged: it binds again if a second learner client is ever added.
 - 2026-11-21: §9 and §10 no longer require automated evaluations for model quality.
   Rationale: the eval harness was never run and was removed with its judge model;
   generation now runs on one app-wide model. Tests still verify behavior only, and

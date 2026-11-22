@@ -270,7 +270,7 @@ class GenerationOrchestrator:
     Constructed with injectable seams so tests drive it deterministically and
     AL-041 can wrap the spawn. Defaults wire production: sessions from the
     module maker, ``asyncio.create_task`` for spawning, and the OpenRouter/stub
-    resolver for models. ``config`` supplies caps, model slots, the prefetch
+    resolver for models. ``config`` supplies caps, ``MODEL_DEFAULT``, the prefetch
     window, and the per-call timeout; the caps are built from it explicitly and
     passed to the agents as run-time deps (the agents never read config).
     """
@@ -429,7 +429,7 @@ class GenerationOrchestrator:
         route. They are **persisted on the row** — not carried in memory to the
         spawned task — so the DB-driven resume/reconcile (§5.4/D6) re-generates
         with the chosen model rather than the config default. ``None`` falls back
-        to the configured slot at model-resolution time.
+        to ``MODEL_DEFAULT`` at model-resolution time.
         """
         async with self._session_factory() as session:
             path = await self._paths(session).create(

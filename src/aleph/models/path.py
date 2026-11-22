@@ -106,9 +106,10 @@ class Path(Base, UUIDAuditMixin):
     # outline/lesson model per-path from ``MODEL_ALLOWLIST``; the choice is stored
     # here — not held on the request — so the DB-driven resume/reconcile
     # (§5.4/D6) re-generates with the chosen model rather than the config default.
-    # ``NULL`` means "use the configured slot" (the default for every non-admin
-    # and un-overridden create). Enforcement (admin-only, allowlist-bound) lives
-    # at the create route; this column trusts an already-validated id.
+    # ``NULL`` means "use the app-wide ``MODEL_DEFAULT``" (the default for every
+    # non-admin and un-overridden create). Enforcement (admin-only,
+    # allowlist-bound) lives at the create route; this column trusts an
+    # already-validated id.
     model_outline: Mapped[str | None] = mapped_column(Text, nullable=True)
     model_lesson: Mapped[str | None] = mapped_column(Text, nullable=True)
 

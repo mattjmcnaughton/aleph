@@ -11,8 +11,8 @@ the security boundary), streamed to the rail as it is produced (TDD §5.1/§5.4)
 Layout follows the Phase 1/2A purity pattern exactly as ``outline.py``,
 ``lesson.py`` and ``tutor.py``: this module binds **no model** and imports **no
 config/services/DB/routers**, so ``services/shaping.py`` (AL-320) injects the
-model at run time via ``agent.run_stream(..., model=...)`` and the eval harness
-imports the factory and the predicates directly.
+model at run time via ``agent.run_stream(..., model=...)`` and tests import
+the factory and the predicates directly.
 ``tests/unit/test_agents_layering.py`` covers it with no edit.
 
 **One tool, and it is a no-op** (D4, exactly 2A's D5): ``propose_path_edit``.
@@ -28,9 +28,9 @@ functions. :func:`operations_within_caps`,
 :func:`insertions_after_first_shapeable`, :func:`revision_targets_unengaged`,
 :func:`revision_targets_distinct`, :func:`titles_nonempty_distinct` and the
 shape-exhaustive :func:`operations_have_known_shapes` are exported and take the
-deps' digest and caps, so the agent (at draft time), the evals (layer 1,
-deterministic) and ``services/shaping.py`` (re-validating at apply, D5) all
-reach the *same* functions. They are imported, never copied (the epic's rule).
+deps' digest and caps, so the agent (at draft time), the tests and
+``services/shaping.py`` (re-validating at apply, D5) all reach the *same*
+functions. They are imported, never copied (the epic's rule).
 
 :func:`proposal_violation` composes them into the whole rulebook and **returns**
 its verdict — the first violation as a sentence, or ``None``. That is the shape
@@ -68,7 +68,7 @@ floor rather than a sanitisation layer.
 vocabulary, the declined edit, propose-when-asked, scale fidelity, the refusal
 boundary, data-not-instructions) plus one dynamic ``@agent.instructions`` block
 rendered from :class:`ShaperDeps` by :func:`render_shaping_context`. That
-renderer is a plain pure function so tests and the eval harness can inspect
+renderer is a plain pure function so tests can inspect
 exactly what the model was told without running an agent. Both blocks ride
 ``instructions`` rather than ``system_prompt`` for ``agents/tutor.py``'s
 multi-turn reason: ``system_prompt`` parts are appended only when the history is
@@ -306,7 +306,7 @@ class ShapingCaps:
       boundary as data rather than making the model derive it.
 
     Dependencies, not config: the service builds this from ``Settings`` and the
-    live path, the evals build it from a fixture. Mirrors ``OutlineCaps`` /
+    live path, tests build it directly. Mirrors ``OutlineCaps`` /
     ``LessonCaps``, including the eager coherence check.
     """
 
@@ -344,8 +344,8 @@ class ShaperDeps:
     Shaping scope: the ``topic``/``level`` the path was created with, the
     ``digest`` (every unit/lesson with position, unlock state, engagement and
     Outcome), the ``change_history`` summaries, and the ``caps`` that bound what
-    may be proposed. The context seam (AL-311) wires real values here; tests and
-    the eval harness construct it directly.
+    may be proposed. The context seam (AL-311) wires real values here; tests
+    construct it directly.
 
     ``digest`` and ``change_history`` accept any ``Sequence`` (ergonomic for
     callers) but are stored as tuples for real immutability under
@@ -386,7 +386,7 @@ class ShaperDeps:
             )
 
 
-# --- the exported pure predicates (D1 — shared with the evals and with apply) ---
+# --- the exported pure predicates (D1 — shared with apply) ---------------------
 
 
 # Both filters state the same pair of conditions and neither is redundant:
@@ -420,8 +420,8 @@ def operations_have_known_shapes(operations: Sequence[object]) -> bool:
     """True when every operation is an Addition or a Revision (D1, exhaustive).
 
     The other predicates dispatch through :func:`operation_kind` and would raise
-    on a foreign object; this is the boolean form the evals' deterministic layer
-    reports on. Vacuously true for an empty list — "a Proposal must do
+    on a foreign object; this is the boolean form :func:`proposal_violation`
+    checks first. Vacuously true for an empty list — "a Proposal must do
     something" is :func:`validate_proposal`'s check, not a shape's.
     """
     for operation in operations:
@@ -599,8 +599,8 @@ def proposal_violation(
     """The first reason this Proposal is not well formed, or ``None`` (D1).
 
     The rulebook itself. Composes the exported predicates above rather than
-    restating any of their logic, so the agent's draft-time gate, the evals'
-    deterministic layer, the context seam's *superseded* derivation (§4) and
+    restating any of their logic, so the agent's draft-time gate, the context
+    seam's *superseded* derivation (§4) and
     apply's re-validation (D5) can never disagree about what "well formed"
     means.
 
@@ -618,8 +618,8 @@ def proposal_violation(
     2A §5.1). Callers asking yes/no simply compare against ``None``.
 
     Deliberately *not* checked here: whether the Proposal is a good idea. Scale
-    fidelity, responsiveness and honesty are the prompt's and the evals' job
-    (§10 rubric items 2-6); this is the deterministic floor.
+    fidelity, responsiveness and honesty are the prompt's job, judged by
+    reviewing real output; this is the deterministic floor.
     """
     if not operations_have_known_shapes(operations):
         return (
@@ -967,7 +967,7 @@ def render_shaping_context(deps: ShaperDeps) -> str:
     to violate. That mirrors the Attempt regime's placement in the tutor's block.
 
     Pure and config-free: everything comes from ``deps``. Exported (rather than
-    inlined in the ``@agent.instructions`` closure) so tests and the eval harness
+    inlined in the ``@agent.instructions`` closure) so tests
     can read exactly what the model was told without running an agent.
     """
     about = about_you_block(deps.about_you)
@@ -1048,7 +1048,7 @@ def proposal_already_made(
 
     Stateless by construction — the run's own messages are the record, so there
     is no counter to reset and the agent factory's result stays safely reusable
-    across replies (the eval harness builds one agent and runs it many times).
+    across replies (a caller may build one agent and run it many times).
 
     ``tool_call_id`` is the id of the call being validated right now, and is
     required: it is what stops the scan from finding *this* call and reporting
@@ -1207,7 +1207,8 @@ def build_shaper_agent() -> Agent[ShaperDeps, str]:
         """Reject an empty reply — the one runtime output check (2A §5.1).
 
         Minimal on purpose: under streaming a validator cannot retract text the
-        learner has already seen, so quality is the prompt's and the evals' job.
+        learner has already seen, so quality is the prompt's job, judged by
+        reviewing real output.
         This one is still worth keeping because an empty reply put nothing on the
         wire, which makes the retry free.
         """

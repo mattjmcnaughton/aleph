@@ -89,7 +89,7 @@ class PathRepository:
         ``model_outline``/``model_lesson`` carry an admin's picker overrides
         (AL-052, §5.3): already validated (admin-only, allowlist-bound) at the
         route, stored so the DB-driven resume/reconcile routes the chosen model.
-        ``None`` means "use the configured slot".
+        ``None`` means "use the app-wide ``MODEL_DEFAULT``".
         """
         path = Path(
             user_id=user_id,

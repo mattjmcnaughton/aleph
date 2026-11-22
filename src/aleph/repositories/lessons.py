@@ -332,7 +332,7 @@ class LessonRepository:
         supplies the two facts — the row's ``completed_at`` and this flag — and
         :func:`aleph.domains.engagement.is_engaged` is the single predicate that
         decides. Keeping the decision out of SQL is what lets proposal
-        validation, apply, undo and the evals share one rule instead of four
+        validation, apply and undo share one rule instead of three
         ``WHERE`` clauses that drift.
 
         A correlated ``EXISTS`` rather than a join, for two reasons: it cannot

@@ -77,9 +77,9 @@ Session = Annotated[AsyncSession, Depends(get_session)]
 
 @dataclass(frozen=True)
 class ModelOverrides:
-    """A create request's validated per-slot model choices (AL-052, §5.3).
+    """A create request's validated outline/lesson model choices (AL-052, §5.3).
 
-    ``None`` on a slot means "use the configured default" — the orchestrator
+    ``None`` on a field means "use the configured default" — the orchestrator
     falls back to ``MODEL_DEFAULT``.
     """
 
@@ -126,7 +126,7 @@ def validate_model_override(
 def resolve_model_overrides(
     body: CreatePathRequest, *, is_admin: bool, allowed: tuple[str, ...]
 ) -> ModelOverrides:
-    """Validate both picker slots on a create request (AL-052, §5.3/D14).
+    """Validate both picker fields on a create request (AL-052, §5.3/D14).
 
     The single enforcement seam ``POST /paths`` calls before any billed work:
     each present override is admin-only and allowlist-bound (see

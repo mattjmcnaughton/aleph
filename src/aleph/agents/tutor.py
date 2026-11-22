@@ -8,16 +8,16 @@ security boundary), streamed to the rail as it is produced (TDD D1/§5.4).
 Layout follows the Phase 1 purity pattern exactly as ``outline.py`` and
 ``lesson.py``: this module binds **no model** and imports **no
 config/services/DB/routers**, so ``services/tutor.py`` (AL-220) injects the model
-at run time via ``agent.run_stream(..., model=...)`` and the eval harness imports
+at run time via ``agent.run_stream(..., model=...)`` and tests import
 the factory directly. ``tests/unit/test_agents_layering.py`` covers it with no
 edit.
 
 **No output union, and minimal output validation (TDD §5.1).** Under streaming
 the reply text is on the wire before any output validator could run, so a
 ``ModelRetry``-style validator cannot retract a bad reply — reply *quality* is
-owned by the prompt and the evals (§10), not by a runtime gate. The one runtime
-check kept is non-emptiness, and it is safe precisely because an empty reply put
-nothing on the wire to retract.
+owned by the prompt and judged by reviewing real output, not by a runtime gate.
+The one runtime check kept is non-emptiness, and it is safe precisely because an
+empty reply put nothing on the wire to retract.
 
 **One tool, and it is a no-op** (D5): ``pose_tutor_check``. The *service*
 observes the call on the agent's event stream and renders the card; all the tool
@@ -34,8 +34,7 @@ not machine-readable signals, this phase (D5, §5.7).
 data-not-instructions framing, Tutor check usage) plus one dynamic
 ``@agent.instructions`` block rendered from :class:`TutorDeps` by
 :func:`render_lesson_context`. That renderer is a plain pure function so tests
-and the eval harness can inspect exactly what the model was told without running
-an agent.
+can inspect exactly what the model was told without running an agent.
 
 **Why ``instructions`` here and ``system_prompt`` in Phase 1.** ``outline.py``
 and ``lesson.py`` are single-turn agents: they run once with no
@@ -433,8 +432,8 @@ def render_lesson_context(deps: TutorDeps) -> str:
     most likely to violate.
 
     Pure and config-free: everything comes from ``deps``. Exported (rather than
-    inlined in the ``@agent.system_prompt`` closure) so tests and the eval
-    harness can read exactly what the model was told without running an agent.
+    inlined in the ``@agent.system_prompt`` closure) so tests
+    can read exactly what the model was told without running an agent.
     """
     sections = [
         f"Learner level: {deps.level}. {_LEVEL_GUIDANCE[deps.level]}",
@@ -516,7 +515,7 @@ def validate_tutor_check(
 
     Deliberately narrower than the lesson agent's ``validate_lesson_content``:
     there is no passage and no word band here, and option *content* quality is
-    the evals' business (§10), not a deterministic gate.
+    the prompt's job, judged by reviewing real output, not a deterministic gate.
     """
     if not is_non_empty(stem):
         raise ModelRetry("The Tutor check needs a non-empty question stem.")
@@ -550,7 +549,7 @@ def tutor_check_already_posed(
 
     Stateless by construction — the run's own messages are the record, so there
     is no counter to reset and the agent factory's result stays safely reusable
-    across replies (the eval harness builds one agent and runs it many times).
+    across replies (a caller may build one agent and run it many times).
 
     ``tool_call_id`` is the id of the call being validated right now, and is
     required: it is what stops the scan from finding *this* call and reporting
@@ -728,7 +727,8 @@ def build_tutor_agent() -> Agent[TutorDeps, str]:
         """Reject an empty reply — the one runtime output check (§5.1).
 
         Minimal on purpose: under streaming a validator cannot retract text the
-        learner has already seen, so quality is the prompt's and the evals' job.
+        learner has already seen, so quality is the prompt's job, judged by
+        reviewing real output.
         This one is still worth keeping precisely because an empty reply put
         nothing on the wire, which makes the retry free.
         """

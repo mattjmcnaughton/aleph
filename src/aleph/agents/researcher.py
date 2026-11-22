@@ -28,9 +28,8 @@ over-the-boundary Topic terminates a Beat as **refused**, never **failed**
 cites what it did not read" is enforced as a set-membership check against the
 agent's own inputs: :func:`cites_only_read_documents` below, exported so
 `agents/analyst.py`'s writer validator can reuse the identical predicate
-(TDD §5.5: "the same check's degenerate case") and so AL-550's eval layer-1
-pre-filters import it directly rather than re-implementing it (TDD §10 —
-"never a second spelling").
+(TDD §5.5: "the same check's degenerate case") rather than re-implementing it
+("never a second spelling").
 
 Consequently this module binds **no model** and imports **nothing** from any
 application layer (no `services`, `routers`, `config`, `repositories`,
@@ -137,16 +136,14 @@ class Findings(BaseModel):
 ResearchResult = Findings | Refusal
 
 
-# --- shared validator predicate (TDD D8; exported for AL-521 and AL-550) -------
+# --- shared validator predicate (TDD D8; exported for AL-521) -------------------
 #
 # "The analyst never cites what it did not read" (PRD §4.4) is a set-membership
 # check against the agent's own inputs, not a prompt instruction (TDD D8). One
 # predicate serves both citation checks this phase needs — a Finding's
 # ``source_urls`` here, and a Brief's ``cited_urls`` in `agents/analyst.py`
 # (TDD §5.5: "the same check's degenerate case") — imported there rather than
-# copied, and importable directly by AL-550's eval layer-1 pre-filters
-# (TDD §10, "never a second spelling") so the product's gate and the harness's
-# gate are the identical function.
+# copied ("never a second spelling") so both gates are the identical function.
 
 
 def cites_only_read_documents(urls: Sequence[str], available_urls: Set[str]) -> bool:

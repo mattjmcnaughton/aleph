@@ -1,8 +1,15 @@
 # PRD — The Home Screen app (aleph on the phone, without a native client)
 
-**Status:** Accepted for provisional feature-branch implementation; T0 and release acceptance outstanding · **Owner:** solo builder · **Roadmap item:** Home Screen app (§2.3)
+**Status:** Shipped (v1.46.0); real-device acceptance never recorded · **Owner:** solo builder · **Roadmap item:** Home Screen app (§2.3)
 **References:** [`CONSTITUTION.md`](../../CONSTITUTION.md) · [`CLAUDE.md` — One Client](../../CLAUDE.md#one-client-web-and-home-screen-app) · [`CONTEXT.md`](../CONTEXT.md) · [`api.md`](../api.md) · [`deploy.md`](../deploy.md) · [`metrics.md`](../metrics.md) · [iOS app PRD](ios-app.md) · [iOS app TDD](../tdds/ios-app.md) · [ADR 0001 — store the last-seen time zone](../adrs/0001-store-last-seen-time-zone.md) · [Phase 5 streaks PRD](phase-5-streaks.md) · [Phase 6 PRD](phase-6-analyst.md)
 **Companion:** [Home Screen app TDD](../tdds/home-screen-app.md), which owns the mechanics and the tickets.
+
+> **Shipped, 2026-10-21 (v1.46.0).** The owner promoted `feature/home-screen-app` to
+> `main` in #286 despite the open gates. The real-iPhone check (T0, #259) and the device
+> and operations handoff (#270) were never recorded and were closed as not planned on
+> 2026-11-22. The native iOS app this replaced was abandoned the same day. The
+> amendment and draft below are kept as history; their delivery rules (feature branch
+> only, no main merge) no longer apply.
 
 ## Execution amendment (2026-10-20)
 

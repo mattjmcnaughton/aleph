@@ -28,7 +28,7 @@ could reproduce the very bias it is here to remove, so it does not get to look.
 ``sha256(f"{seed}:{position}")`` rather than ``random``, so a given seed always
 yields a given order. Callers seed with something stable, per-check, and
 unrelated to the answer — a lesson id, a check's stem — which makes the shuffle
-reproducible in tests and in an eval replay while still varying from one check to
+reproducible in tests while still varying from one check to
 the next. It is applied **once**, where the check is persisted or first
 delivered, so the stored order is the order everything downstream agrees on:
 grading, the tutor's view of the keyed answer, a Revision snapshot and its undo.

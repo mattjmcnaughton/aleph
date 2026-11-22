@@ -101,7 +101,7 @@ this document for what is deferred.
 | **Quote** | A span of the current Read passage the learner selected and sent with their question. Visible in the sent message and part of that turn's context. (Deferred — cut from Phase 2, and no longer part of 2B; see the phase boundaries below.) |
 | **Suggestion** | A one-tap ask offered by the rail — *Explain this simpler · Go deeper · Quiz me on this · Show me a real example*. Sent as if typed; never a constraint on free text. |
 | **Tutor check** | A question the **tutor** asks back inside a conversation, with options and immediate feedback. **Non-scoring and outside progress**: it is not a Quick check, creates no **Attempt**, and touches no progress or metric. It persists only as an artifact of its conversation, deleted with it. (Distinct entity, distinct name — do not call it a Quick check, and avoid "ephemeral": it *is* stored, with the learner's answer, for the life of the thread.) |
-| **Grounded** | The property that a tutor reply is anchored in the current lesson's Read passage and does not contradict it. The behavior ships now; as an eval rubric item it lands with the post-launch tutor evals. |
+| **Grounded** | The property that a tutor reply is anchored in the current lesson's Read passage and does not contradict it. Judged by reviewing real replies; there is no automated eval. |
 | **Contradiction handling** | The tutor's behavior on a **checkable factual error** in a lesson: correct it, attribute the difference plainly, and say what the Quick check expects (Phase 2 PRD §5.7b). Nothing is regenerated or mutated. Incomplete is not wrong — a level-scoped simplification is never flagged. (A machine-readable *flag event* was cut from Phase 2; the behavior lives in reply text only.) |
 
 ## Shaping (Phase 2B)
@@ -149,7 +149,7 @@ Spec: [Phase 6 PRD](prds/phase-6-analyst.md), [Phase 6 TDD](tdds/phase-6-analyst
 ## Flow
 
 Flow vocabulary. A bounded run of lessons, scoped once at the door instead of choosing after every
-one — **default on in this feature branch, unshipped**; the `flow` flag remains a kill switch.
+one — **shipped and default on** (v1.46.0); the `flow` flag remains a kill switch.
 See the phase-boundary note at the foot of this document.
 Spec: [Flow TDD](tdds/flow.md), mock: [Flow mode](mocks/aleph-flow-mode.html).
 
@@ -189,10 +189,9 @@ Some terms name things drawn in the mocks that are **not all built**. Use them, 
 phase:
 
 - **Home Screen app**, Web Push **Notifications**, subscription **Devices**, stored
-  **Learner time zone**, and scheduled **Reminders**/Briefs — accepted for provisional
-  feature-branch implementation, **not shipped**; native is conditionally parked.
-  T0 and device/operational acceptance remain outstanding; see the
-  [execution amendment](prds/home-screen-app.md#execution-amendment-2026-10-20).
+  **Learner time zone**, and scheduled **Reminders**/Briefs — **shipped** (v1.46.0).
+  Real-iPhone and operational acceptance were never recorded. The native iOS app
+  was abandoned on 2026-11-22.
 - **Tutor** in **lesson scope** — the in-lesson rail, its **Suggestions**, its **Tutor check**, one
   **Conversation** per lesson, and streamed replies. Lesson-scoped conversations replace
   Phase 2's original path-wide thread; existing lesson-chat history is not preserved.
@@ -242,10 +241,9 @@ phase:
   same dark-then-flip playbook as `tutor`/`shaping`, and stays registered as a
   kill switch.
 - **Flow** / **Flow length** / **Flow scope** — the Flow section above: **built,
-  default on in this feature branch, unshipped** ([TDD](tdds/flow.md)). Unlike every flag above,
+  shipped and default on** ([TDD](tdds/flow.md)). Unlike every flag above,
   Flow is **100% client-side** — no table, no route, no migration, gated purely
   in the client by `useFeatureFlag("flow")` rather than a router `404` — so the
   code default is now `FLAG_DEFAULTS[FeatureFlag.FLOW] = True` (#262).
   `FEATURE_FLAG_DEFAULTS=flow:off` outranks the code and admin defaults;
-  an explicit per-user override still wins. Production configuration is unchanged;
-  removing any production Flow override is a separate authorized post-deploy step.
+  an explicit per-user override still wins.

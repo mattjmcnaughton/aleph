@@ -93,7 +93,7 @@ class BeatRepository:
         generation inputs are — no route ever writes them after ``create``.
         ``model_research``/``model_brief`` carry an admin's picker overrides
         (TDD D7, §5.3), already validated at the route; ``None`` means "use
-        the configured slot".
+        the app-wide ``MODEL_DEFAULT``".
         """
         beat = Beat(
             user_id=user_id,
