@@ -1,3 +1,10 @@
+# [1.53.0](https://github.com/mattjmcnaughton/aleph/compare/v1.52.0...v1.53.0) (2026-11-22)
+
+
+### Features
+
+* **new-path:** draft a path from an idea, sharpened by an interview ([3f07654](https://github.com/mattjmcnaughton/aleph/commit/3f07654f5cab609484ac075de80f173c2c26e98b))
+
 # [1.52.0](https://github.com/mattjmcnaughton/aleph/compare/v1.51.0...v1.52.0) (2026-11-22)
 
 
