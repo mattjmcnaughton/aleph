@@ -56,6 +56,7 @@ and never an already-written one. With no style the prompt is byte-identical.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -66,6 +67,7 @@ from aleph.agents._about_you import about_you_block
 from aleph.agents._delimiters import neutralize_delimiters
 from aleph.agents._evidence import web_evidence_block
 from aleph.agents.outline import Level, PathOutline, require_valid_level
+from aleph.domains.visuals import is_placeholder_ref, visual_fence_refs
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -87,6 +89,24 @@ class QuickCheck(BaseModel):
     explanation: str
 
 
+class Visual(BaseModel):
+    """One interactive **Visual** the lesson agent wrote (CONTEXT.md: *Visual*).
+
+    ``source`` is a small HTML body (markup plus inline ``<script>``) the client
+    runs inside an opaque-origin sandbox, wrapped in the versioned Nocturne kit
+    (docs/tdds/lesson-visuals.md). ``ref`` is the agent's own placeholder
+    (``visual-1``) — the passage fences it as ```visual visual-1 — and is
+    replaced by the stored row's UUID at persist time, because a model cannot
+    mint identifiers reliably. ``alt`` is the non-executable fallback: what the
+    learner reads when the visual cannot run.
+    """
+
+    ref: str
+    title: str
+    alt: str
+    source: str
+
+
 class LessonContent(BaseModel):
     """A lesson's generated content: one Read passage + one Quick check.
 
@@ -102,10 +122,15 @@ class LessonContent(BaseModel):
     API serves the Markdown source and rendering happens only at the edge, so the
     string is untrusted-by-construction and the renderer, not this schema, is what
     keeps raw HTML out of the DOM.
+
+    ``visuals`` holds at most one interactive **Visual** (CONTEXT.md), stored
+    beside the passage and referenced from it by a ```visual fence. Most lessons
+    have none, so it defaults to empty.
     """
 
     read_passage: str
     quick_check: QuickCheck
+    visuals: list[Visual] = []
 
 
 # --- shared validator predicates (TDD §5.1, §5.2, §14, §11) --------------------
@@ -179,6 +204,49 @@ def passage_within_word_band(
 ) -> bool:
     """True when ``passage`` falls inside the §14 Read-passage word band."""
     return minimum <= count_words(passage) <= maximum
+
+
+# --- Visual predicates (docs/tdds/lesson-visuals.md) ---------------------------
+# Cheap sanity, not the security boundary: the client runs a visual in an
+# opaque-origin sandbox under a no-network CSP, which is what actually contains
+# it. These reject the obviously broken or hostile so the model retries rather
+# than the learner meeting the fallback.
+
+MAX_VISUALS = 1
+MAX_VISUAL_SOURCE_BYTES = 12_000
+
+_KIT_READY_RE = re.compile(r"\bkit\s*\.\s*ready\s*\(")
+_EMBEDDING_TAG_RE = re.compile(r"<\s*(iframe|object|embed|link|base|frame)\b", re.I)
+_SCRIPT_SRC_RE = re.compile(r"<\s*script\b[^>]*\bsrc\s*=", re.I)
+_ABSOLUTE_URL_RE = re.compile(r"https?://[^\s\"'<>()]+", re.I)
+# Protocol-relative URLs only where something would load them: a bare ``//``
+# elsewhere is far more often a JavaScript comment.
+_RELATIVE_LOAD_RE = re.compile(
+    r"(?:\b(?:src|href|action|data)\s*=\s*[\"']?|url\(\s*[\"']?)//", re.I
+)
+# The SVG/XHTML namespace URIs are identifiers inline SVG must declare, never
+# fetched; they are the one absolute URL a self-contained visual has reason to
+# contain.
+_NAMESPACE_PREFIX = "http://www.w3.org/"
+
+
+def source_calls_kit_ready(source: str) -> bool:
+    """True when ``source`` calls ``kit.ready()`` (how the host knows it ran)."""
+    return _KIT_READY_RE.search(source) is not None
+
+
+def source_loads_nothing_external(source: str) -> bool:
+    """True when ``source`` embeds no frame/object and names no external URL."""
+    if (
+        _EMBEDDING_TAG_RE.search(source)
+        or _SCRIPT_SRC_RE.search(source)
+        or _RELATIVE_LOAD_RE.search(source)
+    ):
+        return False
+    return all(
+        url.lower().startswith(_NAMESPACE_PREFIX)
+        for url in _ABSOLUTE_URL_RE.findall(source)
+    )
 
 
 # --- run-time dependencies (inputs + bands, injected — never imported) ---------
@@ -392,12 +460,49 @@ directives, embedded HTML or images in labels, styling/theme directives, or \
 newer syntax you are unsure of. Always explain the diagram in the prose around \
 it, so the lesson still reads correctly for someone who cannot see it.
 
-Do not use raw HTML, images, or footnotes — the renderer does not support them, \
+Interactive visuals are a third rung, after prose and Mermaid. Before writing, \
+decide whether this lesson needs one by asking: is there a quantity the learner \
+could change and watch the result respond, a chance process they could run many \
+times, or an algorithm they could step through? If yes, include exactly one \
+interactive visual in the `visuals` list: sliders on a formula (interest over \
+time, a function's parameters), a simulation of a counterintuitive result \
+(Monty Hall, sampling, base rates), stepping through an algorithm (a search, a \
+sort, a state change). If no, leave `visuals` empty: a fixed process, sequence \
+or structure is a Mermaid diagram, a narrative or definitional lesson is prose, \
+and decoration never earns a visual. The prose must teach the idea completely \
+without the visual and state the key numbers itself, because the visual may not \
+run for every learner.
+
+A visual has a `ref`, a `title`, an `alt` and a `source`. The `ref` is your own \
+short placeholder, `visual-1`; place the visual in the Read passage with an \
+empty fenced block whose info string is exactly `visual visual-1`, on two \
+lines — ```visual visual-1 then a closing ``` — fenced exactly once, nowhere else. \
+The `title` is a short caption. The `alt` describes what the visual shows and \
+what manipulating it reveals, in a sentence or two of plain text: it is what \
+the learner reads if the visual cannot run.
+
+The `source` is the HTML body only — markup plus inline <script> — no <html>, \
+<head> or <body> tags. It runs in a sandbox with no network: no fetch, no images \
+or fonts to load, no external libraries or CDNs, no iframes. Write plain \
+JavaScript and inline SVG or HTML. Keep it small (well under 12 KB) and sized \
+for a phone: about 340px wide, with nothing that needs hover. The sandbox \
+provides a `kit` and dark-theme styling: CSS variables --night, --surface, \
+--elevated, --porcelain (text), --mist and --slate (quieter text), --faint, \
+--teal (the accent for the thing that moves), --iris, --divider and --danger; \
+classes `row` (a horizontal flex row with a gap), `muted` (small quiet text) \
+and `ghost` (a quiet button; plain <button> is the teal primary); and range \
+inputs already styled in teal. Call kit.ready() once your visual has drawn — \
+without it the learner sees the alt text instead — and kit.fail(reason) if it \
+cannot work. Label every control, and show the current value of every slider.
+
+Do not use raw HTML, images, or footnotes in the Read passage — the renderer \
+does not support them, \
 and raw HTML shows up as literal, broken-looking text. Reach for structure when \
 it earns its place: a conceptual passage may \
 be nothing but prose, while a hands-on one may be mostly code. Prose is the \
 default; never turn the whole passage into a bare bullet list. Note that the word \
-band counts every word in the passage, code blocks and diagrams included.
+band counts every word in the passage, code blocks and diagrams included; a \
+visual's source is not part of the passage and does not count.
 
 Then write the Quick check: a clear question stem, the number of answer options \
 you are told to use with exactly one correct, the zero-based index of the correct \
@@ -508,7 +613,73 @@ def validate_lesson_content(caps: LessonCaps, content: LessonContent) -> LessonC
             "The Quick check needs a non-empty explanation of the correct answer."
         )
 
+    validate_visuals(passage, content.visuals)
     return content
+
+
+def validate_visuals(passage: str, visuals: Sequence[Visual]) -> None:
+    """Enforce the **Visual** invariants, raising ``ModelRetry`` on violation.
+
+    At most :data:`MAX_VISUALS`; every visual's ``ref`` is a placeholder slug
+    fenced exactly once in the passage, and every ```visual fence names a
+    declared visual; ``title``/``alt``/``source`` are non-empty; the source is
+    within :data:`MAX_VISUAL_SOURCE_BYTES`, calls ``kit.ready()``, and loads
+    nothing external. The passage word band is not touched — the source lives
+    outside the passage.
+    """
+    if len(visuals) > MAX_VISUALS:
+        raise ModelRetry(
+            f"The lesson has {len(visuals)} visuals; use at most one, and only "
+            "when manipulating something teaches what prose cannot."
+        )
+
+    fence_refs = visual_fence_refs(passage)
+    if None in fence_refs:
+        raise ModelRetry(
+            "A ```visual fence is malformed. Write it as exactly two lines, "
+            "```visual visual-1 then ```, with nothing inside the fence."
+        )
+    declared = {visual.ref for visual in visuals}
+    for ref in fence_refs:
+        if ref not in declared:
+            raise ModelRetry(
+                f"The passage fences ```visual {ref} but no visual with that ref "
+                "is in `visuals`. Use your own placeholder ref (like visual-1) for "
+                "a visual you write here, or remove the fence."
+            )
+
+    for visual in visuals:
+        if not is_placeholder_ref(visual.ref):
+            raise ModelRetry(
+                f"The visual ref {visual.ref!r} is not a placeholder: use a short "
+                "lowercase slug like visual-1."
+            )
+        if fence_refs.count(visual.ref) != 1:
+            raise ModelRetry(
+                f"Fence the visual exactly once in the Read passage, as "
+                f"```visual {visual.ref} followed by a closing ``` line, where it "
+                "belongs in the lesson."
+            )
+        for field in ("title", "alt", "source"):
+            if not is_non_empty(getattr(visual, field)):
+                raise ModelRetry(f"The visual needs a non-empty {field}.")
+        size = len(visual.source.encode("utf-8"))
+        if size > MAX_VISUAL_SOURCE_BYTES:
+            raise ModelRetry(
+                f"The visual source is {size // 1000} KB; keep it under "
+                f"{MAX_VISUAL_SOURCE_BYTES // 1000} KB — smaller and simpler."
+            )
+        if not source_calls_kit_ready(visual.source):
+            raise ModelRetry(
+                "The visual source must call kit.ready() once it has drawn, or "
+                "the learner sees the fallback instead."
+            )
+        if not source_loads_nothing_external(visual.source):
+            raise ModelRetry(
+                "The visual source must be self-contained: no iframe, object, "
+                "embed or link tags, no script src, and no external or network "
+                "URLs. Write plain inline HTML, SVG and JavaScript."
+            )
 
 
 # --- prompt assembly (user prompt built from deps) -----------------------------
@@ -630,7 +801,11 @@ _REVISION_RULES = (
     "definitions, the same worked results — because the lessons around it were "
     "written against those and must stay coherent. Change how it teaches, not "
     "what is true. Do not mention the revision, the earlier version, or that "
-    "anything changed: the learner reads a lesson, not a diff."
+    "anything changed: the learner reads a lesson, not a diff. The passage it "
+    "replaces may contain ```visual fences naming visuals stored with that "
+    "version; those ids are not yours to reuse. If this lesson should keep a "
+    "visual, write it again in `visuals` under your own placeholder ref "
+    "(visual-1) and fence that."
 )
 
 _NEW_REVISION_RULES = (
