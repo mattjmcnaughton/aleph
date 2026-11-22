@@ -11,12 +11,10 @@
 > implementation notes below are retained only as historical context. Current Flow is a bounded
 > run of ordinary lessons and its receipt contains no retention surface.
 
-> **Current status (#262): built, default on in this feature branch, unshipped.**
+> **Current status: shipped and default on (v1.46.0, #262).**
 > `FLAG_DEFAULTS[FLOW] = True`; `FEATURE_FLAG_DEFAULTS=flow:off` still reaches learners
-> and admins unless a per-user override wins. Production configuration is unchanged;
-> removing any production Flow override requires a separate authorized post-deploy step.
-> The Flow journey is W34; analyst W32 remains unchanged. Native is conditionally parked
-> under the Home Screen app execution amendment; real-phone acceptance remains deferred.
+> and admins unless a per-user override wins. The Flow journey is W34; analyst W32
+> remains unchanged.
 >
 > **Original implementation plan follows.** This document is the implementer's brief. It is written for an
 > engineer (or agent) starting cold: it carries every decision already taken, every codebase fact the
@@ -67,7 +65,7 @@ untouched. Nothing about a flow is stored on the server.
 | D7 | Drafts wait for the end | Auto-draft keeps drafting as each lesson opens (unchanged). The per-lesson `DraftList` is **not rendered** inside a flow; the receipt shows every drafted set from the flow as one batch, kept per lesson. An ended-early flow still gets the batch. | The keep/discard moment would break the one thing a flow is for. Drafts are re-served on any later fetch (api.md: abandoned drafts wait), so nothing is lost by deferring. |
 | D8 | Generation look-ahead | The client pre-draws the *next* lesson when the current one opens and fires the existing poll-as-trigger, `GET /lessons/{nextId}`, once — via `queryClient.prefetchQuery(lessonQueryOptions(nextId))`. No `POST …/generate`. *Decided here.* | Backend Prefetch (+N) is per-path (`services/generation.py`, `ensure_prefetch_window`); an interleaved flow's next lesson is on a *different* path. The GET is idempotent, spawns the resume, refills that path's window, and is not counted by the generation rate limit the way `POST …/generate` is. |
 | D9 | A failed or stalled lesson mid-flow | The lesson route renders its existing `FailedState`/`StalledState`; the flow bar stays; nothing auto-skips. | api.md §Lessons documents the "complete past a failed head" dead-end. An auto-advancing flow must never walk into it. |
-| D10 | Feature flag | Initially registered `FeatureFlag.FLOW` **dark**, in `ADMIN_DEFAULT_FLAGS`, gated purely in the client with `useFeatureFlag("flow")`. #262 sets `FLAG_DEFAULTS[FLOW] = True` in this feature branch, unshipped; settings and per-user precedence are unchanged. | Every launched surface ran the dark-then-flip playbook (deploy.md §Launching a flagged phase) and keeps a kill switch. This is the first client-only gate (no router `404`); acceptable because there is no router. |
+| D10 | Feature flag | Initially registered `FeatureFlag.FLOW` **dark**, in `ADMIN_DEFAULT_FLAGS`, gated purely in the client with `useFeatureFlag("flow")`. #262 set `FLAG_DEFAULTS[FLOW] = True`, shipped in v1.46.0; settings and per-user precedence are unchanged. | Every launched surface ran the dark-then-flip playbook (deploy.md §Launching a flagged phase) and keeps a kill switch. This is the first client-only gate (no router `404`); acceptable because there is no router. |
 | D11 | Due cards | Never inside a flow. The receipt links to `/review` when cards are due. | Lessons and reviews are counted, scheduled and celebrated differently; a flow is the wrong first place to blur them. |
 | D12 | Analytics | No new event. | There is no client event ingest (metrics.md); `lesson_viewed`/`lesson_completed` already reconstruct flow-shaped bursts within a Session. Adding an event would need a purpose-built route — out of scope. |
 | D13 | Length options | `3`, `5`, `8`, **Until I stop** (`null`). No minutes estimate. *Settled by the owner.* | Aleph has no per-lesson duration; a made-up estimate is a small lie. |

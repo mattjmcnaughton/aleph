@@ -1,5 +1,11 @@
 # TDD — The iOS app (native SwiftUI client)
 
+> **Abandoned, 2026-11-22.** The owner abandoned the native iOS app; the web app,
+> installable as the [Home Screen app](../prds/home-screen-app.md), is the only learner client. The Swift
+> branches (`claude/ios`, `ios-dev/*`) and the native issues were deleted or closed.
+> This document is kept only as a record of the decisions; nothing in it is live
+> guidance. It was parked on 2026-10-20, and that earlier note follows.
+>
 > **Parked (conditional), 2026-10-20.** Follow the accepted
 > [Home Screen app execution amendment](home-screen-app.md#execution-amendment-2026-10-20),
 > not this native build plan. T0 is deferred to the end, not passed; native remains
@@ -9,7 +15,7 @@
 
 **Status:** plan, ready to build · **Owner:** solo builder · **Companion to:** [iOS app PRD](../prds/ios-app.md)
 **References:** [`CLAUDE.md` — Two Clients](../../CLAUDE.md#two-clients-web-and-ios) · [`CONTEXT.md`](../CONTEXT.md) · [`api.md`](../api.md) · [`architecture.md`](../architecture.md) · [`ci.md`](../ci.md) · [`deploy.md`](../deploy.md) · [ADR 0001 — store the last-seen time zone](../adrs/0001-store-last-seen-time-zone.md) · [ADR 0002 — iOS-owned Markdown renderer](../adrs/0002-ios-owned-markdown-renderer.md) · [Flow TDD](flow.md) · [Phase 2 TDD](phase-2-tutor.md) · [Phase 6 TDD](phase-6-analyst.md)
-**Builds on:** the home-screen PoC on [`claude/ios-homescreen-poc`](https://github.com/mattjmcnaughton/aleph/tree/claude/ios-homescreen-poc) (kept as a reference branch, not merged; its CI runs: [record](https://github.com/mattjmcnaughton/aleph/actions/runs/39064335563), [compare](https://github.com/mattjmcnaughton/aleph/actions/runs/39065171978)) (`clients/ios/`, `.github/workflows/ios.yml`)
+**Builds on:** the home-screen PoC on [`claude/ios-homescreen-poc`](https://github.com/mattjmcnaughton/aleph/tree/claude/ios-homescreen-poc) (branch deleted 2026-11-22, never merged; its CI runs: [record](https://github.com/mattjmcnaughton/aleph/actions/runs/39064335563), [compare](https://github.com/mattjmcnaughton/aleph/actions/runs/39065171978)) (`clients/ios/`, `.github/workflows/ios.yml`)
 
 > **This document is the implementer's brief.** It is written for an engineer (or agent) starting
 > cold. Where it says **settled**, the owner decided; do not re-open it. Where it says **decided

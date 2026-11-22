@@ -10,8 +10,8 @@
 // lesson rather than rebuilding it in TypeScript. So the assertion is "the reply
 // names the words this lesson is showing the learner", which is a property of
 // the whole chain — context assembly → prompt → stream → the rail's renderer —
-// and not a string two files happen to agree on. Reply *quality* is §10's job
-// (the evals), never a browser's.
+// and not a string two files happen to agree on. Reply *quality* is the
+// prompt's job, judged by reviewing real output, never a browser's.
 //
 // The second half is the one the PRD calls the pass condition: the tutor is
 // **additive**. It gates nothing and writes no Phase 1 state, so the Quick check

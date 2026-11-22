@@ -20,7 +20,7 @@ Boundary contract (see :mod:`aleph.domains`): a service maps rows — a
 ``Lesson``'s ``position_in_path`` and ``completed_at``, plus whether an Attempt
 exists on its Quick check — into :class:`LessonEngagement` before calling in.
 The domain never sees an ORM object, which is what lets the shaper agent's
-validation, the apply path, and the evals share it.
+validation, the apply path, and tests share it.
 """
 
 from __future__ import annotations

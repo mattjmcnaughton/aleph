@@ -4,7 +4,7 @@ Modules here derive product rules from **plain data**: they import stdlib only
 (``dataclasses``, ``enum``, ``datetime``, ``collections.abc``) and never touch
 SQLAlchemy models, repositories, services, config, or the DB. That keeps the
 rules trivially testable (pure data in, pure data out) and reusable across the
-service layer, the eval harness, and any future caller.
+service layer, tests, and any future caller.
 
 The **boundary contract**: services map ORM rows to the small frozen input
 dataclasses defined here (:class:`~aleph.domains.progression.LessonProgress`,

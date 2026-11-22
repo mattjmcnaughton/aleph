@@ -8,7 +8,7 @@ mid-path provider refusal surfaces as ``failed`` + retry, §5.1).
 Layout follows the habagou purity pattern (adrs 0010/0011), exactly as
 ``outline.py``: this module binds **no model** and imports **no
 config/services/DB**, so a service (AL-040) injects the model at run time via
-``agent.run(..., model=...)`` and eval harnesses import the factory directly.
+``agent.run(..., model=...)`` and tests import the factory directly.
 The §14 word/option bands are **not** read from config here — they arrive as a
 run-time dependency (:class:`LessonCaps` inside :class:`LessonDeps`), which the
 service populates from ``Settings``.
@@ -17,13 +17,13 @@ Two-layer validation (habagou's pattern): the output schema is layer 1 (shape);
 :func:`validate_lesson_content` is layer 2 (``ModelRetry`` on an
 option/index/duplicate/size/empty violation, fed back so the model
 self-corrects). The invariants live in this module as importable pure
-predicates + a composing ``validate_lesson_content`` because the eval harness's
-deterministic pre-filters (§11) reuse the *same* code — shared, not duplicated.
+predicates + a composing ``validate_lesson_content`` so the agent's validator
+and the tests exercise the *same* code — shared, not duplicated.
 They sit here beside the ``LessonContent`` schema they validate, exactly as
 AL-031's ``validate_outline`` sits with ``OutlineResult`` in ``outline.py`` (see
 thermo-2 in the AL-032 review: a separate ``validators.py`` holding only the
 *lesson* validators was asymmetric with the outline agent and its name wrongly
-implied general/shared validators; evals now import each agent's validators from
+implied general/shared validators; each agent's validators now live in
 that agent's own module).
 
 **Prompt assembly & the stub contract.** :func:`build_lesson_prompt` builds the
@@ -80,7 +80,7 @@ class QuickCheck(BaseModel):
 
     A ``stem``, 3-4 ``options``, the ``correct_index`` into them, and an
     ``explanation``. The count/range/duplication checks live with the assembled
-    agent's output validators below (shared with the eval pre-filters, §11).
+    agent's output validators below.
     """
 
     stem: str
@@ -133,20 +133,18 @@ class LessonContent(BaseModel):
     visuals: list[Visual] = []
 
 
-# --- shared validator predicates (TDD §5.1, §5.2, §14, §11) --------------------
-# The lesson agent's output invariants are needed in **two** places: as the
-# assembled agent's layer-2 output validator (``ModelRetry`` on violation) and as
-# the eval harness's deterministic *pre-filters* (§11, free checks that gate
-# before judge spend). The TDD is explicit these are **shared code, not
-# duplicated** (§5.1). Each is a boolean check on plain fields so the eval
-# harness can call them as per-dimension pre-filters; ``validate_lesson_content``
+# --- shared validator predicates (TDD §5.1, §5.2, §14) -------------------------
+# The lesson agent's output invariants are the assembled agent's layer-2 output
+# validator (``ModelRetry`` on violation). The TDD is explicit these are **shared
+# code, not duplicated** (§5.1). Each is a boolean check on plain fields so tests
+# can call them one dimension at a time; ``validate_lesson_content``
 # composes them for the agent's output validator. Word counting is
 # whitespace-split (matching the stub's own passage sizing) — "words" for the §14
 # band, not glyphs or tokens.
 #
 # The passage is Markdown, and the count stays deliberately naive about that: a
 # fence line and the words inside a code block count like any other. One counting
-# rule for the agent, the validator, and the eval pre-filters beats a
+# rule for the agent and the validator beats a
 # Markdown-aware count that the prompt could only describe approximately, so the
 # prompt states the rule ("the word band counts every word in the passage, code
 # blocks included") rather than the count trying to guess intent.
@@ -259,8 +257,8 @@ class LessonCaps:
     Defaults mirror TDD §14's provisional numbers so the module is runnable and
     tests are terse, but they are **dependencies, not config**: the service
     constructs this from ``Settings`` (``READ_PASSAGE_WORDS`` …) and passes it in
-    :class:`LessonDeps`; the eval harness constructs it directly to run the same
-    pre-filters. Mirrors AL-031's ``OutlineCaps`` — the frozen, eagerly-validated
+    :class:`LessonDeps`; tests construct it directly to run the same
+    validators. Mirrors AL-031's ``OutlineCaps`` — the frozen, eagerly-validated
     cap set that both targets the prompt and backs the output validator.
     """
 
@@ -537,7 +535,7 @@ always produce the lesson — there is no refusal option at this stage.\
 """
 
 
-# --- output validator (layer 2 — ModelRetry, shared with eval pre-filters) -----
+# --- output validator (layer 2 — ModelRetry) ----------------------------------
 
 
 def validate_lesson_content(caps: LessonCaps, content: LessonContent) -> LessonContent:
@@ -552,7 +550,7 @@ def validate_lesson_content(caps: LessonCaps, content: LessonContent) -> LessonC
     retry.
 
     Pure and config-free: the bands come from the caller (the agent passes
-    ``ctx.deps.caps``; the eval harness passes its own), never from imported
+    ``ctx.deps.caps``; tests pass their own), never from imported
     settings.
 
     The non-empty passage check is kept distinct from the word-band check (not
@@ -564,9 +562,9 @@ def validate_lesson_content(caps: LessonCaps, content: LessonContent) -> LessonC
     Scope note (mirrors AL-031's discipline): this enforces exactly the §5.1/§14
     band — option count, index range, distinctness, passage size, non-empty
     stem/explanation. It deliberately does **not** check option non-emptiness
-    (c-5), factual accuracy, or level-appropriateness: those are graded by the
-    eval judge (§11), not gated deterministically. Widening past the band would
-    over-validate beyond spec.
+    (c-5), factual accuracy, or level-appropriateness: those are the prompt's job,
+    judged by reviewing real output, not gated deterministically. Widening past
+    the band would over-validate beyond spec.
     """
     passage = content.read_passage
     if not is_non_empty(passage):
@@ -790,10 +788,9 @@ def _teaching_style_block(teaching_style: str) -> str:
 
 # The consistency posture D7 promises, written for the model. It is a
 # *prompt-level* promise and the TDD says so plainly (§14): the mechanism is the
-# old passage plus this rule, and the check is rubric 3 plus the content
-# follow-through evals — there is nothing structural holding a revised lesson to
-# its neighbours, and pretending otherwise here would be the wrong kind of
-# comment.
+# old passage plus this rule, and the check is reviewing real output — there is
+# nothing structural holding a revised lesson to its neighbours, and pretending
+# otherwise here would be the wrong kind of comment.
 _REVISION_RULES = (
     "This lesson already exists on the learner's path and THEY asked for it to "
     "be re-taught. Rewrite it to follow the instruction above. Keep every "

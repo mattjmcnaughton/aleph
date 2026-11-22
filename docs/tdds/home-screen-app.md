@@ -1,7 +1,14 @@
 # TDD — The Home Screen app (installable web app and Web Push)
 
-**Status:** Accepted for provisional feature-branch implementation; T0 and release acceptance outstanding · **Owner:** solo builder · **Companion to:** [Home Screen app PRD](../prds/home-screen-app.md)
-**References:** [`CONSTITUTION.md`](../../CONSTITUTION.md) (§1A) · [`CLAUDE.md`](../../CLAUDE.md) · [`CONTEXT.md`](../CONTEXT.md) · [`api.md`](../api.md) · [`architecture.md`](../architecture.md) · [`ci.md`](../ci.md) · [`deploy.md`](../deploy.md) · [ADR 0001 — store the last-seen time zone](../adrs/0001-store-last-seen-time-zone.md) · [iOS app TDD](ios-app.md) (parked if the PRD is accepted; §9 and §10 here restate what this plan keeps from it)
+**Status:** Shipped (v1.46.0); real-device acceptance never recorded · **Owner:** solo builder · **Companion to:** [Home Screen app PRD](../prds/home-screen-app.md)
+**References:** [`CONSTITUTION.md`](../../CONSTITUTION.md) (§1A) · [`CLAUDE.md`](../../CLAUDE.md) · [`CONTEXT.md`](../CONTEXT.md) · [`api.md`](../api.md) · [`architecture.md`](../architecture.md) · [`ci.md`](../ci.md) · [`deploy.md`](../deploy.md) · [ADR 0001 — store the last-seen time zone](../adrs/0001-store-last-seen-time-zone.md) · [iOS app TDD](ios-app.md) (abandoned; §9 and §10 here restate what this plan keeps from it)
+
+> **Shipped, 2026-10-21 (v1.46.0).** The owner promoted `feature/home-screen-app` to
+> `main` in #286 despite the open gates. The real-iPhone check (T0, #259) and the device
+> and operations handoff (#270) were never recorded and were closed as not planned on
+> 2026-11-22. The native iOS app this replaced was abandoned the same day. The
+> amendment and draft below are kept as history; their delivery rules (feature branch
+> only, no main merge) no longer apply.
 
 ## Execution amendment (2026-10-20)
 

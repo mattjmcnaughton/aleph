@@ -106,6 +106,6 @@ class Beat(Base, UUIDAuditMixin):
     # Admin model-picker overrides (TDD D7, §5.3), the ``paths.model_outline``/
     # ``paths.model_lesson`` precedent: stored on the row (not held on the
     # request) so the DB-driven claim/retry re-runs research with the model an
-    # admin chose. ``None`` means "use the configured slot".
+    # admin chose. ``None`` means "use the app-wide ``MODEL_DEFAULT``".
     model_research: Mapped[str | None] = mapped_column(Text, nullable=True)
     model_brief: Mapped[str | None] = mapped_column(Text, nullable=True)

@@ -692,7 +692,7 @@ def emit_tutor_reply_completed(
     ``success`` is the boolean form for the failure-rate guardrail. **A refusal
     is a success**: an over-the-boundary ask answered gracefully is a real,
     persisted turn and is deliberately not machine-tagged this phase (D5,
-    PRD §5.7b) — the distinction lives in the reply text and the evals.
+    PRD §5.7b) — the distinction lives in the reply text.
 
     This is the only place PRD §5.9's *latency to first token* exists: no
     Phase 1 event has it, because no Phase 1 surface streams. ``ttft_ms`` is the
@@ -899,7 +899,7 @@ def emit_shaping_reply_completed(
     is answered gracefully as a real, persisted turn, and is deliberately not
     machine-tagged this phase (D5, PRD §5.7b). It reads here as a success with
     ``has_proposal=False``, which is the only trace of it in the events; the
-    distinction lives in the reply text and in the evals.
+    distinction lives in the reply text.
 
     ``has_proposal`` therefore does two jobs: it is the denominator half of
     proposal acceptance (of the replies that offered an edit, how many were

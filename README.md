@@ -119,8 +119,8 @@ uv run alembic upgrade head   # migrations
 just dev                      # backend on :8000 and the frontend dev server
 ```
 
-Real generation needs `OPENROUTER_API_KEY` in `.env`; without it, point the
-`MODEL_*` slots at `stub` for deterministic offline content. See
+Real generation needs `OPENROUTER_API_KEY` in `.env`; without it, set
+`MODEL_DEFAULT=stub` for deterministic offline content. See
 [docs/development.md](docs/development.md) for the full setup and debugging.
 
 ### Checks
@@ -131,7 +131,6 @@ Real generation needs `OPENROUTER_API_KEY` in `.env`; without it, point the
 | `just test-integration` | Integration tests against real Postgres and Keycloak |
 | `just test-e2e` | Playwright journeys on a phone viewport |
 | `just gate-expensive` | All of the above |
-| `just evals` | The generation eval harness (costs money; see [docs/evals.md](docs/evals.md)) |
 
 Every check has `-be` and `-fe` variants, such as `just lint-fe`.
 

@@ -7,8 +7,8 @@ conflated with a failure.
 
 Layout follows the habagou purity pattern (adrs 0010/0011): this module binds
 **no model** and imports **no config/services/DB**, so a service (AL-040)
-injects the model at run time via ``agent.run(..., model=...)`` and eval
-harnesses import the factory directly. Caps are *not* read from config here —
+injects the model at run time via ``agent.run(..., model=...)`` and tests
+import the factory directly. Caps are *not* read from config here —
 they arrive as run-time dependencies (:class:`OutlineDeps` / :class:`OutlineCaps`),
 which the service populates from ``Settings`` (§14). :func:`build_outline_agent`
 assembles the full agent (level-scoped system prompt + the §14 cap validators);
@@ -333,10 +333,10 @@ def validate_outline(caps: OutlineCaps, result: OutlineResult) -> OutlineResult:
     counts within caps, non-empty *titles*, unique *lesson* titles. It
     deliberately does **not** check unit-summary content (a whitespace-only
     summary passes) or unit-title distinctness: a one-sentence summary and
-    distinct unit titles are *prompt targets*, and their quality is graded by
-    the eval judge (§11), not gated deterministically. Widening the validator
-    past the §14 band would over-validate beyond spec, so these stay prompt-only
-    by design.
+    distinct unit titles are *prompt targets*, and their quality is the prompt's
+    job, judged by reviewing real output, not gated deterministically. Widening
+    the validator past the §14 band would over-validate beyond spec, so these
+    stay prompt-only by design.
     """
     if isinstance(result, Refusal):
         if not result.message.strip():

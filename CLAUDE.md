@@ -91,21 +91,19 @@ src/aleph/web/frontend/tests/e2e/  # Playwright browser suite (E2E, phone viewpo
 
 ## One Client: Web and Home Screen app
 
-The [Home Screen app plan](docs/prds/home-screen-app.md#execution-amendment-2026-10-20)
-uses the existing web client, not a second implementation. Native iOS is
-**conditionally parked**; its [PRD](docs/prds/ios-app.md) and [TDD](docs/tdds/ios-app.md)
-remain historical references. This work requires no Swift changes, native build,
-generated Swift client or native backlog edits. Keep API schemas and `docs/api.md`
-consistent with API changes. Render untrusted Read passages without raw HTML or
-dangerous URL schemes; verify client behavior with web tests.
+The web client is the only learner client. The
+[Home Screen app](docs/prds/home-screen-app.md) shipped to `main` in v1.46.0: the
+same web app, installable on the iPhone Home Screen, with Web Push Notifications.
+Work on it like any other web change, on a branch off `main`.
 
-The owner approved provisional implementation on `feature/home-screen-app`, with
-the real-iPhone T0 spike deferred to the end and rework risk accepted. Neither
-feasibility nor release acceptance has passed. No main merge or production change
-is authorized by this plan. If native returns, CONSTITUTION.md §8's equivalent
-experiences obligation applies again: shared API/vocabulary, tracked parity gaps,
-and independently implemented client rules tested in each active client. Admin
-tools remain web-only; Notifications reach every capable active client.
+The native iOS app was **abandoned** on 2026-11-22. Its
+[PRD](docs/prds/ios-app.md), [TDD](docs/tdds/ios-app.md) and
+[ADR 0002](docs/adrs/0002-ios-owned-markdown-renderer.md) are kept only as a
+record; don't build from them, and don't add Swift code or a generated Swift client.
+
+Keep API schemas and `docs/api.md` consistent with API changes. Render untrusted
+Read passages without raw HTML or dangerous URL schemes; verify client behavior
+with web tests. Admin tools are web-only.
 
 ## Testing Philosophy
 

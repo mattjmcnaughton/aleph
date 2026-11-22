@@ -1,5 +1,11 @@
 # PRD — The iOS app (native SwiftUI client)
 
+> **Abandoned, 2026-11-22.** The owner abandoned the native iOS app; the web app,
+> installable as the [Home Screen app](home-screen-app.md), is the only learner client. The Swift
+> branches (`claude/ios`, `ios-dev/*`) and the native issues were deleted or closed.
+> This document is kept only as a record of the decisions; nothing in it is live
+> guidance. It was parked on 2026-10-20, and that earlier note follows.
+>
 > **Parked (conditional), 2026-10-20.** The accepted
 > [Home Screen app execution amendment](home-screen-app.md#execution-amendment-2026-10-20)
 > supersedes this native implementation plan. T0 is deferred to the end, not passed;

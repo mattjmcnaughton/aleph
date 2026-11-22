@@ -215,7 +215,7 @@ async def deploy_beat(
 
     Model overrides are enforced **first** — admin-only (``403``),
     allowlist-bound (``422``) — the identical ``validate_model_override``
-    ``POST /paths`` already runs for its own two slots, so an unauthorized or
+    ``POST /paths`` already runs for its own two picker fields, so an unauthorized or
     off-allowlist request is rejected before any quota is spent. The **stock**
     Beat cap (``check_beat_creation``, ``MAX_BEATS_PER_LEARNER``, admins
     exempt) is then checked before the row is created. This is this route's

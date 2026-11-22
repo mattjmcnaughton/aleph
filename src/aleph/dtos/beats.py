@@ -64,13 +64,13 @@ class DeployBeatRequest(BaseModel):
     admin-only per-Beat picker overrides (TDD D7/§5.3):
     ``routers/v1/paths.py::validate_model_override`` enforces them (``403``
     non-admin, ``422`` off-allowlist) before any billed work, the identical
-    enforcement ``POST /paths`` already runs for its own two slots.
+    enforcement ``POST /paths`` already runs for its own two picker fields.
     """
 
     # ``model_research``/``model_brief`` start with the ``model_`` prefix
     # pydantic protects by default; the picker wire contract fixes these
-    # names (parity with the ``MODEL_DEFAULT`` config
-    # slots, ``CreatePathRequest``'s own precedent), so opt out of the
+    # names (parity with the ``MODEL_DEFAULT`` setting,
+    # ``CreatePathRequest``'s own precedent), so opt out of the
     # protected namespace rather than rename.
     model_config = ConfigDict(protected_namespaces=())
 

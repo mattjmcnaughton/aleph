@@ -141,17 +141,14 @@ class Settings(BaseSettings):
 
         The stub is the deterministic CI/e2e model (D9); reaching it in
         production would silently serve canned content, so it is rejected here
-        rather than at resolution time. This covers both the fixed model
-        slots *and* the admin picker's ``MODEL_ALLOWLIST`` — once AL-052's
-        per-request picker lands, an allowlisted ``stub`` would let an admin
-        select it in prod and call ``resolve_model("stub")``, bypassing a
-        slot-only guard. The picker's reach grew again in Phase 2 (the tutor
-        takes it as a per-message override, §5.3) and in Phase 2B (the shaper
-        takes the same per-message override, Phase 2B §5.3/D10), so the
-        allowlist arm covers those slots as well.
+        rather than at resolution time. This covers both the app-wide
+        ``MODEL_DEFAULT`` *and* the admin picker's ``MODEL_ALLOWLIST`` — an
+        allowlisted ``stub`` would let an admin select it in prod as a
+        per-request override and call ``resolve_model("stub")``, bypassing a
+        default-only guard.
 
-        The slot arm iterates :data:`MODEL_SLOTS`, so a new slot is guarded the
-        moment it is listed there. ``tests/unit/test_config_models.py``
+        The default arm iterates :data:`MODEL_SLOTS`, so any model setting is
+        guarded the moment it is listed there. ``tests/unit/test_config_models.py``
         parametrizes over an independent literal list — deliberately not over
         the constant, which would make the test tautological.
         """
@@ -509,7 +506,7 @@ class Settings(BaseSettings):
     # --- Phase 5: streaks (TDD §13, D1/D12) -----------------------------------
     # Appended as this phase's self-contained block at the END of Settings
     # (every phase branch appends its own; keep them separate to avoid merge
-    # conflicts). This is the **only** knob the slice adds — no model slot, no
+    # conflicts). This is the **only** knob the slice adds — no model setting, no
     # timeout, no semaphore, no rate limiter, because D1's whole payoff is a
     # feature derived from existing rows rather than one with new machinery to
     # tune.
