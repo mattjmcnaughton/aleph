@@ -29,6 +29,8 @@ function useSession(session: AuthSession) {
 async function gotoNewPath() {
   window.history.pushState({}, "", "/new");
   render(<App />);
+  // A bare /new opens on the idea step; these tests drive the form itself.
+  fireEvent.click(await screen.findByRole("button", { name: "I'll fill in the form myself" }));
   return (await screen.findByRole("textbox", { name: /topic/i })) as HTMLInputElement;
 }
 

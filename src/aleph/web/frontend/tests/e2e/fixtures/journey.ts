@@ -152,6 +152,8 @@ export async function startPath(
   beforeSubmit?: (page: Page) => Promise<void>,
 ): Promise<void> {
   await page.goto("/new");
+  // A bare /new opens on the idea step (Path draft); these journeys use the form.
+  await page.getByRole("button", { name: "I'll fill in the form myself" }).click();
   await page.locator("#onboarding-topic").fill(topic);
   await page.locator(`label[for="level-${level}"]`).click();
   await beforeSubmit?.(page);

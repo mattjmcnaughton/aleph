@@ -5,6 +5,7 @@ import { resetAccount } from "../src/mocks/account";
 import { resetBeats } from "../src/mocks/beats";
 import { resetFlowCelebrations } from "../src/lib/flow-celebration";
 import { resetLessons } from "../src/mocks/lessons";
+import { resetPathDrafts } from "../src/mocks/path-drafts";
 import { resetPaths } from "../src/mocks/paths";
 import { resetProgress } from "../src/mocks/progress";
 import { server } from "../src/mocks/server";
@@ -33,6 +34,7 @@ beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterEach(() => {
   server.resetHandlers();
   resetPaths();
+  resetPathDrafts();
   resetLessons();
   resetTutor();
   resetShaping();

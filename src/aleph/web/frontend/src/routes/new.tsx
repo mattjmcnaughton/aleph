@@ -5,6 +5,7 @@ import {
   type Level,
   PATHS_LIST_QUERY_KEY,
   type PathDetail,
+  type PathDraft,
   createPath,
   isPathStatusTerminal,
   isRateLimited,
@@ -17,6 +18,8 @@ import { AboutYouApplies } from "../components/about-you-applies";
 import { ModelPicker } from "../components/model-picker";
 import { announcePathCreated } from "../components/push-lifecycle";
 import { Breadcrumbs } from "../components/breadcrumbs";
+import { PathDraftFlow } from "../components/path-draft/path-draft-flow";
+import { usePathDraft } from "../components/path-draft/use-path-draft";
 import { LevelFieldset } from "../components/level-fieldset";
 import { TeachingStyleField } from "../components/teaching-style-field";
 import { PRIMARY_CTA, RetryNotices, Spinner, StateCard } from "../components/state-card";
@@ -90,6 +93,31 @@ function NewPath() {
   // `buildCreatePathInput` drops the key rather than sending an empty id.
   const [modelOutline, setModelOutline] = useState(MODEL_SLOT_DEFAULT);
   const [modelLesson, setModelLesson] = useState(MODEL_SLOT_DEFAULT);
+
+  // Drafting from an Idea (CONTEXT.md: *Path draft*) is where a bare `/new`
+  // starts. Any prefill (a Learning summary Suggestion, Go deeper) already says
+  // what the path is, so it opens straight on the form, exactly as before.
+  const prefilled = Object.values(search).some((value) => value !== undefined);
+  const [mode, setMode] = useState<"idea" | "form">(prefilled ? "form" : "idea");
+  const [filledFromDraft, setFilledFromDraft] = useState(false);
+  const draftFlow = usePathDraft();
+
+  // "Use this draft" fills the ordinary form and nothing else: the learner
+  // still edits and submits it (Constitution §2).
+  function applyDraft(draft: PathDraft) {
+    setTopic(draft.topic);
+    setLevel(draft.level);
+    setGuidance(draft.guidance);
+    setTeachingStyle(draft.teaching_style);
+    setFilledFromDraft(true);
+    setMode("form");
+    window.scrollTo(0, 0);
+  }
+
+  function showDraft() {
+    setMode("idea");
+    window.scrollTo(0, 0);
+  }
 
   // The session is already resolved (the root route's `beforeLoad` awaits it),
   // so this is a cache read: is this learner an admin, and which model ids may
@@ -198,8 +226,36 @@ function NewPath() {
         Name a topic or a goal and Aleph drafts a path you can work through, lesson by lesson.
       </p>
 
-      {phase === "editing" ? (
+      {phase === "editing" && mode === "idea" ? (
+        <PathDraftFlow
+          flow={draftFlow}
+          onUse={applyDraft}
+          onFillMyself={() => {
+            setFilledFromDraft(false);
+            setMode("form");
+          }}
+        />
+      ) : null}
+
+      {phase === "editing" && mode === "form" && filledFromDraft ? (
+        <div
+          data-testid="draft-filled-notice"
+          className="mt-8 flex items-start justify-between gap-3 rounded-md border border-divider bg-elevated px-4 py-3 text-sm leading-6 text-mist"
+        >
+          <span>Filled from Aleph's draft. Edit anything before you build.</span>
+          <button
+            type="button"
+            className="shrink-0 font-medium text-iris-300 hover:text-iris-400"
+            onClick={showDraft}
+          >
+            See draft
+          </button>
+        </div>
+      ) : null}
+
+      {phase === "editing" && mode === "form" ? (
         <OnboardingForm
+          compact={filledFromDraft}
           topic={topic}
           level={level}
           guidance={guidance}
@@ -282,6 +338,8 @@ interface FormProps {
    * renders nothing for everyone else, so the form places it unconditionally.
    */
   modelPicker: React.ReactNode;
+  /** Sits under the "Filled from Aleph's draft" notice: less space above. */
+  compact?: boolean;
 }
 
 function OnboardingForm({
@@ -302,9 +360,10 @@ function OnboardingForm({
   rateLimited,
   errored,
   modelPicker,
+  compact = false,
 }: FormProps) {
   return (
-    <form className="mt-8" onSubmit={onSubmit} noValidate>
+    <form className={compact ? "mt-5" : "mt-8"} onSubmit={onSubmit} noValidate>
       {rateLimited ? (
         <p
           data-testid="onboarding-ratelimit"

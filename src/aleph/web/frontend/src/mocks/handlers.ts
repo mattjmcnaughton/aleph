@@ -4,6 +4,7 @@ import { accountHandlers } from "./account";
 import { beatHandlers } from "./beats";
 import { lessonsHandlers } from "./lessons";
 import { ADMIN_MODEL_ALLOWLIST } from "./models";
+import { pathDraftHandlers } from "./path-drafts";
 import { pathsHandlers } from "./paths";
 import { progressHandlers } from "./progress";
 import { shapingHandlers } from "./shaping";
@@ -91,6 +92,7 @@ export const handlers = [
   http.get(`${API_V1_BASE}/auth/session`, () => HttpResponse.json(authenticatedSession)),
   http.post(AUTH_LOGOUT_PATH, () => new HttpResponse(null, { status: 204 })),
   ...pathsHandlers,
+  ...pathDraftHandlers,
   ...lessonsHandlers,
   ...tutorHandlers,
   ...shapingHandlers,

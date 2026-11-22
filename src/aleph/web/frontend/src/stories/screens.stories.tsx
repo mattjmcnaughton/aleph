@@ -7,6 +7,7 @@ import { learnerUser } from "../mocks/handlers";
 import { writeFlow } from "../lib/flow";
 import { EXAMPLE_SUMMARY, configureAccount } from "../mocks/account";
 import { configureBeats, resetBeats, seedBeat } from "../mocks/beats";
+import { EXAMPLE_IDEA, EXAMPLE_QUESTIONS, configurePathDrafts } from "../mocks/path-drafts";
 import { configurePaths, resetPaths } from "../mocks/paths";
 import { configureProgress, zeroActivity } from "../mocks/progress";
 import { AppAt } from "./app-at";
@@ -81,7 +82,137 @@ export const Login: Story = {
   },
 };
 
-export const NewPath: Story = { name: "New path", args: { url: "/new" } };
+export const NewPath: Story = {
+  name: "New path — the form",
+  args: { url: "/new" },
+  play: async ({ canvasElement }) => {
+    await fillTheFormMyself(within(canvasElement));
+  },
+};
+
+// --- New path, drafted from an idea (CONTEXT.md: *Path draft*) -------------------
+//
+// A bare `/new` opens on the idea step. Each story clicks through the real flow
+// against the Path drafts fakes (`mocks/path-drafts.ts`), so every frame is the
+// shipped component on the mockup's Postgres example.
+
+type Canvas = ReturnType<typeof within>;
+
+async function fillTheFormMyself(canvas: Canvas) {
+  await userEvent.click(
+    await canvas.findByRole("button", { name: "I'll fill in the form myself" }),
+  );
+}
+
+async function typeIdea(canvas: Canvas) {
+  const idea = await canvas.findByRole("textbox", { name: "Start from an idea" });
+  await userEvent.clear(idea);
+  // `paste` rather than `type`: one input event, not one per character.
+  await userEvent.click(idea);
+  await userEvent.paste(EXAMPLE_IDEA);
+}
+
+async function toDraft(canvas: Canvas) {
+  await typeIdea(canvas);
+  await userEvent.click(canvas.getByRole("button", { name: "Draft it for me" }));
+  await canvas.findByTestId("path-draft");
+}
+
+async function toInterview(canvas: Canvas) {
+  await toDraft(canvas);
+  await userEvent.click(canvas.getByRole("button", { name: "Sharpen it: ask me a few questions" }));
+  await canvas.findByRole("heading", { name: EXAMPLE_QUESTIONS[0].prompt });
+}
+
+async function toSharpened(canvas: Canvas) {
+  await toInterview(canvas);
+  for (const [index, question] of EXAMPLE_QUESTIONS.entries()) {
+    await canvas.findByRole("heading", { name: question.prompt });
+    const role = question.multi ? "checkbox" : "radio";
+    await userEvent.click(canvas.getByRole(role, { name: question.options[index === 1 ? 1 : 0] }));
+    if (question.multi) {
+      await userEvent.click(canvas.getByRole(role, { name: question.options[1] }));
+    }
+    const last = index === EXAMPLE_QUESTIONS.length - 1;
+    await userEvent.click(canvas.getByRole("button", { name: last ? "Redraft" : "Next" }));
+  }
+  await canvas.findByText("Aleph's draft, sharpened");
+}
+
+export const NewPathIdea: Story = {
+  name: "New path — idea",
+  args: { url: "/new" },
+  play: async ({ canvasElement }) => {
+    await typeIdea(within(canvasElement));
+  },
+};
+
+export const NewPathDrafting: Story = {
+  name: "New path — drafting",
+  args: { url: "/new" },
+  beforeEach: () => {
+    configurePathDrafts({ holdDrafts: true });
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await typeIdea(canvas);
+    await userEvent.click(canvas.getByRole("button", { name: "Draft it for me" }));
+    await expect(await canvas.findByTestId("path-draft-working")).toBeInTheDocument();
+  },
+};
+
+export const NewPathDraft: Story = {
+  name: "New path — Aleph's draft",
+  args: { url: "/new" },
+  play: async ({ canvasElement }) => {
+    await toDraft(within(canvasElement));
+  },
+};
+
+export const NewPathInterview: Story = {
+  name: "New path — interview",
+  args: { url: "/new" },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await toInterview(canvas);
+    await userEvent.click(canvas.getByRole("radio", { name: EXAMPLE_QUESTIONS[0].options[0] }));
+    await userEvent.click(canvas.getByRole("button", { name: "Next" }));
+    await canvas.findByRole("heading", { name: EXAMPLE_QUESTIONS[1].prompt });
+  },
+};
+
+export const NewPathSharpened: Story = {
+  name: "New path — sharpened draft",
+  args: { url: "/new" },
+  play: async ({ canvasElement }) => {
+    await toSharpened(within(canvasElement));
+  },
+};
+
+export const NewPathFilledFromDraft: Story = {
+  name: "New path — form filled from the draft",
+  args: { url: "/new" },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await toSharpened(canvas);
+    await userEvent.click(canvas.getByRole("button", { name: "Use this draft" }));
+    await expect(await canvas.findByTestId("draft-filled-notice")).toBeInTheDocument();
+  },
+};
+
+export const NewPathDraftError: Story = {
+  name: "New path — draft failed",
+  args: { url: "/new" },
+  beforeEach: () => {
+    configurePathDrafts({ draftFailures: 1 });
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await typeIdea(canvas);
+    await userEvent.click(canvas.getByRole("button", { name: "Draft it for me" }));
+    await expect(await canvas.findByTestId("path-draft-error")).toBeInTheDocument();
+  },
+};
 
 export const NewPathRateLimited: Story = {
   name: "New path — daily limit reached",
@@ -343,6 +474,9 @@ export const NewPathAboutYouApplies: Story = {
   args: { url: "/new" },
   beforeEach: () => {
     configureAccount({ aboutYou: "Use examples from clinical medicine where they fit." });
+  },
+  play: async ({ canvasElement }) => {
+    await fillTheFormMyself(within(canvasElement));
   },
 };
 

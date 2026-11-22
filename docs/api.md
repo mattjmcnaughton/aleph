@@ -582,6 +582,33 @@ the restriction is the correctness boundary rather than a simplification. It
 costs nothing PRD §5.5 promises: a Change stays undoable until it is engaged, by
 undoing the ones above it in turn.
 
+## Path drafts (`/api/v1`)
+
+Session-cookie protected (`401` via the shared envelope when anonymous). Turns a
+learner's **Idea** into a **Path draft** and runs the **Interview** that sharpens
+it (CONTEXT.md). Both routes are **synchronous and stateless**: each call runs
+the app-wide model once (bounded by the generation timeout), answers with a
+proposal, and **stores and creates nothing**. The client resends the idea, the
+answers so far and the previous draft on every call. A draft only ever reaches a
+path through the learner's own `POST /paths`, after "Use this draft" fills the
+New path form and the learner submits it. Each call reads the learner's
+**About you**.
+
+| Method | Path | Body | Success | Notes |
+| ------ | ---- | ---- | ------- | ----- |
+| `POST` | `/api/v1/path-drafts` | `{idea, answers?, previous?}` | `200 {topic, level, guidance, teaching_style}` | A first draft from `idea`, or a redraft when `answers` (and usually `previous`, the draft being sharpened) are sent. `idea` is stripped, 1–1000 chars. `answers` is at most 20 `{question, answer}` pairs (question 1–300 chars, answer 1–500, both stripped), the Interview's questions and the learner's answers as text. `previous` and the response share the draft shape: `topic` (1–500, short in practice), `level` (`new_to_it` \| `some_experience` \| `work_in_it`), `guidance` (newline-separated sentences, 0–4000 chars, `""` for none) and `teaching_style` (0–2000, `""` for none). A violation is `422 validation_error`. |
+| `POST` | `/api/v1/path-drafts/questions` | `{idea, draft, answers?}` | `200 {questions: [{prompt, why, options, multi}]}` | One Interview round about `draft`: 2–5 questions, the model decides how many. `why` is one short line on what the answer decides; `options` is 2–4 short strings; `multi` means several options may be picked together. A question already in `answers` is never asked again (the agent retries rather than repeat one). Same bounds as above. |
+
+**Failure.** A provider error, a timeout, or output that never validated is
+`502 draft_failed` with a retryable message, never a `200` with an empty draft or
+no questions (Constitution §4). Nothing was stored, so a retry is the same
+request again.
+
+**Not rate-limited (known follow-up).** Neither route counts against a daily
+cap yet, like the tutor's cap shipping at `0`: they are stateless and create
+nothing, but each call is a billed model run, so a per-learner cap is the
+expected next step.
+
 ## Account profile (`/api/v1`)
 
 Session-cookie protected; every route reads or writes only the caller's own account.
@@ -593,7 +620,7 @@ Session-cookie protected; every route reads or writes only the caller's own acco
 | `GET` | `/api/v1/learning-summary` | — | `200` | `{state, facts, summary, written_at, min_lessons_complete}`. `state` is `too_early` \| `none` \| `generating` \| `ready` \| `failed`; a run stalled past `GENERATION_STALE_AFTER` reads as `failed`. `facts` (`lessons_complete`, `paths`, `beats`) is counted on every read. `summary` is the last written `{areas, suggestions}` and survives a failed or in-flight refresh. Behind the `learning_summary` flag (`404` when off). |
 | `POST` | `/api/v1/learning-summary` | — | `202` | Trigger + poll: claims the account's summary and starts a run, answering with the `GET` body. A trigger while a run is in flight starts nothing. `409 not_enough_progress` under 3 completed lessons; `429 rate_limited` within 2 minutes of the last write. Flag-gated like `GET`. |
 
-`/new` accepts `topic`, `level`, `guidance` and `teaching_style` search params, and `/beats/new` accepts `topic` and `level`, as editable starting values; the summary's suggestions link there.
+`/new` accepts `topic`, `level`, `guidance` and `teaching_style` search params, and `/beats/new` accepts `topic` and `level`, as editable starting values; the summary's suggestions link there. With any of them, `/new` opens straight on the form; a bare `/new` opens on the idea step (see Path drafts above).
 
 ## Progress (`/api/v1`, Phase 5 TDD §5.4/§6)
 

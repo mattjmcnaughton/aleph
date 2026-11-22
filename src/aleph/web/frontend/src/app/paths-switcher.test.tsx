@@ -343,6 +343,7 @@ describe("Your paths switcher — /", () => {
     await screen.findByTestId("paths-empty");
 
     fireEvent.click(screen.getByTestId("new-path-button"));
+    fireEvent.click(await screen.findByRole("button", { name: "I'll fill in the form myself" }));
     const topic = await screen.findByRole("textbox", { name: /topic/i });
     fireEvent.change(topic, { target: { value: "TypeScript generics" } });
     fireEvent.click(screen.getByRole("button", { name: /build my path/i }));
