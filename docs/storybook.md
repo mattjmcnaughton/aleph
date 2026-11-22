@@ -15,8 +15,11 @@ In an orb, run it as a supervised service and open the portal it prints:
 
 ```sh
 amp orb service start storybook --port 6006 --portal \
-  --command 'cd src/aleph/web/frontend && pnpm exec storybook dev -p 6006 --no-open --ci'
+  --command 'cd src/aleph/web/frontend && pnpm exec storybook dev -p 6006 --host 0.0.0.0 --no-open --ci'
 ```
+
+`--host 0.0.0.0` matters: without it Storybook answers the portal's hostname
+with `403 Invalid host`.
 
 ## Layout
 
