@@ -54,6 +54,7 @@ export const IDS = {
   rustDoneLesson: "l-rust-2",
   rustLockedLesson: "l-rust-7",
   k8sFirstLesson: "l-k8s-1",
+  bayesVisualLesson: "l-bayes-3",
   beat: "b-ai-infra",
   brief: "br-ai-infra-3",
 } as const;
@@ -314,6 +315,101 @@ export function seedGeneratingLesson(): void {
   });
 }
 
+// --- A lesson with an interactive Visual (docs/tdds/lesson-visuals.md) ---------
+
+const BASE_RATE_VISUAL_ID = "7d3f2a10-5b8c-4e1d-9a6f-2c4b8e1f0a37";
+
+/** Agent-style visual source: plain JS against the kit's tokens and classes. */
+const BASE_RATE_SOURCE = `<style>
+  .field{display:grid;grid-template-columns:1fr auto;gap:2px 8px;margin-bottom:10px}
+  .field input{grid-column:1/-1}
+  b{font-variant-numeric:tabular-nums}
+  .grid{display:grid;grid-template-columns:repeat(20,1fr);gap:2px;margin:4px 0 10px;max-width:360px}
+  .grid i{aspect-ratio:1;border-radius:2px;background:var(--elevated)}
+  .grid i.tp{background:var(--teal)} .grid i.fp{background:var(--iris)}
+</style>
+<div class="field"><label for="prev">How common the condition is</label><b id="prev-v"></b>
+  <input id="prev" type="range" min="1" max="20" value="2"></div>
+<div class="field"><label for="acc">Test accuracy</label><b id="acc-v"></b>
+  <input id="acc" type="range" min="80" max="99" value="95"></div>
+<div id="grid" class="grid" role="img" aria-label="200 people, marked by test result"></div>
+<p class="muted" style="margin:0">Of everyone who tests positive, <b id="post" style="color:var(--porcelain)"></b>
+  actually has it. <span style="color:var(--teal)">■</span> true positive
+  <span style="color:var(--iris)">■</span> false positive</p>
+<script>
+  const $ = (id) => document.getElementById(id);
+  function draw() {
+    const prev = Number($("prev").value) / 100, acc = Number($("acc").value) / 100;
+    const n = 200, tp = Math.round(n * prev * acc);
+    const fp = Math.round(n * (1 - prev) * (1 - acc));
+    const posterior = (prev * acc) / (prev * acc + (1 - prev) * (1 - acc));
+    $("prev-v").textContent = $("prev").value + "%";
+    $("acc-v").textContent = $("acc").value + "%";
+    $("post").textContent = Math.round(100 * posterior) + "%";
+    let cells = "";
+    for (let i = 0; i < n; i++) cells += i < tp ? '<i class="tp"></i>' : i < tp + fp ? '<i class="fp"></i>' : "<i></i>";
+    $("grid").innerHTML = cells;
+  }
+  $("prev").addEventListener("input", draw);
+  $("acc").addEventListener("input", draw);
+  draw();
+  kit.ready();
+</script>`;
+
+export const BASE_RATE_VISUAL = {
+  id: BASE_RATE_VISUAL_ID,
+  kind: "interactive" as const,
+  title: "Why a positive test is weaker evidence than it sounds",
+  alt:
+    "Two sliders set how common a condition is (1–20%) and how accurate the test is " +
+    "(80–99%). A grid of 200 people marks true and false positives; at 2% prevalence " +
+    "and 95% accuracy only about 28% of positives actually have the condition.",
+  source: BASE_RATE_SOURCE,
+  kit_version: 1,
+};
+
+const POSTERIOR_PASSAGE = `Bayes' rule says the posterior is the prior, *reweighted by how well each
+hypothesis predicts what you saw*. The surprise is how much the prior matters.
+
+Take a condition **2%** of people have, and a test that is **95%** accurate either
+way. Out of 1,000 people, 20 have it and 19 test positive. Of the 980 who don't, 49
+still test positive. So of the 68 positives, only 19 — about **28%** — have the
+condition.
+
+\`\`\`visual ${BASE_RATE_VISUAL_ID}
+\`\`\`
+
+The false positives come from the *large* healthy group, so they swamp the true
+ones whenever the condition is rare. Raise prevalence to 20% and the same test's
+positives are right about 83% of the time: the evidence did not change, the prior did.`;
+
+/** The Bayes path's third lesson, with an interactive Visual. */
+export function seedVisualLesson(source: string = BASE_RATE_SOURCE): void {
+  seedLesson({
+    id: IDS.bayesVisualLesson,
+    path_id: IDS.bayes,
+    title: "Updating: the posterior",
+    position_in_path: 3,
+    // Matches the path rail: the Bayes path is finished, Attempt recorded.
+    unlock_state: "complete",
+    attemptSelectedIndex: 1,
+    readPassage: POSTERIOR_PASSAGE,
+    stem: "A test is 99% accurate for a condition 1 in 1,000 people have. You test positive. What best describes your chance of having it?",
+    options: [
+      "About 99%, because that is the test's accuracy",
+      "Under 10%, because false positives from the healthy majority dominate",
+      "Exactly 50%, because you either have it or you don't",
+    ],
+    correctIndex: 1,
+    explanation:
+      "Out of 100,000 people, ~99 sick people test positive but ~999 healthy ones do too, so only about 9% of positives are real.",
+    visuals: [{ ...BASE_RATE_VISUAL, source }],
+  });
+}
+
+/** A visual whose source throws: the learner reads its alt text instead. */
+export const BROKEN_VISUAL_SOURCE = `<script>document.getElementById("missing").textContent = "x"; kit.ready();</script>`;
+
 // --- Tutor & shaping ------------------------------------------------------------
 
 export function seedTutor(): void {
@@ -534,6 +630,7 @@ export function seedBeats(): void {
 export function seedWorld(): void {
   seedPaths();
   seedLessons();
+  seedVisualLesson();
   seedTutor();
   seedShaping();
   seedProgress();

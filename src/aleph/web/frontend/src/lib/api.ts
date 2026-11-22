@@ -610,6 +610,21 @@ export interface LessonAttempt {
   explanation: string;
 }
 
+/**
+ * An interactive Visual (CONTEXT.md), referenced from the Read passage by a
+ * ```visual <id> fence. `source` is untrusted, agent-written HTML: render it only
+ * through `components/lesson-visual.tsx`'s sandboxed frame, never in this
+ * document. `alt` is the plain-text fallback.
+ */
+export interface LessonVisual {
+  id: string;
+  kind: "interactive";
+  title: string;
+  alt: string;
+  source: string;
+  kit_version: number;
+}
+
 /** `GET /api/v1/lessons/{id}` body — the poll target (docs/api.md). */
 export interface LessonDetail {
   id: string;
@@ -627,6 +642,8 @@ export interface LessonDetail {
   attempt: LessonAttempt | null;
   /** Non-null only when `generation_state == failed` (learner-safe message). */
   generation_error: string | null;
+  /** The passage's Visuals; empty unless generated (and for most lessons). */
+  visuals: LessonVisual[];
 }
 
 /**

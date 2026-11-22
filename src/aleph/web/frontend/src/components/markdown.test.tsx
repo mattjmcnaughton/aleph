@@ -133,3 +133,49 @@ describe("Markdown", () => {
     expect(root.textContent).toContain("Body.");
   });
 });
+
+describe("Markdown ```visual fences", () => {
+  const VISUAL = {
+    id: "0b6c1f6e-3d1a-4a8e-9a8b-2f6d3c1e9a10",
+    kind: "interactive" as const,
+    title: "Simple and compound interest",
+    alt: "Two bars compare growth.",
+    source: "<script>kit.ready()</script>",
+    kit_version: 1,
+  };
+
+  it("routes a fence naming a listed visual to the sandboxed frame", () => {
+    render(
+      <Markdown testid="md" visuals={[VISUAL]}>
+        {`Before.\n\n\`\`\`visual ${VISUAL.id}\n\`\`\`\n\nAfter.`}
+      </Markdown>,
+    );
+    const root = screen.getByTestId("md");
+
+    const frame = root.querySelector("iframe");
+    expect(frame?.getAttribute("title")).toBe(VISUAL.title);
+    expect(frame?.getAttribute("sandbox")).toBe("allow-scripts");
+    expect(root.querySelector("pre")).toBeNull();
+    expect(root.textContent).toContain("Before.");
+    expect(root.textContent).toContain("After.");
+  });
+
+  it("renders nothing for a fence naming no listed visual", () => {
+    render(
+      <Markdown testid="md" visuals={[VISUAL]}>
+        {"Before.\n\n```visual 11111111-2222-4333-8444-555555555555\n```\n\nAfter."}
+      </Markdown>,
+    );
+    const root = screen.getByTestId("md");
+
+    expect(root.querySelector("iframe")).toBeNull();
+    expect(root.querySelector("pre")).toBeNull();
+    expect(root.textContent).not.toContain("11111111");
+  });
+
+  it("renders nothing for a visual fence when no visuals are passed", () => {
+    render(<Markdown testid="md">{`\`\`\`visual ${VISUAL.id}\n\`\`\``}</Markdown>);
+
+    expect(screen.getByTestId("md").querySelector("iframe")).toBeNull();
+  });
+});

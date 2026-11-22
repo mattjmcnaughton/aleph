@@ -11,6 +11,7 @@ import { configurePaths, resetPaths } from "../mocks/paths";
 import { configureProgress, zeroActivity } from "../mocks/progress";
 import { AppAt } from "./app-at";
 import {
+  BROKEN_VISUAL_SOURCE,
   FAILED_LESSON_ID,
   GENERATING_LESSON_ID,
   IDS,
@@ -18,6 +19,7 @@ import {
   seedFailedLesson,
   seedGeneratingLesson,
   seedPathEdgeStates,
+  seedVisualLesson,
   seedWorld,
   sessionHandler,
   signedOutWorldSession,
@@ -191,6 +193,22 @@ export const LessonFailed: Story = {
   args: { url: `/lessons/${FAILED_LESSON_ID}` },
   beforeEach: () => {
     seedFailedLesson();
+  },
+};
+
+export const LessonWithVisual: Story = {
+  name: "Lesson — with visual",
+  args: { url: `/lessons/${IDS.bayesVisualLesson}` },
+  beforeEach: () => {
+    seedVisualLesson();
+  },
+};
+
+export const LessonVisualFallback: Story = {
+  name: "Lesson — visual fallback (alt text)",
+  args: { url: `/lessons/${IDS.bayesVisualLesson}` },
+  beforeEach: () => {
+    seedVisualLesson(BROKEN_VISUAL_SOURCE);
   },
 };
 

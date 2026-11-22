@@ -758,7 +758,7 @@ function ReadyLesson({
           blocks all carry structure the old `whitespace-pre-line` text node
           flattened. `read_passage` is null only while ungenerated, a state this
           branch never renders — the `?? ""` is a type narrowing, not a case. */}
-      <Markdown testid="lesson-read-passage" className="reading mt-6">
+      <Markdown testid="lesson-read-passage" className="reading mt-6" visuals={detail.visuals}>
         {detail.read_passage ?? ""}
       </Markdown>
 
