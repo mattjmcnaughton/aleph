@@ -1,3 +1,10 @@
+## [1.50.2](https://github.com/mattjmcnaughton/aleph/compare/v1.50.1...v1.50.2) (2026-11-22)
+
+
+### Bug Fixes
+
+* **health:** report deployed commit SHA in /healthz and /readyz ([b663cdf](https://github.com/mattjmcnaughton/aleph/commit/b663cdf9f3b6b09619690d2c3c20865a388e643b))
+
 ## [1.50.1](https://github.com/mattjmcnaughton/aleph/compare/v1.50.0...v1.50.1) (2026-11-22)
 
 
