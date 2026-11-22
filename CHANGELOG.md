@@ -1,3 +1,12 @@
+# [1.52.0](https://github.com/mattjmcnaughton/aleph/compare/v1.51.0...v1.52.0) (2026-11-22)
+
+
+### Features
+
+* **lessons:** let the lesson agent attach one interactive visual ([78aa764](https://github.com/mattjmcnaughton/aleph/commit/78aa76410c154ef7aa2ed49711350dd0e4615c03))
+* **lessons:** store, serve and shape lesson visuals ([9d1d96c](https://github.com/mattjmcnaughton/aleph/commit/9d1d96ce4fa5e0c68c03a08e01ae8e3bf90298fc))
+* **web:** render lesson visuals in an opaque-origin sandbox ([54f83ba](https://github.com/mattjmcnaughton/aleph/commit/54f83ba0fe3558f6c695d0b8c7172950bed80fdf))
+
 # [1.51.0](https://github.com/mattjmcnaughton/aleph/compare/v1.50.2...v1.51.0) (2026-11-22)
 
 
