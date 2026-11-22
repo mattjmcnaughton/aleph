@@ -1,3 +1,10 @@
+# [1.51.0](https://github.com/mattjmcnaughton/aleph/compare/v1.50.2...v1.51.0) (2026-11-22)
+
+
+### Features
+
+* **account:** add About you and a Learning summary ([95f416c](https://github.com/mattjmcnaughton/aleph/commit/95f416c76777df3eb5da77dac7f1d1a219a552bc))
+
 ## [1.50.2](https://github.com/mattjmcnaughton/aleph/compare/v1.50.1...v1.50.2) (2026-11-22)
 
 
