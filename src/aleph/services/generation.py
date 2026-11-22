@@ -52,6 +52,7 @@ import time
 from collections import defaultdict
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
+from uuid import uuid4
 
 import structlog
 
@@ -77,10 +78,12 @@ from aleph.agents.outline import (
 from aleph.config import settings as global_settings
 from aleph.db import new_session
 from aleph.domains.answer_order import shuffle_options
+from aleph.domains.visuals import rewrite_visual_fences, strip_visual_fences
 from aleph.models import LessonGenerationState, Level
 from aleph.repositories import (
     ChangeRepository,
     LessonRepository,
+    LessonVisualRepository,
     PathGenerationProgress,
     PathRepository,
     QuickCheckRepository,
@@ -977,7 +980,7 @@ class GenerationOrchestrator:
     async def _persist_lesson(
         self, lesson_id: uuid.UUID, fence: datetime.datetime, content: LessonContent
     ) -> bool:
-        """Write the generated passage + Quick check under the fence.
+        """Write the generated passage, Quick check and Visuals under the fence.
 
         The Quick check's options are **re-ordered on the way in**
         (:func:`~aleph.domains.answer_order.shuffle_options`): the model keys the
@@ -992,13 +995,30 @@ class GenerationOrchestrator:
         shuffle would move the answer out from under an Attempt already recorded
         against it.
         """
+        # Each Visual gets its row's UUID here, and the passage's placeholder
+        # fences are rewritten to it before the passage is stored: the API and
+        # the client only ever see UUIDs (docs/tdds/lesson-visuals.md).
+        visual_ids = {visual.ref: uuid4() for visual in content.visuals}
+        read_passage = rewrite_visual_fences(
+            content.read_passage,
+            {ref: str(visual_id) for ref, visual_id in visual_ids.items()},
+        )
         async with self._session_factory() as session:
             marked = await self._lessons(session).mark_generated(
-                lesson_id=lesson_id, read_passage=content.read_passage, fence=fence
+                lesson_id=lesson_id, read_passage=read_passage, fence=fence
             )
             if not marked:
                 await session.rollback()
                 return False  # lost the claim to a re-claim; drop silently
+            visuals = LessonVisualRepository(session)
+            for visual in content.visuals:
+                await visuals.create(
+                    visual_id=visual_ids[visual.ref],
+                    lesson_id=lesson_id,
+                    title=visual.title,
+                    alt=visual.alt,
+                    source=visual.source,
+                )
             quick_check = content.quick_check
             ordered = shuffle_options(
                 quick_check.options, quick_check.correct_index, seed=str(lesson_id)
@@ -1061,7 +1081,9 @@ class GenerationOrchestrator:
             PriorPassage(
                 unit_title=unit_title,
                 lesson_title=lesson_title,
-                read_passage=passage,
+                # An earlier lesson's visual belongs to that lesson: continuity
+                # carries its prose, never its fence (or its source).
+                read_passage=strip_visual_fences(passage),
             )
             for unit_title, lesson_title, passage in windowed
         )

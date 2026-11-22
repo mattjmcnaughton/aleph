@@ -30,6 +30,7 @@ from aleph.models import LessonGenerationState
 from aleph.repositories import (
     AttemptRepository,
     LessonRepository,
+    LessonVisualRepository,
     QuickCheckRepository,
 )
 
@@ -38,7 +39,7 @@ if TYPE_CHECKING:
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from aleph.models import Lesson
+    from aleph.models import Lesson, LessonVisual
     from aleph.services.generation import GenerationOrchestrator
 
 
@@ -78,6 +79,8 @@ class LessonDetailView:
     quick_check: QuickCheckView | None
     attempt: AttemptResultView | None
     generation_error: str | None
+    # Empty unless generated, like ``read_passage`` (whose fences name them).
+    visuals: tuple[LessonVisual, ...] = ()
 
 
 async def lesson_unlock_state(
@@ -141,6 +144,7 @@ async def load_lesson_detail(
     quick_check_view: QuickCheckView | None = None
     attempt_view: AttemptResultView | None = None
     read_passage: str | None = None
+    visuals: tuple[LessonVisual, ...] = ()
 
     # Gate ALL generated-only content on the **effective** state (TN-1), not on
     # the mere existence of a quick-check row: a lesson can transiently hold a
@@ -155,6 +159,9 @@ async def load_lesson_detail(
         quick_check = await QuickCheckRepository(session).get_for_lesson(lesson.id)
         if quick_check is not None:
             read_passage = lesson.read_passage
+            visuals = tuple(
+                await LessonVisualRepository(session).list_for_lesson(lesson.id)
+            )
             quick_check_view = QuickCheckView(
                 stem=quick_check.stem, options=list(quick_check.options)
             )
@@ -184,4 +191,5 @@ async def load_lesson_detail(
         quick_check=quick_check_view,
         attempt=attempt_view,
         generation_error=lesson.generation_error,
+        visuals=visuals,
     )

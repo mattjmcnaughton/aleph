@@ -141,7 +141,7 @@ from aleph.agents.shaper import (
     proposal_violation,
     render_prior_proposal,
 )
-from aleph.agents.tutor import AttemptView, DigestEntry, TutorDeps
+from aleph.agents.tutor import AttemptView, DigestEntry, TutorDeps, VisualSummary
 from aleph.config import settings
 from aleph.domains.engagement import (
     LessonEngagement,
@@ -162,6 +162,7 @@ from aleph.repositories import (
     ChangeRepository,
     ConversationRepository,
     LessonRepository,
+    LessonVisualRepository,
     QuickCheckRepository,
     UnitRepository,
     UserRepository,
@@ -329,7 +330,7 @@ def _tutor_text(message: Message) -> str:
 async def assemble_lesson_context(
     session: AsyncSession, *, path: Path, lesson_id: uuid.UUID
 ) -> AssembledContext[TutorDeps]:
-    """Everything one in-lesson tutor reply runs on, from six reads.
+    """Everything one in-lesson tutor reply runs on, from seven reads.
 
     ``path`` is the owned :class:`~aleph.models.Path` row the router already
     resolved (``OwnedPath``): it carries the ``topic``/``level`` the reply is
@@ -383,6 +384,13 @@ async def assemble_lesson_context(
         attempt=_attempt_view(attempt, correct_index=quick_check.correct_index),
         path_digest=_build_digest(lessons, unit_titles),
         about_you=await UserRepository(session).about_you(path.user_id),
+        # Title + alt only: a visual's source never reaches the tutor.
+        visuals=tuple(
+            VisualSummary(title=visual.title, alt=visual.alt)
+            for visual in await LessonVisualRepository(session).list_for_lesson(
+                lesson.id
+            )
+        ),
     )
     return AssembledContext(
         deps=deps,

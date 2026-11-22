@@ -118,6 +118,7 @@ from aleph.domains.changes import (
     QuickCheckSnapshot,
     RevisionSnapshot,
     UnitSlot,
+    VisualSnapshot,
     change_payload,
     plan_insertion_shifts,
     reverse_shifts,
@@ -132,6 +133,7 @@ from aleph.dtos.tutor import (
 from aleph.models import (
     ConversationKind,
     LessonGenerationState,
+    LessonVisualKind,
     Message,
     PathChangeKind,
     PathChangeStatus,
@@ -142,6 +144,7 @@ from aleph.repositories import (
     ChangeRepository,
     ConversationRepository,
     LessonRepository,
+    LessonVisualRepository,
     QuickCheckRepository,
     UnitRepository,
 )
@@ -1557,12 +1560,14 @@ async def _apply_revisions(
     """
     snapshots: list[RevisionSnapshot] = []
     quick_checks = QuickCheckRepository(session)
+    visuals = LessonVisualRepository(session)
     lessons = LessonRepository(session)
     for revision in _revisions(operations):
         lesson = live.lesson(revision.lesson_id)
         if lesson is None:  # pragma: no cover - the predicates rejected it first
             continue
         quick_check = await quick_checks.get_for_lesson(lesson.id)
+        lesson_visuals = await visuals.list_for_lesson(lesson.id)
         snapshots.append(
             RevisionSnapshot(
                 lesson_id=str(lesson.id),
@@ -1584,9 +1589,23 @@ async def _apply_revisions(
                         explanation=quick_check.explanation,
                     )
                 ),
+                # With their ids: the snapshotted passage fences them (undo).
+                visuals=tuple(
+                    VisualSnapshot(
+                        visual_id=str(visual.id),
+                        kind=visual.kind.value,
+                        title=visual.title,
+                        alt=visual.alt,
+                        source=visual.source,
+                        kit_version=visual.kit_version,
+                    )
+                    for visual in lesson_visuals
+                ),
             )
         )
         await quick_checks.delete_for_lesson(lesson.id)
+        # The visuals go with the passage that fences them (D7's reset).
+        await visuals.delete_for_lesson(lesson.id)
         await lessons.start_revision(
             lesson_id=lesson.id,
             instruction=revision.instruction,
@@ -1858,6 +1877,20 @@ async def _restore_revision(session: AsyncSession, revision: RevisionSnapshot) -
             options=list(revision.quick_check.options),
             correct_index=revision.quick_check.correct_index,
             explanation=revision.quick_check.explanation,
+        )
+    # Replace, then re-create under the snapshot's ids, so the restored
+    # passage's ```visual fences resolve to exactly what they named before.
+    visuals = LessonVisualRepository(session)
+    await visuals.delete_for_lesson(lesson_id)
+    for visual in revision.visuals:
+        await visuals.create(
+            visual_id=uuid.UUID(visual.visual_id),
+            lesson_id=lesson_id,
+            kind=LessonVisualKind(visual.kind),
+            title=visual.title,
+            alt=visual.alt,
+            source=visual.source,
+            kit_version=visual.kit_version,
         )
 
 

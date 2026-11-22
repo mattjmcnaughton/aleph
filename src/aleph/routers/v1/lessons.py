@@ -51,6 +51,7 @@ from aleph.dtos.lessons import (
     MilestoneDTO,
     PathCompletionDTO,
     QuickCheckDTO,
+    VisualDTO,
 )
 from aleph.dtos.progress import TzOffsetMinutes  # noqa: TC001 - FastAPI annotation.
 from aleph.models import (  # noqa: TC001 - FastAPI resolves annotations.
@@ -194,6 +195,17 @@ def _detail_response(view: LessonDetailView) -> LessonDetailResponse:
         quick_check=quick_check,
         attempt=attempt,
         generation_error=view.generation_error,
+        visuals=[
+            VisualDTO(
+                id=visual.id,
+                kind=visual.kind,
+                title=visual.title,
+                alt=visual.alt,
+                source=visual.source,
+                kit_version=visual.kit_version,
+            )
+            for visual in view.visuals
+        ],
     )
 
 

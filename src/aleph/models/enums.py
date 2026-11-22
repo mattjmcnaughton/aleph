@@ -132,3 +132,15 @@ class BriefKind(StrEnum):
 
     PUBLISHED = "published"
     SKIPPED = "skipped"
+
+
+class LessonVisualKind(StrEnum):
+    """What kind of **Visual** a lesson carries (CONTEXT.md: *Visual*).
+
+    One member today: ``interactive``, agent-written HTML run in the client's
+    opaque-origin sandbox. A closed enum rather than free text so a second kind
+    (a static image, say) is an explicit migration, not a silent new string the
+    client does not know how to render.
+    """
+
+    INTERACTIVE = "interactive"

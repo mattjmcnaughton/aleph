@@ -138,6 +138,19 @@ class AttemptView:
 
 
 @dataclass(frozen=True)
+class VisualSummary:
+    """A lesson **Visual** as the tutor sees it: its caption and alt text only.
+
+    Never the source — that is executable, agent-written HTML the tutor has no
+    use for (docs/tdds/lesson-visuals.md). Title and alt are what the learner
+    sees and may ask about.
+    """
+
+    title: str
+    alt: str
+
+
+@dataclass(frozen=True)
 class DigestEntry:
     """One lesson's line in the path digest: names and unlock state, nothing else.
 
@@ -182,6 +195,8 @@ class TutorDeps:
     path_digest: Sequence[DigestEntry] = ()
     # The learner's About you (CONTEXT.md), or ``None``.
     about_you: str | None = None
+    # The lesson's interactive visuals, title + alt only (never source).
+    visuals: Sequence[VisualSummary] = ()
 
     def __post_init__(self) -> None:
         """Reject an unknown ``level`` or a non-positive position at construction.
@@ -199,6 +214,7 @@ class TutorDeps:
                 "the lesson's 1-based position in the path's total order)."
             )
         object.__setattr__(self, "path_digest", tuple(self.path_digest))
+        object.__setattr__(self, "visuals", tuple(self.visuals))
 
 
 # --- the static system prompt (role + behavioral rules) -------------------------
@@ -335,6 +351,7 @@ QUICK_CHECK_BLOCK = "quick-check"
 PATH_DIGEST_BLOCK = "path-digest"
 CURRENT_LESSON_BLOCK = "current-lesson"
 ATTEMPT_BLOCK = "learner-attempt"
+VISUAL_BLOCK = "lesson-visual"
 
 # The two Attempt regimes (PRD §10 no-leak; TDD D7). Exported constants rather
 # than inline strings so the flip is assertable without matching on prose.
@@ -437,6 +454,16 @@ def render_lesson_context(deps: TutorDeps) -> str:
         ),
         "Its Read passage — the material to explain:",
         _data_block(READ_PASSAGE_BLOCK, deps.read_passage),
+        *(
+            section
+            for visual in deps.visuals
+            for section in (
+                "An interactive visual the learner can manipulate in this "
+                "lesson (its ```visual fence in the passage marks where it sits); "
+                "you see only its caption and description:",
+                _data_block(VISUAL_BLOCK, f"Title: {visual.title}\n{visual.alt}"),
+            )
+        ),
         "Its Quick check, with the keyed answer:",
         _data_block(QUICK_CHECK_BLOCK, _render_quick_check(deps.quick_check)),
     ]
