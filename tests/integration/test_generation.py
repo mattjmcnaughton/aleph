@@ -45,7 +45,7 @@ from aleph.models import (
     QuickCheck,
     Unit,
 )
-from aleph.repositories import PathRepository
+from aleph.repositories import PathRepository, UserRepository
 from aleph.services.generation import GenerationOrchestrator
 from aleph.services.retrieval import RetrievalUnavailableError
 from aleph.services.stub_model import (
@@ -1165,6 +1165,47 @@ async def test_a_path_without_teaching_style_sends_no_style_block() -> None:
 
     assert captured
     assert "teaching_style" not in captured[0]
+
+
+@pytest.mark.anyio
+async def test_about_you_reaches_the_outline_and_every_later_lesson() -> None:
+    # CONTEXT.md: About you lives on the account and is read when each
+    # generation runs, so the outline and the lessons both carry it.
+    outline_prompts: list[str] = []
+    orch, spawn = make_orchestrator(
+        resolve_model_fn=capturing_outline_resolver(outline_prompts)
+    )
+    about = "I'm a nurse practitioner. Use clinical examples where they fit."
+    async with db.async_session() as session:
+        user = await create_user(session, username="outline-learner")
+        await UserRepository(session).set_about_you(user.id, about)
+        await session.commit()
+        user_id = user.id
+
+    await orch.create_path(
+        user_id=user_id, topic="Rust ownership", level=Level.SOME_EXPERIENCE
+    )
+    await spawn.drain()
+
+    assert outline_prompts
+    assert f"<about_you>\n{about}\n</about_you>" in outline_prompts[0]
+
+    lesson_prompts: list[str] = []
+    orch, _ = make_orchestrator(
+        resolve_model_fn=capturing_resolver(lesson_prompts), prefetch_n=0
+    )
+    path_id, _ids = await _seed_path_with_lessons(
+        [(1, LessonGenerationState.UNGENERATED)]
+    )
+    async with db.async_session() as session:
+        path = await session.get(Path, path_id)
+        assert path is not None
+        await UserRepository(session).set_about_you(path.user_id, about)
+        await session.commit()
+
+    await orch.ensure_generated_through(path_id, 1)
+
+    assert f"<about_you>\n{about}\n</about_you>" in lesson_prompts[0]
 
 
 @pytest.mark.anyio

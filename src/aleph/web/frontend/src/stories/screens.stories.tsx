@@ -2,8 +2,10 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { HttpResponse, http } from "msw";
 import { expect, userEvent, within } from "storybook/test";
-import { API_V1_BASE } from "../lib/api";
+import { API_V1_BASE, type AuthSession } from "../lib/api";
+import { learnerUser } from "../mocks/handlers";
 import { writeFlow } from "../lib/flow";
+import { EXAMPLE_SUMMARY, configureAccount } from "../mocks/account";
 import { configureBeats, resetBeats, seedBeat } from "../mocks/beats";
 import { configurePaths, resetPaths } from "../mocks/paths";
 import { configureProgress, zeroActivity } from "../mocks/progress";
@@ -281,5 +283,122 @@ export const NotificationSettings: Story = {
         return HttpResponse.json(preferences);
       }),
     );
+  },
+};
+
+// --- Account profile: About you and the Learning summary ----------------------
+
+const summarySession: AuthSession = {
+  authenticated: true,
+  provider: "keycloak",
+  user: {
+    ...learnerUser,
+    display_name: "Matt McNaughton",
+    feature_flags: {
+      tutor: true,
+      streaks: true,
+      analyst: true,
+      flow: true,
+      learning_summary: true,
+    },
+  },
+};
+
+export const AboutYou: Story = {
+  name: "Settings — About you",
+  args: { url: "/settings/about-you" },
+  beforeEach: () => {
+    configureAccount({
+      aboutYou:
+        "I'm a nurse practitioner moving into health informatics. Use examples from clinical medicine where they fit. I learn best from a worked example before the theory.",
+    });
+  },
+};
+
+export const AboutYouEmpty: Story = {
+  name: "Settings — About you, empty",
+  args: { url: "/settings/about-you" },
+};
+
+export const NewPathAboutYouApplies: Story = {
+  name: "New path — About you applies",
+  args: { url: "/new" },
+  beforeEach: () => {
+    configureAccount({ aboutYou: "Use examples from clinical medicine where they fit." });
+  },
+};
+
+export const NewPathFromSuggestion: Story = {
+  name: "New path — prefilled from a suggestion",
+  args: {
+    url: "/new?topic=Async%20Rust%3A%20borrows%20across%20.await&level=some_experience&guidance=Assume%20ownership%20is%20known.%20Cover%20Send%2C%20'static%20and%20Pin.&teaching_style=Worked%20example%20first.",
+  },
+};
+
+export const LearningSummaryReady: Story = {
+  name: "Your learning — ready",
+  args: { url: "/learning" },
+  beforeEach: ({ msw }) => {
+    msw.use(sessionHandler(summarySession));
+    configureAccount({
+      summary: {
+        state: "ready",
+        facts: { lessons_complete: 8, paths: 3, beats: 2 },
+        summary: EXAMPLE_SUMMARY,
+        written_at: "2026-11-21T12:00:00Z",
+        min_lessons_complete: 3,
+      },
+    });
+  },
+};
+
+export const HomeWithLearningSummary: Story = {
+  name: "Home — Your learning door",
+  args: { url: "/" },
+  beforeEach: ({ msw }) => {
+    msw.use(sessionHandler(summarySession));
+    configureAccount({ pollsBeforeReady: 1 });
+  },
+};
+
+export const LearningSummaryNone: Story = {
+  name: "Your learning — not written yet",
+  args: { url: "/learning" },
+  beforeEach: ({ msw }) => {
+    msw.use(sessionHandler(summarySession));
+  },
+};
+
+export const LearningSummaryTooEarly: Story = {
+  name: "Your learning — too early",
+  args: { url: "/learning" },
+  beforeEach: ({ msw }) => {
+    msw.use(sessionHandler(summarySession));
+    configureAccount({
+      summary: {
+        state: "too_early",
+        facts: { lessons_complete: 1, paths: 1, beats: 0 },
+        summary: null,
+        written_at: null,
+        min_lessons_complete: 3,
+      },
+    });
+  },
+};
+
+export const LearningSummaryFailed: Story = {
+  name: "Your learning — failed",
+  args: { url: "/learning" },
+  beforeEach: ({ msw }) => {
+    msw.use(sessionHandler(summarySession));
+    configureAccount({
+      summary: {
+        state: "failed",
+        facts: { lessons_complete: 8, paths: 3, beats: 2 },
+        summary: null,
+        written_at: null,
+        min_lessons_complete: 3,
+      },
+    });
   },
 };

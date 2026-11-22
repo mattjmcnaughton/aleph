@@ -17,6 +17,7 @@ import { ActivityStrip } from "../components/activity-strip";
 import { BeatCard, hasUnreadBriefs } from "../components/beat-card";
 import { ContinueCard } from "../components/continue-card";
 import { FlowDoor } from "../components/flow/flow-door";
+import { LearningDoor } from "../components/learning-door";
 import { ListRow, RowActions, RowChevron, RowTitle, type RowVariant } from "../components/list-row";
 import { type NewMenuItem, NewMenu } from "../components/new-menu";
 import { SectionHeader } from "../components/section-header";
@@ -152,6 +153,7 @@ function Home() {
   // is no route to 404, so `FlowDoor` itself decides whether it has anything
   // to show once this says the surface exists at all.
   const flowEnabled = useFeatureFlag("flow");
+  const summaryEnabled = useFeatureFlag("learning_summary");
 
   // Armed only while some row is still non-terminal; a poll that resolves the
   // last one flips this false and tears the timer down.
@@ -317,6 +319,7 @@ function Home() {
           {/* One tap back into yesterday's work, above everything else. */}
           <ContinueCard path={resumeTarget} />
           {flowEnabled ? <FlowDoor paths={paths} /> : null}
+          {summaryEnabled ? <LearningDoor /> : null}
         </div>
 
         {/* A Brief waiting to be read outranks the day's state, so a promoted

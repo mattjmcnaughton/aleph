@@ -62,6 +62,7 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel
 from pydantic_ai import Agent, ModelRetry, RunContext
 
+from aleph.agents._about_you import about_you_block
 from aleph.agents._delimiters import neutralize_delimiters
 from aleph.agents._evidence import web_evidence_block
 from aleph.agents.outline import Level, PathOutline, require_valid_level
@@ -304,6 +305,9 @@ class LessonDeps:
     # after it. Blank collapses to "no style" in :func:`build_lesson_prompt`.
     teaching_style: str | None = None
     documents: tuple[RetrievedDocument, ...] = ()
+    # The learner's About you (CONTEXT.md), read off the account when the lesson
+    # generates — forward-only for the same reason ``teaching_style`` is.
+    about_you: str | None = None
 
     def __post_init__(self) -> None:
         """Reject an unknown ``level`` or non-positive position at construction.
@@ -566,6 +570,12 @@ def build_lesson_prompt(deps: LessonDeps) -> str:
 
     if deps.documents:
         sections.append(web_evidence_block(deps.documents))
+
+    # Before the style: the path's own instruction is read later, so it wins
+    # where the account-wide note and the path disagree.
+    about = about_you_block(deps.about_you)
+    if about:
+        sections.append(about)
 
     teaching_style = (
         deps.teaching_style.strip() if deps.teaching_style is not None else ""

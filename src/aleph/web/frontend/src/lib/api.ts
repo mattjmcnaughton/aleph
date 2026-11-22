@@ -1215,3 +1215,62 @@ export function briefQueryOptions(id: string, enabled: boolean) {
     queryFn: enabled ? () => getBrief(id) : skipToken,
   });
 }
+
+// --- Account profile: About you and the Learning summary (docs/CONTEXT.md) ---
+
+/** `GET`/`PUT /api/v1/about-you`. `null` means none is set. */
+export interface AboutYou {
+  about_you: string | null;
+}
+
+export const ABOUT_YOU_QUERY_KEY = ["about-you"] as const;
+
+export function getAboutYou(): Promise<AboutYou> {
+  return apiFetch<AboutYou>(apiV1Path("/about-you"));
+}
+
+/** Replace or clear (`null`) About you. Forward-only: nothing regenerates. */
+export function putAboutYou(aboutYou: string | null): Promise<AboutYou> {
+  return apiFetch<AboutYou>(apiV1Path("/about-you"), {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ about_you: aboutYou }),
+  });
+}
+
+export type SummaryState = "too_early" | "none" | "generating" | "ready" | "failed";
+
+export interface SummaryArea {
+  title: string;
+  note: string;
+}
+
+/** A next thing to learn, with what its creation form needs. */
+export interface Suggestion {
+  kind: "path" | "beat";
+  topic: string;
+  level: Level;
+  why: string;
+  guidance: string;
+  teaching_style: string;
+}
+
+export interface LearningSummary {
+  state: SummaryState;
+  /** Counted from progress on every read; never model-written. */
+  facts: { lessons_complete: number; paths: number; beats: number };
+  summary: { areas: SummaryArea[]; suggestions: Suggestion[] } | null;
+  written_at: string | null;
+  min_lessons_complete: number;
+}
+
+export const LEARNING_SUMMARY_QUERY_KEY = ["learning-summary"] as const;
+
+export function getLearningSummary(): Promise<LearningSummary> {
+  return apiFetch<LearningSummary>(apiV1Path("/learning-summary"));
+}
+
+/** Start writing (or rewriting) the summary; poll `GET` for the outcome. */
+export function triggerLearningSummary(): Promise<LearningSummary> {
+  return apiFetch<LearningSummary>(apiV1Path("/learning-summary"), { method: "POST" });
+}

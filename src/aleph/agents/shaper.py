@@ -95,6 +95,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from pydantic_ai import Agent, ModelRetry, RunContext
 from pydantic_ai.messages import RetryPromptPart, ToolCallPart, UserPromptPart
 
+from aleph.agents._about_you import about_you_block
 from aleph.agents.lesson import is_non_empty
 from aleph.agents.outline import Level, require_valid_level
 
@@ -357,6 +358,8 @@ class ShaperDeps:
     # Accept any Sequence (ergonomics), stored as tuples by __post_init__.
     digest: Sequence[ShapingDigestEntry] = field(default=())
     change_history: Sequence[ChangeSummary] = field(default=())
+    # The learner's About you (CONTEXT.md), or ``None``.
+    about_you: str | None = None
 
     def __post_init__(self) -> None:
         """Reject an unknown ``level`` or an incoherent boundary; freeze to tuples.
@@ -967,9 +970,11 @@ def render_shaping_context(deps: ShaperDeps) -> str:
     inlined in the ``@agent.instructions`` closure) so tests and the eval harness
     can read exactly what the model was told without running an agent.
     """
+    about = about_you_block(deps.about_you)
     return "\n\n".join(
         (
             f"Learner level: {deps.level}. {_LEVEL_GUIDANCE[deps.level]}",
+            *((about,) if about else ()),
             "The changes already applied to this path, newest first:",
             _data_block(
                 CHANGE_HISTORY_BLOCK, _render_change_history(deps.change_history)

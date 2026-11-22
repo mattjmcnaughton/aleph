@@ -4,6 +4,7 @@ import { mswLoader } from "msw-storybook-addon/csf3";
 import "../src/index.css";
 import { resetFlowCelebrations } from "../src/lib/flow-celebration";
 import { handlers } from "../src/mocks/handlers";
+import { resetAccount } from "../src/mocks/account";
 import { resetBeats } from "../src/mocks/beats";
 import { resetLessons } from "../src/mocks/lessons";
 import { resetPaths } from "../src/mocks/paths";
@@ -34,6 +35,7 @@ const preview: Preview = {
     resetShaping();
     resetProgress();
     resetBeats();
+    resetAccount();
     resetFlowCelebrations();
     window.sessionStorage.clear();
   },

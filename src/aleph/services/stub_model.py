@@ -173,6 +173,11 @@ from aleph.agents.analyst import (
     ANALYST_SURVIVORS_MARKER as _AGENT_ANALYST_SURVIVORS_MARKER,
 )
 from aleph.agents.analyst import BriefBody, SkippedNote
+from aleph.agents.learning_summary import (
+    LearningSummaryBody,
+    Suggestion,
+    SummaryArea,
+)
 from aleph.agents.lesson import LessonContent, QuickCheck
 from aleph.agents.outline import LessonOutline, PathOutline, Refusal, UnitOutline
 from aleph.agents.researcher import Finding, Findings
@@ -889,6 +894,12 @@ def _stub_respond(messages: Sequence[ModelMessage], info: AgentInfo) -> ModelRes
     research_tool = _tool_with(info.output_tools, "findings")
     brief_tool = _tool_with(info.output_tools, "cited_urls")
     skipped_tool = _tool_with(info.output_tools, "detail")
+    summary_tool = _tool_with(info.output_tools, "suggestions")
+    if summary_tool is not None:
+        body = _build_learning_summary(text)
+        return ModelResponse(
+            parts=[ToolCallPart(tool_name=summary_tool.name, args=body.model_dump())]
+        )
 
     # A real agent registers either the lesson schema or the outline union,
     # never more than one. If more than one appears
@@ -1002,6 +1013,61 @@ def _stub_respond(messages: Sequence[ModelMessage], info: AgentInfo) -> ModelRes
         "stub model could not recognise the agent's output schema "
         f"(tools: {[tool.name for tool in info.output_tools]})"
     )
+
+
+_SUMMARY_PATH_RE = re.compile(
+    r"^Path: (?P<topic>.+?) \| level (?P<level>\w+) \| (?P<progress>\w+) \| "
+    r"(?P<done>\d+) of (?P<total>\d+) lessons complete$",
+    re.MULTILINE,
+)
+_SUMMARY_BEAT_RE = re.compile(r"^Beat: (?P<topic>.+?) \| level", re.MULTILINE)
+
+
+def _build_learning_summary(text: str) -> LearningSummaryBody:
+    """A deterministic Learning summary from the digest lines in its own prompt.
+
+    One area per path (plus "Following" for Beats) restating the digest's
+    counts, and one "going further" path suggestion per path, up to three.
+    """
+    paths = list(_SUMMARY_PATH_RE.finditer(text))
+    beats = [m.group("topic") for m in _SUMMARY_BEAT_RE.finditer(text)]
+    areas = [
+        SummaryArea(
+            title=m.group("topic")[:120],
+            note=(
+                f"{m.group('done')} of {m.group('total')} lessons complete "
+                f"({m.group('progress').replace('_', ' ')})."
+            ),
+        )
+        for m in paths[:5]
+    ]
+    if beats:
+        areas.append(SummaryArea(title="Following", note=", ".join(beats)[:400]))
+    if not areas:
+        areas.append(SummaryArea(title="Getting started", note="Nothing yet."))
+    suggestions = [
+        Suggestion.model_validate(
+            {
+                "kind": "path",
+                "topic": f"{m.group('topic')}: going further"[:200],
+                "level": m.group("level"),
+                "why": (
+                    f"You have {m.group('done')} lessons on "
+                    f"{m.group('topic')} behind you."
+                )[:400],
+                "guidance": "Assume the basics are known. Go one level deeper.",
+            }
+        )
+        for m in paths[:3]
+    ] or [
+        Suggestion(
+            kind="path",
+            topic="How to learn anything faster",
+            level="new_to_it",
+            why="A good first path.",
+        )
+    ]
+    return LearningSummaryBody(areas=areas, suggestions=suggestions)
 
 
 # --- the streamed (tutor) branch — Phase 2, TDD §11 (D10) ----------------------

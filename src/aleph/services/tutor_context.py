@@ -164,6 +164,7 @@ from aleph.repositories import (
     LessonRepository,
     QuickCheckRepository,
     UnitRepository,
+    UserRepository,
 )
 from aleph.services.generation import AGENT_LEVEL
 
@@ -381,6 +382,7 @@ async def assemble_lesson_context(
         ),
         attempt=_attempt_view(attempt, correct_index=quick_check.correct_index),
         path_digest=_build_digest(lessons, unit_titles),
+        about_you=await UserRepository(session).about_you(path.user_id),
     )
     return AssembledContext(
         deps=deps,
@@ -941,6 +943,7 @@ async def assemble_shaping_context(
             caps=caps,
             digest=digest,
             change_history=summarize_changes(changes),
+            about_you=await UserRepository(session).about_you(path.user_id),
         ),
         message_history=build_shaping_message_history(
             messages,

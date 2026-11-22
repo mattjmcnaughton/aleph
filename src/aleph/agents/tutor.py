@@ -75,6 +75,7 @@ from typing import TYPE_CHECKING
 from pydantic_ai import Agent, ModelRetry, RunContext
 from pydantic_ai.messages import RetryPromptPart, ToolCallPart, UserPromptPart
 
+from aleph.agents._about_you import about_you_block
 from aleph.agents.lesson import (
     OPTION_COUNT_MAX,
     OPTION_COUNT_MIN,
@@ -179,6 +180,8 @@ class TutorDeps:
     attempt: AttemptView | None = None
     # Accepts any Sequence (ergonomics), stored as a tuple by __post_init__.
     path_digest: Sequence[DigestEntry] = ()
+    # The learner's About you (CONTEXT.md), or ``None``.
+    about_you: str | None = None
 
     def __post_init__(self) -> None:
         """Reject an unknown ``level`` or a non-positive position at construction.
@@ -437,6 +440,10 @@ def render_lesson_context(deps: TutorDeps) -> str:
         "Its Quick check, with the keyed answer:",
         _data_block(QUICK_CHECK_BLOCK, _render_quick_check(deps.quick_check)),
     ]
+
+    about = about_you_block(deps.about_you)
+    if about:
+        sections.insert(1, about)
 
     if deps.attempt is None:
         sections.append(PRE_ATTEMPT_RULE)

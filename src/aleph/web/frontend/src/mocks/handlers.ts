@@ -1,5 +1,6 @@
 import { HttpResponse, http } from "msw";
 import { API_V1_BASE, AUTH_LOGOUT_PATH, type AuthSession, type AuthUser } from "../lib/api";
+import { accountHandlers } from "./account";
 import { beatHandlers } from "./beats";
 import { lessonsHandlers } from "./lessons";
 import { ADMIN_MODEL_ALLOWLIST } from "./models";
@@ -95,4 +96,5 @@ export const handlers = [
   ...shapingHandlers,
   ...progressHandlers,
   ...beatHandlers,
+  ...accountHandlers,
 ];

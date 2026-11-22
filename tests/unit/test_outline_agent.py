@@ -472,6 +472,23 @@ def test_build_outline_prompt_with_guidance_is_labelled_and_delimited() -> None:
     assert prompt.index("Topic: Rust ownership") < prompt.index("<guidance>")
 
 
+def test_build_outline_prompt_adds_about_you_after_the_guidance() -> None:
+    about = "I work in clinical research."
+    prompt = build_outline_prompt(
+        "Rust ownership", "Skip the history.", about_you=about
+    )
+    assert prompt.startswith("Topic: Rust ownership\n\n")
+    assert f"<about_you>\n{about}\n</about_you>" in prompt
+    assert prompt.index("</guidance>") < prompt.index("<about_you>")
+
+
+def test_build_outline_prompt_labels_the_topic_when_only_about_you_is_set() -> None:
+    prompt = build_outline_prompt("Rust ownership", about_you="Clinical examples.")
+    assert prompt.startswith("Topic: Rust ownership\n\n")
+    assert "<guidance>" not in prompt
+    assert build_outline_prompt("Rust ownership", about_you="  ") == "Rust ownership"
+
+
 def test_build_outline_prompt_strips_guidance_whitespace() -> None:
     prompt = build_outline_prompt("Rust ownership", "  more depth on borrowing  ")
     assert "<guidance>\nmore depth on borrowing\n</guidance>" in prompt
