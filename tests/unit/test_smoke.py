@@ -5,6 +5,7 @@ import asyncio
 import pytest
 
 from aleph.app import create_app
+from aleph.config import settings
 from aleph.routers.health import healthz
 
 
@@ -16,8 +17,9 @@ def test_app_factory_builds() -> None:
     assert "/readyz" in paths
 
 
-def test_healthz_returns_ok() -> None:
-    assert asyncio.run(healthz()) == {"status": "ok"}
+def test_healthz_reports_deployed_commit(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "git_sha", "3f2a9c1")
+    assert asyncio.run(healthz()) == {"status": "ok", "commit": "3f2a9c1"}
 
 
 def test_production_app_exposes_no_e2e_route() -> None:

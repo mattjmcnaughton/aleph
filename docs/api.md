@@ -78,6 +78,10 @@ has no committed generated contract artifact or active Swift client.
 | GET | `/healthz` | Liveness probe — returns 200 if the process is alive |
 | GET | `/readyz` | Readiness probe — returns 200 if the service is ready to accept traffic |
 
+Both bodies include `commit`, the Git SHA the running image was built from
+(`GIT_SHA` build arg; `unknown` outside a release build), e.g.
+`{"status": "ok", "commit": "3f2a9c1…"}`.
+
 ## Authentication
 
 Every `/api/v1` route that this document calls "session-cookie protected"

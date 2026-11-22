@@ -45,6 +45,12 @@ class Settings(BaseSettings):
     # spam was the AL-003 finding); Logfire export is gated by LOGFIRE_TOKEN.
     otel_exporter_otlp_endpoint: str = ""
 
+    # The commit the running build came from, reported by ``/healthz`` and
+    # ``/readyz``. The Dockerfile bakes it in from the ``GIT_SHA`` build arg
+    # (``release.yml`` passes the release tag's commit); a source checkout
+    # leaves it ``unknown``.
+    git_sha: str = "unknown"
+
     database_url: str = "postgresql+asyncpg://localhost:5432/aleph"
 
     # Generation timings (TDD §5.4 / §14). A model call is bounded by
