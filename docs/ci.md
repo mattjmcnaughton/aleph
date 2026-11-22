@@ -1,19 +1,14 @@
 # Continuous Integration
 
 Two GitHub Actions workflows. [`ci.yml`](../.github/workflows/ci.yml) runs on every
-push/PR to `main` or `feature/home-screen-app`;
+push/PR to `main`;
 [`release.yml`](../.github/workflows/release.yml) runs after a
 green CI on `main` (and can be dispatched as a dry run).
 
 | Workflow | Trigger | Purpose |
 | -------- | ------- | ------- |
-| **CI** | push/PR to `main` or `feature/home-screen-app` | Correctness gates (below) |
+| **CI** | push/PR to `main` | Correctness gates (below) |
 | **Release** | after a green CI on `main`, or `workflow_dispatch` | semantic-release → GHCR image → Fly deploy ([deploy.md](deploy.md)) |
-
-Home Screen app ticket PRs target `feature/home-screen-app`. A green CI run on
-that integration branch does not release or deploy: the Release workflow and
-semantic-release remain restricted to `main`. Promotion to `main` is a separate
-release decision.
 
 ## CI (`ci.yml`)
 
@@ -81,7 +76,7 @@ Its `webServer` block boots two processes (unless
 
 1. **Stub backend** — [`scripts/e2e_backend.py`](../scripts/e2e_backend.py)
    `create_stub_app`: the real API, orchestrator and DB with the deterministic
-   stub model wired into every slot (`MODEL_* = stub`) and the per-account rate
+   stub model as the app-wide model (`MODEL_DEFAULT=stub`) and the per-account rate
    limits lifted. `alembic upgrade head` migrates the target database first;
    `ENV=test` keeps the production stub-guard satisfied.
 2. **Dev frontend** — `vite`, proxying `/api` to the backend.
