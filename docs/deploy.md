@@ -281,6 +281,10 @@ curl -fsS https://aleph-prod-mattjmcnaughton.fly.dev/healthz
 curl -fsS https://aleph-prod-mattjmcnaughton.fly.dev/readyz
 ```
 
+Both health bodies report `commit`, the SHA the image was built from. A manual
+`flyctl deploy` reports `unknown` unless it passes
+`--build-arg GIT_SHA="$(git rev-parse HEAD)"`, as `release.yml` does.
+
 ### 4. Custom domain + DNS + TLS
 
 Only after a successful deploy, so the app has allocated IPs.

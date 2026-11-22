@@ -129,7 +129,7 @@ def test_unknown_backend_path_keeps_the_error_envelope(
 
 
 def test_probes_are_untouched(client: TestClient) -> None:
-    assert client.get("/healthz").json() == {"status": "ok"}
+    assert client.get("/healthz").json()["status"] == "ok"
 
 
 def test_non_get_request_does_not_fall_back(client: TestClient) -> None:

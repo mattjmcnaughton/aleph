@@ -81,6 +81,12 @@ COPY --chown=app:app --chmod=0755 docker/release.sh /app/docker/release.sh
 # not turn.
 ENV PATH="/app/.venv/bin:${PATH}"
 
+# The source commit, surfaced as `commit` by /healthz and /readyz so the deployed
+# version is visible. release.yml passes the release tag's commit; a bare
+# `docker build` reports `unknown`. Declared last so a new SHA rebuilds nothing.
+ARG GIT_SHA=unknown
+ENV GIT_SHA=${GIT_SHA}
+
 USER app
 
 EXPOSE 8000
