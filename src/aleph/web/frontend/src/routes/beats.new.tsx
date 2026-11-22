@@ -13,15 +13,16 @@ import { LevelFieldset } from "../components/level-fieldset";
 import { PRIMARY_CTA, StateCard } from "../components/state-card";
 import { ANCHOR_WEEKDAYS, DEFAULT_ANCHOR_WEEKDAY } from "../lib/beats";
 import { useFeatureFlag } from "../lib/feature-flags";
-import { GUIDANCE_MAX_LENGTH, TOPIC_MAX_LENGTH, canSubmitTopic } from "../lib/onboarding";
+import { GUIDANCE_MAX_LENGTH, TOPIC_MAX_LENGTH, canSubmitTopic, isLevel } from "../lib/onboarding";
 
 export const Route = createFileRoute("/beats/new")({
   // `?topic=` seeds the field, exactly as on `/new` — the door the
   // path-complete card offers ("Follow it as a Beat", AL-420) carries the
   // finished path's Topic across. Standing orders are frozen at deployment,
   // but not until then: this is an editable initial value.
-  validateSearch: (search: Record<string, unknown>): { topic?: string } => ({
+  validateSearch: (search: Record<string, unknown>): { topic?: string; level?: Level } => ({
     topic: typeof search.topic === "string" ? search.topic : undefined,
+    level: isLevel(search.level) ? search.level : undefined,
   }),
   component: DeployAnalyst,
 });
@@ -47,7 +48,7 @@ function DeployAnalyst() {
   const search = Route.useSearch();
 
   const [topic, setTopic] = useState(search.topic ?? "");
-  const [level, setLevel] = useState<Level>("new_to_it");
+  const [level, setLevel] = useState<Level>(search.level ?? "new_to_it");
   const [anchorWeekday, setAnchorWeekday] = useState(DEFAULT_ANCHOR_WEEKDAY);
   const [guidance, setGuidance] = useState("");
 

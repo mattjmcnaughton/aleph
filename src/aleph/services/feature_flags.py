@@ -116,6 +116,9 @@ class FeatureFlag(StrEnum):
     # sheet, the flow bar and the receipt render at all. Its own key, for the
     # same reason every flag above is independent of the others.
     FLOW = "flow"
+    # The Learning summary (CONTEXT.md): its page and its two routes. Ships dark
+    # (off, on for admins) on the earlier phases' playbook.
+    LEARNING_SUMMARY = "learning_summary"
 
 
 # Code defaults per flag. Every FeatureFlag member gets an entry here; a flag
@@ -144,6 +147,8 @@ FLAG_DEFAULTS: dict[FeatureFlag, bool] = {
     # FEATURE_FLAG_DEFAULTS=flow:off still closes it for learners and admins
     # unless a per-user override wins. Production configuration is unchanged.
     FeatureFlag.FLOW: True,
+    # Off: dark until launched; admins dogfood it via ADMIN_DEFAULT_FLAGS.
+    FeatureFlag.LEARNING_SUMMARY: False,
 }
 
 
@@ -170,6 +175,7 @@ ADMIN_DEFAULT_FLAGS: frozenset[FeatureFlag] = frozenset(
         FeatureFlag.STREAKS,
         FeatureFlag.ANALYST,
         FeatureFlag.FLOW,
+        FeatureFlag.LEARNING_SUMMARY,
     }
 )
 

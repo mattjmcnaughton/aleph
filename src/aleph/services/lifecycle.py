@@ -85,6 +85,7 @@ from aleph.config import settings as global_settings
 from aleph.db import new_session
 from aleph.repositories import PathRepository
 from aleph.services.briefing import briefing_service
+from aleph.services.learning_summary import learning_summary_service
 from aleph.services.retrieval import GENERATION_SEARCH_MAX_DOCUMENTS, ExaRetriever
 
 if TYPE_CHECKING:
@@ -518,6 +519,10 @@ class GenerationLifecycle:
             model_slot=lambda: self._research_semaphore,
             retriever=self._research_retriever,
         )
+        # A Learning summary is generation work: same registry, same bound.
+        learning_summary_service.bind_runtime(
+            spawn=self._registry.spawn, model_slot=lambda: self._semaphore
+        )
         self._reconciler_task = asyncio.create_task(self._reconciler.run_forever())
         logger.info("generation_lifecycle_started")
 
@@ -541,4 +546,5 @@ class GenerationLifecycle:
         await self._registry.cancel_all()
         self._orchestrator.reset_runtime()
         briefing_service.reset_runtime()
+        learning_summary_service.reset_runtime()
         logger.info("generation_lifecycle_stopped")

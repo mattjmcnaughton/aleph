@@ -1453,3 +1453,14 @@ def test_stub_payload_builders_match_the_tool_operation_models(
         for operation in payload["operations"]
     ]
     assert operations_have_known_shapes(validated)
+
+
+def test_about_you_reaches_the_shaping_context_only_when_set() -> None:
+    about = "Use clinical examples where they fit."
+    with_about = shaper_agent_module.render_shaping_context(
+        replace(_deps(), about_you=about)
+    )
+    without = shaper_agent_module.render_shaping_context(_deps())
+
+    assert f"<about_you>\n{about}\n</about_you>" in with_about
+    assert "<about_you>" not in without

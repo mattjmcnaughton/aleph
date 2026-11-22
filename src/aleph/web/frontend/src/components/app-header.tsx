@@ -3,6 +3,7 @@ import { Link } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
 import { getPushConfig } from "../lib/api";
 import { sessionQueryOptions } from "../lib/auth";
+import { useFeatureFlag } from "../lib/feature-flags";
 import { AlephLogo } from "./aleph-logo";
 import { useLogout } from "./use-logout";
 
@@ -35,6 +36,7 @@ function AccountMenu() {
   const session = useQuery(sessionQueryOptions);
   const config = useQuery({ queryKey: ["push-config-menu"], queryFn: getPushConfig });
   const detailsRef = useRef<HTMLDetailsElement>(null);
+  const summaryEnabled = useFeatureFlag("learning_summary");
 
   const user = session.data?.authenticated ? session.data.user : null;
   const name = user?.display_name ?? "";
@@ -84,6 +86,23 @@ function AccountMenu() {
           </p>
         ) : null}
         <div className={name ? "pt-1.5" : undefined}>
+          <Link
+            to="/settings/about-you"
+            onClick={close}
+            data-testid="account-menu-about-you"
+            className="flex min-h-11 items-center rounded-md px-3 text-sm text-porcelain transition-colors hover:bg-elevated"
+          >
+            About you
+          </Link>
+          {summaryEnabled ? (
+            <Link
+              to="/learning"
+              onClick={close}
+              className="flex min-h-11 items-center rounded-md px-3 text-sm text-porcelain transition-colors hover:bg-elevated"
+            >
+              Your learning
+            </Link>
+          ) : null}
           {config.data ? (
             <Link
               to="/settings/notifications"

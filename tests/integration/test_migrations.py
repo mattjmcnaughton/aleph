@@ -76,7 +76,7 @@ async def _enum_types(database_url: str) -> set[str]:
 # otherwise read as "step N's downgrade dropped it". Grows with each such step.
 LATER_COLUMNS: dict[str, set[str]] = {
     "paths": {"teaching_style", "search_outline", "search_lessons"},
-    "users": {"time_zone", "time_zone_seen_at"},  # 0017_user_time_zone
+    "users": {"time_zone", "time_zone_seen_at", "about_you"},  # 0017, 0023
     "conversations": {"lesson_id"},  # 0021_lesson_conversations
 }
 
@@ -494,7 +494,7 @@ def test_earlier_tables_keep_their_columns_through_the_shaping_reversal(
             "search_outline",
             "search_lessons",
         },
-        "users": {"time_zone", "time_zone_seen_at"},
+        "users": {"time_zone", "time_zone_seen_at", "about_you"},
     }
     assert {
         table: columns - added.get(table, set()) for table, columns in before.items()
@@ -1851,9 +1851,10 @@ def test_time_zone_migration_nullable_and_reversible(isolated_database: str) -> 
     assert asyncio.run(_columns(database_url, "users")) == at_head - {
         "time_zone",
         "time_zone_seen_at",
+        "about_you",
     }
     run_alembic(database_url, "0017_user_time_zone")
-    assert asyncio.run(_columns(database_url, "users")) == at_head
+    assert asyncio.run(_columns(database_url, "users")) == at_head - {"about_you"}
 
 
 async def _retained_conversation_rows(database_url: str) -> dict[str, list[str]]:
@@ -1960,3 +1961,14 @@ def test_web_search_migration_backfills_false_and_roundtrips(
     assert asyncio.run(_columns(database_url, "paths")) == before
     run_alembic(database_url, "0022_path_web_search")
     asyncio.run(check_defaults())
+
+
+def test_learner_profile_migration_is_reversible(isolated_database: str) -> None:
+    database_url = isolated_database
+    assert "learning_summaries" in asyncio.run(_tables(database_url))
+    assert asyncio.run(_is_nullable(database_url, "users", "about_you"))
+    run_alembic(database_url, "0022_path_web_search", downgrade=True)
+    assert "learning_summaries" not in asyncio.run(_tables(database_url))
+    assert "about_you" not in asyncio.run(_columns(database_url, "users"))
+    run_alembic(database_url, "head")
+    assert "learning_summaries" in asyncio.run(_tables(database_url))

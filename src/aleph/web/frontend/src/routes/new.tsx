@@ -13,6 +13,7 @@ import {
   pathQueryOptions,
   retryPath,
 } from "../lib/api";
+import { AboutYouApplies } from "../components/about-you-applies";
 import { ModelPicker } from "../components/model-picker";
 import { announcePathCreated } from "../components/push-lifecycle";
 import { Breadcrumbs } from "../components/breadcrumbs";
@@ -27,6 +28,7 @@ import {
   buildCreatePathInput,
   canSubmitTopic,
   deriveOnboardingPhase,
+  isLevel,
 } from "../lib/onboarding";
 import { makePollingRefetchInterval } from "../lib/polling";
 import { useRetryGeneration } from "../lib/use-retry-generation";
@@ -38,11 +40,23 @@ export const Route = createFileRoute("/new")({
   // exists. The one caller today is the path-complete card's "Go deeper" door
   // (AL-420), which hands over the finished path's Topic so the learner is not
   // retyping a subject Aleph already knows.
-  validateSearch: (search: Record<string, unknown>): { topic?: string } => ({
+  // The Learning summary's suggestions also prefill `level`, `guidance` and
+  // `teaching_style`, so a suggested path opens with its form filled in.
+  validateSearch: (search: Record<string, unknown>): NewPathSearch => ({
     topic: typeof search.topic === "string" ? search.topic : undefined,
+    level: isLevel(search.level) ? search.level : undefined,
+    guidance: typeof search.guidance === "string" ? search.guidance : undefined,
+    teaching_style: typeof search.teaching_style === "string" ? search.teaching_style : undefined,
   }),
   component: NewPath,
 });
+
+interface NewPathSearch {
+  topic?: string;
+  level?: Level;
+  guidance?: string;
+  teaching_style?: string;
+}
 
 const pathPollConfig = {
   isTerminal: (data: PathDetail | undefined) => isPathStatusTerminal(data?.status),
@@ -63,12 +77,12 @@ function NewPath() {
   // Seeded once, as the initial value — not synced to the search param, so a
   // learner who edits the field keeps their edit.
   const [topic, setTopic] = useState(search.topic ?? "");
-  const [level, setLevel] = useState<Level>("new_to_it");
+  const [level, setLevel] = useState<Level>(search.level ?? "new_to_it");
   // Optional creation input alongside topic (§5.1, docs/api.md): free text the
   // learner pastes to shape the outline. Preserved across the failed→editing
   // round trip exactly like topic/level, below.
-  const [guidance, setGuidance] = useState("");
-  const [teachingStyle, setTeachingStyle] = useState("");
+  const [guidance, setGuidance] = useState(search.guidance ?? "");
+  const [teachingStyle, setTeachingStyle] = useState(search.teaching_style ?? "");
   const [searchOutline, setSearchOutline] = useState(false);
   const [searchLessons, setSearchLessons] = useState(false);
   const [pathId, setPathId] = useState<string | null>(null);
@@ -326,6 +340,8 @@ function OnboardingForm({
         maxLength={TOPIC_MAX_LENGTH}
         className="w-full rounded-md border border-divider bg-surface px-4 py-3 text-base text-porcelain placeholder:text-slate focus:border-teal focus:outline-none"
       />
+
+      <AboutYouApplies />
 
       <div className="mt-6">
         <label htmlFor="onboarding-guidance" className="text-sm font-medium text-porcelain">

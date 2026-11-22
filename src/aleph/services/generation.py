@@ -85,6 +85,7 @@ from aleph.repositories import (
     PathRepository,
     QuickCheckRepository,
     UnitRepository,
+    UserRepository,
 )
 from aleph.services.notifications import NotificationService, notification_service
 from aleph.services.openrouter import resolve_model
@@ -230,6 +231,9 @@ class _LessonContext:
     # generates rather than when the path was created, which is what makes an
     # edit forward-only: it reaches the next lesson loaded, never a written one.
     teaching_style: str | None = None
+    # The account's About you (CONTEXT.md), read when the lesson generates, so
+    # an edit is forward-only exactly as ``teaching_style`` is.
+    about_you: str | None = None
 
 
 @dataclass(frozen=True)
@@ -253,6 +257,8 @@ class _OutlineClaim:
     model_outline: str | None
     account_id: uuid.UUID
     search_outline: bool = False
+    # The account's About you (CONTEXT.md), read at claim time.
+    about_you: str | None = None
 
 
 class GenerationOrchestrator:
@@ -544,7 +550,10 @@ class GenerationOrchestrator:
                     )
                 run = await agent.run(
                     build_outline_prompt(
-                        claim.topic, claim.guidance, documents=documents
+                        claim.topic,
+                        claim.guidance,
+                        documents=documents,
+                        about_you=claim.about_you,
                     ),
                     deps=deps,
                     model=model,
@@ -647,6 +656,7 @@ class GenerationOrchestrator:
             # ``user_id`` rides the claim so the fenced ``outline_generated``
             # emissions carry ``account_id`` without a second read.
             account_id = path.user_id
+            about_you = await UserRepository(session).about_you(path.user_id)
             await session.commit()
         if fence is None:
             return None
@@ -658,6 +668,7 @@ class GenerationOrchestrator:
             model_outline=model_outline,
             account_id=account_id,
             search_outline=search_outline,
+            about_you=about_you,
         )
 
     @staticmethod
@@ -879,6 +890,7 @@ class GenerationOrchestrator:
             caps=self._lesson_caps,
             revision=context.revision,
             teaching_style=context.teaching_style,
+            about_you=context.about_you,
         )
         model = self._resolve_model(
             context.model_lesson
@@ -1087,6 +1099,7 @@ class GenerationOrchestrator:
             search_lessons=path.search_lessons,
             revision=revision,
             teaching_style=path.teaching_style,
+            about_you=await UserRepository(session).about_you(path.user_id),
         )
 
     async def _load_revision(

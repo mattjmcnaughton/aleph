@@ -33,6 +33,18 @@ class UserRepository:
             .values(time_zone=zone, time_zone_seen_at=func.now())
         )
 
+    async def about_you(self, user_id: uuid.UUID) -> str | None:
+        """The account's About you (CONTEXT.md), or ``None`` when unset."""
+        return await self.session.scalar(
+            select(User.about_you).where(User.id == user_id)
+        )
+
+    async def set_about_you(self, user_id: uuid.UUID, about_you: str | None) -> None:
+        """Replace or clear (``None``) the account's About you."""
+        await self.session.execute(
+            update(User).where(User.id == user_id).values(about_you=about_you)
+        )
+
     async def lock_by_id(self, user_id: uuid.UUID) -> User | None:
         """Load an account by id, locking the row until the transaction ends.
 

@@ -567,6 +567,19 @@ the restriction is the correctness boundary rather than a simplification. It
 costs nothing PRD §5.5 promises: a Change stays undoable until it is engaged, by
 undoing the ones above it in turn.
 
+## Account profile (`/api/v1`)
+
+Session-cookie protected; every route reads or writes only the caller's own account.
+
+| Method | Path | Body | Success | Notes |
+| ------ | ---- | ---- | ------- | ----- |
+| `GET` | `/api/v1/about-you` | — | `200 {about_you}` | The learner's **About you** (CONTEXT.md), or `null`. |
+| `PUT` | `/api/v1/about-you` | `{about_you}` | `200 {about_you}` | Required, nullable: a string (stripped, 1–2000 chars) replaces it, `null` clears it. **Forward-only**: nothing regenerates; generation reads it when each outline, lesson, tutor or shaping turn runs. |
+| `GET` | `/api/v1/learning-summary` | — | `200` | `{state, facts, summary, written_at, min_lessons_complete}`. `state` is `too_early` \| `none` \| `generating` \| `ready` \| `failed`; a run stalled past `GENERATION_STALE_AFTER` reads as `failed`. `facts` (`lessons_complete`, `paths`, `beats`) is counted on every read. `summary` is the last written `{areas, suggestions}` and survives a failed or in-flight refresh. Behind the `learning_summary` flag (`404` when off). |
+| `POST` | `/api/v1/learning-summary` | — | `202` | Trigger + poll: claims the account's summary and starts a run, answering with the `GET` body. A trigger while a run is in flight starts nothing. `409 not_enough_progress` under 3 completed lessons; `429 rate_limited` within 2 minutes of the last write. Flag-gated like `GET`. |
+
+`/new` accepts `topic`, `level`, `guidance` and `teaching_style` search params, and `/beats/new` accepts `topic` and `level`, as editable starting values; the summary's suggestions link there.
+
 ## Progress (`/api/v1`, Phase 5 TDD §5.4/§6)
 
 The Streaks slice's whole API: one read-only route folding the global **Daily

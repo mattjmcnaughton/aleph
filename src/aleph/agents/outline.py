@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING, Literal, get_args
 from pydantic import BaseModel
 from pydantic_ai import Agent, ModelRetry, RunContext
 
+from aleph.agents._about_you import about_you_block
 from aleph.agents._delimiters import neutralize_delimiters
 from aleph.agents._evidence import web_evidence_block
 
@@ -200,6 +201,7 @@ def build_outline_prompt(
     guidance: str | None = None,
     *,
     documents: Sequence[RetrievedDocument] = (),
+    about_you: str | None = None,
 ) -> str:
     """Build the outline agent's user prompt from ``topic`` and optional Guidance.
 
@@ -222,16 +224,25 @@ def build_outline_prompt(
     it). The guidance text is neutralised against its own delimiter first
     (:func:`_neutralize_guidance_delimiters`) so it cannot forge the end of
     the block.
+
+    ``about_you`` (CONTEXT.md: *About you*) adds the account-wide block after
+    the guidance (``agents/_about_you.py``); with neither present the prompt
+    is still the bare topic.
     """
     stripped_guidance = guidance.strip() if guidance is not None else ""
+    about = about_you_block(about_you)
     prompt = topic
-    if stripped_guidance:
-        safe_guidance = _neutralize_guidance_delimiters(stripped_guidance)
-        prompt = (
-            f"Topic: {topic}\n\n"
-            "Additional guidance from the learner (about the shape and emphasis of "
-            f"the path):\n<guidance>\n{safe_guidance}\n</guidance>"
-        )
+    if stripped_guidance or about:
+        sections = [f"Topic: {topic}"]
+        if stripped_guidance:
+            safe_guidance = _neutralize_guidance_delimiters(stripped_guidance)
+            sections.append(
+                "Additional guidance from the learner (about the shape and "
+                f"emphasis of the path):\n<guidance>\n{safe_guidance}\n</guidance>"
+            )
+        if about:
+            sections.append(about)
+        prompt = "\n\n".join(sections)
     if documents:
         prompt += "\n\n" + web_evidence_block(documents)
     return prompt

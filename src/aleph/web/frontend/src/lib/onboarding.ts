@@ -11,6 +11,11 @@ export const LEVELS: ReadonlyArray<{ value: Level; label: string }> = [
   { value: "work_in_it", label: "I work in it" },
 ] as const;
 
+/** Whether `value` is one of the three levels (e.g. a URL search param). */
+export function isLevel(value: unknown): value is Level {
+  return LEVELS.some((option) => option.value === value);
+}
+
 /** The display label for a level, e.g. on a "Your paths" row (§5.5). */
 export function levelLabel(level: Level): string {
   return LEVELS.find((option) => option.value === level)?.label ?? level;

@@ -846,3 +846,16 @@ def test_stub_force_tutor_check_round_trips_through_the_real_tool() -> None:
     assert _retry_prompt_text(messages) == ""
     assert dict(posed[0].args_as_dict()) == dict(build_stub_tutor_check(question))
     assert output.strip()
+
+
+def test_about_you_reaches_the_tutor_context_only_when_set() -> None:
+    from dataclasses import replace
+
+    about = "Use clinical examples where they fit."
+    with_about = tutor_agent_module.render_lesson_context(
+        replace(_deps(), about_you=about)
+    )
+    without = tutor_agent_module.render_lesson_context(_deps())
+
+    assert f"<about_you>\n{about}\n</about_you>" in with_about
+    assert "<about_you>" not in without

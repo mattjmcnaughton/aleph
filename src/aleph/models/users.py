@@ -42,6 +42,9 @@ class User(Base, UUIDAuditMixin):
     time_zone_seen_at: Mapped[datetime.datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # CONTEXT.md: *About you*. Read by every outline, lesson, tutor and shaping
+    # prompt when it runs, so an edit is forward-only, like Teaching style.
+    about_you: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     paths: Mapped[list[Path]] = relationship(
         back_populates="user",
