@@ -1,3 +1,10 @@
+## [1.50.1](https://github.com/mattjmcnaughton/aleph/compare/v1.50.0...v1.50.1) (2026-11-22)
+
+
+### Bug Fixes
+
+* **config:** run every model call on one app-wide GPT-6 Luna default ([dd3fe53](https://github.com/mattjmcnaughton/aleph/commit/dd3fe536e6b7d574dc24e3f861a6e791689215e0))
+
 # [1.50.0](https://github.com/mattjmcnaughton/aleph/compare/v1.49.0...v1.50.0) (2026-11-21)
 
 
