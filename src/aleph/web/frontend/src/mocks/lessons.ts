@@ -16,6 +16,7 @@ import {
   type LessonAttempt,
   type LessonDetail,
   type LessonGenerationState,
+  type LessonVisual,
   type LessonUnlockState,
 } from "../lib/api";
 
@@ -48,6 +49,8 @@ interface StoredLesson {
   completedAt: string | null;
   /** Overrides the generic failure copy when generation resolves to `failed`. */
   generationError?: string;
+  /** Visuals the passage's ```visual <id> fences name (served only when generated). */
+  visuals: LessonVisual[];
 }
 
 interface LessonsConfig {
@@ -113,6 +116,7 @@ export interface SeedLessonInput {
    */
   attemptSelectedIndex?: number;
   generationError?: string;
+  visuals?: LessonVisual[];
 }
 
 const DEFAULT_OPTIONS = ["A type-checked superset of JS", "A new runtime", "A CSS framework"];
@@ -146,6 +150,7 @@ export function seedLesson(input: SeedLessonInput): void {
     // lesson lands rather than dating the whole path from that final tap.
     completedAt: (input.unlock_state ?? "available") === "complete" ? nowIso() : null,
     generationError: input.generationError,
+    visuals: input.visuals ?? [],
   };
   if (input.attemptSelectedIndex !== undefined) {
     stored.attempt = gradeAttempt(stored, input.attemptSelectedIndex);
@@ -182,6 +187,7 @@ function detailFor(lesson: StoredLesson): LessonDetail {
     attempt: lesson.attempt,
     generation_error:
       generationState === "failed" ? (lesson.generationError ?? GENERIC_GENERATION_ERROR) : null,
+    visuals: generated ? lesson.visuals : [],
   };
 }
 

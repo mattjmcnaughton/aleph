@@ -184,6 +184,7 @@ describe("isLessonViewTerminal", () => {
       quick_check: null,
       attempt: null,
       generation_error: null,
+      visuals: [],
     };
   }
 

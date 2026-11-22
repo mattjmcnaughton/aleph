@@ -19,9 +19,11 @@
 // that can't reflow — fenced code blocks and tables — scroll horizontally inside
 // their own container rather than pushing the page sideways.
 
-import { isValidElement, type ReactNode } from "react";
+import { createContext, isValidElement, type ReactNode, useContext } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import type { LessonVisual as Visual } from "../lib/api";
+import { LessonVisual } from "./lesson-visual";
 import { Mermaid } from "./mermaid";
 
 // The plugin list is module-level (not inline) so its identity is stable across
@@ -43,6 +45,48 @@ function mermaidSource(children: ReactNode): string | null {
     return null;
   }
   return typeof code === "string" ? code : null;
+}
+
+// A stored visual's id: the canonical lowercase UUID the server writes into the
+// fence (`domains/visuals.py`). Anything else in a ```visual info string is not
+// an id we can resolve.
+const VISUAL_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/**
+ * For a ```visual fence: the id it names (or null when malformed). Undefined for
+ * any other `pre`. The id is the fence's info-string *meta* — mdast keeps the
+ * first word as the language and the rest on `node.data.meta`.
+ */
+function visualFenceId(children: ReactNode): string | null | undefined {
+  if (
+    !isValidElement<{
+      className?: string;
+      node?: { data?: { meta?: unknown } };
+    }>(children)
+  ) {
+    return undefined;
+  }
+  const { className, node } = children.props;
+  if (typeof className !== "string" || !className.split(/\s+/).includes("language-visual")) {
+    return undefined;
+  }
+  const meta = node?.data?.meta;
+  const id = typeof meta === "string" ? meta.trim() : "";
+  return VISUAL_ID_RE.test(id) ? id : null;
+}
+
+// The visuals a passage's fences may name, provided by `Markdown` so the
+// module-level `COMPONENTS` can stay stable across renders.
+const VisualsContext = createContext<readonly Visual[]>([]);
+
+/** A ```visual fence: the named visual in its sandbox, or nothing at all. */
+function VisualFence({ id }: { id: string | null }) {
+  const visuals = useContext(VisualsContext);
+  const visual = id === null ? undefined : visuals.find((candidate) => candidate.id === id);
+  // An unknown or malformed fence renders nothing: the passage teaches without
+  // it, and a broken block would only be noise.
+  if (visual === undefined) return null;
+  return <LessonVisual key={visual.id} visual={visual} />;
 }
 
 // Nocturne treatments for the block/inline elements the agent is told it may use
@@ -118,6 +162,10 @@ const COMPONENTS: Components = {
   // routes to the lazily-loaded renderer instead (which draws its own container,
   // including the code-block fallback when a chart won't parse).
   pre: ({ children }) => {
+    // ```visual <id> places an interactive Visual (lesson-visual.tsx): its
+    // source runs only in that component's sandboxed frame, never here.
+    const visualId = visualFenceId(children);
+    if (visualId !== undefined) return <VisualFence id={visualId} />;
     const chart = mermaidSource(children);
     if (chart !== null) return <Mermaid source={chart} />;
     return (
@@ -161,20 +209,27 @@ export function Markdown({
   children,
   className = "",
   testid,
+  visuals = NO_VISUALS,
 }: {
   children: string;
   className?: string;
   testid?: string;
+  /** The Visuals the passage's ```visual <id> fences may name (lesson detail). */
+  visuals?: readonly Visual[];
 }) {
   return (
     <div data-testid={testid} className={`space-y-[1.05em] ${className}`}>
-      <ReactMarkdown
-        remarkPlugins={REMARK_PLUGINS}
-        components={COMPONENTS}
-        disallowedElements={["img"]}
-      >
-        {children}
-      </ReactMarkdown>
+      <VisualsContext.Provider value={visuals}>
+        <ReactMarkdown
+          remarkPlugins={REMARK_PLUGINS}
+          components={COMPONENTS}
+          disallowedElements={["img"]}
+        >
+          {children}
+        </ReactMarkdown>
+      </VisualsContext.Provider>
     </div>
   );
 }
+
+const NO_VISUALS: readonly Visual[] = [];

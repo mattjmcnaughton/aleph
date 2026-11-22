@@ -38,7 +38,9 @@ teach without it and state the key numbers.
   `contentWindow` and only `{type:"status",status:"ok"|"error"}` and
   `{type:"height",height}` (clamped 60–640px). Height comes from
   `document.body` observed with `ResizeObserver` (observing `<html>` does not
-  work: it is pinned to the frame height). Error, or no `ok` within 3 s → the
+  work: it is pinned to the frame height). A height of 0 is ignored: Chrome
+  throttles an offscreen cross-origin frame, so `kit.ready()` measures 0 until
+  the frame scrolls into view, when the observer reports the real height. Error, or no `ok` within 3 s → the
   frame is removed and `alt` shows as text. Source never reaches
   `dangerouslySetInnerHTML`.
 - **D5 Shaping.** A Revision snapshots each visual (with its id) into the
