@@ -1,3 +1,10 @@
+## [1.53.1](https://github.com/mattjmcnaughton/aleph/compare/v1.53.0...v1.53.1) (2026-11-23)
+
+
+### Bug Fixes
+
+* **web:** put the forward action on the right of lesson-complete buttons ([7cc9ba9](https://github.com/mattjmcnaughton/aleph/commit/7cc9ba93400a603768455193541f8c576de36e6a))
+
 # [1.53.0](https://github.com/mattjmcnaughton/aleph/compare/v1.52.0...v1.53.0) (2026-11-22)
 
 
