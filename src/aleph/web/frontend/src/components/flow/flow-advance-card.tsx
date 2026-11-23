@@ -97,15 +97,8 @@ export function FlowAdvanceCard({
         {nextPathTitle ? ` · ${nextPathTitle}` : ""}
       </p>
 
+      {/* Go now on the right: the forward action sits where the eye ends. */}
       <div className="mt-5 grid grid-cols-2 gap-2">
-        <button
-          type="button"
-          data-testid="flow-advance-go"
-          onClick={onGoNow}
-          className="rounded-md bg-teal px-4 py-3 text-sm font-semibold text-night transition-colors hover:bg-teal-bright"
-        >
-          Go now
-        </button>
         <button
           type="button"
           data-testid="flow-advance-pause"
@@ -114,6 +107,14 @@ export function FlowAdvanceCard({
           className="rounded-md border border-faint px-4 py-3 text-sm font-medium text-mist transition-colors hover:text-porcelain"
         >
           {manuallyPaused ? "Resume" : "Pause"}
+        </button>
+        <button
+          type="button"
+          data-testid="flow-advance-go"
+          onClick={onGoNow}
+          className="rounded-md bg-teal px-4 py-3 text-sm font-semibold text-night transition-colors hover:bg-teal-bright"
+        >
+          Go now
         </button>
       </div>
 

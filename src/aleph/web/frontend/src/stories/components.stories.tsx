@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { ActivityStrip } from "../components/activity-strip";
 import { AlephLogo } from "../components/aleph-logo";
+import { FlowAdvanceCard } from "../components/flow/flow-advance-card";
 import { Markdown } from "../components/markdown";
 import { StateCard } from "../components/state-card";
 import { StreakChip } from "../components/streak-chip";
@@ -50,6 +51,22 @@ export const StateCards: Story = {
           </p>
         </StateCard>
       ))}
+    </div>
+  ),
+};
+
+export const FlowAdvance: Story = {
+  name: "Flow advance card (paused)",
+  render: () => (
+    <div className="mx-auto max-w-[36rem]">
+      <FlowAdvanceCard
+        nextTitle="Reading an EXPLAIN plan"
+        nextPathTitle="SQL performance"
+        startPaused
+        tutorOpen={false}
+        onGoNow={() => {}}
+        onEnd={() => {}}
+      />
     </div>
   ),
 };
