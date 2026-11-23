@@ -1061,7 +1061,22 @@ function CompletedState({ pathId, nextLesson }: { pathId: string; nextLesson: Pa
         )}
       </p>
 
-      <div className="mt-5 flex flex-col gap-2 lg:flex-row lg:[&>a]:w-auto">
+      {/* Back first in the DOM so the row reads back-then-forward on desktop
+          (the forward door on the right, like the prev/next footer below);
+          `flex-col-reverse` keeps the forward door on top on the phone. */}
+      <div className="mt-5 flex flex-col-reverse gap-2 lg:flex-row lg:[&>a]:w-auto">
+        {/* One link, two ranks: the teal door when it is the only way forward,
+            the outline one beside "Next lesson" when it is not. Written once so
+            the destination and its testid cannot drift between the two. */}
+        <Link
+          to="/paths/$pathId"
+          params={{ pathId }}
+          data-testid="lesson-completed-back"
+          className={nextLesson ? SECONDARY_CTA : PRIMARY_CTA_BASE}
+        >
+          Back to your path
+        </Link>
+
         {nextLesson ? (
           <Link
             to="/lessons/$lessonId"
@@ -1072,18 +1087,6 @@ function CompletedState({ pathId, nextLesson }: { pathId: string; nextLesson: Pa
             Next lesson
           </Link>
         ) : null}
-
-        {/* One link, two ranks: the teal door when it is the only way forward,
-            the outline one under "Next lesson" when it is not. Written once so
-            the destination and its testid cannot drift between the two. */}
-        <Link
-          to="/paths/$pathId"
-          params={{ pathId }}
-          data-testid="lesson-completed-back"
-          className={nextLesson ? SECONDARY_CTA : PRIMARY_CTA_BASE}
-        >
-          Back to your path
-        </Link>
       </div>
 
       <Link
