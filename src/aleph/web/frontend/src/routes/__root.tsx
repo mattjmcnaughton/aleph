@@ -8,10 +8,12 @@ import {
 import { useEffect } from "react";
 import type { RouterContext } from "../app/app";
 import { AppHeader } from "../components/app-header";
+import { PublicHeader, useSignedIn } from "../components/public-profile";
 import { PushLifecycle } from "../components/push-lifecycle";
 import { LOGIN_PATH, authRedirect, sessionQueryOptions } from "../lib/auth";
 import { clearFlow, readFlow } from "../lib/flow";
 import { useRepinAfterKeyboard } from "../lib/keyboard";
+import { isPublicPathname } from "../lib/public-profiles";
 
 export const Route = createRootRouteWithContext<RouterContext>()({
   // The auth gate: resolve the session once (cached), then let the pure
@@ -36,6 +38,12 @@ function RootLayout() {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   // The login screen is its own full-bleed surface — no app chrome.
   const showChrome = pathname !== LOGIN_PATH;
+  // A Public profile page (Public profiles TDD §6): signed out it gets the
+  // public header (brand + Sign in), signed in the visitor's own header. Push
+  // never starts here: a visitor reading someone else's page is not asking
+  // for notifications.
+  const publicPage = isPublicPathname(pathname);
+  const signedIn = useSignedIn();
 
   // Leaving is ending (flow TDD D5): a flow that silently survived a trip to
   // home would resume itself hours later. This is what makes *Home* in the
@@ -58,8 +66,8 @@ function RootLayout() {
 
   return (
     <div className="min-h-screen bg-night text-porcelain">
-      {showChrome ? <AppHeader /> : null}
-      {showChrome ? <PushLifecycle /> : null}
+      {showChrome ? publicPage && !signedIn ? <PublicHeader /> : <AppHeader /> : null}
+      {showChrome && !publicPage ? <PushLifecycle /> : null}
       <Outlet />
     </div>
   );

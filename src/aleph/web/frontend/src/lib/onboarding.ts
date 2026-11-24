@@ -123,6 +123,8 @@ export function buildCreatePathInput(input: {
   searchLessons?: boolean;
   modelOutline?: string;
   modelLesson?: string;
+  /** A Copy's source path, sent for credit only. */
+  sourcePathId?: string;
 }): CreatePathInput {
   // A slot value is either `MODEL_SLOT_DEFAULT` (the empty string) or an id the
   // picker took verbatim from the session — never free text — so a falsy check
@@ -137,5 +139,6 @@ export function buildCreatePathInput(input: {
   if (input.searchLessons !== undefined) body.search_lessons = input.searchLessons;
   if (input.modelOutline) body.model_outline = input.modelOutline;
   if (input.modelLesson) body.model_lesson = input.modelLesson;
+  if (input.sourcePathId) body.source_path_id = input.sourcePathId;
   return body;
 }

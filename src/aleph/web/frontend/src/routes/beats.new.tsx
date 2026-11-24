@@ -1,13 +1,16 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   BEATS_LIST_QUERY_KEY,
   type Level,
   beatQueryKey,
   deployBeat,
+  isNotFound,
   isRateLimited,
+  publicBeatQueryOptions,
 } from "../lib/api";
+import { fillEmptyFields, parseFrom } from "../lib/public-profiles";
 import { Breadcrumbs } from "../components/breadcrumbs";
 import { LevelFieldset } from "../components/level-fieldset";
 import { PRIMARY_CTA, StateCard } from "../components/state-card";
@@ -20,12 +23,22 @@ export const Route = createFileRoute("/beats/new")({
   // path-complete card offers ("Follow it as a Beat", AL-420) carries the
   // finished path's Topic across. Standing orders are frozen at deployment,
   // but not until then: this is an editable initial value.
-  validateSearch: (search: Record<string, unknown>): { topic?: string; level?: Level } => ({
+  validateSearch: (search: Record<string, unknown>): NewBeatSearch => ({
     topic: typeof search.topic === "string" ? search.topic : undefined,
     level: isLevel(search.level) ? search.level : undefined,
+    guidance: typeof search.guidance === "string" ? search.guidance : undefined,
+    // `?from=<handle>/<beatId>`: a Copy of a Shared Beat (Public profiles D2).
+    from: parseFrom(search.from) ? (search.from as string) : undefined,
   }),
   component: DeployAnalyst,
 });
+
+interface NewBeatSearch {
+  topic?: string;
+  level?: Level;
+  guidance?: string;
+  from?: string;
+}
 
 // Deploying an analyst (PRD §3, TDD §8): `routes/new.tsx`'s grammar with one
 // field added — Topic, Level (the existing three-way control, verbatim),
@@ -50,7 +63,31 @@ function DeployAnalyst() {
   const [topic, setTopic] = useState(search.topic ?? "");
   const [level, setLevel] = useState<Level>(search.level ?? "new_to_it");
   const [anchorWeekday, setAnchorWeekday] = useState(DEFAULT_ANCHOR_WEEKDAY);
-  const [guidance, setGuidance] = useState("");
+  const [guidance, setGuidance] = useState(search.guidance ?? "");
+
+  // A Copy of a Shared Beat: Topic, Level and Guidance, filled only where
+  // empty. The Anchor day stays the visitor's own choice (PRD §4.8).
+  const copyFrom = parseFrom(search.from);
+  const sourceQuery = useQuery({
+    ...publicBeatQueryOptions(copyFrom?.handle ?? "", copyFrom?.id ?? ""),
+    enabled: copyFrom !== null && analystEnabled,
+    staleTime: Number.POSITIVE_INFINITY,
+  });
+  const levelTouched = useRef(search.level !== undefined);
+  const appliedSource = useRef(false);
+  const source = sourceQuery.data;
+  useEffect(() => {
+    if (!source || appliedSource.current) return;
+    appliedSource.current = true;
+    const filled = fillEmptyFields(
+      { topic, guidance },
+      { topic: source.topic, guidance: source.guidance },
+    );
+    if (filled.topic !== undefined) setTopic(filled.topic);
+    if (filled.guidance !== undefined) setGuidance(filled.guidance);
+    if (!levelTouched.current) setLevel(source.level);
+  }, [source, topic, guidance]);
+  const sourceMissing = copyFrom !== null && isNotFound(sourceQuery.error);
 
   const createMutation = useMutation({
     mutationFn: deployBeat,
@@ -102,6 +139,7 @@ function DeployAnalyst() {
       level,
       anchor_weekday: anchorWeekday,
       ...(trimmedGuidance ? { guidance: trimmedGuidance } : {}),
+      ...(source ? { source_beat_id: source.id } : {}),
     });
   }
 
@@ -115,7 +153,24 @@ function DeployAnalyst() {
         Name a topic and Aleph reports on what changed, on the day you pick.
       </p>
 
-      <form className="mt-8" onSubmit={onSubmit} noValidate>
+      {source ? (
+        <p
+          data-testid="copy-from-notice"
+          className="mt-8 rounded-md border border-divider bg-elevated px-4 py-3 text-sm leading-6 text-mist"
+        >
+          From {source.owner.display_name}'s Beat. Pick your own report day; Briefs start at #1.
+        </p>
+      ) : null}
+      {sourceMissing ? (
+        <p
+          data-testid="copy-from-missing"
+          className="mt-8 rounded-md border border-divider bg-elevated px-4 py-3 text-sm leading-6 text-mist"
+        >
+          That shared Beat isn't available anymore, so the form starts empty.
+        </p>
+      ) : null}
+
+      <form className={source || sourceMissing ? "mt-5" : "mt-8"} onSubmit={onSubmit} noValidate>
         {rateLimited ? (
           <p
             data-testid="deploy-beat-ratelimit"
@@ -152,7 +207,14 @@ function DeployAnalyst() {
           className="w-full rounded-md border border-divider bg-surface px-4 py-3 text-base text-porcelain placeholder:text-slate focus:border-teal focus:outline-none"
         />
 
-        <LevelFieldset level={level} onChange={setLevel} idPrefix="beat-level" />
+        <LevelFieldset
+          level={level}
+          onChange={(value) => {
+            levelTouched.current = true;
+            setLevel(value);
+          }}
+          idPrefix="beat-level"
+        />
 
         <div className="mt-6">
           <label htmlFor="beat-anchor-weekday" className="text-sm font-medium text-porcelain">

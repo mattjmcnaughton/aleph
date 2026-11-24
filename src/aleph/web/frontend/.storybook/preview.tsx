@@ -10,6 +10,7 @@ import { resetLessons } from "../src/mocks/lessons";
 import { resetPathDrafts } from "../src/mocks/path-drafts";
 import { resetPaths } from "../src/mocks/paths";
 import { resetProgress } from "../src/mocks/progress";
+import { resetPublic } from "../src/mocks/public";
 import { resetShaping } from "../src/mocks/shaping";
 import { resetTutor } from "../src/mocks/tutor";
 import { sessionHandler, worldSession } from "../src/stories/world";
@@ -38,6 +39,7 @@ const preview: Preview = {
     resetProgress();
     resetBeats();
     resetAccount();
+    resetPublic();
     resetFlowCelebrations();
     window.sessionStorage.clear();
   },

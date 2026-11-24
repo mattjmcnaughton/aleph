@@ -31,6 +31,7 @@ __all__ = [
     "AnchorWeekday",
     "BeatDetailDTO",
     "BeatListResponse",
+    "BeatSourceDTO",
     "BeatSummaryDTO",
     "BriefDetailDTO",
     "BriefEntryDTO",
@@ -80,6 +81,8 @@ class DeployBeatRequest(BaseModel):
     guidance: GuidanceStr | None = None
     model_research: str | None = None
     model_brief: str | None = None
+    # CONTEXT.md: *Copy*, credit only (Public profiles TDD D7).
+    source_beat_id: UUID | None = None
 
 
 class PublishedEntryDTO(BaseModel):
@@ -131,6 +134,14 @@ BriefEntryDTO = Annotated[
 ]
 
 
+class BeatSourceDTO(BaseModel):
+    """\"Started from {display_name}'s Beat\"; ``None`` once it is not public."""
+
+    display_name: str
+    handle: str
+    beat_id: UUID
+
+
 class BeatDetailDTO(BaseModel):
     """``GET /api/v1/beats/{id}`` body (§6) — the poll target and the rail.
 
@@ -151,6 +162,8 @@ class BeatDetailDTO(BaseModel):
     research_started_at: datetime | None
     refusal_message: str | None
     entries: list[BriefEntryDTO]
+    shared: bool
+    source: BeatSourceDTO | None
 
 
 class BeatSummaryDTO(BaseModel):
@@ -176,6 +189,7 @@ class BeatSummaryDTO(BaseModel):
     research_started_at: datetime | None
     refusal_message: str | None
     unread_count: int
+    shared: bool
 
 
 class BeatListResponse(BaseModel):

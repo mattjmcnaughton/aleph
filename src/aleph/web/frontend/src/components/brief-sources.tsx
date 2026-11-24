@@ -3,6 +3,23 @@ import type { Source } from "../lib/api";
 import { formatBriefDate } from "../lib/beats";
 
 /**
+ * A Source URL safe to put in `href`: absolute `http:` or `https:` with a host,
+ * else null (Public profiles TDD §6, SR 9). Source URLs come from retrieval, so
+ * a `javascript:` or relative value must never become a link.
+ */
+export function safeSourceHref(url: string): string | null {
+  try {
+    const parsed = new URL(url);
+    if ((parsed.protocol === "http:" || parsed.protocol === "https:") && parsed.hostname) {
+      return parsed.href;
+    }
+  } catch {
+    // Not an absolute URL.
+  }
+  return null;
+}
+
+/**
  * The Sources block (PRD §3, CONTEXT.md: Source): "the part a learner should
  * be able to check us on", so it is a **first-class region of the page** —
  * body text size, an `elevated` surface, publisher and date beside each
@@ -38,7 +55,8 @@ export function BriefSources({
   onFirstVisible,
 }: {
   sources: Source[];
-  onFirstVisible: () => void;
+  /** Omitted on a public Brief, which never pings (Public profiles TDD §6). */
+  onFirstVisible?: () => void;
 }) {
   const containerRef = useRef<HTMLElement | null>(null);
   const firedRef = useRef(false);
@@ -60,7 +78,7 @@ export function BriefSources({
       for (const entry of entries) {
         if (entry.isIntersecting && !firedRef.current) {
           firedRef.current = true;
-          onFirstVisibleRef.current();
+          onFirstVisibleRef.current?.();
           observer.disconnect();
           break;
         }
@@ -97,14 +115,7 @@ export function BriefSources({
             data-testid="brief-source"
             className="min-w-0 border-b border-divider py-3 last:border-b-0"
           >
-            <a
-              href={source.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex min-h-[44px] flex-col justify-center text-[15px] font-semibold leading-6 text-porcelain underline-offset-[3px] hover:underline hover:decoration-teal focus-visible:outline focus-visible:outline-2 focus-visible:outline-teal"
-            >
-              {source.title}
-            </a>
+            <SourceTitle source={source} />
             {/* Publisher and date beside the title (PRD §3), truncated so a
                 long publisher name can't push the row past 390px. */}
             <p className="min-w-0 truncate text-sm leading-6 text-mist">
@@ -114,5 +125,31 @@ export function BriefSources({
         ))}
       </ol>
     </section>
+  );
+}
+
+const SOURCE_TITLE =
+  "flex min-h-[44px] flex-col justify-center text-[15px] font-semibold leading-6 text-porcelain";
+
+function SourceTitle({ source }: { source: Source }) {
+  const href = safeSourceHref(source.url);
+  if (href === null) {
+    // Shown, never linked: the learner can still read what was cited.
+    return (
+      <p className={SOURCE_TITLE}>
+        <span>{source.title}</span>
+        <span className="break-all text-sm font-normal text-mist">{source.url}</span>
+      </p>
+    );
+  }
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className={`${SOURCE_TITLE} underline-offset-[3px] hover:underline hover:decoration-teal focus-visible:outline focus-visible:outline-2 focus-visible:outline-teal`}
+    >
+      {source.title}
+    </a>
   );
 }

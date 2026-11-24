@@ -95,6 +95,8 @@ function detail(
     status,
     refusal_message: null,
     progress: { total_lessons: lessons.length, generated_lessons: 0, completed_lessons: 0 },
+    shared: false,
+    source: null,
     units: [
       {
         id: "u1",
@@ -219,6 +221,7 @@ describe("isPathListTerminal", () => {
       progress: { total_lessons: 0, generated_lessons: 0, completed_lessons: 0 },
       last_activity_at: null,
       next_lesson: null,
+      shared: false,
     };
   }
 
@@ -272,6 +275,8 @@ describe("isBeatDetailTerminal", () => {
       research_started_at: null,
       refusal_message: null,
       entries: [],
+      shared: false,
+      source: null,
     };
   }
 

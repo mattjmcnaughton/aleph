@@ -102,6 +102,10 @@ class CreatePathRequest(BaseModel):
     search_lessons: bool = False
     model_outline: str | None = None
     model_lesson: str | None = None
+    # CONTEXT.md: *Copy*. The Shared path this one was started from, for credit
+    # only (Public profiles TDD D7): dropped silently unless that path is
+    # public right now, and nothing else is ever read from it.
+    source_path_id: UUID | None = None
 
 
 class UpdatePathRequest(BaseModel):
@@ -195,6 +199,7 @@ class PathSummaryDTO(BaseModel):
     progress: PathProgressDTO
     last_activity_at: datetime | None
     next_lesson: NextLessonDTO | None
+    shared: bool
 
 
 class PathListResponse(BaseModel):
@@ -236,6 +241,17 @@ class UnitDTO(BaseModel):
     lessons: list[LessonSummaryDTO]
 
 
+class PathSourceDTO(BaseModel):
+    """\"Started from {display_name}'s path\" (CONTEXT.md: *Copy*).
+
+    Resolved on every read; ``None`` once the source is no longer public.
+    """
+
+    display_name: str
+    handle: str
+    path_id: UUID
+
+
 class PathDetailResponse(BaseModel):
     """``GET /api/v1/paths/{id}`` body — the poll target (§5.4/§6).
 
@@ -270,3 +286,5 @@ class PathDetailResponse(BaseModel):
     refusal_message: str | None
     progress: PathProgressDTO
     units: list[UnitDTO]
+    shared: bool
+    source: PathSourceDTO | None

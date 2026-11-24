@@ -25,6 +25,7 @@ maps to in ``OIDC_CLIENT_MAP``, else ``unknown``.
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Annotated
+from urllib.parse import urlsplit
 from uuid import UUID
 
 import structlog
@@ -177,6 +178,38 @@ async def _resolve_bearer_user(
     _bind_user_to_request(request, user, auth_method="bearer", client=client)
     await observe(session, user, request.headers.get("X-Aleph-Time-Zone"))
     return user
+
+
+def _origin_of(url: str) -> str | None:
+    parts = urlsplit(url)
+    if not parts.scheme or not parts.netloc:
+        return None
+    return f"{parts.scheme}://{parts.netloc}".lower()
+
+
+async def require_same_origin(request: Request) -> None:
+    """Reject a cookie-authenticated write from another origin (TDD §4, SR 5).
+
+    ``SameSite=Lax`` alone still lets a same-site page drive these writes, and
+    these publish a learner's data, so they check ``Origin`` (``Referer`` when a
+    browser omits it). A request with neither is rejected: every browser sends
+    ``Origin`` on a cross-origin or non-GET ``fetch``. Bearer requests skip the
+    check; they carry no ambient credential to forge. Accepted origins: the
+    request's own, ``PUBLIC_BASE_URL`` and ``CSRF_TRUSTED_ORIGINS``.
+    """
+    if request.method in ("GET", "HEAD", "OPTIONS") or bearer_token(request):
+        return
+    claimed = request.headers.get("origin") or request.headers.get("referer")
+    origin = _origin_of(claimed) if claimed else None
+    own = _origin_of(str(request.base_url))
+    if origin is not None and (
+        origin == own or origin in settings.csrf_trusted_origin_set
+    ):
+        return
+    logger.info("same_origin_rejected", origin=claimed)
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN, detail="cross-origin request"
+    )
 
 
 def bearer_client(client_id: str | None, labels: Mapping[str, str]) -> str:

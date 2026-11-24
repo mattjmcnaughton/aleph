@@ -74,9 +74,17 @@ async def _enum_types(database_url: str) -> set[str]:
 # "earlier tables are unchanged by step N" tests snapshot at head and downgrade
 # one step below N, so a column some step after N added to a tracked table would
 # otherwise read as "step N's downgrade dropped it". Grows with each such step.
+PUBLIC_PROFILE_COLUMNS = {
+    "users": {"handle", "profile_public", "profile_show_activity"},
+    "paths": {"shared", "source_path_id"},
+    "beats": {"shared", "source_beat_id"},
+}
 LATER_COLUMNS: dict[str, set[str]] = {
-    "paths": {"teaching_style", "search_outline", "search_lessons"},
-    "users": {"time_zone", "time_zone_seen_at", "about_you"},  # 0017, 0023
+    "paths": {"teaching_style", "search_outline", "search_lessons"}
+    | PUBLIC_PROFILE_COLUMNS["paths"],
+    # 0017, 0023, 0025
+    "users": {"time_zone", "time_zone_seen_at", "about_you"}
+    | PUBLIC_PROFILE_COLUMNS["users"],
     "conversations": {"lesson_id"},  # 0021_lesson_conversations
 }
 
@@ -493,8 +501,14 @@ def test_earlier_tables_keep_their_columns_through_the_shaping_reversal(
             "teaching_style",
             "search_outline",
             "search_lessons",
+            *PUBLIC_PROFILE_COLUMNS["paths"],
         },
-        "users": {"time_zone", "time_zone_seen_at", "about_you"},
+        "users": {
+            "time_zone",
+            "time_zone_seen_at",
+            "about_you",
+            *PUBLIC_PROFILE_COLUMNS["users"],
+        },
     }
     assert {
         table: columns - added.get(table, set()) for table, columns in before.items()
@@ -1852,9 +1866,13 @@ def test_time_zone_migration_nullable_and_reversible(isolated_database: str) -> 
         "time_zone",
         "time_zone_seen_at",
         "about_you",
+        *PUBLIC_PROFILE_COLUMNS["users"],
     }
     run_alembic(database_url, "0017_user_time_zone")
-    assert asyncio.run(_columns(database_url, "users")) == at_head - {"about_you"}
+    assert asyncio.run(_columns(database_url, "users")) == at_head - {
+        "about_you",
+        *PUBLIC_PROFILE_COLUMNS["users"],
+    }
 
 
 async def _retained_conversation_rows(database_url: str) -> dict[str, list[str]]:
@@ -1987,3 +2005,24 @@ def test_lesson_visuals_migration_downgrades_and_reapplies_cleanly(
     run_alembic(database_url, "0024_lesson_visuals")
     assert asyncio.run(_tables(database_url)) == at_head
     assert "lesson_visual_kind" in asyncio.run(_enum_types(database_url))
+
+
+def test_public_profiles_migration_downgrades_and_reapplies_cleanly(
+    isolated_database: str,
+) -> None:
+    """0025 adds exactly its columns and removes exactly them on the way down."""
+    database_url = isolated_database
+    at_head = {
+        table: asyncio.run(_columns(database_url, table))
+        for table in PUBLIC_PROFILE_COLUMNS
+    }
+    for table, columns in PUBLIC_PROFILE_COLUMNS.items():
+        assert columns <= at_head[table]
+
+    run_alembic(database_url, "0024_lesson_visuals", downgrade=True)
+    for table, columns in PUBLIC_PROFILE_COLUMNS.items():
+        assert asyncio.run(_columns(database_url, table)) == at_head[table] - columns
+
+    run_alembic(database_url, "head")
+    for table in PUBLIC_PROFILE_COLUMNS:
+        assert asyncio.run(_columns(database_url, table)) == at_head[table]

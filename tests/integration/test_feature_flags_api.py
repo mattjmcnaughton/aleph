@@ -74,6 +74,7 @@ ANALYST = "analyst"
 # In every resolved map because the session carries the whole registry.
 FLOW = "flow"
 LEARNING_SUMMARY = "learning_summary"
+PUBLIC_PROFILES = "public_profiles"
 
 LEARNER = AuthIdentity(
     issuer="https://issuer.example.test",
@@ -152,6 +153,7 @@ def _resolved(
     analyst: bool = False,
     flow: bool = False,
     learning_summary: bool = False,
+    public_profiles: bool = False,
 ) -> dict[str, bool]:
     """The full resolved map — the session carries **every** registered flag.
 
@@ -177,6 +179,7 @@ def _resolved(
         ANALYST: analyst,
         FLOW: flow,
         LEARNING_SUMMARY: learning_summary,
+        PUBLIC_PROFILES: public_profiles,
     }
 
 
@@ -234,6 +237,7 @@ async def test_admin_lists_every_registered_flag(
                 _flag_row(ANALYST, enabled_default=False),
                 _flag_row(FLOW, enabled_default=False),
                 _flag_row(LEARNING_SUMMARY, enabled_default=False),
+                _flag_row(PUBLIC_PROFILES, enabled_default=False),
                 _flag_row(SHAPING, enabled_default=False),
                 _flag_row(STREAKS, enabled_default=False),
                 _flag_row(TUTOR, enabled_default=False),
@@ -308,6 +312,7 @@ async def test_launched_flags_reach_a_plain_learner(
     makes a fresh clone and a local ``just dev`` show the real product.
     Flow also defaults on in this feature branch (#262), without claiming
     production launch. Its real default must reach the session unchanged.
+    Public profiles ship on (TDD D9); nothing is public until a learner opts in.
     """
     monkeypatch.undo()
     assert not settings.feature_flag_defaults, "nothing may be configured here"
@@ -315,7 +320,12 @@ async def test_launched_flags_reach_a_plain_learner(
     async with _client(app) as learner:
         await _sign_in(learner, monkeypatch, LEARNER)
         assert await _flags_on_session(learner) == _resolved(
-            tutor=True, shaping=True, streaks=True, analyst=True, flow=True
+            tutor=True,
+            shaping=True,
+            streaks=True,
+            analyst=True,
+            flow=True,
+            public_profiles=True,
         )
 
 
@@ -351,6 +361,7 @@ async def test_dark_flags_resolve_on_for_admins(
             _flag_row(ANALYST, enabled_default=False),
             _flag_row(FLOW, enabled_default=False),
             _flag_row(LEARNING_SUMMARY, enabled_default=False),
+            _flag_row(PUBLIC_PROFILES, enabled_default=False),
             _flag_row(SHAPING, enabled_default=False),
             _flag_row(STREAKS, enabled_default=False),
             _flag_row(TUTOR, enabled_default=False),
@@ -385,6 +396,7 @@ async def test_override_flips_a_learner_on_and_clears_idempotently(
             _flag_row(ANALYST, enabled_default=False),
             _flag_row(FLOW, enabled_default=False),
             _flag_row(LEARNING_SUMMARY, enabled_default=False),
+            _flag_row(PUBLIC_PROFILES, enabled_default=False),
             _flag_row(SHAPING, enabled_default=False),
             _flag_row(STREAKS, enabled_default=False),
             _flag_row(TUTOR, enabled_default=False, override_count=1),
@@ -443,6 +455,7 @@ async def test_settings_default_flips_the_flag_without_a_deploy(
             _flag_row(ANALYST, enabled_default=False),
             _flag_row(FLOW, enabled_default=False),
             _flag_row(LEARNING_SUMMARY, enabled_default=False),
+            _flag_row(PUBLIC_PROFILES, enabled_default=False),
             _flag_row(SHAPING, enabled_default=False),
             _flag_row(STREAKS, enabled_default=False),
             _flag_row(TUTOR, enabled_default=True),

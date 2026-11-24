@@ -235,7 +235,21 @@ def create_stub_app() -> FastAPI:
     settings.max_beats_per_learner = 30
     # Pin all surfaces exercised by the browser suite, including Flow,
     # so code-default changes cannot turn a journey into a flag-gate test.
+    # ``public_profiles`` is not pinned: it defaults on in code, and PP3 and
+    # the demo run on that default.
     settings.feature_flag_defaults = "tutor:on,shaping:on,streaks:on,analyst:on,flow:on"
+    # The harness's SPA (tests/e2e/servers.ts) calls the API through the vite
+    # proxy, which rewrites Host but not Origin, so the Public profile writes'
+    # Origin check must trust it explicitly (beside any configured origins).
+    settings.csrf_trusted_origins = ",".join(
+        filter(
+            None,
+            [
+                settings.csrf_trusted_origins,
+                "http://127.0.0.1:5300,http://localhost:5300",
+            ],
+        )
+    )
 
     # Phase 6's retrieval seam (ticket AL-560; `services/retrieval.py`,
     # `services/briefing.py`). ``briefing_service`` is a module-level

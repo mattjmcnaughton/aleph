@@ -18,6 +18,7 @@ import {
   type Level,
   type PathDetail,
   type PathProgress,
+  type PathSource,
   type PathStatus,
   type PathSummary,
   type PathUnit,
@@ -28,6 +29,7 @@ import {
   TOPIC_MAX_LENGTH,
 } from "../lib/onboarding";
 import { ADMIN_MODEL_ALLOWLIST } from "./models";
+import { publicPathCredit } from "./public";
 
 // --- Reusable path-view fixtures (AL-062) -----------------------------------
 //
@@ -214,6 +216,10 @@ interface StoredPath {
   units?: PathUnit[];
   /** Pinned `last_activity_at`; derived from the outline when omitted. */
   lastActivityAt?: string;
+  /** Shown on the owner's Public profile. */
+  shared?: boolean;
+  /** A Copy's credit, resolved at create time in this fake. */
+  source?: PathSource | null;
 }
 
 interface PathsConfig {
@@ -360,8 +366,12 @@ export function seedPath(path: {
    * for every worked path) deliberately cannot express.
    */
   lastActivityAt?: string;
+  shared?: boolean;
+  source?: PathSource | null;
 }): void {
   store.set(path.id, {
+    shared: path.shared ?? false,
+    source: path.source ?? null,
     id: path.id,
     topic: path.topic,
     title: path.title,
@@ -589,6 +599,8 @@ function detailFor(path: StoredPath): PathDetail {
     // Roll-up derived from the same units the rail renders (docs/api.md).
     progress: status === "ready" ? progressFor(units) : EMPTY_PROGRESS,
     units,
+    shared: path.shared ?? false,
+    source: path.source ?? null,
   };
 }
 
@@ -622,6 +634,7 @@ function summaryFor(path: StoredPath): PathSummary {
       next === undefined
         ? null
         : { id: next.id, title: next.title, position_in_path: next.position_in_path },
+    shared: detail.shared,
   };
 }
 
@@ -747,6 +760,7 @@ export const pathsHandlers = [
       level: body.level,
       resolution: resolutionForTopic(body.topic),
       pollsRemaining: config.pollsBeforeResolve,
+      source: publicPathCredit(body.source_path_id),
     });
     return HttpResponse.json({ id }, { status: 202 });
   }),
@@ -882,6 +896,14 @@ export const pathsHandlers = [
     }
     path.teachingStyle = trimmed;
     return HttpResponse.json(detailFor(path));
+  }),
+
+  http.put(`${API_V1_BASE}/paths/:id/shared`, async ({ request, params }) => {
+    const path = store.get(String(params.id));
+    if (!path) return HttpResponse.json({ error: { code: "not_found" } }, { status: 404 });
+    const { shared } = (await request.json()) as { shared: boolean };
+    path.shared = shared;
+    return HttpResponse.json({ shared });
   }),
 
   http.post(`${API_V1_BASE}/paths/:id/retry`, ({ params }) => {

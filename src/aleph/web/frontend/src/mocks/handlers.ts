@@ -7,6 +7,7 @@ import { ADMIN_MODEL_ALLOWLIST } from "./models";
 import { pathDraftHandlers } from "./path-drafts";
 import { pathsHandlers } from "./paths";
 import { progressHandlers } from "./progress";
+import { publicHandlers } from "./public";
 import { shapingHandlers } from "./shaping";
 import { tutorHandlers } from "./tutor";
 
@@ -99,4 +100,5 @@ export const handlers = [
   ...progressHandlers,
   ...beatHandlers,
   ...accountHandlers,
+  ...publicHandlers,
 ];

@@ -89,6 +89,14 @@ function VisualFence({ id }: { id: string | null }) {
   return <LessonVisual key={visual.id} visual={visual} />;
 }
 
+function CodeBlock({ children }: { children?: ReactNode }) {
+  return (
+    <pre className="overflow-x-auto rounded-md bg-surface p-4 font-mono text-[13px] leading-6 text-porcelain [&_code]:bg-transparent [&_code]:p-0 [&_code]:text-[inherit] [&_code]:text-porcelain">
+      {children}
+    </pre>
+  );
+}
+
 // Nocturne treatments for the block/inline elements the agent is told it may use
 // (see `SYSTEM_PROMPT` in src/aleph/agents/lesson.py). Anything not listed falls
 // back to react-markdown's plain element, which inherits the container's type
@@ -168,11 +176,7 @@ const COMPONENTS: Components = {
     if (visualId !== undefined) return <VisualFence id={visualId} />;
     const chart = mermaidSource(children);
     if (chart !== null) return <Mermaid source={chart} />;
-    return (
-      <pre className="overflow-x-auto rounded-md bg-surface p-4 font-mono text-[13px] leading-6 text-porcelain [&_code]:bg-transparent [&_code]:p-0 [&_code]:text-[inherit] [&_code]:text-porcelain">
-        {children}
-      </pre>
-    );
+    return <CodeBlock>{children}</CodeBlock>;
   },
   // GFM tables (remark-gfm). Same reflow problem as code blocks: the wrapper owns
   // the horizontal scroll so a wide table never widens the page on a phone.
@@ -196,6 +200,14 @@ const COMPONENTS: Components = {
   ),
 };
 
+// Every fence, Mermaid and ```visual included, as a plain code block: for text
+// published to anonymous visitors (Public profiles TDD §6, SR 9), where nothing
+// in the body should render as a diagram or run in a frame.
+const PLAIN_FENCE_COMPONENTS: Components = {
+  ...COMPONENTS,
+  pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
+};
+
 /**
  * Render model-generated Markdown as Nocturne-styled DOM.
  *
@@ -210,19 +222,22 @@ export function Markdown({
   className = "",
   testid,
   visuals = NO_VISUALS,
+  plainFences = false,
 }: {
   children: string;
   className?: string;
   testid?: string;
   /** The Visuals the passage's ```visual <id> fences may name (lesson detail). */
   visuals?: readonly Visual[];
+  /** Render Mermaid and Visual fences as plain code (public Briefs). */
+  plainFences?: boolean;
 }) {
   return (
     <div data-testid={testid} className={`space-y-[1.05em] ${className}`}>
       <VisualsContext.Provider value={visuals}>
         <ReactMarkdown
           remarkPlugins={REMARK_PLUGINS}
-          components={COMPONENTS}
+          components={plainFences ? PLAIN_FENCE_COMPONENTS : COMPONENTS}
           disallowedElements={["img"]}
         >
           {children}

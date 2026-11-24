@@ -4,6 +4,7 @@
 // testable without a router or a network.
 import { queryOptions } from "@tanstack/react-query";
 import { type AuthSession, getAuthSession } from "./api";
+import { isPublicPathname } from "./public-profiles";
 
 /** The public route unauthenticated learners are allowed to sit on. */
 export const LOGIN_PATH = "/login";
@@ -23,6 +24,7 @@ export const sessionQueryOptions = queryOptions({
  * Where the router should send the learner given the resolved session and the
  * path they asked for. Returns null to stay put.
  *
+ * - A Public profile page (`/@handle…`, exact shapes only) -> stay, either way.
  * - Unauthenticated on any protected route -> /login.
  * - Authenticated but sitting on /login    -> app root.
  * - Otherwise                              -> stay.
@@ -32,6 +34,7 @@ export function authRedirect(
   pathname: string,
 ): { to: string } | null {
   const authenticated = session?.authenticated ?? false;
+  if (isPublicPathname(pathname)) return null;
   if (!authenticated && pathname !== LOGIN_PATH) {
     return { to: LOGIN_PATH };
   }

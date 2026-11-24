@@ -23,6 +23,11 @@ from aleph.authz import is_admin
 from aleph.config import settings
 from aleph.db import get_session
 from aleph.dependencies import get_optional_current_user
+from aleph.domains.public_profiles import (
+    CopyIntent,
+    copy_destination,
+    parse_copy_intent,
+)
 from aleph.dtos.auth import SessionDTO, UserDTO
 from aleph.models import User  # noqa: TC001 - FastAPI resolves annotations.
 from aleph.services.auth import AuthService
@@ -32,13 +37,46 @@ router = APIRouter(tags=["auth"])
 logger = structlog.get_logger()
 
 
+# Session key for the typed sign-in copy intent (Public profiles TDD §5, SR 6).
+COPY_INTENT_KEY = "copy_intent"
+
+
 @router.get("/auth/login")
-async def login(request: Request) -> Response:
+async def login(request: Request, copy: str | None = None) -> Response:
+    """Start the OIDC flow; ``copy=path:<handle>:<uuid>`` (or ``beat:``) returns
+    the visitor to the prefilled form after sign-in.
+
+    There is no free-form ``next``. The value is parsed against that grammar and
+    stored as ``{kind, handle, id}`` beside Authlib's state; anything else is
+    ignored, and a stale intent from an earlier attempt is dropped.
+    """
     client = oauth.create_client(settings.oidc_provider)
     if client is None:
         raise RuntimeError(f"auth provider is not registered: {settings.oidc_provider}")
+    intent = parse_copy_intent(copy)
+    if intent is None:
+        request.session.pop(COPY_INTENT_KEY, None)
+    else:
+        request.session[COPY_INTENT_KEY] = {
+            "kind": intent.kind,
+            "handle": intent.handle,
+            "id": str(intent.item_id),
+        }
     callback_url = str(request.url_for("auth_callback"))
     return await client.authorize_redirect(request, callback_url)
+
+
+def _pop_copy_destination(request: Request) -> str | None:
+    """Consume the stored intent (single-use) and build its destination."""
+    stored = request.session.pop(COPY_INTENT_KEY, None)
+    if not isinstance(stored, dict):
+        return None
+    # Re-parse what was stored: the session is signed, but the grammar is the
+    # only thing allowed to produce a destination.
+    intent: CopyIntent | None = parse_copy_intent(
+        f"{stored.get('kind')}:{stored.get('handle')}:{stored.get('id')}"
+    )
+    return copy_destination(intent) if intent is not None else None
 
 
 @router.get("/auth/callback")
@@ -60,10 +98,12 @@ async def auth_callback(
         user = await AuthService(session).sign_in(identity)
     except (OAuthError, ValueError) as exc:
         logger.warning("auth_callback_failed", error=str(exc))
+        request.session.pop(COPY_INTENT_KEY, None)
         return RedirectResponse(url="/login?error=auth_failed", status_code=303)
 
+    destination = _pop_copy_destination(request) or "/"
     request.session["user_id"] = str(user.id)
-    return RedirectResponse(url="/", status_code=303)
+    return RedirectResponse(url=destination, status_code=303)
 
 
 @router.post("/auth/logout", status_code=204)
@@ -76,6 +116,7 @@ async def logout(request: Request) -> Response:
 
 @router.get("/api/v1/auth/session", response_model=SessionDTO)
 async def get_auth_session(
+    response: Response,
     session: Annotated[AsyncSession, Depends(get_session)],
     user: Annotated[User | None, Depends(get_optional_current_user)],
 ) -> SessionDTO:
@@ -93,6 +134,8 @@ async def get_auth_session(
     A native client calls it with its bearer token: the same payload for the
     same account, and an invalid token is ``401`` (it never reads as signed out).
     """
+    # Carries email and flags: never stored by any cache (Public profiles §4).
+    response.headers["Cache-Control"] = "private, no-store"
     if user is None:
         return SessionDTO(authenticated=False, provider=settings.oidc_provider)
 

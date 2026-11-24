@@ -445,7 +445,9 @@ that block. Resolution order and the full semantics are in
 (`services/feature_flags.py`) from `False` to `True`. That is the launch: it
 reaches production *and* every developer's laptop and every CI run at once, which
 is why it beats setting the env var — one statement of what is live, not two.
-`tutor`, `shaping`, `streaks`, and `analyst` were launched this way. The retired
+`tutor`, `shaping`, `streaks`, and `analyst` were launched this way;
+`public_profiles` shipped with its default already on (nothing is public until
+a learner opts in), and `public_profiles:off` is its kill switch. The retired
 flashcard flag is no longer registered.
 
 Use the `fly.toml` env var instead only when the flip must be **reversible
@@ -632,7 +634,9 @@ something else is holding 8000 (the only port the smoke publishes).
 `PUBLIC_BASE_URL` must be an HTTPS origin when `ENV=production`, even with push
 disabled; `fly.toml` supplies `https://aleph.mattjmcnaughton.com`. This source
 configuration change is not a deployment. The Compose smoke uses a synthetic
-HTTPS origin and never sends push.
+HTTPS origin and never sends push. It is also the trusted `Origin` for the
+Public profile writes (`require_same_origin`); production needs no
+`CSRF_TRUSTED_ORIGINS`.
 
 `VAPID_PRIVATE_KEY` is optional and **unset by default**. Without it,
 `GET /api/v1/push-config` returns 404 and the Null sender records `disabled`,

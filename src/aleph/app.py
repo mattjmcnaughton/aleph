@@ -23,6 +23,7 @@ from aleph.routers.v1 import notifications as v1_notifications
 from aleph.routers.v1 import path_drafts as v1_path_drafts
 from aleph.routers.v1 import paths as v1_paths
 from aleph.routers.v1 import progress as v1_progress
+from aleph.routers.v1 import public as v1_public
 from aleph.routers.v1 import shaping as v1_shaping
 from aleph.routers.v1 import tutor as v1_tutor
 from aleph.services.generation import generation_orchestrator
@@ -78,6 +79,7 @@ def create_app() -> FastAPI:
     )
 
     setup_telemetry(app)
+    _install_cache_policy(app)
     _install_request_id(app)
     _install_error_handlers(app)
 
@@ -106,11 +108,41 @@ def create_app() -> FastAPI:
     # Brief routes all 404 by default) and be dogfooded by admins without
     # disturbing any already-launched surface above.
     app.include_router(v1_beats.router)
+    # Public profiles: anonymous reads with no auth dependency at all. Every
+    # read checks the ``public_profiles`` flag for the profile owner (TDD D9).
+    app.include_router(v1_public.router)
 
     # Mount frontend static files (only serves if dist/ exists)
     mount_frontend(app)
 
     return app
+
+
+PUBLIC_API_PREFIX = "/api/v1/public/"
+
+
+def _install_cache_policy(app: FastAPI) -> None:
+    """No shared cache stores account, session or public data (Constitution §1).
+
+    Every ``/api/*`` and ``/auth/*`` response that has not set its own
+    ``Cache-Control`` gets ``no-store`` (Public profiles TDD §4). Public reads
+    also get ``X-Robots-Tag: noindex``, and never carry a cookie: a public
+    route never touches the session, and this strips one regardless, so the
+    rule holds even if something upstream starts writing it. Added after
+    ``SessionMiddleware`` so it wraps it and sees its ``Set-Cookie``.
+    """
+
+    @app.middleware("http")
+    async def cache_policy_middleware(request: Request, call_next):
+        response = await call_next(request)
+        path = request.url.path
+        if path.startswith(("/api/", "/auth/")):
+            response.headers.setdefault("Cache-Control", "no-store")
+        if path.startswith(PUBLIC_API_PREFIX):
+            response.headers["Cache-Control"] = "no-store"
+            response.headers["X-Robots-Tag"] = "noindex"
+            del response.headers["set-cookie"]
+        return response
 
 
 def _install_request_id(app: FastAPI) -> None:

@@ -481,6 +481,7 @@ async def test_list_paths_switcher_shape(
             "progress",
             "last_activity_at",
             "next_lesson",
+            "shared",
         }
         assert row["topic"] == "Second topic"
         assert row["title"] == "Second topic"  # no rename yet: falls back to topic

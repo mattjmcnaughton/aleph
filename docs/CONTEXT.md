@@ -164,7 +164,7 @@ Spec: [Flow TDD](tdds/flow.md), mock: [Flow mode](mocks/aleph-flow-mode.html).
 
 ## Public profiles
 
-Accepted, not yet built, behind the `public_profiles` flag. Spec:
+Built and on for every learner; nothing is public until a learner turns their profile on and shares something. `public_profiles` is only the kill switch. Spec:
 [PRD](prds/public-profiles.md), [TDD](tdds/public-profiles.md).
 
 | Term | Meaning |
