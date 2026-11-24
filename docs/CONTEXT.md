@@ -162,6 +162,18 @@ Spec: [Flow TDD](tdds/flow.md), mock: [Flow mode](mocks/aleph-flow-mode.html).
 | **Flow length** | How many lessons the flow will take — a count (3, 5, 8), or open-ended ("until I stop"). Fixed at the door; the only thing that changes it mid-flow is ending it. |
 | **Flow scope** | Which paths the flow draws lessons from, and in what order — **Interleave** (paths take turns in the order picked), **Random** (the default; a path drawn afresh for every lesson), or **one path at a time** (finish the first before touching the next). New flows default to every active path (ready with a next available lesson); explicit path links and *Go again* prefills override that default. Within a path the order is always Progression's: that path's next available lesson — Random picks the *path*, never a lesson out of order. Always paths, never a **Beat**: a Beat is not a path, so it is never offered here and a **Brief** is never a lesson a flow can open. |
 
+## Public profiles
+
+Accepted, not yet built, behind the `public_profiles` flag. Spec:
+[PRD](prds/public-profiles.md), [TDD](tdds/public-profiles.md).
+
+| Term | Meaning |
+| --- | --- |
+| **Public profile** | A learner's opt-in page at `/@handle`, readable without signing in. Off by default. Shows only what the learner has **Shared**, plus their Daily streak and activity strip if they choose. The one place anonymous reads are allowed (Constitution §1). |
+| **Handle** | The learner-chosen name in a Public profile's URL: 3–30 lowercase letters, digits and `-`, unique, and permanent once set. Distinct from the sign-in username. |
+| **Shared** | A path or Beat the owner picked to appear on their Public profile. Visible only while the profile is on, and live: later Teaching style edits and new Briefs are shown too. |
+| **Copy** | A new path or Beat a learner starts from a Shared one's **creation inputs** (Topic, Level, Guidance and, for a path, Teaching style), prefilled into New path or New beat and created only when they submit. Never the outline, lessons, progress or Briefs: the outline is generated fresh for the copier. Its **source** is credited only while still Shared. |
+
 ## Quality, safety & measurement
 
 | Term | Meaning |

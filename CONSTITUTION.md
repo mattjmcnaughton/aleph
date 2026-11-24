@@ -14,6 +14,18 @@ disabled controls improve usability; they do not enforce security or integrity.
 Model output is untrusted input. It cannot grant access, bypass validation, or
 authorize a mutation.
 
+One bounded exception: an anonymous request may read a **published projection**
+of a learner's data that the learner explicitly chose to publish, for as long as
+it stays published. Such reads are GET-only, return only fields named for
+publication, never read or renew the caller's session, and re-check publication
+on every request. Every mutation and every unpublished resource stays
+authenticated and owner-scoped.
+
+No shared cache may store a response that carries account data or session
+state, or keep a published projection after the learner withdraws it. Such
+responses say so (`Cache-Control: no-store`), and a public response never sets a
+cookie.
+
 ## 2. Learners authorize changes; models propose them
 
 A model may produce a Proposal, but conversation text and model output never
@@ -167,6 +179,15 @@ rather than silently rewriting another authoritative document.
   Rationale: the eval harness was never run and was removed with its judge model;
   generation now runs on one app-wide model. Tests still verify behavior only, and
   quality is judged by reviewing real output.
+- 2026-11-24: §1 permits anonymous reads of an explicitly published projection,
+  and forbids shared caching of account or session responses and of withdrawn
+  projections. Rationale: Public profiles
+  ([PRD](docs/prds/public-profiles.md), [TDD](docs/tdds/public-profiles.md)) let
+  a learner publish chosen paths and Beats for anyone to read without signing
+  in. The owner approved the read exception after a security review, and the
+  caching rule because a shared cache (a CDN or proxy) serves one stored
+  response to every visitor, so a cached session response or a stale published
+  page would reach other people. Mutations and unpublished data are unchanged.
 - 2026-11-22: §9 permits generated executable content in one bounded form.
   Rationale: interactive lesson **Visuals** ([TDD](docs/tdds/lesson-visuals.md))
   teach by manipulation, which prose and Mermaid cannot. The owner approved
