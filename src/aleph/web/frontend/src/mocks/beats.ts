@@ -33,12 +33,14 @@ import {
   API_V1_BASE,
   type BeatDetail,
   type BeatResearchState,
+  type BeatSource,
   type BeatSummary,
   type BriefEntry,
   type Level,
   type ReadPingMarker,
   type Source,
 } from "../lib/api";
+import { publicBeatCredit } from "./public";
 
 /** Topic contains this (case-insensitive) → the research run refuses. */
 export const REFUSED_BEAT_TOPIC_SENTINEL = "refuse-me";
@@ -86,6 +88,8 @@ interface StoredBeat {
   /** Newest first, matching the real rail's own order. */
   entries: StoredEntry[];
   nextNumber: number;
+  shared?: boolean;
+  source?: BeatSource | null;
 }
 
 interface BeatsConfig {
@@ -314,6 +318,8 @@ export function seedBeat(beat: {
   guidance?: string | null;
   resolution?: SettledState;
   pollsRemaining?: number;
+  shared?: boolean;
+  source?: BeatSource | null;
   entries?: Array<
     | {
         kind: "published";
@@ -356,6 +362,8 @@ export function seedBeat(beat: {
     researchStartedAt: new Date().toISOString(),
     entries,
     nextNumber: highestNumber + 1,
+    shared: beat.shared ?? false,
+    source: beat.source ?? null,
   });
 }
 
@@ -425,6 +433,8 @@ function detailFor(beat: StoredBeat): BeatDetail {
     research_started_at: beat.researchStartedAt,
     refusal_message: state === "refused" ? REFUSAL_MESSAGE : null,
     entries: beat.entries.map(toEntryDTO),
+    shared: beat.shared ?? false,
+    source: beat.source ?? null,
   };
 }
 
@@ -443,6 +453,7 @@ function summaryFor(beat: StoredBeat): BeatSummary {
     research_started_at: detail.research_started_at,
     refusal_message: detail.refusal_message,
     unread_count: unread,
+    shared: detail.shared,
   };
 }
 
@@ -528,6 +539,7 @@ export const beatHandlers = [
       researchStartedAt: new Date().toISOString(),
       entries: [],
       nextNumber: 1,
+      source: publicBeatCredit(body.source_beat_id),
     };
     store.set(id, beat);
     // Never settle here — see the module doc's FIX 4 note. `entries` stays
@@ -563,6 +575,14 @@ export const beatHandlers = [
       if (brief.beatId === id) briefStore.delete(briefId);
     }
     return new HttpResponse(null, { status: 204 });
+  }),
+
+  http.put(`${API_V1_BASE}/beats/:id/shared`, async ({ request, params }) => {
+    const beat = store.get(String(params.id));
+    if (!beat) return notFoundEnvelope();
+    const { shared } = (await request.json()) as { shared: boolean };
+    beat.shared = shared;
+    return HttpResponse.json({ shared });
   }),
 
   http.post(`${API_V1_BASE}/beats/:id/retry`, ({ params, request }) => {

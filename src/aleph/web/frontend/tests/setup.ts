@@ -8,6 +8,7 @@ import { resetLessons } from "../src/mocks/lessons";
 import { resetPathDrafts } from "../src/mocks/path-drafts";
 import { resetPaths } from "../src/mocks/paths";
 import { resetProgress } from "../src/mocks/progress";
+import { resetPublic } from "../src/mocks/public";
 import { server } from "../src/mocks/server";
 import { resetShaping } from "../src/mocks/shaping";
 import { resetTutor } from "../src/mocks/tutor";
@@ -41,6 +42,7 @@ afterEach(() => {
   resetProgress();
   resetBeats();
   resetAccount();
+  resetPublic();
   // A Flow record (lib/flow.ts) lives in sessionStorage, not the MSW store —
   // nothing else here resets it, so a flow written by one test would
   // otherwise still be sitting there for the next.

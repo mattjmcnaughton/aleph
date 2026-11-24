@@ -806,6 +806,78 @@ on `POST /beats`, **or** the daily research cap on `POST /beats/{id}/retry`
 when it is about to re-claim a real `failed` run — the job's use of the same cap
 never surfaces on the wire).
 
+## Public profiles (`/api/v1`, [TDD](tdds/public-profiles.md))
+
+On by default; the `public_profiles` flag is the kill switch. It is resolved
+for the **profile's owner**, so a public read of an owner without it is `404`,
+and every owner route below is `404` for a caller without it. Nothing is public
+until a learner turns their profile on and shares an item; both start off.
+
+### Public reads (`/api/v1/public`, anonymous)
+
+No session is read or renewed: these routes take no auth dependency, and the
+response never carries `Set-Cookie`. Every response, including errors, is
+`Cache-Control: no-store` and `X-Robots-Tag: noindex`. Each read checks the
+**whole chain** in one query: Handle → profile on → item owned by that learner
+and Shared → child (a Brief of that Beat; Skipped Briefs never appear). A broken
+link anywhere, an unknown Handle, a private profile, an unshared item and a
+malformed Handle are all the same `404 not_found`, so the URL never confirms
+that something exists. The bodies are dedicated DTOs (`dtos/public.py`) whose
+key sets are pinned by `tests/unit/test_public_dtos.py`: no user ids, emails,
+ids of unshared items, lesson ids or content, About you, web search settings,
+model choices or read state.
+
+| Method | Path | Success | Body |
+| ------ | ---- | ------- | ---- |
+| `GET` | `/api/v1/public/profiles/{handle}` | `200` | `{display_name, handle, member_since, activity, paths, beats}`. `activity` is `{current_streak, best_streak, activity:[{date, count}]}` (49 days in the owner's time zone, account-wide) or `null` when the owner hides it. `paths`: `[{id, title, level, done, total, current_streak}]`, Shared paths only. `beats`: `[{id, topic, level, cadence, latest_brief_title, brief_count}]`, Shared Beats only. |
+| `GET` | `/api/v1/public/profiles/{handle}/paths/{path_id}` | `200` | `{id, owner:{display_name, handle}, title, topic, level, guidance, teaching_style, done, total, units:[{title, lessons:[{title, complete, current}]}]}`. `topic`, `level`, `guidance` and `teaching_style` are the creation inputs a Copy carries; the outline is titles only. |
+| `GET` | `/api/v1/public/profiles/{handle}/beats/{beat_id}?cursor=` | `200` | `{id, owner, topic, level, guidance, cadence, briefs:[{id, number, published_on, title, source_count}], next_cursor}`. 20 published Briefs per page, newest first; `cursor` is the previous page's `next_cursor` (a Brief number, `≥ 1`), `null` on the last page. |
+| `GET` | `/api/v1/public/profiles/{handle}/beats/{beat_id}/briefs/{brief_id}` | `200` | `{id, beat_id, beat_topic, owner, number, published_on, title, body_markdown, sources:[{position, publisher, title, published_on, url}]}`. Reading it records nothing. The web client renders `body_markdown` without raw HTML or Mermaid, and links a Source only when its URL is `http`/`https`. |
+
+### Owner routes (session cookie)
+
+Writes that publish data check the request's `Origin` (or, without one,
+`Referer`) for cookie requests: it must be the request's own origin,
+`PUBLIC_BASE_URL`, one of `CSRF_TRUSTED_ORIGINS`, or (outside production) the
+Vite dev server's `:5173` origin. A cross-origin or
+header-less cookie write is `403 forbidden`; a bearer request skips the check.
+
+| Method | Path | Body | Success | Notes |
+| ------ | ---- | ---- | ------- | ----- |
+| `GET` | `/api/v1/account/public-profile` | — | `200 {handle, profile_public, profile_show_activity}` | `handle` is `null` until chosen. |
+| `PUT` | `/api/v1/account/public-profile` | `{handle, profile_public, profile_show_activity}` | `200` (same shape) | `handle` is lowercased; it can be set once and is **permanent** (CONTEXT.md: *Handle*): sending a different one after that is `409 handle_locked`, sending the same one is a no-op. A malformed or reserved Handle is `422 handle_rejected` with `details.reason` (`too_short` \| `too_long` \| `bad_characters` \| `reserved`); one in use is `409 handle_taken` (including a lost race on the unique index). Turning the profile on without a Handle is `422 handle_required`. Origin-checked. |
+| `PUT` | `/api/v1/paths/{id}/shared` | `{shared}` | `200 {shared}` | Show or hide the path on the owner's profile. Another learner's path is `404`. Origin-checked. |
+| `PUT` | `/api/v1/beats/{id}/shared` | `{shared}` | `200 {shared}` | The same for a Beat. Origin-checked. |
+
+`GET /paths`, `GET /paths/{id}`, `GET /beats` and `GET /beats/{id}` add
+`shared` (Boolean). The details also add `source`: `{display_name, handle,
+path_id}` (or `beat_id`) naming the path or Beat a Copy started from, or `null`.
+
+### Copy credit
+
+`POST /api/v1/paths` accepts an optional `source_path_id` and `POST
+/api/v1/beats` an optional `source_beat_id`. They are **credit only**: nothing
+is read from the source, so the request's own topic, level, guidance and
+teaching style are what generate. The id is stored only when the source is
+Shared on a public profile whose owner has the flag; otherwise it is dropped
+silently and the create succeeds. `source` is resolved on every read through the
+same chain, so it turns `null` once the source stops being Shared, and the
+foreign key is `ON DELETE SET NULL`.
+
+### Sign-in copy intent
+
+`GET /auth/login?copy=path:<handle>:<uuid>` (or `beat:`) stores a typed intent
+in the session, never a URL. A successful callback pops it and redirects to
+`/new?from=<handle>/<uuid>` (or `/beats/new?from=…`); a failed callback drops it.
+A malformed `copy` is ignored. The client links this from a Shared path or Beat
+for a signed-out visitor.
+
+### Caching
+
+Every `/api/*` and `/auth/*` response defaults to `Cache-Control: no-store`
+(a route may set its own); the session probe is `private, no-store`. Nothing in
+front of the app may cache an `/api` response (Constitution §1).
+
 ## Feature flags (admin) (`/api/v1/admin`, AL-203)
 
 Flags are **defined in code** (`services/feature_flags.py`); the database stores
@@ -849,6 +921,7 @@ costs no extra request. The frontend reads it through `useFeatureFlag(key)`
 | `shaping` | **on** | on (redundantly, as above) | Phase 2B shaping — the shaping rail, its API and its stream, and the apply/undo endpoints. Same history on its own key (epic #114, adopted convention 1): dark through 2B's build-out, **launched at AL-370**. Independent of `tutor`, so either can be killed without disturbing the other. |
 | `streaks` | **on** | on (redundantly, as above) | Phase 5 streaks — `GET /progress/summary` and everything under it (see [Progress](#progress-apiv1-phase-5-tdd-546)). Same history again on its own key (TDD D7): dark at `off` through the slice's build-out while admins dogfooded it, then **launched** by flipping this code default on, exactly as AL-270/AL-370 did. Kill it with `FEATURE_FLAG_DEFAULTS=streaks:off`. |
 | `analyst` | **on** | on (redundantly, as above) | Phase 6 — every route under [Analyst](#analyst-apiv1-al-522-issue-172-phase-6-tdd-6) (Beats, Briefs). Shipped dark at `off` through build-out while admins dogfooded it, then launched by flipping its code default on. Kill it without a code deploy with `FEATURE_FLAG_DEFAULTS=analyst:off`. |
+| `public_profiles` | **on** | on (by the code default) | [Public profiles](#public-profiles-apiv1-tdd) — the public reads and the owner routes. Shipped on: nothing is public until a learner opts in. Resolved for the profile's **owner** on public reads. Kill it with `FEATURE_FLAG_DEFAULTS=public_profiles:off`. |
 
 **Operating it.** `FEATURE_FLAG_DEFAULTS` is a comma-separated list of
 `key:on` / `key:off` entries (`FEATURE_FLAG_DEFAULTS="tutor:on"`). Malformed and

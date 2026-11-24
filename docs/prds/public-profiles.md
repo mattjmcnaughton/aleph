@@ -1,11 +1,11 @@
 # PRD — Public profiles
 
-**Status:** Accepted 2026-11-24, not built · **Owner:** solo builder
+**Status:** Accepted 2026-11-24, built and shipped on 2026-11-24 (`public_profiles` defaults on; every profile starts off) · **Owner:** solo builder
 **Companion to:** [Public profiles TDD](../tdds/public-profiles.md)
-**Design:** the Storybook storyboard `Concepts/Public profiles`
+**Design:** Storybook `Screens/Public profiles`
 ([`public-profiles.stories.tsx`](../../src/aleph/web/frontend/src/stories/public-profiles.stories.tsx);
-run `just storybook` and open *Concepts → Public profiles → Storyboard*). Every
-screen below is a frame there.
+run `just storybook` and open *Screens → Public profiles*). Every screen below
+is a story there, rendered by the real app.
 **References:** [`CONTEXT.md`](../CONTEXT.md) · [`CONSTITUTION.md`](../../CONSTITUTION.md) ·
 [`design.md`](../design.md)
 

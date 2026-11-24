@@ -298,6 +298,17 @@ export interface PathDetail {
   refusal_message: string | null;
   progress: PathProgress;
   units: PathUnit[];
+  /** Shown on the owner's Public profile (CONTEXT.md: *Shared*). */
+  shared: boolean;
+  /** "Started from {name}'s path": present only while the source is public. */
+  source: PathSource | null;
+}
+
+/** The credit a Copy shows (CONTEXT.md: *Copy*; docs/api.md). */
+export interface PathSource {
+  display_name: string;
+  handle: string;
+  path_id: string;
 }
 
 /**
@@ -324,6 +335,7 @@ export interface PathSummary {
   last_activity_at: string | null;
   /** Where *continue* resumes; `null` when there is nothing left to do. */
   next_lesson: NextLesson | null;
+  shared: boolean;
 }
 
 /**
@@ -383,6 +395,8 @@ export interface CreatePathInput {
    */
   model_outline?: string;
   model_lesson?: string;
+  /** The Shared path this was started from; credit only (docs/api.md). */
+  source_path_id?: string;
 }
 
 /** Create a path and trigger its outline (§5.1). Returns the new path id. */
@@ -915,6 +929,15 @@ export interface BeatDetail {
   /** Non-null only when `research_state === "refused"`. */
   refusal_message: string | null;
   entries: BriefEntry[];
+  shared: boolean;
+  /** "Started from {name}'s Beat": present only while the source is public. */
+  source: BeatSource | null;
+}
+
+export interface BeatSource {
+  display_name: string;
+  handle: string;
+  beat_id: string;
 }
 
 /**
@@ -934,6 +957,7 @@ export interface BeatSummary {
   /** Published, unread Briefs only (TDD §6) — a Skipped entry never counts,
    *  since nothing can ever stamp one read. */
   unread_count: number;
+  shared: boolean;
 }
 
 /** `GET /api/v1/beats` body — the learner's Beats, newest first. Wrapped in
@@ -955,6 +979,8 @@ export interface DeployBeatInput {
   guidance?: string;
   model_research?: string;
   model_brief?: string;
+  /** The Shared Beat this was started from; credit only (docs/api.md). */
+  source_beat_id?: string;
 }
 
 /**
@@ -1352,4 +1378,187 @@ export function createDraftQuestions(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
   });
+}
+
+// --- Public profiles (docs/api.md, Public profiles TDD) ----------------------
+
+/** Owner settings: `GET`/`PUT /api/v1/account/public-profile`. */
+export interface PublicProfileSettings {
+  /** Chosen once and permanent (CONTEXT.md: *Handle*). */
+  handle: string | null;
+  profile_public: boolean;
+  profile_show_activity: boolean;
+}
+
+export const PUBLIC_PROFILE_SETTINGS_QUERY_KEY = ["account", "public-profile"] as const;
+
+export function getPublicProfileSettings(): Promise<PublicProfileSettings> {
+  return apiFetch<PublicProfileSettings>(apiV1Path("/account/public-profile"));
+}
+
+export function putPublicProfileSettings(
+  settings: PublicProfileSettings,
+): Promise<PublicProfileSettings> {
+  return apiFetch<PublicProfileSettings>(apiV1Path("/account/public-profile"), {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(settings),
+  });
+}
+
+export function setPathShared(pathId: string, shared: boolean): Promise<{ shared: boolean }> {
+  return apiFetch(apiV1Path(`/paths/${pathId}/shared`), {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ shared }),
+  });
+}
+
+export function setBeatShared(beatId: string, shared: boolean): Promise<{ shared: boolean }> {
+  return apiFetch(apiV1Path(`/beats/${beatId}/shared`), {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ shared }),
+  });
+}
+
+export interface PublicOwner {
+  display_name: string;
+  handle: string;
+}
+
+export interface PublicActivity {
+  current_streak: number;
+  best_streak: number;
+  activity: ActivityCell[];
+}
+
+export interface PublicPathSummary {
+  id: string;
+  title: string;
+  level: Level;
+  done: number;
+  total: number;
+  current_streak: number;
+}
+
+export interface PublicBeatSummary {
+  id: string;
+  topic: string;
+  level: Level;
+  cadence: Cadence;
+  latest_brief_title: string | null;
+  brief_count: number;
+}
+
+export interface PublicProfile {
+  display_name: string;
+  handle: string;
+  member_since: string;
+  /** `null` when the owner hides the activity strip. */
+  activity: PublicActivity | null;
+  paths: PublicPathSummary[];
+  beats: PublicBeatSummary[];
+}
+
+export interface PublicLesson {
+  title: string;
+  complete: boolean;
+  /** The owner's position: their next lesson. */
+  current: boolean;
+}
+
+export interface PublicPath {
+  id: string;
+  owner: PublicOwner;
+  title: string;
+  topic: string;
+  level: Level;
+  guidance: string | null;
+  teaching_style: string | null;
+  done: number;
+  total: number;
+  units: { title: string; lessons: PublicLesson[] }[];
+}
+
+export interface PublicBriefEntry {
+  id: string;
+  number: number;
+  published_on: string;
+  title: string;
+  source_count: number;
+}
+
+export interface PublicBeat {
+  id: string;
+  owner: PublicOwner;
+  topic: string;
+  level: Level;
+  guidance: string | null;
+  cadence: Cadence;
+  briefs: PublicBriefEntry[];
+  next_cursor: number | null;
+}
+
+export interface PublicBrief {
+  id: string;
+  beat_id: string;
+  beat_topic: string;
+  owner: PublicOwner;
+  number: number;
+  published_on: string;
+  title: string;
+  body_markdown: string;
+  sources: Source[];
+}
+
+const publicBase = (handle: string) => apiV1Path(`/public/profiles/${encodeURIComponent(handle)}`);
+
+/**
+ * Public reads never share the private cache: every key starts `["public"]`
+ * (TDD §6), so signing in or out never serves one from the other.
+ */
+export function publicProfileQueryOptions(handle: string) {
+  return queryOptions({
+    queryKey: ["public", "profile", handle] as const,
+    queryFn: () => apiFetch<PublicProfile>(publicBase(handle)),
+    retry: false,
+  });
+}
+
+export function publicPathQueryOptions(handle: string, pathId: string) {
+  return queryOptions({
+    queryKey: ["public", "path", handle, pathId] as const,
+    queryFn: () => apiFetch<PublicPath>(`${publicBase(handle)}/paths/${pathId}`),
+    retry: false,
+  });
+}
+
+export function publicBeatQueryOptions(handle: string, beatId: string) {
+  return queryOptions({
+    queryKey: ["public", "beat", handle, beatId] as const,
+    queryFn: () => apiFetch<PublicBeat>(`${publicBase(handle)}/beats/${beatId}`),
+    retry: false,
+  });
+}
+
+export function getPublicBeatPage(
+  handle: string,
+  beatId: string,
+  cursor: number,
+): Promise<PublicBeat> {
+  return apiFetch<PublicBeat>(`${publicBase(handle)}/beats/${beatId}?cursor=${cursor}`);
+}
+
+export function publicBriefQueryOptions(handle: string, beatId: string, briefId: string) {
+  return queryOptions({
+    queryKey: ["public", "brief", handle, beatId, briefId] as const,
+    queryFn: () => apiFetch<PublicBrief>(`${publicBase(handle)}/beats/${beatId}/briefs/${briefId}`),
+    retry: false,
+  });
+}
+
+/** `/auth/login?copy=…`: sign in and land on the prefilled form (TDD §5). */
+export function copySignInHref(kind: "path" | "beat", handle: string, id: string): string {
+  return `${AUTH_LOGIN_PATH}?copy=${kind}:${handle}:${id}`;
 }

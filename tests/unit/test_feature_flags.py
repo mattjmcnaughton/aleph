@@ -204,8 +204,29 @@ def test_the_registry_is_exactly_the_registered_flags() -> None:
     # ``FLAG_DEFAULTS`` does not exist as far as resolution is concerned, and
     # would silently resolve off everywhere.
     assert feature_flags.known_flag_keys() == frozenset(
-        {"tutor", "shaping", "streaks", "analyst", "flow", "learning_summary"}
+        {
+            "tutor",
+            "shaping",
+            "streaks",
+            "analyst",
+            "flow",
+            "learning_summary",
+            "public_profiles",
+        }
     )
+
+
+def test_public_profiles_ships_on_with_a_kill_switch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Public profiles TDD D9: on by default, like ``flow``. Nothing is public
+    # until a learner opts in; FEATURE_FLAG_DEFAULTS=public_profiles:off
+    # closes it for everyone.
+    assert (
+        feature_flags.FLAG_DEFAULTS[feature_flags.FeatureFlag.PUBLIC_PROFILES] is True
+    )
+    monkeypatch.setattr(settings, "feature_flag_defaults", "public_profiles:off")
+    assert feature_flags.effective_defaults(settings)["public_profiles"] is False
 
 
 def test_effective_defaults_applies_settings_over_code_defaults(

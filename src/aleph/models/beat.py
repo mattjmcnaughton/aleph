@@ -8,6 +8,7 @@ from datetime import (
 )
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     DateTime,
     Enum,
@@ -16,6 +17,8 @@ from sqlalchemy import (
     SmallInteger,
     Text,
     Uuid,
+    false,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -58,6 +61,7 @@ class Beat(Base, UUIDAuditMixin):
     __tablename__ = "beats"
     __table_args__ = (
         Index("ix_beats_user_id", "user_id"),
+        Index("ix_beats_user_id_shared", "user_id", postgresql_where=text("shared")),
         # Python's Monday == 0 (CONTEXT.md: Anchor day), enforced at the
         # storage layer so an out-of-range weekday can never be written no
         # matter what validation a service does or skips.
@@ -109,3 +113,10 @@ class Beat(Base, UUIDAuditMixin):
     # admin chose. ``None`` means "use the app-wide ``MODEL_DEFAULT``".
     model_research: Mapped[str | None] = mapped_column(Text, nullable=True)
     model_brief: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # CONTEXT.md: *Shared* and *Copy* (0025), the ``paths`` twins.
+    shared: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
+    source_beat_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("beats.id", ondelete="SET NULL"), nullable=True
+    )

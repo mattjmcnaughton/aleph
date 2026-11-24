@@ -42,6 +42,7 @@ function summary(
       nextLessonId === null
         ? null
         : { id: nextLessonId, title: `Lesson for ${id}`, position_in_path: 1 },
+    shared: false,
   };
 }
 

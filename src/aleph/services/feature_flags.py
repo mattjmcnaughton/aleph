@@ -119,6 +119,10 @@ class FeatureFlag(StrEnum):
     # The Learning summary (CONTEXT.md): its page and its two routes. Ships dark
     # (off, on for admins) on the earlier phases' playbook.
     LEARNING_SUMMARY = "learning_summary"
+    # Public profiles (TDD D9): the owner settings, the sharing writes and every
+    # public read. Resolved for the **profile owner**, so turning it off makes
+    # every profile 404 with no change to any learner's data.
+    PUBLIC_PROFILES = "public_profiles"
 
 
 # Code defaults per flag. Every FeatureFlag member gets an entry here; a flag
@@ -149,6 +153,11 @@ FLAG_DEFAULTS: dict[FeatureFlag, bool] = {
     FeatureFlag.FLOW: True,
     # Off: dark until launched; admins dogfood it via ADMIN_DEFAULT_FLAGS.
     FeatureFlag.LEARNING_SUMMARY: False,
+    # On: Public profiles ship on (TDD D9). Nothing becomes public on deploy:
+    # every profile and every path's and Beat's ``shared`` start false, and a
+    # learner opts in. FEATURE_FLAG_DEFAULTS=public_profiles:off is the kill
+    # switch, closing every public read and owner route.
+    FeatureFlag.PUBLIC_PROFILES: True,
 }
 
 

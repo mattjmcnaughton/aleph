@@ -16,6 +16,7 @@ import {
 import { TeachingStyleCard } from "../components/teaching-style-card";
 import { PRIMARY_CTA, PlayIcon, RetryNotices, Spinner, StateCard } from "../components/state-card";
 import { Breadcrumbs } from "../components/breadcrumbs";
+import { CopyCredit } from "../components/public-profile";
 import { LessonMarker, UNLOCK_STATE_LABEL } from "../components/lesson-marker";
 import { ShapingMark, ShapingRail } from "../components/shaping/shaping-rail";
 import { useShapingRail } from "../components/shaping/use-shaping-rail";
@@ -94,6 +95,9 @@ function PathView() {
       railTestid="shaping-rail-column"
     >
       {detail ? <Breadcrumbs current={detail.title} /> : null}
+      {detail?.source && detail.status !== "ready" ? (
+        <CopyCredit kind="path" source={{ ...detail.source, id: detail.source.path_id }} />
+      ) : null}
 
       {detail === undefined ? (
         pathQuery.isError ? (
@@ -169,6 +173,9 @@ function ReadyPath({
   return (
     <>
       <PathTitle key={detail.id} pathId={detail.id} title={detail.title} />
+      {detail.source ? (
+        <CopyCredit kind="path" source={{ ...detail.source, id: detail.source.path_id }} />
+      ) : null}
 
       {/* Progress sits directly under the title: it is the first thing a
           returning learner wants to know about a path. */}

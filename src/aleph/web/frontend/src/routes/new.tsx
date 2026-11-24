@@ -12,12 +12,16 @@ import {
   isValidationError,
   pathQueryKey,
   pathQueryOptions,
+  publicPathQueryOptions,
+  isNotFound,
   retryPath,
 } from "../lib/api";
+import { fillEmptyFields, parseFrom } from "../lib/public-profiles";
 import { AboutYouApplies } from "../components/about-you-applies";
 import { ModelPicker } from "../components/model-picker";
 import { announcePathCreated } from "../components/push-lifecycle";
 import { Breadcrumbs } from "../components/breadcrumbs";
+import { CopyCredit } from "../components/public-profile";
 import { PathDraftFlow } from "../components/path-draft/path-draft-flow";
 import { usePathDraft } from "../components/path-draft/use-path-draft";
 import { LevelFieldset } from "../components/level-fieldset";
@@ -50,6 +54,9 @@ export const Route = createFileRoute("/new")({
     level: isLevel(search.level) ? search.level : undefined,
     guidance: typeof search.guidance === "string" ? search.guidance : undefined,
     teaching_style: typeof search.teaching_style === "string" ? search.teaching_style : undefined,
+    // `?from=<handle>/<pathId>`: a Copy of a Shared path (Public profiles TDD
+    // D2). A reference, never the inputs themselves: the form fetches them.
+    from: parseFrom(search.from) ? (search.from as string) : undefined,
   }),
   component: NewPath,
 });
@@ -59,6 +66,7 @@ interface NewPathSearch {
   level?: Level;
   guidance?: string;
   teaching_style?: string;
+  from?: string;
 }
 
 const pathPollConfig = {
@@ -93,6 +101,36 @@ function NewPath() {
   // `buildCreatePathInput` drops the key rather than sending an empty id.
   const [modelOutline, setModelOutline] = useState(MODEL_SLOT_DEFAULT);
   const [modelLesson, setModelLesson] = useState(MODEL_SLOT_DEFAULT);
+
+  // A Copy (CONTEXT.md): fetch the Shared path's creation inputs once, fill
+  // only the fields still empty, and send its id for credit. Never submits on
+  // its own (Constitution §2).
+  const copyFrom = parseFrom(search.from);
+  const sourceQuery = useQuery({
+    ...publicPathQueryOptions(copyFrom?.handle ?? "", copyFrom?.id ?? ""),
+    enabled: copyFrom !== null,
+    staleTime: Number.POSITIVE_INFINITY,
+  });
+  const levelTouched = useRef(search.level !== undefined);
+  const appliedSource = useRef(false);
+  const source = sourceQuery.data;
+  useEffect(() => {
+    if (!source || appliedSource.current) return;
+    appliedSource.current = true;
+    const filled = fillEmptyFields(
+      { topic, guidance, teaching_style: teachingStyle },
+      { topic: source.topic, guidance: source.guidance, teaching_style: source.teaching_style },
+    );
+    if (filled.topic !== undefined) setTopic(filled.topic);
+    if (filled.guidance !== undefined) setGuidance(filled.guidance);
+    if (filled.teaching_style !== undefined) setTeachingStyle(filled.teaching_style);
+    if (!levelTouched.current) setLevel(source.level);
+  }, [source, topic, guidance, teachingStyle]);
+  const sourceMissing = copyFrom !== null && isNotFound(sourceQuery.error);
+  function changeLevel(value: Level) {
+    levelTouched.current = true;
+    setLevel(value);
+  }
 
   // Drafting from an Idea (CONTEXT.md: *Path draft*) is where a bare `/new`
   // starts. Any prefill (a Learning summary Suggestion, Go deeper) already says
@@ -194,6 +232,7 @@ function NewPath() {
         searchLessons,
         modelOutline,
         modelLesson,
+        sourcePathId: source?.id,
       }),
     );
   }
@@ -253,9 +292,28 @@ function NewPath() {
         </div>
       ) : null}
 
+      {phase === "editing" && mode === "form" && source ? (
+        <p
+          data-testid="copy-from-notice"
+          className="mt-8 rounded-md border border-divider bg-elevated px-4 py-3 text-sm leading-6 text-mist"
+        >
+          From {source.owner.display_name}'s path. Edit anything before you build: Aleph drafts a
+          new outline for you.
+        </p>
+      ) : null}
+
+      {phase === "editing" && mode === "form" && sourceMissing ? (
+        <p
+          data-testid="copy-from-missing"
+          className="mt-8 rounded-md border border-divider bg-elevated px-4 py-3 text-sm leading-6 text-mist"
+        >
+          That shared path isn't available anymore, so the form starts empty.
+        </p>
+      ) : null}
+
       {phase === "editing" && mode === "form" ? (
         <OnboardingForm
-          compact={filledFromDraft}
+          compact={filledFromDraft || source !== undefined || sourceMissing}
           topic={topic}
           level={level}
           guidance={guidance}
@@ -263,7 +321,7 @@ function NewPath() {
           searchOutline={searchOutline}
           searchLessons={searchLessons}
           onTopicChange={setTopic}
-          onLevelChange={setLevel}
+          onLevelChange={changeLevel}
           onGuidanceChange={setGuidance}
           onTeachingStyleChange={setTeachingStyle}
           onSearchOutlineChange={setSearchOutline}
@@ -294,6 +352,12 @@ function NewPath() {
         />
       ) : null}
 
+      {phase === "generating" && pathQuery.data?.source ? (
+        <CopyCredit
+          kind="path"
+          source={{ ...pathQuery.data.source, id: pathQuery.data.source.path_id }}
+        />
+      ) : null}
       {phase === "generating" ? <GeneratingState /> : null}
 
       {phase === "refused" ? (

@@ -15,6 +15,7 @@ import {
 import { BeatRail } from "../components/beat-rail";
 import { Breadcrumbs } from "../components/breadcrumbs";
 import { PRIMARY_CTA, RetryNotices, Spinner, StateCard } from "../components/state-card";
+import { CopyCredit } from "../components/public-profile";
 import { StandingOrders } from "../components/standing-orders";
 import { useFeatureFlag } from "../lib/feature-flags";
 import { makePollingRefetchInterval } from "../lib/polling";
@@ -95,6 +96,9 @@ function BeatView() {
           {/* `break-words`: a pasted URL as a Topic must not overflow 390px.
               It wraps rather than truncating, like every other page title. */}
           <h1 className="min-w-0 break-words page-title">{detail.topic}</h1>
+          {detail.source ? (
+            <CopyCredit kind="Beat" source={{ ...detail.source, id: detail.source.beat_id }} />
+          ) : null}
           <div className="mt-3">
             <StandingOrders beat={detail} />
           </div>

@@ -8,7 +8,17 @@ from datetime import (
 )
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Index, Text, Uuid, false
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Index,
+    Text,
+    Uuid,
+    false,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from aleph.db import Base
@@ -31,7 +41,10 @@ class Path(Base, UUIDAuditMixin):
     """
 
     __tablename__ = "paths"
-    __table_args__ = (Index("ix_paths_user_id", "user_id"),)
+    __table_args__ = (
+        Index("ix_paths_user_id", "user_id"),
+        Index("ix_paths_user_id_shared", "user_id", postgresql_where=text("shared")),
+    )
 
     user_id: Mapped[uuid.UUID] = mapped_column(
         Uuid,
@@ -112,6 +125,17 @@ class Path(Base, UUIDAuditMixin):
     # already-validated id.
     model_outline: Mapped[str | None] = mapped_column(Text, nullable=True)
     model_lesson: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # CONTEXT.md: *Shared* (0025). Shown on the owner's Public profile only
+    # while that profile is on; kept as-is when the profile is turned off.
+    shared: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
+    # CONTEXT.md: *Copy*. Non-authoritative credit (Public profiles TDD D7):
+    # set only when the source was public at create time, shown only while it
+    # still is. Nothing else about the source is read.
+    source_path_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("paths.id", ondelete="SET NULL"), nullable=True
+    )
 
     @property
     def display_title(self) -> str:

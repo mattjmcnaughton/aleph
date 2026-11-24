@@ -87,6 +87,7 @@ from aleph.repositories import (
 from aleph.routers.v1.paths import (  # noqa: TC001 - FastAPI resolves annotations.
     OwnedPath,
     path_detail_response,
+    path_source,
     validate_model_override,
 )
 
@@ -346,7 +347,8 @@ async def apply_proposal(
     if view is None or change is None:  # pragma: no cover - a raced path delete
         raise _not_found()
     return ApplyProposalResponse(
-        change=_change_dto(change), path=path_detail_response(path, view)
+        change=_change_dto(change),
+        path=path_detail_response(path, view, source=await path_source(session, path)),
     )
 
 

@@ -132,3 +132,15 @@ def test_oidc_client_map_keeps_good_entries_beside_bad_ones() -> None:
     ).oidc_client_labels
 
     assert labels == {"aleph-ios": "ios"}
+
+
+def test_dev_trusts_the_vite_dev_server_origin_without_configuration() -> None:
+    # Public profile writes check Origin (SR 5). The Vite proxy rewrites Host
+    # but not Origin, so `just dev` must work from an `.env` that predates
+    # CSRF_TRUSTED_ORIGINS; production never trusts a localhost origin.
+    dev = Settings.model_validate({"env": "development", "csrf_trusted_origins": ""})
+    assert "http://localhost:5173" in dev.csrf_trusted_origin_set
+    assert "http://127.0.0.1:5173" in dev.csrf_trusted_origin_set
+
+    prod = Settings.model_validate({**_VALID_PROD, "csrf_trusted_origins": ""})
+    assert prod.csrf_trusted_origin_set == frozenset({"https://aleph.example"})

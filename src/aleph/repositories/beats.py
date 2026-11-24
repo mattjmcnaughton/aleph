@@ -85,6 +85,7 @@ class BeatRepository:
         guidance: str | None = None,
         model_research: str | None = None,
         model_brief: str | None = None,
+        source_beat_id: uuid.UUID | None = None,
     ) -> Beat:
         """Insert an ``idle`` Beat.
 
@@ -103,6 +104,7 @@ class BeatRepository:
             guidance=guidance,
             model_research=model_research,
             model_brief=model_brief,
+            source_beat_id=source_beat_id,
         )
         self.session.add(beat)
         await self.session.flush()

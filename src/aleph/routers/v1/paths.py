@@ -38,8 +38,9 @@ from aleph import events
 from aleph.authz import is_admin
 from aleph.config import settings
 from aleph.db import get_session
-from aleph.dependencies import get_current_user
+from aleph.dependencies import get_current_user, require_same_origin
 from aleph.domains.progression import resume_path
+from aleph.dtos.account import SharedDTO
 from aleph.dtos.paths import (
     CreatePathRequest,
     CreatePathResponse,
@@ -48,6 +49,7 @@ from aleph.dtos.paths import (
     PathDetailResponse,
     PathListResponse,
     PathProgressDTO,
+    PathSourceDTO,
     PathSummaryDTO,
     UnitDTO,
     UpdatePathRequest,
@@ -63,9 +65,11 @@ from aleph.repositories import (
 )
 from aleph.services.generation import generation_orchestrator
 from aleph.services.paths_read import load_path_detail
+from aleph.services.public_profiles import PublicProfileService
 from aleph.services.rate_limit import build_daily_rate_limiter
 
 if TYPE_CHECKING:
+    from aleph.domains.public_profiles import Credit
     from aleph.repositories import NextLesson, PathGenerationProgress
     from aleph.services.paths_read import PathDetailView
 
@@ -219,6 +223,9 @@ async def create_path(
     )
     limiter = build_daily_rate_limiter(session)
     await limiter.check_path_creation(user_id=user.id, is_admin=admin)
+    # Credit only (Public profiles TDD D7): kept when the source is public now,
+    # otherwise dropped and the create goes ahead exactly as without it.
+    credit = await PublicProfileService(session).path_credit(body.source_path_id)
     path = await generation_orchestrator.create_path(
         user_id=user.id,
         topic=body.topic,
@@ -229,6 +236,7 @@ async def create_path(
         search_lessons=body.search_lessons,
         model_outline=overrides.model_outline,
         model_lesson=overrides.model_lesson,
+        source_path_id=credit.item_id if credit is not None else None,
     )
     return CreatePathResponse(id=path.id)
 
@@ -268,6 +276,7 @@ async def list_paths(user: CurrentUser, session: Session) -> PathListResponse:
                 progress=_progress_dto(summaries[path.id]),
                 last_activity_at=summaries[path.id].last_completed_at,
                 next_lesson=_next_lesson_dto(next_lessons.get(path.id)),
+                shared=path.shared,
             )
             for path, effective_status in paths
         ],
@@ -285,7 +294,14 @@ def _next_lesson_dto(next_lesson: NextLesson | None) -> NextLessonDTO | None:
     )
 
 
-def path_detail_response(path: Path, view: PathDetailView) -> PathDetailResponse:
+async def path_source(session: AsyncSession, path: Path) -> Credit | None:
+    """The path's Copy credit, re-checked on every read (TDD D7)."""
+    return await PublicProfileService(session).path_credit(path.source_path_id)
+
+
+def path_detail_response(
+    path: Path, view: PathDetailView, *, source: Credit | None
+) -> PathDetailResponse:
     """Translate the composed read-seam view + owned row to the wire DTO.
 
     Public because Phase 2B's **Apply** answers with the refreshed path in the
@@ -326,6 +342,16 @@ def path_detail_response(path: Path, view: PathDetailView) -> PathDetailResponse
             )
             for unit in view.units
         ],
+        shared=path.shared,
+        source=(
+            PathSourceDTO(
+                display_name=source.display_name,
+                handle=source.handle,
+                path_id=source.item_id,
+            )
+            if source is not None
+            else None
+        ),
     )
 
 
@@ -344,7 +370,7 @@ async def get_path(path: OwnedPath, session: Session) -> PathDetailResponse:
     view = await load_path_detail(session, generation_orchestrator, path.id)
     if view is None:
         raise _path_not_found()
-    return path_detail_response(path, view)
+    return path_detail_response(path, view, source=await path_source(session, path))
 
 
 @router.patch("/paths/{path_id}")
@@ -392,7 +418,7 @@ async def update_path(
     view = await load_path_detail(session, generation_orchestrator, path.id)
     if view is None:
         raise _path_not_found()
-    return path_detail_response(path, view)
+    return path_detail_response(path, view, source=await path_source(session, path))
 
 
 @router.put("/paths/{path_id}/teaching-style")
@@ -418,7 +444,24 @@ async def update_teaching_style(
     view = await load_path_detail(session, generation_orchestrator, path.id)
     if view is None:
         raise _path_not_found()
-    return path_detail_response(path, view)
+    return path_detail_response(path, view, source=await path_source(session, path))
+
+
+@router.put("/paths/{path_id}/shared", dependencies=[Depends(require_same_origin)])
+async def set_path_shared(
+    body: SharedDTO, path: OwnedPath, user: CurrentUser, session: Session
+) -> SharedDTO:
+    """Show or hide this path on the owner's Public profile (TDD §4).
+
+    Ownership via ``OwnedPath`` (``404`` for another learner's path). Behind the
+    ``public_profiles`` flag for the caller; the Origin check guards a write
+    that publishes data (SR 5).
+    """
+    service = PublicProfileService(session)
+    if not await service.enabled_for(user):
+        raise _path_not_found()
+    await service.set_path_shared(path.id, shared=body.shared)
+    return SharedDTO(shared=body.shared)
 
 
 @router.post("/paths/{path_id}/retry", status_code=status.HTTP_202_ACCEPTED)

@@ -26,6 +26,9 @@ MODEL_SLOTS: tuple[str, ...] = ("model_default",)
 # guard cannot drift apart.
 DEV_SESSION_SECRET_KEY = "dev-session-secret-change-me"
 
+# Where `just dev-fe` serves the SPA (vite.config.ts); trusted outside production.
+VITE_DEV_ORIGINS = ("http://localhost:5173", "http://127.0.0.1:5173")
+
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
@@ -329,6 +332,26 @@ class Settings(BaseSettings):
     # subdomains) and case-insensitively against the part after the final
     # ``@``. Default is the sole first-party operator.
     admin_email_domains: str = "mattjmcnaughton.com"
+
+    # Public profiles TDD §4 (SR 5): extra origins ``require_same_origin``
+    # accepts besides ``PUBLIC_BASE_URL`` and the request's own origin. Only
+    # needed where the SPA is served from a different origin than the API.
+    # Outside production the Vite dev server's origins are always trusted
+    # (its proxy rewrites Host, not Origin). Comma-separated.
+    csrf_trusted_origins: str = ""
+
+    @property
+    def csrf_trusted_origin_set(self) -> frozenset[str]:
+        dev = () if self.is_production else VITE_DEV_ORIGINS
+        return frozenset(
+            origin.strip().rstrip("/").lower()
+            for origin in [
+                *self.csrf_trusted_origins.split(","),
+                self.public_base_url,
+                *dev,
+            ]
+            if origin.strip()
+        )
 
     @property
     def admin_email_domain_set(self) -> frozenset[str]:

@@ -51,3 +51,22 @@ class LearningSummaryResponse(BaseModel):
     summary: LearningSummaryBodyDTO | None
     written_at: datetime.datetime | None
     min_lessons_complete: int
+
+
+class PublicProfileSettingsDTO(BaseModel):
+    """``GET``/``PUT /api/v1/account/public-profile`` (Public profiles TDD §4).
+
+    On ``PUT``, ``handle`` may be set only while the account has none (D8);
+    resending the current one is allowed and changes nothing. ``profile_public``
+    needs a Handle.
+    """
+
+    handle: Annotated[str, StringConstraints(max_length=64)] | None
+    profile_public: bool
+    profile_show_activity: bool
+
+
+class SharedDTO(BaseModel):
+    """``PUT /api/v1/paths/{id}/shared`` and ``/beats/{id}/shared``, both ways."""
+
+    shared: bool

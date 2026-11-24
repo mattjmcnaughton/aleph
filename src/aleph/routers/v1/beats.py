@@ -39,10 +39,13 @@ from aleph import events
 from aleph.authz import is_admin
 from aleph.config import settings
 from aleph.db import get_session
-from aleph.dependencies import get_current_user
+from aleph.dependencies import get_current_user, require_same_origin
+from aleph.domains.public_profiles import Credit  # noqa: TC001
+from aleph.dtos.account import SharedDTO
 from aleph.dtos.beats import (
     BeatDetailDTO,
     BeatListResponse,
+    BeatSourceDTO,
     BeatSummaryDTO,
     BriefDetailDTO,
     BriefEntryDTO,
@@ -66,6 +69,7 @@ from aleph.repositories import BeatRepository, BriefRepository
 from aleph.routers.v1.paths import validate_model_override
 from aleph.services.briefing import briefing_service
 from aleph.services.feature_flags import FeatureFlag, FeatureFlagService
+from aleph.services.public_profiles import PublicProfileService
 from aleph.services.rate_limit import build_daily_rate_limiter
 
 CurrentUser = Annotated[User, Depends(get_current_user)]
@@ -152,7 +156,14 @@ def _entry_dto(brief: Brief) -> BriefEntryDTO:
     )
 
 
-def _beat_detail_dto(beat: Beat, entries: list[Brief]) -> BeatDetailDTO:
+async def _beat_source(session: AsyncSession, beat: Beat) -> Credit | None:
+    """The Beat's Copy credit, re-checked on every read (Public profiles D7)."""
+    return await PublicProfileService(session).beat_credit(beat.source_beat_id)
+
+
+def _beat_detail_dto(
+    beat: Beat, entries: list[Brief], *, source: Credit | None
+) -> BeatDetailDTO:
     return BeatDetailDTO(
         id=beat.id,
         topic=beat.topic,
@@ -164,6 +175,16 @@ def _beat_detail_dto(beat: Beat, entries: list[Brief]) -> BeatDetailDTO:
         research_started_at=beat.research_started_at,
         refusal_message=beat.refusal_message,
         entries=[_entry_dto(entry) for entry in entries],
+        shared=beat.shared,
+        source=(
+            BeatSourceDTO(
+                display_name=source.display_name,
+                handle=source.handle,
+                beat_id=source.item_id,
+            )
+            if source is not None
+            else None
+        ),
     )
 
 
@@ -178,6 +199,7 @@ def _beat_summary_dto(beat: Beat, *, unread_count: int) -> BeatSummaryDTO:
         research_started_at=beat.research_started_at,
         refusal_message=beat.refusal_message,
         unread_count=unread_count,
+        shared=beat.shared,
     )
 
 
@@ -237,6 +259,7 @@ async def deploy_beat(
 
     limiter = build_daily_rate_limiter(session)
     await limiter.check_beat_creation(user_id=user.id, is_admin=admin)
+    credit = await PublicProfileService(session).beat_credit(body.source_beat_id)
 
     beat = await BeatRepository(session).create(
         user_id=user.id,
@@ -246,6 +269,7 @@ async def deploy_beat(
         guidance=body.guidance,
         model_research=model_research,
         model_brief=model_brief,
+        source_beat_id=credit.item_id if credit is not None else None,
     )
     await session.commit()
 
@@ -268,7 +292,7 @@ async def deploy_beat(
         has_guidance=beat.guidance is not None,
     )
 
-    return _beat_detail_dto(beat, entries=[])
+    return _beat_detail_dto(beat, entries=[], source=credit)
 
 
 @router.get("/beats")
@@ -301,7 +325,19 @@ async def get_beat(
 ) -> BeatDetailDTO:
     """Read standing orders, research state and rail. OwnedBeat enforces ownership."""
     entries = await BriefRepository(session).list_for_beat(beat.id)
-    return _beat_detail_dto(beat, entries)
+    return _beat_detail_dto(beat, entries, source=await _beat_source(session, beat))
+
+
+@router.put("/beats/{beat_id}/shared", dependencies=[Depends(require_same_origin)])
+async def set_beat_shared(
+    body: SharedDTO, beat: OwnedBeat, user: CurrentUser, session: Session
+) -> SharedDTO:
+    """Show or hide this Beat on the owner's Public profile (Public profiles §4)."""
+    service = PublicProfileService(session)
+    if not await service.enabled_for(user):
+        raise _not_found()
+    await service.set_beat_shared(beat.id, shared=body.shared)
+    return SharedDTO(shared=body.shared)
 
 
 @router.delete("/beats/{beat_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -371,7 +407,7 @@ async def retry_beat(
         # billing — see the docstring's FIX 2b note for why every other
         # state (idle above all) must be a genuine no-op here.
         entries = await BriefRepository(session).list_for_beat(beat.id)
-        return _beat_detail_dto(beat, entries)
+        return _beat_detail_dto(beat, entries, source=await _beat_source(session, beat))
 
     limiter = build_daily_rate_limiter(session)
     await limiter.check_brief_research_retry(
@@ -386,7 +422,7 @@ async def retry_beat(
     # than echoing the stale, pre-claim "failed" this request started with.
     await session.refresh(beat)
     entries = await BriefRepository(session).list_for_beat(beat.id)
-    return _beat_detail_dto(beat, entries)
+    return _beat_detail_dto(beat, entries, source=await _beat_source(session, beat))
 
 
 # --------------------------------------------------------------------------- #

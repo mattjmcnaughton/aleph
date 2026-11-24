@@ -1,13 +1,26 @@
 # TDD — Public profiles
 
-**Status:** Accepted 2026-11-24. Not built. · **Owner:** solo builder
+**Status:** Accepted 2026-11-24. Built 2026-11-24 and shipped on (`public_profiles` defaults on; nothing is public until a learner opts in). · **Owner:** solo builder
 **Companion to:** [Public profiles PRD](../prds/public-profiles.md)
-**Design:** Storybook `Concepts/Public profiles`
-([`public-profiles.stories.tsx`](../../src/aleph/web/frontend/src/stories/public-profiles.stories.tsx)).
+**Design:** Storybook `Screens/Public profiles`
+([`public-profiles.stories.tsx`](../../src/aleph/web/frontend/src/stories/public-profiles.stories.tsx)),
+the built screens. They replaced the concept storyboard the design was decided on.
 **Security review:** [design review thread](https://ampcode.com/threads/T-01a20da5-5f85-70ed-a3df-6d63b7f21f8b)
 of `main` at `ea0cd2f`. It found no vulnerability in current code. Its findings are
 folded in below and marked **(SR n)**.
 **Vocabulary:** *Public profile*, *Handle*, *Shared*, *Copy* (defined in [`CONTEXT.md`](../CONTEXT.md)).
+
+**As built, where it differs from the text below:**
+- The public Brief page is `/@$handle/beats/$beatId/briefs/$briefId`, not
+  `/@$handle/briefs/$briefId`: the public API checks the chain through the Beat,
+  so the client needs the Beat id.
+- `PUT /account/public-profile` adds `422 handle_required` for turning the
+  profile on without a Handle. `handle_rejected` carries `details.reason`.
+- `require_same_origin` also rejects a cookie write that sends neither `Origin`
+  nor `Referer`. Besides the request's own origin it accepts `PUBLIC_BASE_URL`
+  and the new `CSRF_TRUSTED_ORIGINS` setting; outside production it also trusts
+  the Vite dev server's origin, which its proxy does not rewrite.
+- `public_profiles` defaults on (D9, owner change 2026-11-24): there is no admin dogfood step.
 
 ## 0. Owner decisions (agreed 2026-11-24)
 
@@ -38,7 +51,7 @@ folded in below and marked **(SR n)**.
 | D6 | Sign-in returns to the copy through a **typed copy intent**, not a raw `next`. | Removes the open-redirect class instead of validating URLs (SR 6). |
 | D7 | Credit (`source_path_id`, `source_beat_id`) is **non-authoritative**. It is silently dropped when unavailable and shown only while the source is public. | Anyone can send a public ID with unrelated inputs, so the credit proves nothing (SR 7). |
 | D8 | **Handles cannot be changed or released** in the first slice. | A freed handle would pass the old owner's links to whoever claims it (SR 11). Turning the profile off hides it; the handle stays reserved. |
-| D9 | Behind a new `public_profiles` flag, resolved for the **profile owner**. | Same dark-then-flip playbook as earlier phases. `FEATURE_FLAG_DEFAULTS=public_profiles:off` makes every profile 404. |
+| D9 | A new `public_profiles` flag, resolved for the **profile owner**, **on by default** (like `flow`). | Shipping on exposes nothing: every profile and every item's `shared` start false, so nothing is public until a learner opts in. The flag stays as the kill switch: `FEATURE_FLAG_DEFAULTS=public_profiles:off` makes every profile 404 and hides the owner routes. |
 
 ## 2. Data model (migration `0025_public_profiles`)
 
@@ -227,4 +240,4 @@ mutations, per-IP limits, search indexing, and everything in PRD §6.
 3. Credit fields on create and detail.
 4. Typed sign-in intent.
 5. Frontend public routes, settings page, `from` prefill, Source URL filter.
-6. Flip `public_profiles` for admins; dogfood; flip the default.
+6. Ship with `public_profiles` on by default. Release gate (security review) before merge: two owners and an anonymous visitor; unsharing closes direct, nested and cached reads; `no-store` and no `Set-Cookie` on public responses.

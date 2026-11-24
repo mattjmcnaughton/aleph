@@ -33,7 +33,7 @@ with `403 Invalid host`.
 | `src/stories/components.stories.tsx` | Shared components in isolation. |
 | `src/stories/foundations.stories.tsx` | The design tokens from `tailwind.config.ts`. |
 | `src/stories/concepts.stories.tsx` | `Concepts/Directions`: the design directions considered for Nocturne, side by side ([`design.md`](design.md)). |
-| `src/stories/public-profiles.stories.tsx` | `Concepts/Public profiles`: the storyboard behind the [Public profiles PRD](prds/public-profiles.md). |
+| `src/stories/public-profiles.stories.tsx` | `Screens/Public profiles`: every Public profile screen and state, signed out and signed in, Copy, and the owner's settings ([PRD](prds/public-profiles.md)). |
 
 ## Adding a story
 
