@@ -1,3 +1,10 @@
+# [1.54.0](https://github.com/mattjmcnaughton/aleph/compare/v1.53.1...v1.54.0) (2026-11-24)
+
+
+### Features
+
+* public profiles ([f7775b2](https://github.com/mattjmcnaughton/aleph/commit/f7775b2f0583cb2aaa6b66c476ebc3e5b1a80899))
+
 ## [1.53.1](https://github.com/mattjmcnaughton/aleph/compare/v1.53.0...v1.53.1) (2026-11-23)
 
 
