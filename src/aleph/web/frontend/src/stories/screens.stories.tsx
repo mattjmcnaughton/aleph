@@ -2,10 +2,11 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { HttpResponse, http } from "msw";
 import { expect, userEvent, within } from "storybook/test";
-import { API_V1_BASE, type AuthSession } from "../lib/api";
+import { API_V1_BASE, type AuthSession, type AuthUser } from "../lib/api";
 import { learnerUser } from "../mocks/handlers";
 import { writeFlow } from "../lib/flow";
 import { EXAMPLE_SUMMARY, configureAccount } from "../mocks/account";
+import { configureApiKeys, resetApiKeys } from "../mocks/api-keys";
 import { configureBeats, resetBeats, seedBeat } from "../mocks/beats";
 import { EXAMPLE_IDEA, EXAMPLE_QUESTIONS, configurePathDrafts } from "../mocks/path-drafts";
 import { configurePaths, resetPaths } from "../mocks/paths";
@@ -27,6 +28,7 @@ import {
   seedWorld,
   sessionHandler,
   signedOutWorldSession,
+  worldSession,
 } from "./world";
 
 // Every screen of the app, rendered by the real router against the seeded world
@@ -482,6 +484,47 @@ export const NotificationSettings: Story = {
         return HttpResponse.json(preferences);
       }),
     );
+  },
+};
+
+const apiKeysSession: AuthSession = {
+  authenticated: true,
+  provider: "keycloak",
+  user: {
+    ...(worldSession.user as AuthUser),
+    feature_flags: { ...(worldSession.user as AuthUser).feature_flags, mcp: true },
+  },
+};
+
+export const ApiKeys: Story = {
+  name: "Settings — API keys",
+  args: { url: "/settings/api-keys" },
+  beforeEach: ({ msw }) => {
+    msw.use(sessionHandler(apiKeysSession));
+    resetApiKeys();
+    configureApiKeys([
+      {
+        id: "00000000-0000-4000-8000-0000000000a1",
+        name: "Claude desktop",
+        created_at: "2026-11-20T10:00:00Z",
+        revoked_at: null,
+      },
+      {
+        id: "00000000-0000-4000-8000-0000000000a2",
+        name: "Old laptop",
+        created_at: "2026-10-02T10:00:00Z",
+        revoked_at: "2026-11-01T10:00:00Z",
+      },
+    ]);
+  },
+};
+
+export const ApiKeysEmpty: Story = {
+  name: "Settings — API keys, none yet",
+  args: { url: "/settings/api-keys" },
+  beforeEach: ({ msw }) => {
+    resetApiKeys();
+    msw.use(sessionHandler(apiKeysSession));
   },
 };
 

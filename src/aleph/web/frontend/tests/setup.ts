@@ -2,6 +2,7 @@ import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, vi } from "vitest";
 import { resetAccount } from "../src/mocks/account";
+import { resetApiKeys } from "../src/mocks/api-keys";
 import { resetBeats } from "../src/mocks/beats";
 import { resetFlowCelebrations } from "../src/lib/flow-celebration";
 import { resetLessons } from "../src/mocks/lessons";
@@ -35,6 +36,7 @@ beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterEach(() => {
   server.resetHandlers();
   resetPaths();
+  resetApiKeys();
   resetPathDrafts();
   resetLessons();
   resetTutor();

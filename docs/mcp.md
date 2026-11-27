@@ -17,19 +17,43 @@ version is `400`. Methods: `initialize`, `ping`, `tools/list`, `tools/call`.
 
 ## Authentication and gating
 
-- **Bearer only**, through the same `aleph/bearer.py` validation as `/api/v1`
-  (see [api.md](api.md#authentication)). With no `Authorization` header the
+- **API keys** (the usual way). A learner creates one under **Settings → API
+  keys** (`/settings/api-keys`) and the MCP client sends it as
+  `Authorization: Bearer <key>`. This follows accanto's API keys: the key is
+  `secrets.token_urlsafe(32)` (43 characters, no prefix), only its SHA-256
+  digest is stored, the secret is shown once at creation, there is no expiry,
+  and revoking stamps `revoked_at` and keeps the row, so revoked keys stay
+  listed. A revoked key is `401` on its next request.
+- **A key only works through `/mcp`.** Each tool forwards to an `/api/v1` route
+  in-process, and the API accepts a key only on those forwarded calls. Sent
+  straight to `/api/v1`, a key is `401`. A leaked key can therefore do what the
+  tools do and nothing else: it can't delete a path, use admin routes or manage
+  keys.
+- **Key management is browser-session only.** `/api/v1/api-keys` refuses any
+  `Authorization` header with `403` (`details.reason: browser_session_required`),
+  so no key, script or agent can list, create or revoke keys.
+- An **OIDC access token** for `OIDC_API_AUDIENCE` also works. That stays off in
+  production while the audience is unset. With no `Authorization` header the
   reply is `401` with
   `WWW-Authenticate: Bearer resource_metadata="<base>/.well-known/oauth-protected-resource"`,
-  and the session cookie is never read. This means a browser cannot drive these
-  writes with ambient credentials.
-- `GET /.well-known/oauth-protected-resource` (RFC 9728) names `OIDC_ISSUER` as
-  the authorization server. It is `404` while bearer auth is off.
-- **Bearer auth is off until `OIDC_API_AUDIENCE` is set** (production doesn't set
-  it today), so every `/mcp` request fails `401` until it is configured.
-  `docs/deploy.md` covers the Auth0 API setup.
-- **The `mcp` feature flag** gates the whole server per account. It is off by
-  default and on for admins, and returns `404` when off.
+  and the session cookie is never read, so a browser can't drive these writes
+  with ambient credentials. The metadata route is `404` while the audience is
+  unset.
+- **The `mcp` feature flag** gates the server, the key routes and the settings
+  page per account. It's off by default and on for admins, and returns `404` when
+  off. A key whose owner loses the flag gets `404` at `/mcp`.
+
+### Key routes
+
+| Method | Path | Body | Success |
+| ------ | ---- | ---- | ------- |
+| `GET` | `/api/v1/api-keys` | — | `200 {keys: [{id, name, created_at, revoked_at}]}`, oldest first, revoked included; never a secret or digest |
+| `POST` | `/api/v1/api-keys` | `{name}` (stripped, 1–120 chars) | `201 {id, name, key}`; `key` is the secret, in this response only |
+| `DELETE` | `/api/v1/api-keys/{id}` | — | `204`; a repeat keeps the first `revoked_at`; another learner's key is `404` |
+
+Writes check `Origin` like other cookie writes that hand out access. Don't
+retry an uncertain create automatically: the secret can't be recovered, so
+reload the list and revoke any key you don't want.
 
 ## Tools
 
@@ -68,13 +92,12 @@ exported by accident.
 
 ## Connecting a client
 
-```json
-{ "mcpServers": { "aleph": { "url": "https://<host>/mcp" } } }
-```
+Add the key as a header (the settings page fills this in with a new key):
 
-A client that implements MCP authorization finds the provider from the `401`
-and the protected-resource metadata. Otherwise, pass
-`Authorization: Bearer <access token>` for the API audience.
+```json
+{ "mcpServers": { "aleph": { "type": "http", "url": "https://<host>/mcp",
+  "headers": { "Authorization": "Bearer <api key>" } } } }
+```
 
 ## Not yet
 

@@ -984,8 +984,11 @@ operator actions, not learner behaviour, and PRD §5.7's event set is unchanged.
 ## Content MCP server (`/mcp`)
 
 `POST /mcp` is a stateless Model Context Protocol server, and its tools forward
-to the `/api/v1` routes above. It accepts bearer tokens only (no cookie) and is
-gated by the `mcp` feature flag (off by default, on for admins, `404` when off).
+to the `/api/v1` routes above. It accepts bearer tokens only (no cookie): an
+**API key** from Settings, or an OIDC access token. It's gated by the `mcp`
+feature flag (off by default, on for admins, `404` when off). API keys are
+managed at `GET`/`POST /api/v1/api-keys` and `DELETE /api/v1/api-keys/{id}`,
+from a browser session only, and work only through `/mcp`.
 `GET /.well-known/oauth-protected-resource` names the identity provider for MCP
 clients and is `404` while `OIDC_API_AUDIENCE` is unset. See [mcp.md](mcp.md)
 for the tools, the Markdown export and its answer-hiding rule.

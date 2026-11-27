@@ -8,6 +8,7 @@ sites keep importing ``from aleph.models import X``.
 
 from __future__ import annotations
 
+from aleph.models.api_key import ApiKey
 from aleph.models.attempt import Attempt
 from aleph.models.beat import Beat
 from aleph.models.beat_research_run import BeatResearchRun
@@ -45,6 +46,7 @@ from aleph.models.unit import Unit
 from aleph.models.users import User
 
 __all__ = [
+    "ApiKey",
     "Attempt",
     "Beat",
     "BeatResearchRun",

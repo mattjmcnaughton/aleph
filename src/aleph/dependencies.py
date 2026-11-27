@@ -46,6 +46,7 @@ from aleph.db import get_session
 from aleph.models import (  # noqa: TC001 - FastAPI resolves annotations.
     User,
 )
+from aleph.services import api_keys
 from aleph.services.auth import AuthService
 from aleph.services.time_zone import observe
 
@@ -152,6 +153,12 @@ async def _resolve_bearer_user(
     authenticator: BearerAuthenticator | None,
     token: str,
 ) -> User:
+    if api_keys.is_api_key(token):
+        # Accepted only on a call the MCP server forwards (services/api_keys).
+        if not api_keys.forwarding.get():
+            logger.info("bearer_auth_rejected", reason="api key outside /mcp")
+            raise _invalid_token()
+        return await resolve_api_key_user(request, session, token)
     if authenticator is None:
         logger.info("bearer_auth_rejected", reason="bearer auth not configured")
         raise _invalid_token()
@@ -176,6 +183,19 @@ async def _resolve_bearer_user(
     # account from the web and from the app.
     user = await AuthService(session).resolve(authenticated.identity)
     _bind_user_to_request(request, user, auth_method="bearer", client=client)
+    await observe(session, user, request.headers.get("X-Aleph-Time-Zone"))
+    return user
+
+
+async def resolve_api_key_user(
+    request: Request, session: AsyncSession, token: str
+) -> User:
+    """The account an API key belongs to, else ``401`` (a revoked key too)."""
+    user = await api_keys.authenticate(session, token)
+    if user is None:
+        logger.info("bearer_auth_rejected", reason="unknown or revoked api key")
+        raise _invalid_token()
+    _bind_user_to_request(request, user, auth_method="api_key", client="mcp")
     await observe(session, user, request.headers.get("X-Aleph-Time-Zone"))
     return user
 

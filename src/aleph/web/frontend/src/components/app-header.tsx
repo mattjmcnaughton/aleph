@@ -38,6 +38,7 @@ function AccountMenu() {
   const detailsRef = useRef<HTMLDetailsElement>(null);
   const summaryEnabled = useFeatureFlag("learning_summary");
   const publicProfilesEnabled = useFeatureFlag("public_profiles");
+  const mcpEnabled = useFeatureFlag("mcp");
 
   const user = session.data?.authenticated ? session.data.user : null;
   const name = user?.display_name ?? "";
@@ -112,6 +113,16 @@ function AccountMenu() {
               className="flex min-h-11 items-center rounded-md px-3 text-sm text-porcelain transition-colors hover:bg-elevated"
             >
               Public profile
+            </Link>
+          ) : null}
+          {mcpEnabled ? (
+            <Link
+              to="/settings/api-keys"
+              onClick={close}
+              data-testid="account-menu-api-keys"
+              className="flex min-h-11 items-center rounded-md px-3 text-sm text-porcelain transition-colors hover:bg-elevated"
+            >
+              API keys
             </Link>
           ) : null}
           {config.data ? (

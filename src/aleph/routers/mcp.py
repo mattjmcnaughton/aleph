@@ -12,7 +12,9 @@ rate limits, validation, the poll-as-trigger resume and the Quick check reveal
 boundary are the web client's, enforced once (Constitution §1, §8). This module
 owns only protocol translation and the Markdown export layout.
 
-**Bearer only.** A request without ``Authorization`` is ``401`` and the session
+**Bearer only.** The token is an **API key** the learner created in
+Settings (``services/api_keys.py``) or an OIDC access token for the API
+audience. A request without ``Authorization`` is ``401`` and the session
 cookie is never consulted, so a browser cannot drive these writes with ambient
 credentials. The ``401`` names the OAuth protected-resource metadata (RFC 9728)
 that MCP clients use to find the identity provider. The whole surface sits
@@ -34,8 +36,13 @@ from sqlalchemy.ext.asyncio import AsyncSession  # noqa: TC002
 from aleph.bearer import BearerAuthenticator, get_bearer_authenticator
 from aleph.config import settings
 from aleph.db import get_session
-from aleph.dependencies import bearer_token, get_current_user
+from aleph.dependencies import (
+    bearer_token,
+    get_current_user,
+    resolve_api_key_user,
+)
 from aleph.domains.visuals import strip_visual_fences
+from aleph.services import api_keys
 from aleph.services.feature_flags import FeatureFlag, FeatureFlagService
 
 if TYPE_CHECKING:
@@ -77,7 +84,12 @@ async def require_mcp_user(
                 )
             },
         )
-    user = await get_current_user(request, session, authenticator)
+    token = bearer_token(request)
+    user = (
+        await resolve_api_key_user(request, session, token)
+        if token is not None and api_keys.is_api_key(token)
+        else await get_current_user(request, session, authenticator)
+    )
     flags = await FeatureFlagService(session).resolve_for_user(user)
     if not flags.get(FeatureFlag.MCP, False):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not found")
@@ -372,21 +384,32 @@ async def _call_tool(
     try:
         if missing:
             raise ToolError(f"missing arguments: {', '.join(missing)}")
-        async with _api_client(request) as api:
-            if tool.name == "export_path":
-                text = await _export_path(api, _uuid_arg(arguments, "path_id"))
-                return {"content": [{"type": "text", "text": text}]}
-            route = tool.route.format(
-                **{
-                    key: _uuid_arg(arguments, key)
-                    for key in tool.required
-                    if key.endswith("_id")
-                }
-            )
-            body = {key: arguments[key] for key in tool.body if key in arguments}
-            data = await _api(api, tool.method, route, body if tool.body else None)
+        # Lets the forwarded /api/v1 calls accept an API key (and only these).
+        reset = api_keys.forwarding.set(True)
+        try:
+            return await _forward(request, tool, arguments)
+        finally:
+            api_keys.forwarding.reset(reset)
     except ToolError as exc:
         return {"content": [{"type": "text", "text": str(exc)}], "isError": True}
+
+
+async def _forward(
+    request: Request, tool: Tool, arguments: Mapping[str, Any]
+) -> dict[str, Any]:
+    async with _api_client(request) as api:
+        if tool.name == "export_path":
+            text = await _export_path(api, _uuid_arg(arguments, "path_id"))
+            return {"content": [{"type": "text", "text": text}]}
+        route = tool.route.format(
+            **{
+                key: _uuid_arg(arguments, key)
+                for key in tool.required
+                if key.endswith("_id")
+            }
+        )
+        body = {key: arguments[key] for key in tool.body if key in arguments}
+        data = await _api(api, tool.method, route, body if tool.body else None)
     return {
         "content": [{"type": "text", "text": json.dumps(data)}],
         "structuredContent": data,
