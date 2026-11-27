@@ -24,7 +24,7 @@ On New path, the **Material** field takes papers alongside today's items, up to
   like `2106.09685`). Aleph reads arXiv's own HTML version of the paper, which
   keeps its sections and equations. If arXiv has no HTML version, Aleph reads
   the PDF instead.
-- **A PDF upload**: up to 20 MB and 60 pages, for papers that aren't on arXiv.
+- **A PDF upload**: up to 20 MB and 50 pages, for papers that aren't on arXiv.
   A scanned PDF with no text layer is read too, if Matt approves the paid
   reader (TDD D5).
 

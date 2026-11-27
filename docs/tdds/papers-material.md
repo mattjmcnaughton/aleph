@@ -91,7 +91,7 @@ Hostile PDFs, read with pypdf in a child process with `RLIMIT_AS` 768 MB,
   stale `reading` draft reads as `failed` and the learner adds the file again
   (Constitution §4: an interrupted read is a visible failure, never an empty
   snapshot). This is why papers need no object storage (D9).
-- **D4. Limits.** *Decided here.* Per PDF: 20 MB, 60 pages, `%PDF-` magic
+- **D4. Limits.** *Decided here.* Per PDF: 20 MB, 50 pages, `%PDF-` magic
   bytes, not encrypted. Per paper: 150,000 extracted characters, after the
   bibliography is dropped. Per path: today's 5 items and 400,000 characters.
   Reasons added to `MaterialFailure`: `too_many_pages`, `encrypted`,
@@ -190,8 +190,12 @@ Hostile PDFs, read with pypdf in a child process with `RLIMIT_AS` 768 MB,
   HTML for the Markdown, so the no-`rehype-raw` rule stands. The KaTeX CSS and
   fonts are about 300 KB, loaded only when a passage contains `$`. The lesson
   and Quick check prompts are told to write inline math as `$…$` and display
-  math as `$$…$$`. Because the renderer is shared, every lesson gets math, not
-  only papers; currency like `$5` needs `singleDollarTextMath: false` or the
+  math as `$$…$$`. Because the renderer is shared, every surface that uses
+  `Markdown` (Read passage, Quick check explanation, Briefs, the tutor and
+  shaping rails) gets math, not only papers. Quick check options are rendered
+  as plain text today (`routes/lessons.$lessonId.tsx`), so they need an inline
+  Markdown render to show math. Matt agreed on 2026-11-27 that math should
+  render everywhere; currency like `$5` needs `singleDollarTextMath: false` or the
   prompt rule, to be settled in slice 1's tests.
 - **D11. Figures as captions first.** *Decided here.* Slices 1–3 keep
   `[Figure n: caption]` lines in the section text, so a lesson can say what a
