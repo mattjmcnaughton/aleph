@@ -326,6 +326,7 @@ async def test_launched_flags_reach_a_plain_learner(
     Flow also defaults on in this feature branch (#262), without claiming
     production launch. Its real default must reach the session unchanged.
     Public profiles ship on (TDD D9); nothing is public until a learner opts in.
+    Material (links, pastes and arXiv papers) is launched for every learner.
     """
     monkeypatch.undo()
     assert not settings.feature_flag_defaults, "nothing may be configured here"
@@ -339,6 +340,7 @@ async def test_launched_flags_reach_a_plain_learner(
             analyst=True,
             flow=True,
             public_profiles=True,
+            material=True,
         )
 
 

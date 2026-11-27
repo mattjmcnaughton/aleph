@@ -169,7 +169,11 @@ FLAG_DEFAULTS: dict[FeatureFlag, bool] = {
     FeatureFlag.PUBLIC_PROFILES: True,
     # Off: dark until launched; admins dogfood it via ADMIN_DEFAULT_FLAGS.
     FeatureFlag.MCP: False,
-    FeatureFlag.MATERIAL: False,
+    # On: Linked Material is launched for every learner, papers included
+    # (docs/prds/papers-material.md): article and docs links, arXiv papers,
+    # pasted text and AI summaries. FEATURE_FLAG_DEFAULTS=material:off is the
+    # kill switch, for learners and admins alike.
+    FeatureFlag.MATERIAL: True,
     # Off: dark until real gradings are reviewed; admins dogfood it.
     FeatureFlag.EXPLAIN_CHECKS: False,
 }

@@ -219,6 +219,23 @@ def test_the_registry_is_exactly_the_registered_flags() -> None:
     )
 
 
+@pytest.mark.anyio
+async def test_material_is_launched_for_learners_and_killable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Material is on for every learner, not only admins, and one settings
+    entry turns it off for both."""
+    monkeypatch.setattr(settings, "feature_flag_defaults", "")
+    service = _service(StubFeatureFlagRepository())
+    assert feature_flags.FLAG_DEFAULTS[feature_flags.FeatureFlag.MATERIAL] is True
+    assert (await service.resolve_for_user(_user()))["material"] is True
+    assert (await service.resolve_for_user(_admin_user()))["material"] is True
+
+    monkeypatch.setattr(settings, "feature_flag_defaults", "material:off")
+    assert (await service.resolve_for_user(_user()))["material"] is False
+    assert (await service.resolve_for_user(_admin_user()))["material"] is False
+
+
 def test_public_profiles_ships_on_with_a_kill_switch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
