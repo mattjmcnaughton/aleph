@@ -98,7 +98,8 @@ Hostile PDFs, read with pypdf in a child process with `RLIMIT_AS` 768 MB,
   `not_a_pdf`, `no_text_layer`. The size limit is enforced while the upload
   streams, before the whole body is in memory. One PDF extraction runs at a time per machine (a semaphore),
   so a burst of uploads queues rather than exhausting the 512 MB app VM.
-- **D5. PDF reader.** **Needs Matt** (spending money). Every PDF is first
+- **D5. PDF reader: Mistral OCR through OpenRouter.** Matt chose option A on
+  2026-11-27. Every PDF is first
   checked by pypdf in a limited child process (D6): magic bytes, encryption,
   page count. Then one of these reads the text:
 
@@ -228,6 +229,15 @@ Specified here; the Space writes the migration.
   `reason` in `items` (D3). A draft's `items` holds the read sections and
   digest until Build copies them, up to about 400,000 characters, so expired
   and consumed drafts need deleting (a reconciler sweep), not just ignoring.
+
+Bulky text stays off the hot paths. Postgres compresses any value over about
+2 KB and stores it out of line in the table's TOAST table, leaving a small
+pointer in the row, and reads it only when a query selects that column. So:
+the section text lives only in `material_sections`, which is read by
+`(path_id, position)` for one lesson at a time; `materials.digest` is
+`deferred()` in the ORM so the path detail's `list_for_path` doesn't load it;
+and the draft poll (`GET /material-drafts/{id}`) selects `state` and each
+item's `state` and `reason`, never the whole `items` value.
 
 ## Size and slices
 
