@@ -36,6 +36,10 @@ class SPAStaticFiles(StaticFiles):
     """
 
     async def get_response(self, path: str, scope: Scope) -> Response:
+        # Before ``StaticFiles`` answers a write with its own ``405``: an unknown
+        # backend path is the API's ``404`` whatever the method.
+        if path.split("/", 1)[0] in BACKEND_PREFIXES:
+            raise HTTPException(status_code=404)
         try:
             response = await super().get_response(path, scope)
             if path == "sw.js":
@@ -55,8 +59,6 @@ def _is_spa_navigation(path: str, scope: Scope) -> bool:
     """
     if scope.get("method") not in ("GET", "HEAD"):
         return False
-    if path.split("/", 1)[0] in BACKEND_PREFIXES:
-        return False
     # A missing *file* is a real 404. Falling back would answer a stale bundle
     # reference with `200` + HTML, turning an obvious failed request into a
     # blank page and a console parse error.
@@ -68,10 +70,9 @@ def mount_frontend(app: FastAPI) -> None:
 
     In production, the frontend is built to `web/frontend/dist/` and served
     as static files. In development, the frontend dev server runs separately.
+
+    It is the router's fallback rather than a ``Mount("/")``: a mount at ``/``
+    matches every path, so any route registered after it would be shadowed.
     """
     if FRONTEND_DIST.is_dir():
-        app.mount(
-            "/",
-            SPAStaticFiles(directory=str(FRONTEND_DIST), html=True),
-            name="frontend",
-        )
+        app.router.default = SPAStaticFiles(directory=str(FRONTEND_DIST), html=True)

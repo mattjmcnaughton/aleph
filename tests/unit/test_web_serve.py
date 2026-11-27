@@ -17,6 +17,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
+from fastapi import FastAPI
 from starlette.testclient import TestClient
 
 from aleph import app as app_module
@@ -126,6 +127,27 @@ def test_unknown_backend_path_keeps_the_error_envelope(
 
     assert response.status_code == 404
     assert response.json()["error"]["code"] == "not_found"
+    # A write too: ``StaticFiles`` would otherwise answer it with its own 405.
+    written = client.post(route, json={})
+    assert written.status_code == 404
+    assert written.json()["error"]["code"] == "not_found"
+
+
+def test_route_added_after_create_app_is_reachable(client: TestClient) -> None:
+    """The shell is a fallback, not a route that shadows later ones.
+
+    A ``Mount("/")`` matches every path, so any route registered after
+    ``create_app()`` (as the integration suite's ``_authprobe`` is) sat behind
+    it and answered the SPA's 404 whenever a built ``dist/`` was present.
+    """
+    app = client.app
+    assert isinstance(app, FastAPI)
+
+    @app.get("/api/v1/_late")
+    async def _late() -> dict[str, bool]:
+        return {"ok": True}
+
+    assert client.get("/api/v1/_late").json() == {"ok": True}
 
 
 def test_probes_are_untouched(client: TestClient) -> None:
