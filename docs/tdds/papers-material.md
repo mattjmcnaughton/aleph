@@ -235,7 +235,9 @@ Specified here; the Space writes the migration.
   drafts, and the slim row is deleted 48 hours after creation so the daily
   draft limit still counts it. A PDF extraction that finishes after its draft
   expired or was claimed writes nothing: its update requires the item still
-  `reading` and `consumed_at` null.
+  `reading`, `consumed_at` null and `expires_at > now()` (the tick clears
+  expired drafts without setting `consumed_at`). Build claims only a draft
+  whose `state` is `ready`.
 
 Bulky text stays off the hot paths. Postgres compresses any value over about
 2 KB and stores it out of line in the table's TOAST table, leaving a small
