@@ -1,3 +1,10 @@
+# [1.56.0](https://github.com/mattjmcnaughton/aleph/compare/v1.55.0...v1.56.0) (2026-11-27)
+
+
+### Features
+
+* **new-path:** build a path from linked Material ([0e4de25](https://github.com/mattjmcnaughton/aleph/commit/0e4de25e69aec338b4db7494d17dee6807568558))
+
 # [1.55.0](https://github.com/mattjmcnaughton/aleph/compare/v1.54.0...v1.55.0) (2026-11-27)
 
 
