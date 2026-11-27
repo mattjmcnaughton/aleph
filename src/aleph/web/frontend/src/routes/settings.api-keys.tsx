@@ -169,15 +169,18 @@ function ApiKeys() {
 
       <SectionHeader kicker="Connect an app" spacing="mt-9" />
       <p className="mt-3 text-sm leading-6 text-mist">
-        Add Aleph as a remote MCP server at{" "}
-        <code className="rounded bg-porcelain/[0.09] px-1.5 py-0.5 font-mono text-porcelain">
-          {window.location.origin}/mcp
-        </code>{" "}
-        and send the key as a Bearer token. Most apps accept this config:
+        Add Aleph as a remote MCP server at this URL, and send the key as a Bearer token:
       </p>
+      <code
+        data-testid="mcp-url"
+        className="mt-2 block rounded-md bg-surface px-4 py-3 font-mono text-[13px] text-porcelain [overflow-wrap:anywhere]"
+      >
+        {window.location.origin}/mcp
+      </code>
+      <p className="mt-3 text-sm leading-6 text-mist">Most apps accept this config:</p>
       <pre
         data-testid="mcp-config"
-        className="mt-3 whitespace-pre-wrap break-all rounded-md bg-surface p-4 font-mono text-[13px] leading-6 text-porcelain"
+        className="mt-3 whitespace-pre-wrap rounded-md [overflow-wrap:anywhere] bg-surface p-4 font-mono text-[13px] leading-6 text-porcelain"
       >
         {snippet}
       </pre>
@@ -217,16 +220,29 @@ function NewKey({
       <label className="sr-only" htmlFor="new-api-key-value">
         New API key (shown once)
       </label>
-      <input
-        id="new-api-key-value"
-        data-testid="new-api-key-value"
-        type={shown ? "text" : "password"}
-        readOnly
-        value={secret.value}
-        autoComplete="off"
-        spellCheck={false}
-        className="mt-3 min-h-12 w-full rounded-md border border-faint bg-night px-3 font-mono text-sm text-porcelain"
-      />
+      {shown ? (
+        // A shown key wraps: a one-line input clips it on a phone.
+        <textarea
+          id="new-api-key-value"
+          data-testid="new-api-key-value"
+          readOnly
+          rows={2}
+          value={secret.value}
+          spellCheck={false}
+          className="mt-3 block w-full resize-none rounded-md border border-faint bg-night px-3 py-3 font-mono text-sm leading-6 text-porcelain [overflow-wrap:anywhere]"
+        />
+      ) : (
+        <input
+          id="new-api-key-value"
+          data-testid="new-api-key-value"
+          type="password"
+          readOnly
+          value={secret.value}
+          autoComplete="off"
+          spellCheck={false}
+          className="mt-3 min-h-12 w-full rounded-md border border-faint bg-night px-3 font-mono text-sm text-porcelain"
+        />
+      )}
       <div className="mt-3 flex flex-wrap gap-2">
         <button
           type="button"
