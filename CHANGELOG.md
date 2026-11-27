@@ -1,3 +1,10 @@
+# [1.58.0](https://github.com/mattjmcnaughton/aleph/compare/v1.57.0...v1.58.0) (2026-11-27)
+
+
+### Features
+
+* **mcp:** API keys minted in Settings for the MCP server ([b6c918e](https://github.com/mattjmcnaughton/aleph/commit/b6c918ea6eeb1b8a50d428a1eb452961d4e4e698))
+
 # [1.57.0](https://github.com/mattjmcnaughton/aleph/compare/v1.56.0...v1.57.0) (2026-11-27)
 
 
