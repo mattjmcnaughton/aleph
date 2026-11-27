@@ -1,3 +1,10 @@
+## [1.60.1](https://github.com/mattjmcnaughton/aleph/compare/v1.60.0...v1.60.1) (2026-11-27)
+
+
+### Bug Fixes
+
+* **web:** serve the SPA as the router fallback, not a root mount ([db931e6](https://github.com/mattjmcnaughton/aleph/commit/db931e6d3ac7e65fc533aef4a4865f81b287ab66))
+
 # [1.60.0](https://github.com/mattjmcnaughton/aleph/compare/v1.59.1...v1.60.0) (2026-11-27)
 
 
