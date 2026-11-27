@@ -1,3 +1,10 @@
+## [1.59.1](https://github.com/mattjmcnaughton/aleph/compare/v1.59.0...v1.59.1) (2026-11-27)
+
+
+### Bug Fixes
+
+* **mcp:** harden OAuth consent framing and client metadata fetch ([ea7464f](https://github.com/mattjmcnaughton/aleph/commit/ea7464f9d52a42418a8a1656a0db119a6d37a1a6))
+
 # [1.59.0](https://github.com/mattjmcnaughton/aleph/compare/v1.58.1...v1.59.0) (2026-11-27)
 
 
