@@ -1,3 +1,10 @@
+# [1.55.0](https://github.com/mattjmcnaughton/aleph/compare/v1.54.0...v1.55.0) (2026-11-27)
+
+
+### Features
+
+* **mcp:** content MCP server for reading and writing paths ([24b9eee](https://github.com/mattjmcnaughton/aleph/commit/24b9eee9cf9535d925191831d47e0d3ee0e704f3))
+
 # [1.54.0](https://github.com/mattjmcnaughton/aleph/compare/v1.53.1...v1.54.0) (2026-11-24)
 
 
