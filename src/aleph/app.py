@@ -125,6 +125,7 @@ def create_app() -> FastAPI:
 
 
 PUBLIC_API_PREFIX = "/api/v1/public/"
+CONSENT_PAGE = oauth.CONSENT_PAGE
 
 
 def _install_cache_policy(app: FastAPI) -> None:
@@ -135,7 +136,8 @@ def _install_cache_policy(app: FastAPI) -> None:
     also get ``X-Robots-Tag: noindex``, and never carry a cookie: a public
     route never touches the session, and this strips one regardless, so the
     rule holds even if something upstream starts writing it. Added after
-    ``SessionMiddleware`` so it wraps it and sees its ``Set-Cookie``.
+    ``SessionMiddleware`` so it wraps it and sees its ``Set-Cookie``. The
+    OAuth consent page (``/connect``) also refuses to be framed.
     """
 
     @app.middleware("http")
@@ -148,6 +150,11 @@ def _install_cache_policy(app: FastAPI) -> None:
             response.headers["Cache-Control"] = "no-store"
             response.headers["X-Robots-Tag"] = "noindex"
             del response.headers["set-cookie"]
+        if path.rstrip("/") == CONSENT_PAGE:
+            # The OAuth consent page must never be framed: a framed Connect
+            # button is a clickjacking grant to whatever app asked.
+            response.headers["Content-Security-Policy"] = "frame-ancestors 'none'"
+            response.headers["X-Frame-Options"] = "DENY"
         return response
 
 

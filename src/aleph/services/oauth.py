@@ -24,6 +24,7 @@ import hmac
 import ipaddress
 import secrets
 import socket
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, Protocol
@@ -157,28 +158,63 @@ def pkce_matches(verifier: str, challenge: str) -> bool:
     return hmac.compare_digest(expected, challenge)
 
 
+Resolver = Callable[[str, int], Awaitable[list[str]]]
+
+
+async def _resolve(host: str, port: int) -> list[str]:
+    infos = await asyncio.get_running_loop().getaddrinfo(
+        host, port, type=socket.SOCK_STREAM
+    )
+    return [str(info[4][0]) for info in infos]
+
+
 class HttpMetadataFetcher:
-    """Fetches metadata over HTTPS from public addresses only (SSRF guard)."""
+    """Fetches metadata over HTTPS from public addresses only (SSRF guard).
+
+    The host is resolved once, every address must be public, and the request
+    then connects to that checked address, so DNS can't answer differently
+    between the check and the connection (rebinding). TLS still verifies the
+    certificate for the real hostname (SNI), and ``Host`` names it too.
+    """
+
+    def __init__(
+        self,
+        resolve: Resolver = _resolve,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
+        self._resolve = resolve
+        self._transport = transport
 
     async def fetch(self, url: str) -> Mapping[str, Any]:
-        host = urlsplit(url).hostname or ""
+        parts = urlsplit(url)
+        host = parts.hostname or ""
+        port = parts.port or 443
         try:
-            infos = await asyncio.get_running_loop().getaddrinfo(
-                host, 443, type=socket.SOCK_STREAM
-            )
+            addresses = await self._resolve(host, port)
         except OSError as exc:
             raise OAuthError("invalid_client", "metadata host not found") from exc
-        if not infos or not all(
-            ipaddress.ip_address(info[4][0]).is_global for info in infos
+        if not addresses or not all(
+            ipaddress.ip_address(address).is_global for address in addresses
         ):
             raise OAuthError("invalid_client", "metadata host is not public")
+        pinned = ipaddress.ip_address(addresses[0])
+        netloc = f"[{pinned}]" if pinned.version == 6 else str(pinned)
+        target = parts._replace(netloc=f"{netloc}:{port}").geturl()
         try:
             async with (
                 httpx.AsyncClient(
-                    timeout=METADATA_TIMEOUT_SECONDS, follow_redirects=False
+                    timeout=METADATA_TIMEOUT_SECONDS,
+                    follow_redirects=False,
+                    transport=self._transport,
                 ) as client,
                 client.stream(
-                    "GET", url, headers={"Accept": "application/json"}
+                    "GET",
+                    target,
+                    headers={
+                        "Accept": "application/json",
+                        "Host": parts.netloc.rsplit("@", 1)[-1],
+                    },
+                    extensions={"sni_hostname": host},
                 ) as response,
             ):
                 response.raise_for_status()

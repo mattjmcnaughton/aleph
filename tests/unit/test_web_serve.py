@@ -138,3 +138,13 @@ def test_non_get_request_does_not_fall_back(client: TestClient) -> None:
 
     assert response.status_code != 200
     assert '<div id="root">' not in response.text
+
+
+def test_the_oauth_consent_page_refuses_to_be_framed(client: TestClient) -> None:
+    connect = client.get("/connect")
+    assert connect.status_code == 200
+    assert '<div id="root">' in connect.text
+    assert connect.headers["content-security-policy"] == "frame-ancestors 'none'"
+    assert connect.headers["x-frame-options"] == "DENY"
+    # Only the consent page: other screens are unchanged.
+    assert "content-security-policy" not in client.get("/paths/abc").headers

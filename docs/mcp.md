@@ -70,7 +70,9 @@ spec (2025-11-25) and OAuth 2.1 for public clients.
    and deprecated in its next revision, and Claude and Amp both use CIMD.
 2. **Client identity: Client ID Metadata Documents.** The `client_id` is an
    HTTPS URL with a path; Aleph fetches it (public addresses only, no redirects,
-   5 KB cap, 5 s timeout), requires its `client_id` to equal the URL, a
+   5 KB cap, 5 s timeout). The host is resolved once and the request connects
+   to that checked address, with TLS verifying the real hostname, so DNS
+   rebinding can't reach an internal address, requires its `client_id` to equal the URL, a
    `redirect_uris` list and a public client, and stores nothing per client. Any
    HTTPS client may ask; the learner decides on the consent page. A redirect URI
    must match exactly, except a loopback `http` URI may use any port (RFC 8252).
@@ -84,7 +86,9 @@ spec (2025-11-25) and OAuth 2.1 for public clients.
 4. **Consent at `/connect`.** The validated request waits in the signed session.
    The page shows the client's name, the host publishing its metadata and the
    host it returns to, and warns when every redirect URI is loopback (any local
-   program could claim the name). `POST /api/v1/oauth/consent {id, approve}`
+   program could claim the name). The page is sent with
+   `Content-Security-Policy: frame-ancestors 'none'` and `X-Frame-Options: DENY`,
+   so no site can frame it to trick a click on Connect. `POST /api/v1/oauth/consent {id, approve}`
    (same origin) answers it once; a stale `id` is `409`. Approving stores a
    one-time code (`oauth_codes`, SHA-256 only, 60 s) and returns
    `{redirect_to}`; at most 10 approvals per learner per hour (`429`).
