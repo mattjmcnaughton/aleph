@@ -1,3 +1,10 @@
+# [1.57.0](https://github.com/mattjmcnaughton/aleph/compare/v1.56.0...v1.57.0) (2026-11-27)
+
+
+### Features
+
+* **quick-check:** ask why, grade the reasoning against a Grading key ([34ace57](https://github.com/mattjmcnaughton/aleph/commit/34ace5770033779de3d740456c6f53b304260e3e))
+
 # [1.56.0](https://github.com/mattjmcnaughton/aleph/compare/v1.55.0...v1.56.0) (2026-11-27)
 
 
