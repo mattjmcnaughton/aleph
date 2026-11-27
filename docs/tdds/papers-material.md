@@ -183,7 +183,10 @@ Hostile PDFs, read with pypdf in a child process with `RLIMIT_AS` 768 MB,
   and needs no new vendor account. R2 is the cheaper choice past its free tier.
   Prices are from the vendors' pages, read 2026-11-27.
 - **D10. Equations render with KaTeX.** *Decided here.* Lessons on papers will
-  write LaTeX. The web client adds `remark-math` and `rehype-katex` to
+  write LaTeX. The web client adds `remark-math` and `rehype-katex`
+  (thin wrappers whose last releases were 2023 and 2024) plus `katex` as a
+  direct dependency, so the parser that handles untrusted LaTeX (last release
+  2026-10) gets updates without waiting on the wrapper, to
   `components/markdown.tsx`, with KaTeX's default `trust: false` (no `\href`,
   `\url` or `\htmlData`), `maxExpand` and `maxSize` limits, and errors rendered
   as the source text in red. KaTeX emits its own HTML; it does not turn on raw
@@ -222,7 +225,9 @@ Specified here; the Space writes the migration.
 - `lessons.material_concepts text[] NULL` (D8): the digest concept ids a lesson
   teaches. Prep lessons store none.
 - `material_drafts` as in Placement check D1, with the per-item `state` and
-  `reason` in `items` (D3).
+  `reason` in `items` (D3). A draft's `items` holds the read sections and
+  digest until Build copies them, up to about 400,000 characters, so expired
+  and consumed drafts need deleting (a reconciler sweep), not just ignoring.
 
 ## Size and slices
 
