@@ -1,7 +1,8 @@
 """The content MCP server (``/mcp``) over real Postgres (docs/mcp.md).
 
-Bearer tokens are minted locally and verified by the real ``BearerAuthenticator``
-over the in-memory JWKS fake; generation uses the deterministic stub model and
+Each learner's account is provisioned by an OIDC bearer token (the real
+``BearerAuthenticator`` over the in-memory JWKS fake), then given an API key,
+the only token ``/mcp`` accepts; generation uses the deterministic stub model and
 a drainable spawn, as in ``test_lessons_api``. Each tool forwards to an
 ``/api/v1`` route, so these tests check what crosses the protocol boundary:
 auth, the flag gate, ownership, and the Quick check reveal boundary.
@@ -10,6 +11,7 @@ auth, the flag gate, ownership, and the Quick check reveal boundary.
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
+from uuid import UUID
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -19,6 +21,7 @@ from aleph.app import create_app
 from aleph.bearer import get_bearer_authenticator
 from aleph.config import settings
 from aleph.models import QuickCheck
+from aleph.services import api_keys
 from aleph.services import generation as gen_module
 from tests._bearer_fakes import USERINFO, fake_authenticator, mint
 
@@ -59,8 +62,28 @@ def _as(app: FastAPI, userinfo: dict[str, Any]) -> None:
     app.dependency_overrides[get_bearer_authenticator] = lambda: authenticator
 
 
-def _auth(subject: str = "subject-1") -> dict[str, str]:
+def _jwt(subject: str = "subject-1") -> dict[str, str]:
     return {"Authorization": f"Bearer {mint(sub=subject)}"}
+
+
+_keys: dict[str, str] = {}
+
+
+@pytest.fixture(autouse=True)
+def _fresh_keys() -> None:
+    _keys.clear()
+
+
+async def _auth(client: AsyncClient, subject: str = "subject-1") -> dict[str, str]:
+    """An API key for the learner the OIDC subject signs in as."""
+    if subject not in _keys:
+        resp = await client.get("/api/v1/auth/session", headers=_jwt(subject))
+        user_id = UUID(resp.json()["user"]["id"])
+        async with db.async_session() as session:
+            _, _keys[subject] = await api_keys.issue_key(
+                session, user_id=user_id, name="test"
+            )
+    return {"Authorization": f"Bearer {_keys[subject]}"}
 
 
 async def _rpc(
@@ -73,7 +96,7 @@ async def _rpc(
     resp = await client.post(
         "/mcp",
         json={"jsonrpc": "2.0", "id": 1, "method": method, "params": params or {}},
-        headers=_auth(subject),
+        headers=await _auth(client, subject),
     )
     assert resp.status_code == 200, resp.text
     return resp.json()
@@ -113,8 +136,22 @@ async def test_requests_without_a_bearer_token_are_401_with_resource_metadata(
     assert resp.status_code == 401
     assert resp.headers["www-authenticate"] == (
         'Bearer resource_metadata="http://testserver'
-        '/.well-known/oauth-protected-resource"'
+        '/.well-known/oauth-protected-resource", scope="mcp"'
     )
+
+
+@pytest.mark.anyio
+async def test_an_identity_provider_token_is_never_accepted(
+    app: FastAPI, mcp_on: None
+) -> None:
+    # Valid for /api/v1, but /mcp takes only Aleph's own tokens (no passthrough).
+    _as(app, USERINFO)
+    async with _client(app) as client:
+        resp = await client.post(
+            "/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "ping"}, headers=_jwt()
+        )
+    assert resp.status_code == 401
+    assert resp.headers["www-authenticate"].startswith('Bearer error="invalid_token"')
 
 
 @pytest.mark.anyio
@@ -122,7 +159,9 @@ async def test_the_mcp_flag_off_hides_the_server(app: FastAPI) -> None:
     _as(app, USERINFO)
     async with _client(app) as client:
         resp = await client.post(
-            "/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "ping"}, headers=_auth()
+            "/mcp",
+            json={"jsonrpc": "2.0", "id": 1, "method": "ping"},
+            headers=await _auth(client),
         )
     assert resp.status_code == 404
 
@@ -138,7 +177,7 @@ async def test_initialize_negotiates_and_lists_tools(
         notified = await client.post(
             "/mcp",
             json={"jsonrpc": "2.0", "method": "notifications/initialized"},
-            headers=_auth(),
+            headers=await _auth(client),
         )
         tools = await _rpc(client, "tools/list")
         unknown = await _rpc(client, "nope")
@@ -242,7 +281,7 @@ async def test_reads_and_exports_hide_the_answer_until_the_learner_attempts(
         attempt = await client.post(
             f"/api/v1/lessons/{first['id']}/attempt",
             json={"selected_index": wrong},
-            headers=_auth(),
+            headers=_jwt(),
         )
         assert attempt.status_code == 200, attempt.text
         export_after = await _call(client, "export_path", path_id=path["id"])

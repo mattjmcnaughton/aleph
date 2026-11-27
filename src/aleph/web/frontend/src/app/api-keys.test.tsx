@@ -76,3 +76,30 @@ describe("API keys settings", () => {
     expect(screen.getByTestId("api-keys-message")).toHaveTextContent("API key revoked.");
   });
 });
+
+describe("Connected apps", () => {
+  it("lists apps connected by OAuth apart from keys, and disconnects after confirming", async () => {
+    session(true);
+    configureApiKeys(
+      [],
+      [
+        {
+          id: "00000000-0000-4000-8000-0000000000c1",
+          name: "Claude Code",
+          client_host: "claude.ai",
+          created_at: "2026-11-25T10:00:00Z",
+        },
+      ],
+    );
+    goto("/settings/api-keys");
+    const row = await screen.findByTestId("connection-row");
+    expect(row).toHaveTextContent("Claude Code");
+    expect(row).toHaveTextContent("claude.ai");
+    expect(screen.getByText("No keys yet.")).toBeVisible();
+
+    fireEvent.click(within(row).getByRole("button", { name: "Disconnect Claude Code" }));
+    fireEvent.click(within(row).getByRole("button", { name: "Disconnect" }));
+    expect(await screen.findByText("No connected apps.")).toBeVisible();
+    expect(screen.getByTestId("api-keys-message")).toHaveTextContent("Claude Code disconnected.");
+  });
+});

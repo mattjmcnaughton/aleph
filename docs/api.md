@@ -984,11 +984,16 @@ operator actions, not learner behaviour, and PRD §5.7's event set is unchanged.
 ## Content MCP server (`/mcp`)
 
 `POST /mcp` is a stateless Model Context Protocol server, and its tools forward
-to the `/api/v1` routes above. It accepts bearer tokens only (no cookie): an
-**API key** from Settings, or an OIDC access token. It's gated by the `mcp`
-feature flag (off by default, on for admins, `404` when off). API keys are
-managed at `GET`/`POST /api/v1/api-keys` and `DELETE /api/v1/api-keys/{id}`,
-from a browser session only, and work only through `/mcp`.
-`GET /.well-known/oauth-protected-resource` names the identity provider for MCP
-clients and is `404` while `OIDC_API_AUDIENCE` is unset. See [mcp.md](mcp.md)
+to the `/api/v1` routes above. It accepts only Aleph's own bearer tokens (no
+cookie, no OIDC token): an **API key** from Settings, or the access token of a
+**connection** an MCP client made through Aleph's OAuth flow. It's gated by the
+`mcp` feature flag (off by default, on for admins, `404` when off). API keys and
+connections are listed at `GET /api/v1/api-keys` (`{keys, connections}`),
+created at `POST /api/v1/api-keys` and revoked or disconnected at
+`DELETE /api/v1/api-keys/{id}`, from a browser session only, and work only
+through `/mcp`. Aleph is the OAuth authorization server:
+`/.well-known/oauth-protected-resource` (also at `…/mcp`),
+`/.well-known/oauth-authorization-server`, `GET /oauth/authorize`,
+`POST /oauth/token`, and the consent routes `GET`/`POST /api/v1/oauth/consent`
+behind the web client's `/connect` page. See [mcp.md](mcp.md)
 for the tools, the Markdown export and its answer-hiding rule.

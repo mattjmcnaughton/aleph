@@ -11,6 +11,20 @@ export interface ApiKeyMetadata {
   revoked_at: string | null;
 }
 
+/** An app connected through OAuth (docs/mcp.md); revoked like a key. */
+export interface Connection {
+  id: string;
+  name: string;
+  /** The host serving the app's client metadata, e.g. `claude.ai`. */
+  client_host: string;
+  created_at: string;
+}
+
+export interface ApiKeyList {
+  keys: ApiKeyMetadata[];
+  connections: Connection[];
+}
+
 export interface CreatedApiKey {
   id: string;
   name: string;
@@ -21,8 +35,8 @@ export interface CreatedApiKey {
 export const API_KEYS_QUERY_KEY = ["api-keys"] as const;
 export const API_KEYS_URL = `${API_V1_BASE}/api-keys`;
 
-export async function listApiKeys(): Promise<ApiKeyMetadata[]> {
-  return (await apiFetch<{ keys: ApiKeyMetadata[] }>(apiV1Path("/api-keys"))).keys;
+export function listApiKeys(): Promise<ApiKeyList> {
+  return apiFetch<ApiKeyList>(apiV1Path("/api-keys"));
 }
 
 export function createApiKey(name: string): Promise<CreatedApiKey> {
@@ -37,7 +51,7 @@ export function revokeApiKey(id: string): Promise<void> {
   return apiFetch<void>(apiV1Path(`/api-keys/${id}`), { method: "DELETE" });
 }
 
-/** The config most MCP clients (Claude, Cursor, Amp) accept for a remote server. */
+/** The config for clients that can't sign in with OAuth: send a key as a header. */
 export function mcpConfigSnippet(origin: string, key: string): string {
   return JSON.stringify(
     {

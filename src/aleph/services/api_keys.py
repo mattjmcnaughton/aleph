@@ -11,6 +11,11 @@ call; ``dependencies.get_current_user`` accepts an API key only while it is
 set. Presented to ``/api/v1`` directly, a key is ``401``, so a leaked key can
 do what the MCP tools do and nothing else (no deleting paths, no admin, no key
 management).
+
+A **connection** is a key an MCP client got through OAuth (``services/oauth.py``):
+it carries the client's ``client_id`` and expires after an hour, and the client
+renews it with a rotating refresh token. Settings lists connections apart from
+hand-made keys and revokes both the same way.
 """
 
 from __future__ import annotations
@@ -39,12 +44,18 @@ def is_api_key(token: str) -> bool:
     return "." not in token
 
 
-def _digest(secret: str) -> str:
+def digest(secret: str) -> str:
     return hashlib.sha256(secret.encode()).hexdigest()
 
 
 async def list_keys(session: AsyncSession, user_id: uuid.UUID) -> list[ApiKey]:
+    """Hand-made keys, revoked ones included."""
     return await ApiKeyRepository(session).list_for_user(user_id)
+
+
+async def list_connections(session: AsyncSession, user_id: uuid.UUID) -> list[ApiKey]:
+    """Connected apps (``services/oauth.py``) that can still refresh."""
+    return await ApiKeyRepository(session).list_connections(user_id)
 
 
 async def issue_key(
@@ -53,7 +64,7 @@ async def issue_key(
     """The new key's row and its secret; the secret is never readable again."""
     secret = secrets.token_urlsafe(32)
     key = await ApiKeyRepository(session).add(
-        user_id=user_id, name=name, digest=_digest(secret)
+        user_id=user_id, name=name, digest=digest(secret)
     )
     await session.commit()
     return key, secret
@@ -71,8 +82,8 @@ async def revoke_key(
 
 
 async def authenticate(session: AsyncSession, secret: str) -> User | None:
-    """The account an unrevoked key belongs to, else ``None``."""
-    key = await ApiKeyRepository(session).active_by_digest(_digest(secret))
+    """The account an unrevoked, unexpired key belongs to, else ``None``."""
+    key = await ApiKeyRepository(session).active_by_digest(digest(secret))
     if key is None:
         return None
     return await session.get(User, key.user_id)

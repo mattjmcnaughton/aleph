@@ -26,8 +26,24 @@ class ApiKeyDTO(BaseModel):
     revoked_at: datetime.datetime | None
 
 
+class ConnectionDTO(BaseModel):
+    """An app connected through OAuth: never a token or digest.
+
+    ``name`` is the client's own name from its metadata document, and
+    ``client_host`` the host serving that document.
+    """
+
+    id: uuid.UUID
+    name: str
+    client_host: str
+    created_at: datetime.datetime
+
+
 class ApiKeyListResponse(BaseModel):
+    """Hand-made ``keys`` (revoked included) and live ``connections``."""
+
     keys: list[ApiKeyDTO]
+    connections: list[ConnectionDTO]
 
 
 class CreatedApiKeyResponse(BaseModel):

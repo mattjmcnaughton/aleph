@@ -6,7 +6,12 @@ import { API_V1_BASE, type AuthSession, type AuthUser } from "../lib/api";
 import { learnerUser } from "../mocks/handlers";
 import { writeFlow } from "../lib/flow";
 import { EXAMPLE_SUMMARY, configureAccount } from "../mocks/account";
-import { configureApiKeys, resetApiKeys } from "../mocks/api-keys";
+import {
+  EXAMPLE_CONSENT,
+  configureApiKeys,
+  configureConsent,
+  resetApiKeys,
+} from "../mocks/api-keys";
 import { configureBeats, resetBeats, seedBeat } from "../mocks/beats";
 import { EXAMPLE_IDEA, EXAMPLE_QUESTIONS, configurePathDrafts } from "../mocks/path-drafts";
 import { configurePaths, resetPaths } from "../mocks/paths";
@@ -502,26 +507,55 @@ export const ApiKeys: Story = {
   beforeEach: ({ msw }) => {
     msw.use(sessionHandler(apiKeysSession));
     resetApiKeys();
-    configureApiKeys([
-      {
-        id: "00000000-0000-4000-8000-0000000000a1",
-        name: "Claude desktop",
-        created_at: "2026-11-20T10:00:00Z",
-        revoked_at: null,
-      },
-      {
-        id: "00000000-0000-4000-8000-0000000000a2",
-        name: "Old laptop",
-        created_at: "2026-10-02T10:00:00Z",
-        revoked_at: "2026-11-01T10:00:00Z",
-      },
-    ]);
+    configureApiKeys(
+      [
+        {
+          id: "00000000-0000-4000-8000-0000000000a1",
+          name: "Claude desktop",
+          created_at: "2026-11-20T10:00:00Z",
+          revoked_at: null,
+        },
+        {
+          id: "00000000-0000-4000-8000-0000000000a2",
+          name: "Old laptop",
+          created_at: "2026-10-02T10:00:00Z",
+          revoked_at: "2026-11-01T10:00:00Z",
+        },
+      ],
+      [
+        {
+          id: "00000000-0000-4000-8000-0000000000c1",
+          name: "Claude Code",
+          client_host: "claude.ai",
+          created_at: "2026-11-25T10:00:00Z",
+        },
+      ],
+    );
   },
 };
 
 export const ApiKeysEmpty: Story = {
   name: "Settings — API keys, none yet",
   args: { url: "/settings/api-keys" },
+  beforeEach: ({ msw }) => {
+    resetApiKeys();
+    msw.use(sessionHandler(apiKeysSession));
+  },
+};
+
+export const ConnectApp: Story = {
+  name: "Connect an app — consent",
+  args: { url: "/connect" },
+  beforeEach: ({ msw }) => {
+    resetApiKeys();
+    msw.use(sessionHandler(apiKeysSession));
+    configureConsent(EXAMPLE_CONSENT);
+  },
+};
+
+export const ConnectAppRefused: Story = {
+  name: "Connect an app — refused request",
+  args: { url: "/connect?error=invalid_redirect" },
   beforeEach: ({ msw }) => {
     resetApiKeys();
     msw.use(sessionHandler(apiKeysSession));

@@ -12,13 +12,15 @@ rate limits, validation, the poll-as-trigger resume and the Quick check reveal
 boundary are the web client's, enforced once (Constitution §1, §8). This module
 owns only protocol translation and the Markdown export layout.
 
-**Bearer only.** The token is an **API key** the learner created in
-Settings (``services/api_keys.py``) or an OIDC access token for the API
-audience. A request without ``Authorization`` is ``401`` and the session
-cookie is never consulted, so a browser cannot drive these writes with ambient
-credentials. The ``401`` names the OAuth protected-resource metadata (RFC 9728)
-that MCP clients use to find the identity provider. The whole surface sits
-behind the ``mcp`` feature flag (off -> ``404``).
+**Bearer only, and only Aleph's own tokens.** The token is an **API key**
+(``services/api_keys.py``): one the learner created in Settings, or a
+connection's access token from Aleph's OAuth flow (``routers/oauth.py``). No
+other token is accepted, so an identity provider's token is never passed
+through to ``/api/v1`` (MCP authorization spec, "Token Passthrough"). A request
+without a valid token is ``401`` naming the OAuth protected-resource metadata
+(RFC 9728), which points MCP clients at that flow. The session cookie is never
+consulted, so a browser cannot drive these writes with ambient credentials. The
+whole surface sits behind the ``mcp`` feature flag (off -> ``404``).
 """
 
 from __future__ import annotations
@@ -33,16 +35,11 @@ from fastapi.responses import JSONResponse, Response
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession  # noqa: TC002
 
-from aleph.bearer import BearerAuthenticator, get_bearer_authenticator
 from aleph.config import settings
 from aleph.db import get_session
-from aleph.dependencies import (
-    bearer_token,
-    get_current_user,
-    resolve_api_key_user,
-)
+from aleph.dependencies import bearer_token, resolve_api_key_user
 from aleph.domains.visuals import strip_visual_fences
-from aleph.services import api_keys
+from aleph.services import api_keys, oauth
 from aleph.services.feature_flags import FeatureFlag, FeatureFlagService
 
 if TYPE_CHECKING:
@@ -62,51 +59,58 @@ METHOD_NOT_FOUND = -32601
 INVALID_PARAMS = -32602
 
 
-def _base_url(request: Request) -> str:
+def base_url(request: Request) -> str:
     return (settings.public_base_url or str(request.base_url)).rstrip("/")
+
+
+def _challenge(request: Request, error: str | None = None) -> HTTPException:
+    """RFC 6750 / 9728: name the metadata, and the error when a token failed."""
+    params = [
+        f'resource_metadata="{base_url(request)}{METADATA_PATH}"',
+        f'scope="{oauth.SCOPE}"',
+    ]
+    if error is not None:
+        params.insert(0, f'error="{error}"')
+    return HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="bearer token required" if error is None else "invalid bearer token",
+        headers={"WWW-Authenticate": "Bearer " + ", ".join(params)},
+    )
 
 
 async def require_mcp_user(
     request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
-    authenticator: Annotated[
-        BearerAuthenticator | None, Depends(get_bearer_authenticator)
-    ],
 ) -> None:
-    """A valid bearer token whose account has the ``mcp`` flag, else 401/404."""
-    if bearer_token(request) is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="bearer token required",
-            headers={
-                "WWW-Authenticate": (
-                    f'Bearer resource_metadata="{_base_url(request)}{METADATA_PATH}"'
-                )
-            },
-        )
+    """A live API key whose account has the ``mcp`` flag, else 401/404."""
     token = bearer_token(request)
-    user = (
-        await resolve_api_key_user(request, session, token)
-        if token is not None and api_keys.is_api_key(token)
-        else await get_current_user(request, session, authenticator)
-    )
+    if token is None:
+        raise _challenge(request)
+    if not api_keys.is_api_key(token):
+        raise _challenge(request, "invalid_token")
+    try:
+        user = await resolve_api_key_user(request, session, token)
+    except HTTPException as exc:
+        # Unknown, revoked or expired: the client refreshes or re-authorizes.
+        raise _challenge(request, "invalid_token") from exc
     flags = await FeatureFlagService(session).resolve_for_user(user)
     if not flags.get(FeatureFlag.MCP, False):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not found")
 
 
 @router.get(METADATA_PATH)
+@router.get(f"{METADATA_PATH}/mcp")
 async def protected_resource_metadata(request: Request) -> JSONResponse:
-    """RFC 9728 metadata: this server's identity provider. ``404`` when bearer
-    auth is off (``OIDC_API_AUDIENCE`` unset), since every token would fail."""
-    if not settings.oidc_api_audience:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not found")
+    """RFC 9728 metadata: Aleph is its own authorization server
+    (``routers/oauth.py``), whose tokens are API keys."""
+    base = base_url(request)
     return JSONResponse(
         {
-            "resource": f"{_base_url(request)}/mcp",
-            "authorization_servers": [settings.oidc_issuer],
+            "resource": f"{base}/mcp",
+            "authorization_servers": [base],
             "bearer_methods_supported": ["header"],
-            "scopes_supported": ["openid", "profile", "email"],
+            "scopes_supported": [oauth.SCOPE],
+            "resource_name": "Aleph",
         }
     )
 

@@ -14,7 +14,7 @@ from aleph.auth import register_provider
 from aleph.config import settings
 from aleph.errors import error_response
 from aleph.logging import configure_logging
-from aleph.routers import auth, health, mcp
+from aleph.routers import auth, health, mcp, oauth
 from aleph.routers.v1 import account as v1_account
 from aleph.routers.v1 import api_keys as v1_api_keys
 from aleph.routers.v1 import beats as v1_beats
@@ -114,6 +114,8 @@ def create_app() -> FastAPI:
     app.include_router(v1_public.router)
     # The content MCP server, behind the ``mcp`` flag (docs/mcp.md).
     app.include_router(mcp.router)
+    app.include_router(oauth.router)
+    app.include_router(oauth.consent_router)
     app.include_router(v1_api_keys.router)
 
     # Mount frontend static files (only serves if dist/ exists)

@@ -8,6 +8,7 @@ Ported near-verbatim from habagou, trimmed of its workflow-event emission. The
 from __future__ import annotations
 
 from typing import Annotated
+from urllib.parse import parse_qsl, urlencode
 
 import structlog
 from authlib.integrations.base_client.errors import OAuthError
@@ -39,6 +40,9 @@ logger = structlog.get_logger()
 
 # Session key for the typed sign-in copy intent (Public profiles TDD §5, SR 6).
 COPY_INTENT_KEY = "copy_intent"
+# Session key for an MCP client's authorization request awaiting sign-in
+# (``routers/oauth.py``); the callback returns to ``/oauth/authorize``.
+OAUTH_PENDING_KEY = "oauth_pending"
 
 
 @router.get("/auth/login")
@@ -53,6 +57,10 @@ async def login(request: Request, copy: str | None = None) -> Response:
     client = oauth.create_client(settings.oidc_provider)
     if client is None:
         raise RuntimeError(f"auth provider is not registered: {settings.oidc_provider}")
+    # Only ``/oauth/authorize`` signs in with ``oauth=1``; any other sign-in
+    # drops an abandoned authorization request.
+    if request.query_params.get("oauth") != "1":
+        request.session.pop(OAUTH_PENDING_KEY, None)
     intent = parse_copy_intent(copy)
     if intent is None:
         request.session.pop(COPY_INTENT_KEY, None)
@@ -79,6 +87,15 @@ def _pop_copy_destination(request: Request) -> str | None:
     return copy_destination(intent) if intent is not None else None
 
 
+def _pop_oauth_destination(request: Request) -> str | None:
+    """Consume a stored authorization request; the path is fixed, only the
+    re-encoded query comes from the session."""
+    stored = request.session.pop(OAUTH_PENDING_KEY, None)
+    if not isinstance(stored, str):
+        return None
+    return "/oauth/authorize?" + urlencode(parse_qsl(stored))
+
+
 @router.get("/auth/callback")
 async def auth_callback(
     request: Request,
@@ -99,9 +116,12 @@ async def auth_callback(
     except (OAuthError, ValueError) as exc:
         logger.warning("auth_callback_failed", error=str(exc))
         request.session.pop(COPY_INTENT_KEY, None)
+        request.session.pop(OAUTH_PENDING_KEY, None)
         return RedirectResponse(url="/login?error=auth_failed", status_code=303)
 
-    destination = _pop_copy_destination(request) or "/"
+    destination = (
+        _pop_copy_destination(request) or _pop_oauth_destination(request) or "/"
+    )
     request.session["user_id"] = str(user.id)
     return RedirectResponse(url=destination, status_code=303)
 

@@ -15,11 +15,17 @@ from aleph.models.base import UUIDAuditMixin
 
 
 class ApiKey(Base, UUIDAuditMixin):
-    """A secret a learner created in Settings to reach their account from code.
+    """A secret that reaches the learner's account through ``/mcp``.
 
-    Only the SHA-256 of the secret is stored (``digest``); the secret itself is
-    shown once, at creation. Revoking stamps ``revoked_at`` and keeps the row,
-    so the learner's key list stays a truthful record.
+    Either a key the learner created in Settings, or a **connection**: the
+    access token an MCP client got through OAuth (``client_id`` set, see
+    ``services/oauth.py``). Only SHA-256 digests are stored (``digest``,
+    ``refresh_digest``); secrets are shown once. Revoking stamps
+    ``revoked_at`` and keeps the row, so the learner's list stays truthful.
+
+    A connection's access token expires (``expires_at``) and its refresh token
+    rotates on every use: ``previous_refresh_digest`` remembers the one just
+    replaced, so presenting it again (a stolen token) revokes the connection.
     """
 
     __tablename__ = "api_keys"
@@ -31,5 +37,17 @@ class ApiKey(Base, UUIDAuditMixin):
     name: Mapped[str] = mapped_column(Text, nullable=False)
     digest: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
     revoked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # Connections only; all null for a hand-made key, which never expires.
+    client_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    refresh_digest: Mapped[str | None] = mapped_column(Text, nullable=True, unique=True)
+    previous_refresh_digest: Mapped[str | None] = mapped_column(
+        Text, nullable=True, unique=True
+    )
+    refresh_expires_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

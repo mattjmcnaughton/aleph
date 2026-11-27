@@ -36,6 +36,7 @@ from aleph.models.lesson_visual import LessonVisual
 from aleph.models.material import Material, MaterialSection
 from aleph.models.message import Message
 from aleph.models.notification_preferences import NotificationPreferences
+from aleph.models.oauth_code import OAuthCode
 from aleph.models.path import Path
 from aleph.models.path_change import PathChange
 from aleph.models.quick_check import QuickCheck
@@ -70,6 +71,7 @@ __all__ = [
     "MessageRole",
     "MessageSource",
     "NotificationPreferences",
+    "OAuthCode",
     "Path",
     "PathChange",
     "PathChangeKind",

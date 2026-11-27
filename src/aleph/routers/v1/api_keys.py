@@ -1,5 +1,9 @@
 """API keys: list, create and revoke the learner's keys (Settings → MCP).
 
+The list also carries **connections**, the apps connected through OAuth
+(``services/oauth.py``); ``DELETE`` disconnects one the same way it revokes a
+key.
+
 Behind the ``mcp`` flag (off -> ``404``). **Browser session only**, as in
 accanto: any ``Authorization`` header is ``403 browser_session_required``, so
 no key, script or agent can list, mint or revoke keys. Writes check the origin
@@ -9,6 +13,7 @@ like every other cookie write that hands out access.
 from __future__ import annotations
 
 from typing import Annotated
+from urllib.parse import urlsplit
 from uuid import UUID  # noqa: TC003 - FastAPI resolves route-param annotations.
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
@@ -19,6 +24,7 @@ from aleph.dependencies import bearer_token, get_current_user, require_same_orig
 from aleph.dtos.api_keys import (
     ApiKeyDTO,
     ApiKeyListResponse,
+    ConnectionDTO,
     CreateApiKeyRequest,
     CreatedApiKeyResponse,
 )
@@ -63,7 +69,19 @@ def _dto(key: ApiKey) -> ApiKeyDTO:
 @router.get("")
 async def list_keys(user: CurrentUser, session: Session) -> ApiKeyListResponse:
     keys = await api_keys.list_keys(session, user.id)
-    return ApiKeyListResponse(keys=[_dto(key) for key in keys])
+    connections = await api_keys.list_connections(session, user.id)
+    return ApiKeyListResponse(
+        keys=[_dto(key) for key in keys],
+        connections=[
+            ConnectionDTO(
+                id=key.id,
+                name=key.name,
+                client_host=urlsplit(key.client_id or "").netloc,
+                created_at=key.created_at,
+            )
+            for key in connections
+        ],
+    )
 
 
 @router.post(

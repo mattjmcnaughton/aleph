@@ -2010,15 +2010,18 @@ def test_lesson_visuals_migration_downgrades_and_reapplies_cleanly(
     at_head = asyncio.run(_tables(database_url))
     assert "lesson_visuals" in at_head
     run_alembic(database_url, "0023_learner_profile", downgrade=True)
-    # ``reasonings`` is 0027's, ``api_keys`` 0028's and the Material tables
+    # ``reasonings`` is 0027's, ``api_keys`` 0028's, ``oauth_codes`` 0029's and
+    # the Material tables
     # are 0026's, so all of them are gone below 0024 too.
     assert asyncio.run(_tables(database_url)) == (
-        at_head - {"lesson_visuals", "reasonings", "api_keys"} - MATERIAL_TABLES
+        at_head
+        - {"lesson_visuals", "reasonings", "api_keys", "oauth_codes"}
+        - MATERIAL_TABLES
     )
     assert "lesson_visual_kind" not in asyncio.run(_enum_types(database_url))
     run_alembic(database_url, "0024_lesson_visuals")
     assert asyncio.run(_tables(database_url)) == (
-        at_head - {"reasonings", "api_keys"} - MATERIAL_TABLES
+        at_head - {"reasonings", "api_keys", "oauth_codes"} - MATERIAL_TABLES
     )
     assert "lesson_visual_kind" in asyncio.run(_enum_types(database_url))
 
@@ -2056,9 +2059,9 @@ def test_linked_material_migration_downgrades_and_reapplies_cleanly(
     assert tables >= MATERIAL_TABLES
 
     run_alembic(database_url, "0025_public_profiles", downgrade=True)
-    # 0027 and 0028 sit above, so their tables go too.
+    # 0027, 0028 and 0029 sit above, so their tables go too.
     assert asyncio.run(_tables(database_url)) == (
-        tables - MATERIAL_TABLES - {"reasonings", "api_keys"}
+        tables - MATERIAL_TABLES - {"reasonings", "api_keys", "oauth_codes"}
     )
     for table, added in MATERIAL_COLUMNS.items():
         assert asyncio.run(_columns(database_url, table)) == columns[table] - added
@@ -2080,7 +2083,11 @@ def test_quick_check_explanations_migration_downgrades_and_reapplies_cleanly(
     assert "grading_key" in columns
 
     run_alembic(database_url, "0026_linked_material", downgrade=True)
-    assert asyncio.run(_tables(database_url)) == tables - {"reasonings", "api_keys"}
+    assert asyncio.run(_tables(database_url)) == tables - {
+        "reasonings",
+        "api_keys",
+        "oauth_codes",
+    }
     assert asyncio.run(_columns(database_url, "quick_checks")) == columns - {
         "grading_key"
     }
@@ -2093,22 +2100,53 @@ def test_quick_check_explanations_migration_downgrades_and_reapplies_cleanly(
 def test_api_keys_migration_downgrades_and_reapplies_cleanly(
     isolated_database: str,
 ) -> None:
-    """0028 adds ``api_keys`` and nothing else."""
+    """0028 adds ``api_keys`` and nothing else (0029's table goes with it)."""
     database_url = isolated_database
     tables = asyncio.run(_tables(database_url))
     assert "api_keys" in tables
-    assert asyncio.run(_columns(database_url, "api_keys")) == {
-        "id",
-        "user_id",
-        "name",
-        "digest",
-        "revoked_at",
-        "created_at",
-        "updated_at",
-    }
 
     run_alembic(database_url, "0027_quick_check_explanations", downgrade=True)
-    assert asyncio.run(_tables(database_url)) == tables - {"api_keys"}
+    assert asyncio.run(_tables(database_url)) == tables - {"api_keys", "oauth_codes"}
 
     run_alembic(database_url, "head")
     assert asyncio.run(_tables(database_url)) == tables
+
+
+API_KEY_0028_COLUMNS = {
+    "id",
+    "user_id",
+    "name",
+    "digest",
+    "revoked_at",
+    "created_at",
+    "updated_at",
+}
+API_KEY_CONNECTION_COLUMNS = {
+    "client_id",
+    "expires_at",
+    "refresh_digest",
+    "previous_refresh_digest",
+    "refresh_expires_at",
+}
+
+
+def test_mcp_oauth_migration_downgrades_and_reapplies_cleanly(
+    isolated_database: str,
+) -> None:
+    """0029 adds ``oauth_codes`` and the connection columns, nothing else."""
+    database_url = isolated_database
+    tables = asyncio.run(_tables(database_url))
+    assert "oauth_codes" in tables
+    assert asyncio.run(_columns(database_url, "api_keys")) == (
+        API_KEY_0028_COLUMNS | API_KEY_CONNECTION_COLUMNS
+    )
+
+    run_alembic(database_url, "0028_api_keys", downgrade=True)
+    assert asyncio.run(_tables(database_url)) == tables - {"oauth_codes"}
+    assert asyncio.run(_columns(database_url, "api_keys")) == API_KEY_0028_COLUMNS
+
+    run_alembic(database_url, "head")
+    assert asyncio.run(_tables(database_url)) == tables
+    assert asyncio.run(_columns(database_url, "api_keys")) == (
+        API_KEY_0028_COLUMNS | API_KEY_CONNECTION_COLUMNS
+    )

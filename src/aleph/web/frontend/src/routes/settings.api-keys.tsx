@@ -8,6 +8,7 @@ import { Workspace } from "../components/workspace";
 import {
   API_KEYS_QUERY_KEY,
   type ApiKeyMetadata,
+  type Connection,
   createApiKey,
   listApiKeys,
   mcpConfigSnippet,
@@ -32,7 +33,7 @@ function ApiKeysPage() {
       <p className="kicker">Settings</p>
       <h1 className="mt-2 page-title">API keys</h1>
       <p className="mt-3 text-base leading-6 text-mist">
-        Connect Claude, Cursor or another AI app to Aleph. With a key it can read your paths and
+        Connect Claude, Cursor or another AI app to Aleph. Once connected it can read your paths and
         lessons, start new paths and edit their titles, Teaching style and About you. It can't
         delete anything, and a Quick check's answer stays hidden until you've answered it.
       </p>
@@ -82,10 +83,34 @@ function ApiKeys() {
   }
 
   const snippet = mcpConfigSnippet(window.location.origin, secret?.value ?? PLACEHOLDER);
-  const list = keys.data ?? [];
+  const list = keys.data?.keys ?? [];
+  const connections = keys.data?.connections ?? [];
 
   return (
     <>
+      <SectionHeader
+        kicker="Connected apps"
+        spacing="mt-9"
+        summary={keys.isSuccess ? `${connections.length} connected` : undefined}
+      />
+      <p className="mt-3 text-sm leading-6 text-mist">
+        Apps you approved by signing in. They renew their access on their own until you disconnect
+        them, or after 30 days unused.
+      </p>
+      {keys.isSuccess && connections.length === 0 ? (
+        <p className="mt-3 text-sm text-mist">No connected apps.</p>
+      ) : connections.length ? (
+        <ul data-testid="connection-list">
+          {connections.map((connection) => (
+            <ConnectionRow
+              key={connection.id}
+              connection={connection}
+              onDisconnected={() => setMessage(`${connection.name} disconnected.`)}
+            />
+          ))}
+        </ul>
+      ) : null}
+
       <SectionHeader kicker="New key" spacing="mt-9" />
       <form
         className="mt-3"
@@ -169,7 +194,8 @@ function ApiKeys() {
 
       <SectionHeader kicker="Connect an app" spacing="mt-9" />
       <p className="mt-3 text-sm leading-6 text-mist">
-        Add Aleph as a remote MCP server at this URL, and send the key as a Bearer token:
+        Add Aleph as a remote MCP server at this URL. Claude, Amp and most other apps then ask you
+        to sign in and approve them, with no key needed:
       </p>
       <code
         data-testid="mcp-url"
@@ -177,7 +203,9 @@ function ApiKeys() {
       >
         {window.location.origin}/mcp
       </code>
-      <p className="mt-3 text-sm leading-6 text-mist">Most apps accept this config:</p>
+      <p className="mt-3 text-sm leading-6 text-mist">
+        For an app that can't sign in, create a key above and use this config:
+      </p>
       <pre
         data-testid="mcp-config"
         className="mt-3 whitespace-pre-wrap rounded-md [overflow-wrap:anywhere] bg-surface p-4 font-mono text-[13px] leading-6 text-porcelain"
@@ -264,6 +292,74 @@ function NewKey({
         </button>
       </div>
     </div>
+  );
+}
+
+function ConnectionRow({
+  connection,
+  onDisconnected,
+}: {
+  connection: Connection;
+  onDisconnected: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const [confirming, setConfirming] = useState(false);
+  const disconnect = useMutation({
+    mutationFn: () => revokeApiKey(connection.id),
+    onSuccess: () => {
+      setConfirming(false);
+      onDisconnected();
+      void queryClient.invalidateQueries({ queryKey: API_KEYS_QUERY_KEY });
+    },
+  });
+  return (
+    <li
+      data-testid="connection-row"
+      className="flex min-h-16 items-center justify-between gap-4 border-b border-divider py-3"
+    >
+      <div className="min-w-0">
+        <p className="truncate font-semibold">{connection.name}</p>
+        <p className="truncate text-sm text-mist">
+          {connection.client_host}, connected {day(connection.created_at)}
+        </p>
+        {disconnect.isError ? (
+          <p role="alert" className="text-sm text-danger">
+            Disconnecting was not confirmed. Reload the page before trying again.
+          </p>
+        ) : null}
+      </div>
+      {confirming ? (
+        <span className="flex shrink-0 items-center gap-2">
+          <button
+            type="button"
+            disabled={disconnect.isPending}
+            onClick={() => disconnect.mutate()}
+            className="min-h-11 rounded-md bg-danger px-3 text-sm font-semibold text-night disabled:opacity-50"
+          >
+            Disconnect
+          </button>
+          <button
+            type="button"
+            // biome-ignore lint/a11y/noAutofocus: Focus moves only after the learner chose Disconnect; Cancel is the safe default.
+            autoFocus
+            disabled={disconnect.isPending}
+            onClick={() => setConfirming(false)}
+            className={SMALL_SECONDARY}
+          >
+            Cancel
+          </button>
+        </span>
+      ) : (
+        <button
+          type="button"
+          aria-label={`Disconnect ${connection.name}`}
+          onClick={() => setConfirming(true)}
+          className="min-h-11 shrink-0 rounded-md px-3 text-sm font-semibold text-danger hover:bg-elevated"
+        >
+          Disconnect
+        </button>
+      )}
+    </li>
   );
 }
 
