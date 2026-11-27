@@ -932,3 +932,12 @@ the admin baseline does **not** — an entry here is the last word for everyone
 without an override.
 No product events are emitted for admin flag ops (structlog only): these are
 operator actions, not learner behaviour, and PRD §5.7's event set is unchanged.
+
+## Content MCP server (`/mcp`)
+
+`POST /mcp` is a stateless Model Context Protocol server, and its tools forward
+to the `/api/v1` routes above. It accepts bearer tokens only (no cookie) and is
+gated by the `mcp` feature flag (off by default, on for admins, `404` when off).
+`GET /.well-known/oauth-protected-resource` names the identity provider for MCP
+clients and is `404` while `OIDC_API_AUDIENCE` is unset. See [mcp.md](mcp.md)
+for the tools, the Markdown export and its answer-hiding rule.

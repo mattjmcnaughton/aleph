@@ -74,6 +74,7 @@ ANALYST = "analyst"
 # In every resolved map because the session carries the whole registry.
 FLOW = "flow"
 LEARNING_SUMMARY = "learning_summary"
+MCP = "mcp"
 PUBLIC_PROFILES = "public_profiles"
 
 LEARNER = AuthIdentity(
@@ -153,6 +154,7 @@ def _resolved(
     analyst: bool = False,
     flow: bool = False,
     learning_summary: bool = False,
+    mcp: bool = False,
     public_profiles: bool = False,
 ) -> dict[str, bool]:
     """The full resolved map — the session carries **every** registered flag.
@@ -179,6 +181,7 @@ def _resolved(
         ANALYST: analyst,
         FLOW: flow,
         LEARNING_SUMMARY: learning_summary,
+        MCP: mcp,
         PUBLIC_PROFILES: public_profiles,
     }
 
@@ -237,6 +240,7 @@ async def test_admin_lists_every_registered_flag(
                 _flag_row(ANALYST, enabled_default=False),
                 _flag_row(FLOW, enabled_default=False),
                 _flag_row(LEARNING_SUMMARY, enabled_default=False),
+                _flag_row(MCP, enabled_default=False),
                 _flag_row(PUBLIC_PROFILES, enabled_default=False),
                 _flag_row(SHAPING, enabled_default=False),
                 _flag_row(STREAKS, enabled_default=False),
@@ -353,6 +357,7 @@ async def test_dark_flags_resolve_on_for_admins(
             analyst=True,
             flow=True,
             learning_summary=True,
+            mcp=True,
         )
         # The global defaults are still off — nothing was mutated to make the
         # admin's map true.
@@ -361,6 +366,7 @@ async def test_dark_flags_resolve_on_for_admins(
             _flag_row(ANALYST, enabled_default=False),
             _flag_row(FLOW, enabled_default=False),
             _flag_row(LEARNING_SUMMARY, enabled_default=False),
+            _flag_row(MCP, enabled_default=False),
             _flag_row(PUBLIC_PROFILES, enabled_default=False),
             _flag_row(SHAPING, enabled_default=False),
             _flag_row(STREAKS, enabled_default=False),
@@ -396,6 +402,7 @@ async def test_override_flips_a_learner_on_and_clears_idempotently(
             _flag_row(ANALYST, enabled_default=False),
             _flag_row(FLOW, enabled_default=False),
             _flag_row(LEARNING_SUMMARY, enabled_default=False),
+            _flag_row(MCP, enabled_default=False),
             _flag_row(PUBLIC_PROFILES, enabled_default=False),
             _flag_row(SHAPING, enabled_default=False),
             _flag_row(STREAKS, enabled_default=False),
@@ -420,6 +427,7 @@ async def test_override_flips_a_learner_on_and_clears_idempotently(
             analyst=True,
             flow=True,
             learning_summary=True,
+            mcp=True,
         )
 
         # DELETE is idempotent: clearing an absent override is still a 204.
@@ -434,6 +442,7 @@ async def test_override_flips_a_learner_on_and_clears_idempotently(
             analyst=True,
             flow=True,
             learning_summary=True,
+            mcp=True,
         )
         assert await _override_count() == 0
 
@@ -455,6 +464,7 @@ async def test_settings_default_flips_the_flag_without_a_deploy(
             _flag_row(ANALYST, enabled_default=False),
             _flag_row(FLOW, enabled_default=False),
             _flag_row(LEARNING_SUMMARY, enabled_default=False),
+            _flag_row(MCP, enabled_default=False),
             _flag_row(PUBLIC_PROFILES, enabled_default=False),
             _flag_row(SHAPING, enabled_default=False),
             _flag_row(STREAKS, enabled_default=False),

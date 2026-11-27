@@ -14,7 +14,7 @@ from aleph.auth import register_provider
 from aleph.config import settings
 from aleph.errors import error_response
 from aleph.logging import configure_logging
-from aleph.routers import auth, health
+from aleph.routers import auth, health, mcp
 from aleph.routers.v1 import account as v1_account
 from aleph.routers.v1 import beats as v1_beats
 from aleph.routers.v1 import feature_flags as v1_feature_flags
@@ -111,6 +111,8 @@ def create_app() -> FastAPI:
     # Public profiles: anonymous reads with no auth dependency at all. Every
     # read checks the ``public_profiles`` flag for the profile owner (TDD D9).
     app.include_router(v1_public.router)
+    # The content MCP server, behind the ``mcp`` flag (docs/mcp.md).
+    app.include_router(mcp.router)
 
     # Mount frontend static files (only serves if dist/ exists)
     mount_frontend(app)

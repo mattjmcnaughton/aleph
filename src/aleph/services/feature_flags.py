@@ -123,6 +123,8 @@ class FeatureFlag(StrEnum):
     # public read. Resolved for the **profile owner**, so turning it off makes
     # every profile 404 with no change to any learner's data.
     PUBLIC_PROFILES = "public_profiles"
+    # The content MCP server (docs/mcp.md): ``/mcp`` 404s when off. Ships dark.
+    MCP = "mcp"
 
 
 # Code defaults per flag. Every FeatureFlag member gets an entry here; a flag
@@ -158,6 +160,8 @@ FLAG_DEFAULTS: dict[FeatureFlag, bool] = {
     # learner opts in. FEATURE_FLAG_DEFAULTS=public_profiles:off is the kill
     # switch, closing every public read and owner route.
     FeatureFlag.PUBLIC_PROFILES: True,
+    # Off: dark until launched; admins dogfood it via ADMIN_DEFAULT_FLAGS.
+    FeatureFlag.MCP: False,
 }
 
 
@@ -185,6 +189,7 @@ ADMIN_DEFAULT_FLAGS: frozenset[FeatureFlag] = frozenset(
         FeatureFlag.ANALYST,
         FeatureFlag.FLOW,
         FeatureFlag.LEARNING_SUMMARY,
+        FeatureFlag.MCP,
     }
 )
 
