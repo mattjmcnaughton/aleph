@@ -1,3 +1,11 @@
+# [1.60.0](https://github.com/mattjmcnaughton/aleph/compare/v1.59.1...v1.60.0) (2026-11-27)
+
+
+### Features
+
+* **material:** read arXiv papers and teach their core concepts in order ([d06b262](https://github.com/mattjmcnaughton/aleph/commit/d06b2625e929daa8305496ee52c73993216f6775))
+* **material:** turn Material on for every learner ([17a1bfe](https://github.com/mattjmcnaughton/aleph/commit/17a1bfea62890ba3ce16645faee23261a6f8c256))
+
 ## [1.59.1](https://github.com/mattjmcnaughton/aleph/compare/v1.59.0...v1.59.1) (2026-11-27)
 
 
