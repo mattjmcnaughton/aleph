@@ -178,4 +178,35 @@ describe("Markdown ```visual fences", () => {
 
     expect(screen.getByTestId("md").querySelector("iframe")).toBeNull();
   });
+
+  describe("math", () => {
+    it("typesets inline $$…$$ and a fenced $$ display equation", () => {
+      const root = renderMarkdown(
+        "Scale by $$\\sqrt{d_k}$$ first.\n\n$$\n\\mathrm{softmax}(QK^T)V\n$$",
+      );
+      const inline = root.querySelector("p .katex");
+      expect(inline).not.toBeNull();
+      expect(root.querySelector("p")?.textContent).toContain("first.");
+      expect(root.querySelector(".katex-display")).not.toBeNull();
+      expect(root.querySelector("annotation")?.textContent).toBe("\\sqrt{d_k}");
+    });
+
+    it("leaves single-dollar prices as text", () => {
+      const root = renderMarkdown("It costs $5 now and $10 later.");
+      expect(root.querySelector(".katex")).toBeNull();
+      expect(root.textContent).toBe("It costs $5 now and $10 later.");
+    });
+
+    it("never turns \\href into a link", () => {
+      const root = renderMarkdown("See $$\\href{javascript:alert(1)}{x}$$ here.");
+      expect(root.querySelector("a")).toBeNull();
+      expect(root.querySelector("[href]")).toBeNull();
+    });
+
+    it("shows a formula it cannot parse as source, not a broken passage", () => {
+      const root = renderMarkdown("Broken $$\\frac{1}{$$ formula, then more text.");
+      expect(root.textContent).toContain("then more text.");
+      expect(root.textContent).toContain("\\frac{1}{");
+    });
+  });
 });

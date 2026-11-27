@@ -11,7 +11,12 @@ from typing import Annotated, Self
 
 from pydantic import BaseModel, StringConstraints, model_validator
 
-from aleph.domains.material import LINK_KINDS, MAX_TEXT_CHARS, MaterialKind
+from aleph.domains.material import (
+    LINK_KINDS,
+    MAX_TEXT_CHARS,
+    MaterialKind,
+    arxiv_id,
+)
 
 UrlStr = Annotated[
     str,
@@ -39,6 +44,8 @@ class MaterialInput(BaseModel):
         if self.kind in LINK_KINDS:
             if self.url is None or self.text is not None:
                 raise ValueError("a link needs a url and no text")
+            if self.kind is MaterialKind.ARXIV and arxiv_id(self.url) is None:
+                raise ValueError("an arxiv item needs an arxiv.org paper link")
         elif self.text is None:
             raise ValueError("pasted Material needs its text")
         return self

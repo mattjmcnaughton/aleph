@@ -9,9 +9,12 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from aleph.agents._delimiters import neutralize_delimiters
+
+if TYPE_CHECKING:
+    from aleph.domains.material import Concept
 
 MaterialModeId = Literal["teach", "start"]
 
@@ -28,6 +31,19 @@ class MaterialSectionDigest:
 
 
 @dataclass(frozen=True)
+class PaperPlan:
+    """One paper's core concepts and prerequisites (papers TDD D7).
+
+    Concept ids are namespaced by the paper's position (``p1.c3``) so two
+    papers on one path never share an id.
+    """
+
+    material_title: str
+    concepts: tuple[Concept, ...]
+    prerequisites: tuple[tuple[str, str], ...]
+
+
+@dataclass(frozen=True)
 class OutlineMaterial:
     """The snapshot digest plus the mode and, for Teach this, its size target."""
 
@@ -35,6 +51,19 @@ class OutlineMaterial:
     sections: tuple[MaterialSectionDigest, ...]
     target_lessons: int
     target_units: int
+    papers: tuple[PaperPlan, ...] = ()
+
+    @property
+    def concepts(self) -> tuple[Concept, ...]:
+        return tuple(c for paper in self.papers for c in paper.concepts)
+
+    @property
+    def prerequisite_names(self) -> frozenset[str]:
+        return frozenset(
+            name.strip().casefold()
+            for paper in self.papers
+            for name, _ in paper.prerequisites
+        )
 
     @property
     def section_ids(self) -> frozenset[int]:
@@ -117,6 +146,54 @@ def material_outline_block(material: OutlineMaterial) -> str:
         "has an id; name the ids each lesson teaches from in its "
         f"material_sections. {_DATA_RULE}\n"
         f"<material>\n{neutralize_delimiters(payload, 'material')}\n</material>"
+    ) + (f"\n\n{paper_concepts_block(material)}" if material.papers else "")
+
+
+PAPER_OUTLINE_RULES = (
+    "Some of the Material is research papers, and each one's core concepts are "
+    "listed in the <paper_concepts> block with the concepts each builds on and "
+    "the prerequisites the paper assumes. Teach the concepts incrementally: put "
+    "each concept's id in the concepts list of the lesson that teaches it, and "
+    "never teach a concept before every concept in its builds_on. Follow the "
+    "order the concepts depend on each other, not the paper's section order. "
+    "Group closely related concepts in one lesson when they are small. Read the "
+    "learner's guidance for what they already know: for each prerequisite they "
+    "say they lack, add a short prep lesson before the paper's lessons, with "
+    "that prerequisite's exact name in prerequisite and no material_sections "
+    "or concepts (at most 4 prep lessons). Without guidance about their "
+    "familiarity, add at most 1 prep lesson, and only for a prerequisite this "
+    "level would clearly lack. Skip prerequisites the guidance says they know."
+)
+
+
+def paper_concepts_block(material: OutlineMaterial) -> str:
+    """The outline prompt's list of paper concepts, or ``""`` without papers."""
+    if not material.papers:
+        return ""
+    payload = json.dumps(
+        [
+            {
+                "paper": paper.material_title[:300],
+                "concepts": [
+                    {
+                        "id": c.id,
+                        "name": c.name,
+                        "sections": list(c.sections),
+                        "builds_on": list(c.builds_on),
+                    }
+                    for c in paper.concepts
+                ],
+                "prerequisites": [
+                    {"name": name, "why": why} for name, why in paper.prerequisites
+                ],
+            }
+            for paper in material.papers
+        ],
+        ensure_ascii=False,
+    )
+    return (
+        f"<paper_concepts>\n{neutralize_delimiters(payload, 'paper_concepts')}\n"
+        "</paper_concepts>"
     )
 
 

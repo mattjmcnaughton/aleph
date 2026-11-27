@@ -20,15 +20,33 @@
 // their own container rather than pushing the page sideways.
 
 import { createContext, isValidElement, type ReactNode, useContext } from "react";
+import "katex/dist/katex.min.css";
 import ReactMarkdown, { type Components } from "react-markdown";
+import rehypeKatex from "rehype-katex";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
 import type { LessonVisual as Visual } from "../lib/api";
 import { LessonVisual } from "./lesson-visual";
 import { Mermaid } from "./mermaid";
 
 // The plugin list is module-level (not inline) so its identity is stable across
 // renders and react-markdown doesn't rebuild the processor on every poll tick.
-const REMARK_PLUGINS = [remarkGfm];
+//
+// **Math** (docs/tdds/papers-material.md D10). `remark-math` with
+// `singleDollarTextMath: false`, so only `$$…$$` is math and a price such as
+// "$5 or $10" in an existing lesson stays text. `rehype-katex` renders it with
+// KaTeX's untrusted-input defaults kept: `trust: false` (no `\href`, `\url`,
+// `\includegraphics` or `\html*`), plus small expansion and size limits so a
+// macro bomb can't hang the tab. KaTeX writes its own spans and MathML; raw
+// HTML in the Markdown is still escaped, as above. A formula KaTeX can't parse
+// shows its source instead of failing the passage.
+const REMARK_PLUGINS = [remarkGfm, [remarkMath, { singleDollarTextMath: false }]] as const;
+const REHYPE_PLUGINS = [
+  [
+    rehypeKatex,
+    { trust: false, strict: "ignore", maxExpand: 200, maxSize: 10, throwOnError: false },
+  ],
+] as const;
 
 /**
  * The chart source of a ```mermaid fence, or null for any other `pre`.
@@ -236,7 +254,8 @@ export function Markdown({
     <div data-testid={testid} className={`space-y-[1.05em] ${className}`}>
       <VisualsContext.Provider value={visuals}>
         <ReactMarkdown
-          remarkPlugins={REMARK_PLUGINS}
+          remarkPlugins={REMARK_PLUGINS as never}
+          rehypePlugins={REHYPE_PLUGINS as never}
           components={plainFences ? PLAIN_FENCE_COMPONENTS : COMPONENTS}
           disallowedElements={["img"]}
         >

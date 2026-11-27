@@ -82,11 +82,13 @@ PUBLIC_PROFILE_COLUMNS = {
 # 0026_linked_material: two columns on tracked tables, plus two new tables.
 MATERIAL_COLUMNS = {"paths": {"material_mode"}, "lessons": {"material_sections"}}
 MATERIAL_TABLES = {"materials", "material_sections"}
+# 0030_paper_digests: one column on a tracked table and one on ``materials``.
+PAPER_COLUMNS = {"lessons": {"material_concepts"}, "materials": {"digest"}}
 LATER_COLUMNS: dict[str, set[str]] = {
     "paths": {"teaching_style", "search_outline", "search_lessons"}
     | PUBLIC_PROFILE_COLUMNS["paths"]
     | MATERIAL_COLUMNS["paths"],
-    "lessons": MATERIAL_COLUMNS["lessons"],
+    "lessons": MATERIAL_COLUMNS["lessons"] | PAPER_COLUMNS["lessons"],
     # 0017, 0023, 0025
     "users": {"time_zone", "time_zone_seen_at", "about_you"}
     | PUBLIC_PROFILE_COLUMNS["users"],
@@ -500,7 +502,11 @@ def test_earlier_tables_keep_their_columns_through_the_shaping_reversal(
     added = {
         "conversations": {"kind", "lesson_id"},
         "messages": {"proposal"},
-        "lessons": {"revision_instruction", *MATERIAL_COLUMNS["lessons"]},
+        "lessons": {
+            "revision_instruction",
+            *MATERIAL_COLUMNS["lessons"],
+            *PAPER_COLUMNS["lessons"],
+        },
         "quick_checks": {"grading_key"},
         "paths": {
             "title",
@@ -978,7 +984,7 @@ def test_the_streak_index_downgrades_and_reapplies_cleanly(
     assert STREAK_INDEX_NAME not in after_downgrade
     assert after_downgrade.keys() | {STREAK_INDEX_NAME} == at_head.keys()
     assert asyncio.run(_columns(database_url, "lessons")) == (
-        columns - MATERIAL_COLUMNS["lessons"]
+        columns - MATERIAL_COLUMNS["lessons"] - PAPER_COLUMNS["lessons"]
     )
 
     run_alembic(database_url, STREAK_INDEX_HEAD)
@@ -2064,7 +2070,9 @@ def test_linked_material_migration_downgrades_and_reapplies_cleanly(
         tables - MATERIAL_TABLES - {"reasonings", "api_keys", "oauth_codes"}
     )
     for table, added in MATERIAL_COLUMNS.items():
-        assert asyncio.run(_columns(database_url, table)) == columns[table] - added
+        assert asyncio.run(_columns(database_url, table)) == (
+            columns[table] - added - PAPER_COLUMNS.get(table, set())
+        )
 
     run_alembic(database_url, "head")
     assert asyncio.run(_tables(database_url)) == tables
@@ -2150,3 +2158,23 @@ def test_mcp_oauth_migration_downgrades_and_reapplies_cleanly(
     assert asyncio.run(_columns(database_url, "api_keys")) == (
         API_KEY_0028_COLUMNS | API_KEY_CONNECTION_COLUMNS
     )
+
+
+def test_paper_digests_migration_downgrades_and_reapplies_cleanly(
+    isolated_database: str,
+) -> None:
+    """0030 adds ``materials.digest`` and ``lessons.material_concepts`` only."""
+    database_url = isolated_database
+    tables = asyncio.run(_tables(database_url))
+    columns = {t: asyncio.run(_columns(database_url, t)) for t in PAPER_COLUMNS}
+    for table, added in PAPER_COLUMNS.items():
+        assert added <= columns[table]
+
+    run_alembic(database_url, "0029_mcp_oauth", downgrade=True)
+    assert asyncio.run(_tables(database_url)) == tables
+    for table, added in PAPER_COLUMNS.items():
+        assert asyncio.run(_columns(database_url, table)) == columns[table] - added
+
+    run_alembic(database_url, "head")
+    for table in PAPER_COLUMNS:
+        assert asyncio.run(_columns(database_url, table)) == columns[table]

@@ -10,6 +10,7 @@ import {
   type PasteSource,
   countWords,
   guessLinkKind,
+  normalizeLink,
   hostLabel,
   parseUrl,
   pasteSource,
@@ -106,8 +107,8 @@ export function MaterialField({
         Material
       </h2>
       <p className="mt-1 text-sm leading-6 text-mist">
-        Optional. Add an article, a docs site, a transcript or an AI summary and Aleph builds the
-        path from it. Aleph keeps a copy of the text with the path.
+        Optional. Add an article, a docs site, an arXiv paper, a transcript or an AI summary and
+        Aleph builds the path from it. Aleph keeps a copy of the text with the path.
       </p>
 
       {items.length > 0 ? (
@@ -222,8 +223,9 @@ function LinkEntry({
   onSubmit: (url: string) => void;
   onPaste: (kind: PasteKind) => void;
 }) {
-  const valid = parseUrl(url) !== null;
-  const source = valid ? pasteSource(url) : null;
+  const link = normalizeLink(url);
+  const valid = parseUrl(link) !== null;
+  const source = valid ? pasteSource(link) : null;
   // Not a <form>: this sits inside New path's form, and forms don't nest.
   return (
     <div className="mt-3">
@@ -233,23 +235,23 @@ function LinkEntry({
       <div className="flex gap-2">
         <input
           id="material-url"
-          type="url"
+          type="text"
           inputMode="url"
           value={url}
           onChange={(event) => onChange(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === "Enter") {
               event.preventDefault();
-              if (valid) onSubmit(url.trim());
+              if (valid) onSubmit(link);
             }
           }}
-          placeholder="Paste a link"
+          placeholder="Paste a link or an arXiv ID"
           className={`min-w-0 flex-1 ${INPUT}`}
         />
         <button
           type="button"
           disabled={!valid}
-          onClick={() => onSubmit(url.trim())}
+          onClick={() => onSubmit(link)}
           className="min-h-11 shrink-0 rounded-md border border-faint px-4 text-sm font-semibold text-porcelain transition-colors hover:border-mist disabled:cursor-not-allowed disabled:opacity-50"
         >
           Add

@@ -68,6 +68,23 @@ describe("Linked Material — /new", () => {
     });
   });
 
+  it("sends a bare arXiv id and an arXiv PDF link as papers", async () => {
+    useMaterialFlag(true);
+    const topic = await gotoForm();
+    fireEvent.change(topic, { target: { value: "Transformers" } });
+
+    addLink("1706.03762");
+    addLink("https://arxiv.org/pdf/2106.09685v2");
+    expect(screen.getAllByTestId("material-item")[0].textContent).toContain("Paper");
+    fireEvent.click(screen.getByRole("button", { name: /build my path/i }));
+
+    await waitFor(() => expect(createPathBodies()).toHaveLength(1));
+    expect(createPathBodies()[0].material).toEqual([
+      { kind: "arxiv", url: "https://arxiv.org/abs/1706.03762" },
+      { kind: "arxiv", url: "https://arxiv.org/pdf/2106.09685v2" },
+    ]);
+  });
+
   it("opens a transcript box for a video link instead of adding it", async () => {
     useMaterialFlag(true);
     await gotoForm();

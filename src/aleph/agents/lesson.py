@@ -472,6 +472,12 @@ commands, filenames, and literal values
 - fenced code blocks with a language tag (```python, ```sql, ```bash, ...) \
 whenever showing code, a command, or structured data is clearer than describing it
 - tables for genuinely tabular comparisons, and > blockquotes for a short aside
+- LaTeX math when the lesson needs notation, always between DOUBLE dollar signs \
+(a single $ is shown as a plain dollar sign): inline as $$d_k$$ inside a sentence, \
+and a display equation as three lines, `$$`, the equation, `$$`:
+  $$
+  \\mathrm{softmax}(x)_i = \\frac{e^{x_i}}{\\sum_j e^{x_j}}
+  $$
 - a ```mermaid fenced block when a picture teaches something the prose cannot: a \
 process or decision flow, a state machine, a sequence of interactions, a \
 hierarchy or a relationship between concepts
@@ -554,7 +560,8 @@ Keep options genuinely distinct and comparable in length and specificity; do \
 not give away the answer through wording copied only into the correct option. \
 Ensure exactly one option is defensible under the stated conditions. In the \
 explanation, connect the correct answer to the passage's principle and explain \
-why the closest wrong option fails. Write the stem and the options as plain text. The \
+why the closest wrong option fails. Write the stem and the options as plain text, \
+with any math in plain Unicode (√d, x², QKᵀ), never LaTeX. The \
 explanation may use inline Markdown (emphasis and `inline code`) but no headings, \
 lists, tables, or code blocks — it renders inside a small callout. Refer to an \
 option by what it SAYS, never by its position: the app re-orders the options \

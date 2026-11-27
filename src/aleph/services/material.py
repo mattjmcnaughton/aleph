@@ -14,7 +14,7 @@ The orchestrator then calls :func:`outline_material` and
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Protocol
 from urllib.parse import urlparse
 
@@ -26,18 +26,22 @@ from aleph.agents._material import (
     MaterialPassage,
     MaterialSectionDigest,
     OutlineMaterial,
+    PaperPlan,
 )
+from aleph.agents.paper_digest import PaperDigest, PaperDigestDeps, to_concepts
 from aleph.config import STUB_MODEL_ID
 from aleph.config import settings as global_settings
 from aleph.domains.material import (
     LINK_KINDS,
     MAX_DOCS_PAGES,
+    MAX_PAPER_CHARS,
     MAX_PATH_CHARS,
     MIN_ITEM_CHARS,
     MaterialFailure,
     MaterialKind,
     MaterialMode,
     Page,
+    arxiv_id,
     in_crawl_scope,
     needs_paste,
     split_pages,
@@ -45,6 +49,7 @@ from aleph.domains.material import (
     teach_size,
 )
 from aleph.repositories.materials import NewMaterial, NewSection, SectionRow
+from aleph.services.arxiv import ArxivReader, PaperReader, StubPaperReader
 from aleph.services.retrieval import RetrievalUnavailableError
 
 if TYPE_CHECKING:
@@ -223,6 +228,13 @@ def default_reader(config: Settings = global_settings) -> MaterialReader | None:
     return None
 
 
+def default_paper_reader(config: Settings = global_settings) -> PaperReader:
+    """The stub under the stub model (dev, CI, e2e); arXiv itself otherwise."""
+    if config.model_default == STUB_MODEL_ID:
+        return StubPaperReader()
+    return ArxivReader()
+
+
 def _host(url: str) -> str:
     return (urlparse(url).hostname or url).removeprefix("www.")
 
@@ -241,13 +253,31 @@ async def read_snapshot(
     items: Sequence[MaterialItem],
     mode: MaterialMode,
     reader: MaterialReader | None,
+    papers: PaperReader | None = None,
 ) -> MaterialSnapshot:
     """Read every item into sections, or raise with a reason per failed item."""
     failures: list[ItemFailure] = []
     materials: list[NewMaterial] = []
     total = 0
     for index, item in enumerate(items):
-        if item.kind in LINK_KINDS:
+        if item.kind is MaterialKind.ARXIV:
+            paper_id = arxiv_id(item.url or "")
+            if paper_id is None or papers is None:
+                failures.append(ItemFailure(index, MaterialFailure.UNREADABLE))
+                continue
+            paper = await papers.read(paper_id)
+            if isinstance(paper, MaterialFailure):
+                failures.append(ItemFailure(index, paper))
+                continue
+            if len(paper.markdown) > MAX_PAPER_CHARS:
+                failures.append(ItemFailure(index, MaterialFailure.TOO_LARGE))
+                continue
+            title = item.title or paper.title
+            sections = split_sections(paper.markdown, fallback_title=title)
+            if sum(len(s.text) for s in sections) < MIN_ITEM_CHARS:
+                failures.append(ItemFailure(index, MaterialFailure.EMPTY))
+                continue
+        elif item.kind in LINK_KINDS:
             url = item.url or ""
             if needs_paste(url):
                 failures.append(ItemFailure(index, MaterialFailure.PASTE_TRANSCRIPT))
@@ -351,3 +381,53 @@ def failure_details(failures: Sequence[ItemFailure]) -> Mapping[str, object]:
         "reason": "material_unreadable",
         "items": [{"index": f.index, "reason": f.reason.value} for f in failures],
     }
+
+
+def paper_digest_inputs(sections: Sequence[SectionRow]) -> list[PaperDigestDeps]:
+    """One digest input per arXiv paper: its sections whole up to the outline
+    limit, otherwise each section's opening (papers TDD D7)."""
+    papers: dict[int, list[SectionRow]] = {}
+    for section in sections:
+        if section.material_kind == MaterialKind.ARXIV:
+            papers.setdefault(section.material_position, []).append(section)
+    inputs: list[PaperDigestDeps] = []
+    for rows in papers.values():
+        whole = sum(len(row.text) for row in rows) <= OUTLINE_FULL_TEXT_CHARS
+        inputs.append(
+            PaperDigestDeps(
+                title=rows[0].material_title,
+                material_position=rows[0].material_position,
+                sections=tuple(
+                    MaterialSectionDigest(
+                        id=row.position,
+                        material_title=row.material_title,
+                        title=row.title,
+                        chars=len(row.text),
+                        text=row.text if whole else row.text[:OUTLINE_EXCERPT_CHARS],
+                    )
+                    for row in rows
+                ),
+            )
+        )
+    return inputs
+
+
+def paper_plan(number: int, title: str, digest: PaperDigest) -> PaperPlan:
+    """A validated digest with its concept ids namespaced as ``p<number>.<id>``."""
+    prefix = f"p{number}."
+    return PaperPlan(
+        material_title=title,
+        concepts=tuple(
+            replace(
+                concept,
+                id=prefix + concept.id,
+                builds_on=tuple(prefix + parent for parent in concept.builds_on),
+            )
+            for concept in to_concepts(digest)
+        ),
+        prerequisites=tuple(
+            (p.name.strip(), p.why.strip())
+            for p in digest.prerequisites
+            if p.name.strip()
+        ),
+    )

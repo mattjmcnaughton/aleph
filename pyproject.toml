@@ -45,6 +45,7 @@ dependencies = [
     "cryptography>=49.0.0",
     # IANA zones remain available in the slim runtime without system tzdata.
     "tzdata>=2026.1",
+    "beautifulsoup4>=4.12",
 ]
 
 [project.urls]

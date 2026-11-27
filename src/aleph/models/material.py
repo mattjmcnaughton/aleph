@@ -11,7 +11,8 @@ import uuid  # noqa: TC003 - SQLAlchemy resolves mapped annotations at runtime.
 from typing import TYPE_CHECKING
 
 from sqlalchemy import ForeignKey, Index, Integer, Text, UniqueConstraint, Uuid
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.orm import Mapped, deferred, mapped_column, relationship
 
 from aleph.db import Base
 from aleph.models.base import UUIDAuditMixin
@@ -35,6 +36,10 @@ class Material(Base, UUIDAuditMixin):
     title: Mapped[str] = mapped_column(Text, nullable=False)
     # The link it was read from, or the link a transcript was pasted for.
     url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Papers (0030, docs/tdds/papers-material.md D7): an arXiv paper's core
+    # concepts and prerequisites, written by the outline task before its first
+    # outline run. Deferred so loading a path's Material never reads it.
+    digest: Mapped[dict | None] = deferred(mapped_column(JSONB, nullable=True))
 
     path: Mapped[Path] = relationship(back_populates="materials")
     sections: Mapped[list[MaterialSection]] = relationship(

@@ -10,7 +10,7 @@ import uuid  # noqa: TC003 - used at runtime in query parameters.
 from collections.abc import Sequence  # noqa: TC003
 from dataclasses import dataclass
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession  # noqa: TC002
 
 from aleph.models import Material, MaterialSection
@@ -38,6 +38,8 @@ class SectionRow:
     material_title: str
     title: str
     text: str
+    material_kind: str = ""
+    material_position: int = 0
 
 
 class MaterialRepository:
@@ -85,7 +87,7 @@ class MaterialRepository:
     ) -> list[SectionRow]:
         """The path's sections, or only those at ``positions``, in order."""
         query = (
-            select(MaterialSection, Material.title)
+            select(MaterialSection, Material.title, Material.kind, Material.position)
             .join(Material, MaterialSection.material_id == Material.id)
             .where(MaterialSection.path_id == path_id)
             .order_by(MaterialSection.position)
@@ -99,6 +101,29 @@ class MaterialRepository:
                 material_title=material_title,
                 title=section.title,
                 text=section.text,
+                material_kind=kind,
+                material_position=material_position,
             )
-            for section, material_title in result.all()
+            for section, material_title, kind, material_position in result.all()
         ]
+
+    async def digests(self, path_id: uuid.UUID) -> dict[int, dict]:
+        """Each stored paper digest, by its Material's position on the path."""
+        result = await self.session.execute(
+            select(Material.position, Material.digest).where(
+                Material.path_id == path_id, Material.digest.is_not(None)
+            )
+        )
+        return {position: digest for position, digest in result.all()}
+
+    async def set_digest(self, path_id: uuid.UUID, position: int, digest: dict) -> None:
+        """Store a paper's digest once: a concurrent writer's digest is kept."""
+        await self.session.execute(
+            update(Material)
+            .where(
+                Material.path_id == path_id,
+                Material.position == position,
+                Material.digest.is_(None),
+            )
+            .values(digest=digest)
+        )

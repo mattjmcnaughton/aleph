@@ -118,6 +118,11 @@ class Lesson(Base, UUIDAuditMixin):
     material_sections: Mapped[list[int] | None] = mapped_column(
         ARRAY(Integer), nullable=True
     )
+    # Papers (0030, docs/tdds/papers-material.md D8): the paper concept ids
+    # (``p1.c3``) this lesson teaches. ``NULL`` for prep and ordinary lessons.
+    material_concepts: Mapped[list[str] | None] = mapped_column(
+        ARRAY(Text), nullable=True
+    )
 
     unit: Mapped[Unit] = relationship(back_populates="lessons")
     path: Mapped[Path] = relationship(back_populates="lessons")

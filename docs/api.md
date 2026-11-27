@@ -169,16 +169,21 @@ flag). `POST /api/v1/paths` also accepts `material` (up to 5 items of
 are sent together or not at all (`422` otherwise). `kind` is `article` or `docs`
 for a link (`url` required, no `text`; `docs` also reads up to 30 pages under
 the link) and `text` or `ai_summary` for a paste (`text` required, at most
-200,000 characters). The route reads the Material **before** creating the path:
+200,000 characters). `kind` `arxiv` is a research paper
+(docs/tdds/papers-material.md): `url` must be an `arxiv.org` `/abs/`, `/pdf/` or
+`/html/` paper link, and Aleph reads arXiv's own HTML version of the paper,
+keeping its equations as LaTeX. The route reads the Material **before**
+creating the path:
 
 - `403 forbidden` when the `material` flag is off for the caller.
 - `422 validation_error` with `details: {reason: "material_unreadable", items:
   [{index, reason}]}` when any item cannot be read, where `reason` is
   `unreadable`, `empty` (a paywall or a page with almost no text),
   `paste_transcript` (a video or podcast link; paste the transcript), or
-  `too_large` (more than 400,000 characters across the path). No path is
-  created.
-- `503 service_unavailable` when the reader (Exa) is down.
+  `too_large` (more than 400,000 characters across the path, or 150,000 in
+  one paper), or `no_html` (arXiv has no HTML version of the paper). No path
+  is created.
+- `503 service_unavailable` when the reader (Exa or arXiv) is down.
 
 On success the snapshot is stored with the path in one transaction.
 `PathDetailResponse` gains `material_mode` (or `null`) and `materials:

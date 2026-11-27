@@ -50,7 +50,7 @@ import asyncio
 import contextlib
 import time
 from collections import defaultdict
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
@@ -75,6 +75,11 @@ from aleph.agents.outline import (
     build_outline_agent,
     build_outline_prompt,
 )
+from aleph.agents.paper_digest import (
+    PaperDigest,
+    build_digest_agent,
+    build_digest_prompt,
+)
 from aleph.config import settings as global_settings
 from aleph.db import new_session
 from aleph.domains.answer_order import shuffle_options
@@ -91,7 +96,12 @@ from aleph.repositories import (
     UserRepository,
 )
 from aleph.repositories.materials import MaterialRepository
-from aleph.services.material import lesson_material, outline_material
+from aleph.services.material import (
+    lesson_material,
+    outline_material,
+    paper_digest_inputs,
+    paper_plan,
+)
 from aleph.services.notifications import NotificationService, notification_service
 from aleph.services.openrouter import resolve_model
 from aleph.services.retrieval import (
@@ -111,9 +121,10 @@ if TYPE_CHECKING:
     from pydantic_ai.models import Model
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from aleph.agents._material import LessonMaterial, OutlineMaterial
+    from aleph.agents._material import LessonMaterial, OutlineMaterial, PaperPlan
     from aleph.agents.lesson import LessonContent
     from aleph.agents.outline import Level as AgentLevel
+    from aleph.agents.paper_digest import PaperDigestDeps
     from aleph.agents.researcher import RetrievedDocument
     from aleph.config import Settings
     from aleph.models import Lesson, Path, PathStatus
@@ -270,6 +281,10 @@ class _OutlineClaim:
     about_you: str | None = None
     # The Material digest (CONTEXT.md), read off the stored snapshot.
     material: OutlineMaterial | None = None
+    # Papers (docs/tdds/papers-material.md D7): one digest input per paper.
+    papers: tuple[PaperDigestDeps, ...] = ()
+    # Digests already stored on ``materials.digest``, by Material position.
+    digests: dict[int, dict] = field(default_factory=dict)
 
 
 class GenerationOrchestrator:
@@ -551,17 +566,30 @@ class GenerationOrchestrator:
         fence = claim.fence
         account_id = claim.account_id
         agent = build_outline_agent()
-        deps = OutlineDeps(
-            level=AGENT_LEVEL[claim.level],
-            caps=self._outline_caps,
-            material=claim.material,
-        )
         model = self._resolve_model(
             claim.model_outline
             if claim.model_outline is not None
             else self._config.model_default
         )
         started = time.perf_counter()
+        material = claim.material
+        try:
+            if material is not None and claim.papers:
+                material = replace(
+                    material,
+                    papers=await self._digest_papers(
+                        path_id, claim.papers, claim.digests, model
+                    ),
+                )
+        except Exception:  # noqa: BLE001 - a failed digest fails the outline (§5.5)
+            logger.exception("paper_digest_failed", path_id=str(path_id))
+            await self._emit_outline_failed(path_id, fence, account_id, started)
+            return False
+        deps = OutlineDeps(
+            level=AGENT_LEVEL[claim.level],
+            caps=self._outline_caps,
+            material=material,
+        )
         try:
             # The concurrency permit is already held by ``run_outline_task``
             # (acquired before the claim, §5.4, so queue time never counts against
@@ -579,7 +607,7 @@ class GenerationOrchestrator:
                         claim.guidance,
                         documents=documents,
                         about_you=claim.about_you,
-                        material=claim.material,
+                        material=material,
                     ),
                     deps=deps,
                     model=model,
@@ -623,6 +651,40 @@ class GenerationOrchestrator:
                 total_tokens=total_tokens,
             )
         return ready
+
+    async def _digest_papers(
+        self,
+        path_id: uuid.UUID,
+        papers: tuple[PaperDigestDeps, ...],
+        stored: dict[int, dict],
+        model: Model,
+    ) -> tuple[PaperPlan, ...]:
+        """Each paper's core concepts (papers TDD D7).
+
+        A paper whose digest is already on ``materials.digest`` reuses it, so
+        a retried or reclaimed outline asks the model again only for papers it
+        never digested. Otherwise one bounded model call per paper, run before
+        the outline under its own per-call timeout, and stored at once.
+        """
+        agent = build_digest_agent()
+        plans: list[PaperPlan] = []
+        for deps in papers:
+            saved = stored.get(deps.material_position)
+            if saved is not None:
+                digest = PaperDigest.model_validate(saved)
+            else:
+                async with asyncio.timeout(self._outline_timeout):
+                    run = await agent.run(
+                        build_digest_prompt(deps), deps=deps, model=model
+                    )
+                digest = run.output
+                async with self._session_factory() as session:
+                    await MaterialRepository(session).set_digest(
+                        path_id, deps.material_position, digest.model_dump()
+                    )
+                    await session.commit()
+            plans.append(paper_plan(deps.material_position, deps.title, digest))
+        return tuple(plans)
 
     async def _emit_outline_failed(
         self,
@@ -684,11 +746,14 @@ class GenerationOrchestrator:
             account_id = path.user_id
             about_you = await UserRepository(session).about_you(path.user_id)
             material = None
+            papers: tuple[PaperDigestDeps, ...] = ()
+            digests: dict[int, dict] = {}
             if path.material_mode is not None:
-                material = outline_material(
-                    path.material_mode,
-                    await MaterialRepository(session).sections(path_id),
-                )
+                rows = await MaterialRepository(session).sections(path_id)
+                material = outline_material(path.material_mode, rows)
+                papers = tuple(paper_digest_inputs(rows))
+                if papers:
+                    digests = await MaterialRepository(session).digests(path_id)
             await session.commit()
         if fence is None:
             return None
@@ -702,6 +767,8 @@ class GenerationOrchestrator:
             search_outline=search_outline,
             about_you=about_you,
             material=material,
+            papers=papers,
+            digests=digests,
         )
 
     @staticmethod
@@ -777,6 +844,10 @@ class GenerationOrchestrator:
                     if lesson.material_sections:
                         lesson_row.material_sections = sorted(
                             set(lesson.material_sections)
+                        )
+                    if lesson.concepts:
+                        lesson_row.material_concepts = list(
+                            dict.fromkeys(c.strip() for c in lesson.concepts)
                         )
             await session.commit()
             return True

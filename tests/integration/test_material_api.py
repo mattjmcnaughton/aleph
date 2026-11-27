@@ -208,3 +208,148 @@ async def test_mode_and_material_must_come_together(
         )
     assert no_mode.status_code == 422
     assert no_text.status_code == 422
+
+
+@pytest.mark.anyio
+async def test_an_arxiv_paper_is_read_digested_and_taught_concept_by_concept(
+    app: FastAPI,
+    spawn: CollectingSpawn,
+    prompts: list[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Papers TDD slice 1: the arXiv item is read through the paper reader, a
+    digest runs before the outline, and the outline prompt carries it."""
+    from aleph.services.arxiv import StubPaperReader
+
+    monkeypatch.setattr(
+        "aleph.routers.v1.paths.default_paper_reader", lambda: StubPaperReader()
+    )
+    _enable_flag_globally(monkeypatch, "material")
+    body = {
+        "topic": "Attention Is All You Need",
+        "level": "some_experience",
+        "material_mode": "teach",
+        "material": [{"kind": "arxiv", "url": "https://arxiv.org/abs/1706.03762"}],
+    }
+    async with _client(app) as client:
+        await _sign_in(client, monkeypatch, OWNER)
+        resp = await client.post("/api/v1/paths", json=body)
+        assert resp.status_code == 202, resp.text
+        path_id = resp.json()["id"]
+        await spawn.drain()
+        detail = await _poll(client, spawn, path_id)
+
+    assert detail["status"] == "ready"
+    assert [(m["kind"], m["title"]) for m in detail["materials"]] == [
+        ("arxiv", "Stub paper 1706.03762")
+    ]
+    digest_prompts = [p for p in prompts if "<paper>" in p]
+    outline_prompts = [p for p in prompts if "<paper_concepts>" in p]
+    assert len(digest_prompts) == 1
+    assert len(outline_prompts) == 1
+    async with db.async_session() as session:
+        grounded = (
+            await session.scalars(
+                select(Lesson.material_sections)
+                .where(Lesson.path_id == uuid.UUID(path_id))
+                .order_by(Lesson.position_in_path)
+            )
+        ).all()
+    # The stub digest chains one concept per section, so the lessons teach
+    # sections 1..5 in that order.
+    assert grounded == [[1], [2], [3], [4], [5]]
+    async with db.async_session() as session:
+        concepts = (
+            await session.scalars(
+                select(Lesson.material_concepts)
+                .where(Lesson.path_id == uuid.UUID(path_id))
+                .order_by(Lesson.position_in_path)
+            )
+        ).all()
+        digest = await session.scalar(
+            select(Material.digest).where(Material.path_id == uuid.UUID(path_id))
+        )
+    assert concepts == [[f"p1.c{n}"] for n in range(1, 6)]
+    assert digest is not None
+    assert [c["id"] for c in digest["concepts"]] == [f"c{n}" for n in range(1, 6)]
+
+
+@pytest.mark.anyio
+async def test_a_retried_outline_reuses_the_stored_paper_digest(
+    app: FastAPI,
+    spawn: CollectingSpawn,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The digest is stored before the outline runs, so when the outline fails
+    and the learner retries, only the outline asks the model again (D7)."""
+    from aleph.services.arxiv import StubPaperReader
+
+    calls = {"digest": 0, "outline": 0}
+
+    def respond(messages: list[ModelMessage], info: AgentInfo):  # noqa: ANN202
+        names = {
+            prop
+            for tool in info.output_tools
+            for prop in tool.parameters_json_schema.get("properties", {})
+        }
+        if "prerequisites" in names:
+            calls["digest"] += 1
+        elif "units" in names:
+            calls["outline"] += 1
+            if calls["outline"] == 1:
+                raise RuntimeError("provider blip on the first outline")
+        return _stub_respond(messages, info)
+
+    model = FunctionModel(respond)
+    monkeypatch.setattr(
+        gen_module.generation_orchestrator, "_resolve_model", lambda _id: model
+    )
+    monkeypatch.setattr(
+        "aleph.routers.v1.paths.default_paper_reader", lambda: StubPaperReader()
+    )
+    _enable_flag_globally(monkeypatch, "material")
+    body = {
+        "topic": "Attention Is All You Need",
+        "level": "some_experience",
+        "material_mode": "teach",
+        "material": [{"kind": "arxiv", "url": "https://arxiv.org/abs/1706.03762"}],
+    }
+    async with _client(app) as client:
+        await _sign_in(client, monkeypatch, OWNER)
+        path_id = (await client.post("/api/v1/paths", json=body)).json()["id"]
+        await spawn.drain()
+        assert (await _poll(client, spawn, path_id))["status"] == "failed"
+        assert (await client.post(f"/api/v1/paths/{path_id}/retry")).status_code == 202
+        await spawn.drain()
+        assert (await _poll(client, spawn, path_id))["status"] == "ready"
+    assert calls == {"digest": 1, "outline": 2}
+
+
+@pytest.mark.anyio
+async def test_an_arxiv_paper_without_html_creates_no_path(
+    app: FastAPI,
+    spawn: CollectingSpawn,
+    prompts: list[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from aleph.services.arxiv import StubPaperReader
+
+    monkeypatch.setattr(
+        "aleph.routers.v1.paths.default_paper_reader", lambda: StubPaperReader()
+    )
+    _enable_flag_globally(monkeypatch, "material")
+    body = {
+        "topic": "Something new",
+        "level": "some_experience",
+        "material_mode": "teach",
+        "material": [{"kind": "arxiv", "url": "https://arxiv.org/abs/2401.99999"}],
+    }
+    async with _client(app) as client:
+        await _sign_in(client, monkeypatch, OWNER)
+        resp = await client.post("/api/v1/paths", json=body)
+    assert resp.status_code == 422
+    assert resp.json()["error"]["details"]["items"] == [
+        {"index": 0, "reason": "no_html"}
+    ]
+    async with db.async_session() as session:
+        assert await session.scalar(select(func.count()).select_from(Path)) == 0

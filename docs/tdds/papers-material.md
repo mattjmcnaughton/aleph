@@ -217,6 +217,17 @@ Hostile PDFs, read with pypdf in a child process with `RLIMIT_AS` 768 MB,
   the snapshot and digest after Build claims the draft, so a Placement check
   result reaches it with no change to papers.
 
+## Slice 1 as built (2026-11-27)
+
+Migration `0030_paper_digests` adds `materials.digest` and
+`lessons.material_concepts`. The outline task writes each paper's digest
+before the outline runs, in its own transaction, so a retried or reclaimed
+outline reuses it and calls the model only for the outline. Concept ids are
+namespaced by the paper's Material position (`p1.c3`). Math uses only `$$…$$`
+(`singleDollarTextMath: false`), so prices in existing lessons stay text.
+`materials.source_url` is not added: slice 1 reads only arXiv HTML, whose URL
+follows from the stored link.
+
 ## Schema
 
 Specified here; the Space writes the migration.
@@ -230,9 +241,9 @@ Specified here; the Space writes the migration.
 - `material_drafts` as in Placement check D1 and D3: per-item `state` and
   `reason` in `item_states`, sections and digest in `items` (up to about
   400,000 characters). Build copies `items` into `materials` and
-  `material_sections` under `SELECT … FOR UPDATE`, then clears `items` and
-  `placement` in the same transaction; the hourly tick clears them on expired
-  drafts, and the slim row is deleted 48 hours after creation so the daily
+  `material_sections` under `SELECT … FOR UPDATE`, then clears `items` in
+  the same transaction (Placement checks live in their own
+  `placement_checks` table); the hourly tick clears `items` on expired drafts, and the slim row is deleted 48 hours after creation so the daily
   draft limit still counts it. A PDF extraction that finishes after its draft
   expired or was claimed writes nothing: its update requires the item still
   `reading`, `consumed_at` null and `expires_at > now()` (the tick clears

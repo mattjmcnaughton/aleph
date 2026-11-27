@@ -48,8 +48,27 @@ export function pasteSource(url: string): PasteSource | null {
   return null;
 }
 
+// Mirrors `domains.material.arxiv_id`; the server decides.
+const ARXIV_ID = /^(?:\d{4}\.\d{4,5}|[a-z][a-z.-]*\/\d{7})(?:v\d{1,3})?$/i;
+const ARXIV_HOSTS = new Set(["arxiv.org", "www.arxiv.org", "export.arxiv.org"]);
+
+/** A bare arXiv id (`1706.03762`) becomes its abstract page link. */
+export function normalizeLink(value: string): string {
+  const trimmed = value.trim();
+  return ARXIV_ID.test(trimmed) ? `https://arxiv.org/abs/${trimmed}` : trimmed;
+}
+
+/** True for an arXiv `/abs`, `/pdf` or `/html` paper link (papers TDD D1). */
+export function isArxivPaper(url: string): boolean {
+  const parsed = parseUrl(url);
+  if (!parsed || !ARXIV_HOSTS.has(parsed.hostname.toLowerCase())) return false;
+  const match = /^\/(?:abs|pdf|html)\/(.+?)\/?$/.exec(parsed.pathname);
+  return match !== null && ARXIV_ID.test(match[1].replace(/\.pdf$/, ""));
+}
+
 /** A first guess the learner can change: docs hosts and `/docs` paths crawl. */
-export function guessLinkKind(url: string): Extract<MaterialKind, "article" | "docs"> {
+export function guessLinkKind(url: string): Extract<MaterialKind, "article" | "docs" | "arxiv"> {
+  if (isArxivPaper(url)) return "arxiv";
   const parsed = parseUrl(url);
   if (!parsed) return "article";
   return parsed.hostname.startsWith("docs.") || /\/docs(\/|$)/.test(parsed.pathname)
@@ -67,6 +86,7 @@ export const KIND_LABEL: Record<MaterialKind, string> = {
   docs: "Docs",
   text: "Pasted text",
   ai_summary: "AI summary",
+  arxiv: "Paper",
 };
 
 export const FAILURE_COPY: Record<MaterialFailureReason, string> = {
@@ -75,6 +95,8 @@ export const FAILURE_COPY: Record<MaterialFailureReason, string> = {
     "This page had almost no text, often a paywall or a page that needs a browser. Paste its text instead.",
   paste_transcript: "Aleph can't read video or podcast links. Paste the transcript instead.",
   too_large: "There's more Material than one path can hold. Remove an item or trim the text.",
+  no_html:
+    "arXiv has no HTML version of this paper yet, so Aleph can't read it. Paste its text instead.",
 };
 
 /** The wire item, without the client-only id. */

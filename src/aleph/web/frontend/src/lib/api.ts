@@ -310,11 +310,16 @@ export interface PathDetail {
 
 // --- Linked Material (docs/tdds/linked-material.md) -------------------------
 
-/** `article`/`docs` are links Aleph reads; `text`/`ai_summary` are pasted. */
-export type MaterialKind = "article" | "docs" | "text" | "ai_summary";
+/** `article`/`docs`/`arxiv` are links Aleph reads; `text`/`ai_summary` are pasted. */
+export type MaterialKind = "article" | "docs" | "text" | "ai_summary" | "arxiv";
 export type MaterialMode = "teach" | "start";
 /** Why `POST /paths` could not read one item (`422 material_unreadable`). */
-export type MaterialFailureReason = "unreadable" | "empty" | "paste_transcript" | "too_large";
+export type MaterialFailureReason =
+  | "unreadable"
+  | "empty"
+  | "paste_transcript"
+  | "too_large"
+  | "no_html";
 
 export interface MaterialInput {
   kind: MaterialKind;

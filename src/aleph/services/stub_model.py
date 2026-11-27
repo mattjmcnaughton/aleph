@@ -533,6 +533,62 @@ def _build_material_outline(
     )
 
 
+# Papers (docs/tdds/papers-material.md): the digest prompt carries a
+# ``<paper>`` JSON list of sections, and the outline prompt a
+# ``<paper_concepts>`` list. The stub names one concept per section (up to
+# 12), each building on the one before, and teaches one lesson per concept in
+# that order, so the concept-order validator passes.
+_PAPER_BLOCK_RE = re.compile(r"<paper>\n(.*?)\n</paper>", re.DOTALL)
+_PAPER_CONCEPTS_RE = re.compile(
+    r"<paper_concepts>\n(.*?)\n</paper_concepts>", re.DOTALL
+)
+
+
+def _build_paper_digest(text: str) -> dict[str, object]:
+    match = _PAPER_BLOCK_RE.search(text)
+    sections = json.loads(match.group(1)) if match else []
+    concepts = [
+        {
+            "id": f"c{n}",
+            "name": str(section.get("section") or f"Idea {n}")[:80],
+            "sections": [int(section["id"])],
+            "builds_on": [f"c{n - 1}"] if n > 1 else [],
+        }
+        for n, section in enumerate(sections[:_STUB_MATERIAL_MAX_LESSONS], start=1)
+    ]
+    return {
+        "concepts": concepts,
+        "prerequisites": [{"name": "Linear algebra", "why": "matrices throughout"}],
+    }
+
+
+def _build_paper_outline(topic: str, text: str) -> PathOutline | None:
+    match = _PAPER_CONCEPTS_RE.search(text)
+    if match is None:
+        return None
+    units: list[UnitOutline] = []
+    n = 0
+    for index, paper in enumerate(json.loads(match.group(1)), start=1):
+        lessons: list[LessonOutline] = []
+        for concept in paper["concepts"]:
+            n += 1
+            lessons.append(
+                LessonOutline(
+                    title=f"{concept['name']} ({n})",
+                    material_sections=list(concept["sections"]),
+                    concepts=[concept["id"]],
+                )
+            )
+        units.append(
+            UnitOutline(
+                title=f"{str(paper['paper'])[:80]} ({index})",
+                summary=f"The core concepts of {str(paper['paper'])[:80]}, in order.",
+                lessons=lessons,
+            )
+        )
+    return PathOutline(units=units)
+
+
 # The `[force-lesson-error]` block. Fixed wording (no topic interpolation) so
 # its word cost is constant, and it replaces one body paragraph rather than
 # adding to the passage — the §14 word band has to hold with the sentinel on.
@@ -1203,6 +1259,13 @@ def _stub_respond(messages: Sequence[ModelMessage], info: AgentInfo) -> ModelRes
     draft_tool = _tool_with(info.output_tools, "teaching_style")
     questions_tool = _tool_with(info.output_tools, "questions")
     grader_tool = _tool_with(info.output_tools, "covered_points")
+    digest_tool = _tool_with(info.output_tools, "prerequisites")
+    if digest_tool is not None:
+        return ModelResponse(
+            parts=[
+                ToolCallPart(tool_name=digest_tool.name, args=_build_paper_digest(text))
+            ]
+        )
     if grader_tool is not None:
         return ModelResponse(
             parts=[
@@ -1332,10 +1395,10 @@ def _stub_respond(messages: Sequence[ModelMessage], info: AgentInfo) -> ModelRes
             )
         if outline_tool is not None:
             digest = _material_digest(text)
+            material_topic = clean_topic(_without_material(text)) or "the topic"
             outline = (
-                _build_material_outline(
-                    clean_topic(_without_material(text)) or "the topic", digest
-                )
+                _build_paper_outline(material_topic, text)
+                or _build_material_outline(material_topic, digest)
                 if digest
                 else _build_outline(topic)
             )

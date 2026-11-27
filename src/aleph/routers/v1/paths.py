@@ -70,6 +70,7 @@ from aleph.services.material import (
     MaterialItem,
     MaterialSnapshot,
     MaterialUnreadableError,
+    default_paper_reader,
     default_reader,
     failure_details,
     read_snapshot,
@@ -274,7 +275,9 @@ async def _read_material(
         for item in body.material
     ]
     try:
-        return await read_snapshot(items, body.material_mode, default_reader())
+        return await read_snapshot(
+            items, body.material_mode, default_reader(), default_paper_reader()
+        )
     except MaterialUnreadableError as exc:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY, detail=failure_details(exc.failures)

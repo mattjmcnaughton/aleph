@@ -34,9 +34,11 @@ from aleph.agents._delimiters import neutralize_delimiters
 from aleph.agents._evidence import web_evidence_block
 from aleph.agents._material import (
     MODE_OUTLINE_RULES,
+    PAPER_OUTLINE_RULES,
     OutlineMaterial,
     material_outline_block,
 )
+from aleph.domains.material import PlannedLesson, concept_plan_problems
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -55,6 +57,10 @@ class LessonOutline(BaseModel):
 
     title: str
     material_sections: list[int] = Field(default_factory=list)
+    # Papers (docs/tdds/papers-material.md D8): the paper concept ids this
+    # lesson teaches, or, for a prep lesson, the prerequisite it teaches.
+    concepts: list[str] = Field(default_factory=list)
+    prerequisite: str | None = None
 
 
 class UnitOutline(BaseModel):
@@ -442,14 +448,40 @@ def _validate_grounding(outline: PathOutline, material: OutlineMaterial | None) 
             else "This path has no Material; leave every material_sections empty."
         )
     if material is not None and material.mode == "teach":
+        # A prep lesson teaches a prerequisite the paper assumes, not a section.
         ungrounded = [
-            lesson.title for lesson in lessons if not lesson.material_sections
+            lesson.title
+            for lesson in lessons
+            if not lesson.material_sections
+            and not (material.papers and lesson.prerequisite)
         ]
         if ungrounded:
             raise ModelRetry(
                 "In Teach this mode every lesson must name the Material sections "
                 f"it teaches from; these name none: {ungrounded}."
             )
+    named = [lesson for lesson in lessons if lesson.concepts or lesson.prerequisite]
+    if material is None or not material.papers:
+        if named:
+            raise ModelRetry(
+                "This path has no papers; leave concepts and prerequisite empty."
+            )
+        return
+    problems = concept_plan_problems(
+        [
+            PlannedLesson(
+                lesson.title,
+                tuple(c.strip() for c in lesson.concepts),
+                lesson.prerequisite.strip() if lesson.prerequisite else None,
+            )
+            for lesson in lessons
+        ],
+        list(material.concepts),
+        material.prerequisite_names,
+        teach=material.mode == "teach",
+    )
+    if problems:
+        raise ModelRetry("Fix the paper lessons: " + "; ".join(problems) + ".")
 
 
 # Retry budget (Agent(retries=...)): pydantic-ai applies it as an independent cap
@@ -485,6 +517,23 @@ def build_outline_agent() -> Agent[OutlineDeps, OutlineResult]:
         """
         caps = ctx.deps.caps
         material = ctx.deps.material
+        paper_rules = (
+            f"\n\n{PAPER_OUTLINE_RULES}"
+            if material is not None and material.papers
+            else ""
+        )
+        if material is not None and material.mode == "teach" and material.papers:
+            concepts = len(material.concepts)
+            return (
+                f"Learner level: {ctx.deps.level}. "
+                f"{_LEVEL_GUIDANCE[ctx.deps.level]}\n\n"
+                f"{MODE_OUTLINE_RULES['teach']}{paper_rules}\n\n"
+                f"Size the path to the papers' {concepts} core concepts: about one "
+                "lesson per concept, fewer where small concepts share a lesson, "
+                "plus any prep lessons, in units of about five lessons. Hard "
+                f"limits you must not exceed: {caps.max_units} units and "
+                f"{caps.max_lessons_per_path} lessons."
+            )
         if material is not None and material.mode == "teach":
             return (
                 f"Learner level: {ctx.deps.level}. "
@@ -497,7 +546,9 @@ def build_outline_agent() -> Agent[OutlineDeps, OutlineResult]:
                 f"{caps.max_units} units and {caps.max_lessons_per_path} lessons."
             )
         mode_rules = (
-            f"{MODE_OUTLINE_RULES['start']}\n\n" if material is not None else ""
+            f"{MODE_OUTLINE_RULES['start']}{paper_rules}\n\n"
+            if material is not None
+            else ""
         )
         return mode_rules + (
             f"Learner level: {ctx.deps.level}. {_LEVEL_GUIDANCE[ctx.deps.level]}\n\n"
