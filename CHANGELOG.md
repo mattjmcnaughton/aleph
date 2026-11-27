@@ -1,3 +1,10 @@
+## [1.58.1](https://github.com/mattjmcnaughton/aleph/compare/v1.58.0...v1.58.1) (2026-11-27)
+
+
+### Bug Fixes
+
+* **web:** wrap the API key and MCP config on phones ([a852e26](https://github.com/mattjmcnaughton/aleph/commit/a852e2652afab66352731a619e51f29da4563972))
+
 # [1.58.0](https://github.com/mattjmcnaughton/aleph/compare/v1.57.0...v1.58.0) (2026-11-27)
 
 
