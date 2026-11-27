@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     DateTime,
     Enum,
     ForeignKey,
@@ -28,6 +29,7 @@ from aleph.models.enums import Level, PathStatus
 if TYPE_CHECKING:
     from aleph.models.conversation import Conversation
     from aleph.models.lesson import Lesson
+    from aleph.models.material import Material
     from aleph.models.path_change import PathChange
     from aleph.models.unit import Unit
     from aleph.models.users import User
@@ -44,6 +46,10 @@ class Path(Base, UUIDAuditMixin):
     __table_args__ = (
         Index("ix_paths_user_id", "user_id"),
         Index("ix_paths_user_id_shared", "user_id", postgresql_where=text("shared")),
+        CheckConstraint(
+            "material_mode IS NULL OR material_mode IN ('teach', 'start')",
+            name="ck_paths_material_mode",
+        ),
     )
 
     user_id: Mapped[uuid.UUID] = mapped_column(
@@ -136,6 +142,10 @@ class Path(Base, UUIDAuditMixin):
     source_path_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid, ForeignKey("paths.id", ondelete="SET NULL"), nullable=True
     )
+    # CONTEXT.md: *Material mode* (0026): ``teach`` or ``start`` when the path
+    # was built from Material, ``NULL`` otherwise. Fixed at creation, like
+    # ``topic``: the outline was built for this mode.
+    material_mode: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     @property
     def display_title(self) -> str:
@@ -160,6 +170,12 @@ class Path(Base, UUIDAuditMixin):
         cascade="all, delete-orphan",
         passive_deletes=True,
         order_by="Lesson.position_in_path",
+    )
+    materials: Mapped[list[Material]] = relationship(
+        back_populates="path",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="Material.position",
     )
     # The tutor's threads: at most one per kind (Phase 2B TDD D3 widened Phase
     # 2's one-per-path), deleted with the path.

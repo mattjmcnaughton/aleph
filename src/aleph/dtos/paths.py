@@ -14,12 +14,14 @@ reads as ``failed``, §5.4) and ``unlock_state`` (the derived learner axis —
 """
 
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Self
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
+from aleph.domains.material import MAX_ITEMS, MaterialMode
 from aleph.domains.progression import UnlockState
+from aleph.dtos.material import MaterialDTO, MaterialInput
 from aleph.models import LessonGenerationState, Level, PathStatus
 
 # The learner's free-text topic (CONTEXT.md: *Topic*). Stripped of surrounding
@@ -106,6 +108,16 @@ class CreatePathRequest(BaseModel):
     # only (Public profiles TDD D7): dropped silently unless that path is
     # public right now, and nothing else is ever read from it.
     source_path_id: UUID | None = None
+    # CONTEXT.md: *Material* and *Material mode*. Read at create (behind the
+    # ``material`` flag); a mode is required exactly when Material is sent.
+    material: list[MaterialInput] = Field(default_factory=list, max_length=MAX_ITEMS)
+    material_mode: MaterialMode | None = None
+
+    @model_validator(mode="after")
+    def _mode_iff_material(self) -> Self:
+        if bool(self.material) != (self.material_mode is not None):
+            raise ValueError("material_mode is required with material, and only then")
+        return self
 
 
 class UpdatePathRequest(BaseModel):
@@ -288,3 +300,5 @@ class PathDetailResponse(BaseModel):
     units: list[UnitDTO]
     shared: bool
     source: PathSourceDTO | None
+    material_mode: MaterialMode | None
+    materials: list[MaterialDTO]

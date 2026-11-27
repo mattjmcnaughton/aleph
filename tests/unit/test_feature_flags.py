@@ -213,6 +213,7 @@ def test_the_registry_is_exactly_the_registered_flags() -> None:
             "learning_summary",
             "mcp",
             "public_profiles",
+            "material",
         }
     )
 

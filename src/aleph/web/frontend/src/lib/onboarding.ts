@@ -2,7 +2,7 @@
 // generating → ready/refused/failed transitions are testable without a router,
 // a network, or fake timers (§5.1, §5.6; W7 refusal, W8 failure+retry).
 
-import type { CreatePathInput, Level, PathStatus } from "./api";
+import type { CreatePathInput, Level, MaterialInput, MaterialMode, PathStatus } from "./api";
 
 /** The three self-assessed levels offered at onboarding, in display order. */
 export const LEVELS: ReadonlyArray<{ value: Level; label: string }> = [
@@ -125,6 +125,8 @@ export function buildCreatePathInput(input: {
   modelLesson?: string;
   /** A Copy's source path, sent for credit only. */
   sourcePathId?: string;
+  material?: MaterialInput[];
+  materialMode?: MaterialMode;
 }): CreatePathInput {
   // A slot value is either `MODEL_SLOT_DEFAULT` (the empty string) or an id the
   // picker took verbatim from the session — never free text — so a falsy check
@@ -140,5 +142,9 @@ export function buildCreatePathInput(input: {
   if (input.modelOutline) body.model_outline = input.modelOutline;
   if (input.modelLesson) body.model_lesson = input.modelLesson;
   if (input.sourcePathId) body.source_path_id = input.sourcePathId;
+  if (input.material?.length && input.materialMode) {
+    body.material = input.material;
+    body.material_mode = input.materialMode;
+  }
   return body;
 }

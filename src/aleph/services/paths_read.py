@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING
 
 from aleph.domains.progression import LessonProgress, derive_unlock_states
 from aleph.repositories import LessonRepository, UnitRepository
+from aleph.repositories.materials import MaterialRepository
 
 if TYPE_CHECKING:
     import uuid
@@ -30,7 +31,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from aleph.domains.progression import UnlockState
-    from aleph.models import LessonGenerationState, PathStatus
+    from aleph.models import LessonGenerationState, Material, PathStatus
     from aleph.repositories import PathGenerationProgress
     from aleph.services.generation import GenerationOrchestrator
 
@@ -76,6 +77,8 @@ class PathDetailView:
     refusal_message: str | None
     progress: PathGenerationProgress
     units: list[UnitDetailView]
+    # The path's Material items in order (CONTEXT.md); empty without Material.
+    materials: list[Material]
 
 
 async def load_path_detail(
@@ -127,6 +130,7 @@ async def load_path_detail(
         )
 
     return PathDetailView(
+        materials=await MaterialRepository(session).list_for_path(path_id),
         status=snapshot.status,
         refusal_message=snapshot.refusal_message,
         progress=snapshot.progress,

@@ -73,6 +73,7 @@ class PathRepository:
         model_outline: str | None = None,
         model_lesson: str | None = None,
         source_path_id: uuid.UUID | None = None,
+        material_mode: str | None = None,
     ) -> Path:
         """Insert a ``pending`` path.
 
@@ -103,6 +104,7 @@ class PathRepository:
             model_outline=model_outline,
             model_lesson=model_lesson,
             source_path_id=source_path_id,
+            material_mode=material_mode,
         )
         self.session.add(path)
         await self.session.flush()

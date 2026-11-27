@@ -482,6 +482,57 @@ def _build_outline(topic: str) -> PathOutline:
     return PathOutline(units=units)
 
 
+# Linked Material (docs/tdds/linked-material.md): the outline prompt carries a
+# ``<material>`` JSON digest of section ids. The stub teaches one lesson per
+# section (up to 12), grouped into a unit per Material item, so every lesson
+# names exactly the section it teaches from and the grounding validator passes
+# in both modes.
+_MATERIAL_BLOCK_RE = re.compile(r"<material>\n(.*?)\n</material>", re.DOTALL)
+_STUB_MATERIAL_MAX_LESSONS = 12
+
+
+def _material_digest(text: str) -> list[dict[str, object]] | None:
+    match = _MATERIAL_BLOCK_RE.search(text)
+    if match is None:
+        return None
+    try:
+        sections = json.loads(match.group(1))
+    except ValueError:
+        return None
+    return [s for s in sections if isinstance(s, dict) and isinstance(s.get("id"), int)]
+
+
+def _without_material(text: str) -> str:
+    """The prompt with its Material block (and that block's lead-in) removed."""
+    head = text.split("The learner attached Material", 1)[0]
+    return head.replace("Topic:", "", 1) if head.lstrip().startswith("Topic:") else head
+
+
+def _build_material_outline(
+    topic: str, sections: list[dict[str, object]]
+) -> PathOutline:
+    units: dict[str, list[LessonOutline]] = {}
+    for n, section in enumerate(sections[:_STUB_MATERIAL_MAX_LESSONS], start=1):
+        material = str(section.get("material") or "Material")[:80]
+        title = str(section.get("section") or f"Section {n}")[:80]
+        units.setdefault(material, []).append(
+            LessonOutline(
+                title=f"{title} ({n})",
+                material_sections=[int(section["id"])],  # ty: ignore[invalid-argument-type]
+            )
+        )
+    return PathOutline(
+        units=[
+            UnitOutline(
+                title=f"{material} ({index})",
+                summary=f"What {material} says about {topic}.",
+                lessons=lessons,
+            )
+            for index, (material, lessons) in enumerate(units.items(), start=1)
+        ]
+    )
+
+
 # The `[force-lesson-error]` block. Fixed wording (no topic interpolation) so
 # its word cost is constant, and it replaces one body paragraph rather than
 # adding to the passage — the §14 word band has to hold with the sentinel on.
@@ -1196,7 +1247,14 @@ def _stub_respond(messages: Sequence[ModelMessage], info: AgentInfo) -> ModelRes
                 ]
             )
         if outline_tool is not None:
-            outline = _build_outline(topic)
+            digest = _material_digest(text)
+            outline = (
+                _build_material_outline(
+                    clean_topic(_without_material(text)) or "the topic", digest
+                )
+                if digest
+                else _build_outline(topic)
+            )
             return ModelResponse(
                 parts=[
                     ToolCallPart(tool_name=outline_tool.name, args=outline.model_dump())

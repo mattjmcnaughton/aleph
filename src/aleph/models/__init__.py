@@ -32,6 +32,7 @@ from aleph.models.feature_flags import UserFeatureOverride
 from aleph.models.learning_summary import LearningSummary
 from aleph.models.lesson import Lesson
 from aleph.models.lesson_visual import LessonVisual
+from aleph.models.material import Material, MaterialSection
 from aleph.models.message import Message
 from aleph.models.notification_preferences import NotificationPreferences
 from aleph.models.path import Path
@@ -60,6 +61,8 @@ __all__ = [
     "LessonVisual",
     "LessonVisualKind",
     "Level",
+    "Material",
+    "MaterialSection",
     "Message",
     "MessageRole",
     "MessageSource",

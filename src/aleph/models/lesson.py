@@ -9,6 +9,7 @@ from datetime import (
 from typing import TYPE_CHECKING
 
 from sqlalchemy import (
+    ARRAY,
     DateTime,
     Enum,
     ForeignKey,
@@ -111,6 +112,12 @@ class Lesson(Base, UUIDAuditMixin):
     # ``generated -> ungenerated`` exists but only inside ``apply_change`` for
     # an unengaged lesson (D2 guard).
     revision_instruction: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # CONTEXT.md: *Grounding plan* (0026). The path-wide positions of the
+    # Material sections this lesson teaches from, as the outline mapped them
+    # and the outline validator checked them. ``NULL`` for a lesson with none.
+    material_sections: Mapped[list[int] | None] = mapped_column(
+        ARRAY(Integer), nullable=True
+    )
 
     unit: Mapped[Unit] = relationship(back_populates="lessons")
     path: Mapped[Path] = relationship(back_populates="lessons")

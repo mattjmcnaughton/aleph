@@ -66,6 +66,7 @@ from pydantic_ai import Agent, ModelRetry, RunContext
 from aleph.agents._about_you import about_you_block
 from aleph.agents._delimiters import neutralize_delimiters
 from aleph.agents._evidence import web_evidence_block
+from aleph.agents._material import LessonMaterial, material_lesson_block
 from aleph.agents.outline import Level, PathOutline, require_valid_level
 from aleph.domains.visuals import is_placeholder_ref, visual_fence_refs
 
@@ -374,6 +375,8 @@ class LessonDeps:
     # The learner's About you (CONTEXT.md), read off the account when the lesson
     # generates — forward-only for the same reason ``teaching_style`` is.
     about_you: str | None = None
+    # CONTEXT.md: *Material*. The sections this lesson's grounding plan names.
+    material: LessonMaterial | None = None
 
     def __post_init__(self) -> None:
         """Reject an unknown ``level`` or non-positive position at construction.
@@ -739,6 +742,7 @@ def build_lesson_prompt(deps: LessonDeps) -> str:
 
     if deps.documents:
         sections.append(web_evidence_block(deps.documents))
+    sections.extend(filter(None, [material_lesson_block(deps.material)]))
 
     # Before the style: the path's own instruction is read later, so it wins
     # where the account-wide note and the path disagree.

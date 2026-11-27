@@ -90,6 +90,8 @@ from aleph.repositories import (
     UnitRepository,
     UserRepository,
 )
+from aleph.repositories.materials import MaterialRepository
+from aleph.services.material import lesson_material, outline_material
 from aleph.services.notifications import NotificationService, notification_service
 from aleph.services.openrouter import resolve_model
 from aleph.services.retrieval import (
@@ -109,11 +111,13 @@ if TYPE_CHECKING:
     from pydantic_ai.models import Model
     from sqlalchemy.ext.asyncio import AsyncSession
 
+    from aleph.agents._material import LessonMaterial, OutlineMaterial
     from aleph.agents.lesson import LessonContent
     from aleph.agents.outline import Level as AgentLevel
     from aleph.agents.researcher import RetrievedDocument
     from aleph.config import Settings
     from aleph.models import Lesson, Path, PathStatus
+    from aleph.services.material import MaterialSnapshot
     from aleph.services.retrieval import Retriever
 
     SessionFactory = Callable[[], AbstractAsyncContextManager[AsyncSession]]
@@ -237,6 +241,8 @@ class _LessonContext:
     # The account's About you (CONTEXT.md), read when the lesson generates, so
     # an edit is forward-only exactly as ``teaching_style`` is.
     about_you: str | None = None
+    # The Material sections this lesson's grounding plan names (CONTEXT.md).
+    material: LessonMaterial | None = None
 
 
 @dataclass(frozen=True)
@@ -262,6 +268,8 @@ class _OutlineClaim:
     search_outline: bool = False
     # The account's About you (CONTEXT.md), read at claim time.
     about_you: str | None = None
+    # The Material digest (CONTEXT.md), read off the stored snapshot.
+    material: OutlineMaterial | None = None
 
 
 class GenerationOrchestrator:
@@ -407,8 +415,13 @@ class GenerationOrchestrator:
         model_outline: str | None = None,
         model_lesson: str | None = None,
         source_path_id: uuid.UUID | None = None,
+        material: MaterialSnapshot | None = None,
     ) -> Path:
         """Insert the path (``pending``), spawn the outline task, return the row.
+
+        ``material`` is an already-read Material snapshot (CONTEXT.md). It is
+        stored in the same transaction as the path, so a path built from
+        Material never exists without its snapshot.
 
         The caller (AL-050) turns the returned row into a ``202 {id}`` and
         returns immediately while the outline generates in the background. The
@@ -444,7 +457,10 @@ class GenerationOrchestrator:
                 model_outline=model_outline,
                 model_lesson=model_lesson,
                 source_path_id=source_path_id,
+                material_mode=material.mode.value if material is not None else None,
             )
+            if material is not None:
+                await MaterialRepository(session).add_snapshot(path.id, material.items)
             await session.commit()
             path_id = path.id
 
@@ -535,7 +551,11 @@ class GenerationOrchestrator:
         fence = claim.fence
         account_id = claim.account_id
         agent = build_outline_agent()
-        deps = OutlineDeps(level=AGENT_LEVEL[claim.level], caps=self._outline_caps)
+        deps = OutlineDeps(
+            level=AGENT_LEVEL[claim.level],
+            caps=self._outline_caps,
+            material=claim.material,
+        )
         model = self._resolve_model(
             claim.model_outline
             if claim.model_outline is not None
@@ -559,6 +579,7 @@ class GenerationOrchestrator:
                         claim.guidance,
                         documents=documents,
                         about_you=claim.about_you,
+                        material=claim.material,
                     ),
                     deps=deps,
                     model=model,
@@ -662,6 +683,12 @@ class GenerationOrchestrator:
             # emissions carry ``account_id`` without a second read.
             account_id = path.user_id
             about_you = await UserRepository(session).about_you(path.user_id)
+            material = None
+            if path.material_mode is not None:
+                material = outline_material(
+                    path.material_mode,
+                    await MaterialRepository(session).sections(path_id),
+                )
             await session.commit()
         if fence is None:
             return None
@@ -674,6 +701,7 @@ class GenerationOrchestrator:
             account_id=account_id,
             search_outline=search_outline,
             about_you=about_you,
+            material=material,
         )
 
     @staticmethod
@@ -739,13 +767,17 @@ class GenerationOrchestrator:
                 )
                 for lesson_index, lesson in enumerate(unit.lessons, start=1):
                     position_in_path += 1
-                    await lessons_repo.create(
+                    lesson_row = await lessons_repo.create(
                         unit_id=unit_row.id,
                         path_id=path_id,
                         position_in_path=position_in_path,
                         position_in_unit=lesson_index,
                         title=lesson.title,
                     )
+                    if lesson.material_sections:
+                        lesson_row.material_sections = sorted(
+                            set(lesson.material_sections)
+                        )
             await session.commit()
             return True
 
@@ -896,6 +928,7 @@ class GenerationOrchestrator:
             revision=context.revision,
             teaching_style=context.teaching_style,
             about_you=context.about_you,
+            material=context.material,
         )
         model = self._resolve_model(
             context.model_lesson
@@ -1110,6 +1143,14 @@ class GenerationOrchestrator:
             session, path_id, lesson.position_in_path
         )
         revision = await self._load_revision(session, path_id, lesson)
+        material = None
+        if path.material_mode is not None and lesson.material_sections:
+            material = lesson_material(
+                path.material_mode,
+                await MaterialRepository(session).sections(
+                    path_id, lesson.material_sections
+                ),
+            )
         return _LessonContext(
             account_id=path.user_id,
             topic=path.topic,
@@ -1124,6 +1165,7 @@ class GenerationOrchestrator:
             revision=revision,
             teaching_style=path.teaching_style,
             about_you=await UserRepository(session).about_you(path.user_id),
+            material=material,
         )
 
     async def _load_revision(

@@ -87,6 +87,8 @@ function detail(
     id: "p1",
     topic: "TypeScript",
     title: "TypeScript",
+    material_mode: null,
+    materials: [],
     guidance: null,
     teaching_style: null,
     search_outline: false,

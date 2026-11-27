@@ -79,9 +79,14 @@ PUBLIC_PROFILE_COLUMNS = {
     "paths": {"shared", "source_path_id"},
     "beats": {"shared", "source_beat_id"},
 }
+# 0026_linked_material: two columns on tracked tables, plus two new tables.
+MATERIAL_COLUMNS = {"paths": {"material_mode"}, "lessons": {"material_sections"}}
+MATERIAL_TABLES = {"materials", "material_sections"}
 LATER_COLUMNS: dict[str, set[str]] = {
     "paths": {"teaching_style", "search_outline", "search_lessons"}
-    | PUBLIC_PROFILE_COLUMNS["paths"],
+    | PUBLIC_PROFILE_COLUMNS["paths"]
+    | MATERIAL_COLUMNS["paths"],
+    "lessons": MATERIAL_COLUMNS["lessons"],
     # 0017, 0023, 0025
     "users": {"time_zone", "time_zone_seen_at", "about_you"}
     | PUBLIC_PROFILE_COLUMNS["users"],
@@ -494,7 +499,7 @@ def test_earlier_tables_keep_their_columns_through_the_shaping_reversal(
     added = {
         "conversations": {"kind", "lesson_id"},
         "messages": {"proposal"},
-        "lessons": {"revision_instruction"},
+        "lessons": {"revision_instruction", *MATERIAL_COLUMNS["lessons"]},
         "paths": {
             "title",
             "guidance",
@@ -502,6 +507,7 @@ def test_earlier_tables_keep_their_columns_through_the_shaping_reversal(
             "search_outline",
             "search_lessons",
             *PUBLIC_PROFILE_COLUMNS["paths"],
+            *MATERIAL_COLUMNS["paths"],
         },
         "users": {
             "time_zone",
@@ -969,7 +975,9 @@ def test_the_streak_index_downgrades_and_reapplies_cleanly(
     after_downgrade = asyncio.run(_indexes(database_url, "lessons"))
     assert STREAK_INDEX_NAME not in after_downgrade
     assert after_downgrade.keys() | {STREAK_INDEX_NAME} == at_head.keys()
-    assert asyncio.run(_columns(database_url, "lessons")) == columns
+    assert asyncio.run(_columns(database_url, "lessons")) == (
+        columns - MATERIAL_COLUMNS["lessons"]
+    )
 
     run_alembic(database_url, STREAK_INDEX_HEAD)
 
@@ -2000,10 +2008,12 @@ def test_lesson_visuals_migration_downgrades_and_reapplies_cleanly(
     at_head = asyncio.run(_tables(database_url))
     assert "lesson_visuals" in at_head
     run_alembic(database_url, "0023_learner_profile", downgrade=True)
-    assert asyncio.run(_tables(database_url)) == at_head - {"lesson_visuals"}
+    assert asyncio.run(_tables(database_url)) == (
+        at_head - {"lesson_visuals"} - MATERIAL_TABLES
+    )
     assert "lesson_visual_kind" not in asyncio.run(_enum_types(database_url))
     run_alembic(database_url, "0024_lesson_visuals")
-    assert asyncio.run(_tables(database_url)) == at_head
+    assert asyncio.run(_tables(database_url)) == at_head - MATERIAL_TABLES
     assert "lesson_visual_kind" in asyncio.run(_enum_types(database_url))
 
 
@@ -2021,8 +2031,30 @@ def test_public_profiles_migration_downgrades_and_reapplies_cleanly(
 
     run_alembic(database_url, "0024_lesson_visuals", downgrade=True)
     for table, columns in PUBLIC_PROFILE_COLUMNS.items():
-        assert asyncio.run(_columns(database_url, table)) == at_head[table] - columns
+        assert asyncio.run(_columns(database_url, table)) == (
+            at_head[table] - columns - MATERIAL_COLUMNS.get(table, set())
+        )
 
     run_alembic(database_url, "head")
     for table in PUBLIC_PROFILE_COLUMNS:
         assert asyncio.run(_columns(database_url, table)) == at_head[table]
+
+
+def test_linked_material_migration_downgrades_and_reapplies_cleanly(
+    isolated_database: str,
+) -> None:
+    """0026 adds its two tables and two columns, and removes exactly them."""
+    database_url = isolated_database
+    tables = asyncio.run(_tables(database_url))
+    columns = {t: asyncio.run(_columns(database_url, t)) for t in MATERIAL_COLUMNS}
+    assert tables >= MATERIAL_TABLES
+
+    run_alembic(database_url, "0025_public_profiles", downgrade=True)
+    assert asyncio.run(_tables(database_url)) == tables - MATERIAL_TABLES
+    for table, added in MATERIAL_COLUMNS.items():
+        assert asyncio.run(_columns(database_url, table)) == columns[table] - added
+
+    run_alembic(database_url, "head")
+    assert asyncio.run(_tables(database_url)) == tables
+    for table in MATERIAL_COLUMNS:
+        assert asyncio.run(_columns(database_url, table)) == columns[table]

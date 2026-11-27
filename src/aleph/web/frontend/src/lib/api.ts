@@ -302,6 +302,41 @@ export interface PathDetail {
   shared: boolean;
   /** "Started from {name}'s path": present only while the source is public. */
   source: PathSource | null;
+  /** CONTEXT.md: *Material mode*; null for a path built without Material. */
+  material_mode: MaterialMode | null;
+  /** The path's Material items in order; empty without Material. */
+  materials: PathMaterial[];
+}
+
+// --- Linked Material (docs/tdds/linked-material.md) -------------------------
+
+/** `article`/`docs` are links Aleph reads; `text`/`ai_summary` are pasted. */
+export type MaterialKind = "article" | "docs" | "text" | "ai_summary";
+export type MaterialMode = "teach" | "start";
+/** Why `POST /paths` could not read one item (`422 material_unreadable`). */
+export type MaterialFailureReason = "unreadable" | "empty" | "paste_transcript" | "too_large";
+
+export interface MaterialInput {
+  kind: MaterialKind;
+  url?: string;
+  title?: string;
+  text?: string;
+}
+
+export interface PathMaterial {
+  kind: MaterialKind;
+  title: string;
+  url: string | null;
+}
+
+/** The per-item reasons of a `422 material_unreadable`, or null for any other error. */
+export function materialFailures(
+  error: unknown,
+): { index: number; reason: MaterialFailureReason }[] | null {
+  if (!(error instanceof ApiError) || error.status !== 422) return null;
+  const details = error.details as { reason?: string; items?: unknown } | undefined;
+  if (details?.reason !== "material_unreadable" || !Array.isArray(details.items)) return null;
+  return details.items as { index: number; reason: MaterialFailureReason }[];
 }
 
 /** The credit a Copy shows (CONTEXT.md: *Copy*; docs/api.md). */
@@ -369,6 +404,9 @@ export interface PathCreated {
 export interface CreatePathInput {
   topic: string;
   level: Level;
+  /** Linked Material and its mode; sent together or not at all. */
+  material?: MaterialInput[];
+  material_mode?: MaterialMode;
   /** Independent web search choices; omitted values default to false. */
   search_outline?: boolean;
   search_lessons?: boolean;

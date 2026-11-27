@@ -26,12 +26,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, get_args
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from pydantic_ai import Agent, ModelRetry, RunContext
 
 from aleph.agents._about_you import about_you_block
 from aleph.agents._delimiters import neutralize_delimiters
 from aleph.agents._evidence import web_evidence_block
+from aleph.agents._material import (
+    MODE_OUTLINE_RULES,
+    OutlineMaterial,
+    material_outline_block,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -41,9 +46,15 @@ if TYPE_CHECKING:
 
 class LessonOutline(BaseModel):
     """A single lesson's slot in the outline: a title only (content is generated
-    on demand later, per lesson, by the lesson agent)."""
+    on demand later, per lesson, by the lesson agent).
+
+    ``material_sections`` is this lesson's part of the *Grounding plan*
+    (CONTEXT.md): the ids of the Material sections it teaches from. Empty for
+    a path without Material, and for Start from this lessons beyond it.
+    """
 
     title: str
+    material_sections: list[int] = Field(default_factory=list)
 
 
 class UnitOutline(BaseModel):
@@ -166,6 +177,8 @@ class OutlineDeps:
     # A frozen, immutable default instance is safe to share across instances
     # (ponytail-2): OutlineCaps is itself frozen, so no mutable-default hazard.
     caps: OutlineCaps = OutlineCaps()
+    # The Material digest and mode, or ``None`` for an ordinary path.
+    material: OutlineMaterial | None = None
 
     def __post_init__(self) -> None:
         """Reject an unknown ``level`` at construction (thermo-1).
@@ -202,6 +215,7 @@ def build_outline_prompt(
     *,
     documents: Sequence[RetrievedDocument] = (),
     about_you: str | None = None,
+    material: OutlineMaterial | None = None,
 ) -> str:
     """Build the outline agent's user prompt from ``topic`` and optional Guidance.
 
@@ -243,6 +257,10 @@ def build_outline_prompt(
         if about:
             sections.append(about)
         prompt = "\n\n".join(sections)
+    if material is not None:
+        if prompt == topic:
+            prompt = f"Topic: {topic}"
+        prompt += "\n\n" + material_outline_block(material)
     if documents:
         prompt += "\n\n" + web_evidence_block(documents)
     return prompt
@@ -315,7 +333,11 @@ alongside a refusal. If in doubt, teach.\
 # --- output validators (layer 2 — ModelRetry, habagou's pattern) ---------------
 
 
-def validate_outline(caps: OutlineCaps, result: OutlineResult) -> OutlineResult:
+def validate_outline(
+    caps: OutlineCaps,
+    result: OutlineResult,
+    material: OutlineMaterial | None = None,
+) -> OutlineResult:
     """Enforce the §5.1 outline invariants, raising ``ModelRetry`` on violation.
 
     Checks, in order: a refusal carries a non-empty message; the path has at
@@ -395,7 +417,39 @@ def validate_outline(caps: OutlineCaps, result: OutlineResult) -> OutlineResult:
             f"{sorted(set(duplicates))}. Rename or remove the duplicates."
         )
 
+    _validate_grounding(result, material)
     return result
+
+
+def _validate_grounding(outline: PathOutline, material: OutlineMaterial | None) -> None:
+    """The Grounding plan names only this path's sections (Constitution §1).
+
+    Model output cannot point a lesson at a section the path does not own, so
+    every id must be in the digest. Without Material no lesson may name any.
+    In Teach this every lesson must name at least one: a lesson grounded in
+    nothing would quietly become an ordinary generated lesson (§4).
+    """
+    known = material.section_ids if material is not None else frozenset()
+    lessons = [lesson for unit in outline.units for lesson in unit.lessons]
+    unknown = sorted(
+        {sid for lesson in lessons for sid in lesson.material_sections} - known
+    )
+    if unknown:
+        raise ModelRetry(
+            f"material_sections names ids that are not in the Material: {unknown}. "
+            "Use only the section ids listed in the <material> block."
+            if material is not None
+            else "This path has no Material; leave every material_sections empty."
+        )
+    if material is not None and material.mode == "teach":
+        ungrounded = [
+            lesson.title for lesson in lessons if not lesson.material_sections
+        ]
+        if ungrounded:
+            raise ModelRetry(
+                "In Teach this mode every lesson must name the Material sections "
+                f"it teaches from; these name none: {ungrounded}."
+            )
 
 
 # Retry budget (Agent(retries=...)): pydantic-ai applies it as an independent cap
@@ -430,7 +484,22 @@ def build_outline_agent() -> Agent[OutlineDeps, OutlineResult]:
         text) means the same agent serves every level and every cap set.
         """
         caps = ctx.deps.caps
-        return (
+        material = ctx.deps.material
+        if material is not None and material.mode == "teach":
+            return (
+                f"Learner level: {ctx.deps.level}. "
+                f"{_LEVEL_GUIDANCE[ctx.deps.level]}\n\n"
+                f"{MODE_OUTLINE_RULES['teach']}\n\n"
+                "Size the path to the Material, not to a typical path: about "
+                f"{material.target_lessons} lessons in about "
+                f"{material.target_units} unit(s), with as few as 1 lesson in a "
+                "unit. Hard limits you must not exceed: "
+                f"{caps.max_units} units and {caps.max_lessons_per_path} lessons."
+            )
+        mode_rules = (
+            f"{MODE_OUTLINE_RULES['start']}\n\n" if material is not None else ""
+        )
+        return mode_rules + (
             f"Learner level: {ctx.deps.level}. {_LEVEL_GUIDANCE[ctx.deps.level]}\n\n"
             f"Size the path to the topic and to any guidance the learner gave: "
             f"about {caps.units_target} units is typical, with roughly "
@@ -443,6 +512,6 @@ def build_outline_agent() -> Agent[OutlineDeps, OutlineResult]:
 
     @agent.output_validator
     def _validate(ctx: RunContext[OutlineDeps], result: OutlineResult) -> OutlineResult:
-        return validate_outline(ctx.deps.caps, result)
+        return validate_outline(ctx.deps.caps, result, ctx.deps.material)
 
     return agent

@@ -163,6 +163,27 @@ server first to preserve that affordance during a mixed-version rollout.
 | `POST` | `/api/v1/paths/{id}/retry` | — | `202 {id}` | Retry a `failed` outline. Rate-limited by its own daily cap (`check_outline_generation`, reusing `RATE_LIMIT_PATHS_PER_DAY`; admins exempt) → `429 rate_limited` at the cap. **A retry on a terminal path (`ready`/`refused`) or a freshly `generating` one still returns `202` but is a silent no-op** — the claim matches nothing, so nothing is re-run (a refusal is terminal; the learner starts a new topic, §5.5). |
 | `DELETE` | `/api/v1/paths/{id}` | — | `204` | Hard-delete; `ON DELETE CASCADE` tears down units, lessons, quick checks, and attempts. Not undoable (UI confirms); doubles as reset. |
 
+**Linked Material** (docs/tdds/linked-material.md, behind the `material`
+flag). `POST /api/v1/paths` also accepts `material` (up to 5 items of
+`{kind, url?, title?, text?}`) and `material_mode` (`teach` or `start`), which
+are sent together or not at all (`422` otherwise). `kind` is `article` or `docs`
+for a link (`url` required, no `text`; `docs` also reads up to 30 pages under
+the link) and `text` or `ai_summary` for a paste (`text` required, at most
+200,000 characters). The route reads the Material **before** creating the path:
+
+- `403 forbidden` when the `material` flag is off for the caller.
+- `422 validation_error` with `details: {reason: "material_unreadable", items:
+  [{index, reason}]}` when any item cannot be read, where `reason` is
+  `unreadable`, `empty` (a paywall or a page with almost no text),
+  `paste_transcript` (a video or podcast link; paste the transcript), or
+  `too_large` (more than 400,000 characters across the path). No path is
+  created.
+- `503 service_unavailable` when the reader (Exa) is down.
+
+On success the snapshot is stored with the path in one transaction.
+`PathDetailResponse` gains `material_mode` (or `null`) and `materials:
+[{kind, title, url}]`; the stored text is never returned.
+
 **Optional web search.** `POST /api/v1/paths` also accepts `search_outline`
 and `search_lessons`, independent Booleans defaulting to `false`. Both are
 persisted on the path and returned as Booleans in `PathDetailResponse` (including

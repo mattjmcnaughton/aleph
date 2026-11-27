@@ -125,6 +125,9 @@ class FeatureFlag(StrEnum):
     PUBLIC_PROFILES = "public_profiles"
     # The content MCP server (docs/mcp.md): ``/mcp`` 404s when off. Ships dark.
     MCP = "mcp"
+    # Linked Material (docs/prds/linked-material.md): building a path from
+    # links or pasted text. Dark: off, on for admins.
+    MATERIAL = "material"
 
 
 # Code defaults per flag. Every FeatureFlag member gets an entry here; a flag
@@ -162,6 +165,7 @@ FLAG_DEFAULTS: dict[FeatureFlag, bool] = {
     FeatureFlag.PUBLIC_PROFILES: True,
     # Off: dark until launched; admins dogfood it via ADMIN_DEFAULT_FLAGS.
     FeatureFlag.MCP: False,
+    FeatureFlag.MATERIAL: False,
 }
 
 
@@ -190,6 +194,7 @@ ADMIN_DEFAULT_FLAGS: frozenset[FeatureFlag] = frozenset(
         FeatureFlag.FLOW,
         FeatureFlag.LEARNING_SUMMARY,
         FeatureFlag.MCP,
+        FeatureFlag.MATERIAL,
     }
 )
 

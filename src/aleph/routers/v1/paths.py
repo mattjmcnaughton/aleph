@@ -41,6 +41,7 @@ from aleph.db import get_session
 from aleph.dependencies import get_current_user, require_same_origin
 from aleph.domains.progression import resume_path
 from aleph.dtos.account import SharedDTO
+from aleph.dtos.material import MaterialDTO
 from aleph.dtos.paths import (
     CreatePathRequest,
     CreatePathResponse,
@@ -63,10 +64,20 @@ from aleph.repositories import (
     LessonRepository,
     PathRepository,
 )
+from aleph.services.feature_flags import FeatureFlag, FeatureFlagService
 from aleph.services.generation import generation_orchestrator
+from aleph.services.material import (
+    MaterialItem,
+    MaterialSnapshot,
+    MaterialUnreadableError,
+    default_reader,
+    failure_details,
+    read_snapshot,
+)
 from aleph.services.paths_read import load_path_detail
 from aleph.services.public_profiles import PublicProfileService
 from aleph.services.rate_limit import build_daily_rate_limiter
+from aleph.services.retrieval import RetrievalUnavailableError
 
 if TYPE_CHECKING:
     from aleph.domains.public_profiles import Credit
@@ -226,6 +237,7 @@ async def create_path(
     # Credit only (Public profiles TDD D7): kept when the source is public now,
     # otherwise dropped and the create goes ahead exactly as without it.
     credit = await PublicProfileService(session).path_credit(body.source_path_id)
+    material = await _read_material(body, user, session)
     path = await generation_orchestrator.create_path(
         user_id=user.id,
         topic=body.topic,
@@ -237,8 +249,41 @@ async def create_path(
         model_outline=overrides.model_outline,
         model_lesson=overrides.model_lesson,
         source_path_id=credit.item_id if credit is not None else None,
+        material=material,
     )
     return CreatePathResponse(id=path.id)
+
+
+async def _read_material(
+    body: CreatePathRequest, user: User, session: AsyncSession
+) -> MaterialSnapshot | None:
+    """Read the request's Material before any path exists (CONTEXT.md).
+
+    ``403`` when the ``material`` flag is off for this learner; ``422`` with a
+    coded reason per item when any item cannot be read, so the client can mark
+    the item; ``503`` when the reader itself is unavailable, which is an outage
+    and never an empty snapshot (Constitution §4).
+    """
+    if not body.material or body.material_mode is None:
+        return None
+    flags = await FeatureFlagService(session).resolve_for_user(user)
+    if not flags.get(FeatureFlag.MATERIAL, False):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail="material is not enabled")
+    items = [
+        MaterialItem(kind=item.kind, url=item.url, title=item.title, text=item.text)
+        for item in body.material
+    ]
+    try:
+        return await read_snapshot(items, body.material_mode, default_reader())
+    except MaterialUnreadableError as exc:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY, detail=failure_details(exc.failures)
+        ) from exc
+    except RetrievalUnavailableError as exc:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Material can't be read right now. Try again in a few minutes.",
+        ) from exc
 
 
 @router.get("/paths")
@@ -352,6 +397,11 @@ def path_detail_response(
             if source is not None
             else None
         ),
+        material_mode=path.material_mode,
+        materials=[
+            MaterialDTO(kind=item.kind, title=item.title, url=item.url)
+            for item in view.materials
+        ],
     )
 
 

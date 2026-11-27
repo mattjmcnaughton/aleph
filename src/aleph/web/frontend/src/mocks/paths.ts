@@ -601,6 +601,8 @@ function detailFor(path: StoredPath): PathDetail {
     units,
     shared: path.shared ?? false,
     source: path.source ?? null,
+    material_mode: null,
+    materials: [],
   };
 }
 

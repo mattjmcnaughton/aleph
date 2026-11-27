@@ -14,8 +14,13 @@ import {
   pathQueryOptions,
   publicPathQueryOptions,
   isNotFound,
+  type MaterialMode,
+  materialFailures,
   retryPath,
 } from "../lib/api";
+import { useFeatureFlag } from "../lib/feature-flags";
+import { MaterialField } from "../components/material-field";
+import { type MaterialDraft, toInput } from "../components/material-items";
 import { fillEmptyFields, parseFrom } from "../lib/public-profiles";
 import { AboutYouApplies } from "../components/about-you-applies";
 import { ModelPicker } from "../components/model-picker";
@@ -101,6 +106,11 @@ function NewPath() {
   // `buildCreatePathInput` drops the key rather than sending an empty id.
   const [modelOutline, setModelOutline] = useState(MODEL_SLOT_DEFAULT);
   const [modelLesson, setModelLesson] = useState(MODEL_SLOT_DEFAULT);
+  // Linked Material (CONTEXT.md), behind the dark `material` flag. Read by the
+  // server at create; nothing is fetched while the learner edits.
+  const materialEnabled = useFeatureFlag("material");
+  const [material, setMaterial] = useState<MaterialDraft[]>([]);
+  const [materialMode, setMaterialMode] = useState<MaterialMode>("teach");
 
   // A Copy (CONTEXT.md): fetch the Shared path's creation inputs once, fill
   // only the fields still empty, and send its id for credit. Never submits on
@@ -233,6 +243,8 @@ function NewPath() {
         modelOutline,
         modelLesson,
         sourcePathId: source?.id,
+        material: materialEnabled ? material.map(toInput) : undefined,
+        materialMode,
       }),
     );
   }
@@ -249,11 +261,18 @@ function NewPath() {
   const sentModelOverride =
     createMutation.variables !== undefined &&
     ("model_outline" in createMutation.variables || "model_lesson" in createMutation.variables);
+  // A Material read failure is a 422 too, but it names its items: claim it for
+  // the Material field before the picker can, and show it on those items.
+  const failedMaterial = createMutation.isError ? materialFailures(createMutation.error) : null;
   const modelRejected =
-    createMutation.isError && sentModelOverride && isValidationError(createMutation.error);
+    createMutation.isError &&
+    failedMaterial === null &&
+    sentModelOverride &&
+    isValidationError(createMutation.error);
   // Everything else — including a 422 the picker did not cause — falls through
   // to the generic surface, so no failed create is ever silent.
-  const createFailed = createMutation.isError && !rateLimited && !modelRejected;
+  const createFailed =
+    createMutation.isError && !rateLimited && !modelRejected && failedMaterial === null;
 
   return (
     <main className="page">
@@ -328,6 +347,26 @@ function NewPath() {
           onSearchLessonsChange={setSearchLessons}
           onSubmit={onSubmit}
           submitting={createMutation.isPending}
+          submittingLabel={
+            materialEnabled && material.length > 0 ? "Reading your Material…" : undefined
+          }
+          materialField={
+            materialEnabled ? (
+              <MaterialField
+                items={material}
+                onItemsChange={(items) => {
+                  setMaterial(items);
+                  // The reasons are by index; any edit makes them stale.
+                  if (failedMaterial) createMutation.reset();
+                }}
+                mode={materialMode}
+                onModeChange={setMaterialMode}
+                failures={Object.fromEntries(
+                  (failedMaterial ?? []).map((failure) => [failure.index, failure.reason]),
+                )}
+              />
+            ) : null
+          }
           rateLimited={rateLimited}
           errored={createFailed}
           // Assembled here rather than relayed as eight props the form only
@@ -395,6 +434,10 @@ interface FormProps {
   onSearchLessonsChange: (value: boolean) => void;
   onSubmit: (event: React.FormEvent) => void;
   submitting: boolean;
+  /** Replaces "Starting…" while the server reads Material. */
+  submittingLabel?: string;
+  /** The Material field, when the `material` flag is on; placed under the topic. */
+  materialField?: React.ReactNode;
   rateLimited: boolean;
   errored: boolean;
   /**
@@ -421,6 +464,8 @@ function OnboardingForm({
   onSearchLessonsChange,
   onSubmit,
   submitting,
+  submittingLabel,
+  materialField,
   rateLimited,
   errored,
   modelPicker,
@@ -465,6 +510,8 @@ function OnboardingForm({
       />
 
       <AboutYouApplies />
+
+      {materialField}
 
       <div className="mt-6">
         <label htmlFor="onboarding-guidance" className="text-sm font-medium text-porcelain">
@@ -538,7 +585,7 @@ function OnboardingForm({
         disabled={!canSubmitTopic(topic) || submitting}
         className="mt-8 inline-flex w-full items-center justify-center rounded-md bg-teal px-4 py-3 text-sm font-semibold text-night transition-colors hover:bg-teal-bright disabled:cursor-not-allowed disabled:opacity-50"
       >
-        {submitting ? "Starting…" : "Build my path"}
+        {submitting ? (submittingLabel ?? "Starting…") : "Build my path"}
       </button>
     </form>
   );
