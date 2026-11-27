@@ -91,6 +91,7 @@ LATER_COLUMNS: dict[str, set[str]] = {
     "users": {"time_zone", "time_zone_seen_at", "about_you"}
     | PUBLIC_PROFILE_COLUMNS["users"],
     "conversations": {"lesson_id"},  # 0021_lesson_conversations
+    "quick_checks": {"grading_key"},  # 0027_quick_check_explanations
 }
 
 
@@ -500,6 +501,7 @@ def test_earlier_tables_keep_their_columns_through_the_shaping_reversal(
         "conversations": {"kind", "lesson_id"},
         "messages": {"proposal"},
         "lessons": {"revision_instruction", *MATERIAL_COLUMNS["lessons"]},
+        "quick_checks": {"grading_key"},
         "paths": {
             "title",
             "guidance",
@@ -2008,12 +2010,16 @@ def test_lesson_visuals_migration_downgrades_and_reapplies_cleanly(
     at_head = asyncio.run(_tables(database_url))
     assert "lesson_visuals" in at_head
     run_alembic(database_url, "0023_learner_profile", downgrade=True)
+    # ``reasonings`` is 0027's and the Material tables are 0026's, so all of
+    # them are gone below 0024 too.
     assert asyncio.run(_tables(database_url)) == (
-        at_head - {"lesson_visuals"} - MATERIAL_TABLES
+        at_head - {"lesson_visuals", "reasonings"} - MATERIAL_TABLES
     )
     assert "lesson_visual_kind" not in asyncio.run(_enum_types(database_url))
     run_alembic(database_url, "0024_lesson_visuals")
-    assert asyncio.run(_tables(database_url)) == at_head - MATERIAL_TABLES
+    assert asyncio.run(_tables(database_url)) == (
+        at_head - {"reasonings"} - MATERIAL_TABLES
+    )
     assert "lesson_visual_kind" in asyncio.run(_enum_types(database_url))
 
 
@@ -2050,7 +2056,10 @@ def test_linked_material_migration_downgrades_and_reapplies_cleanly(
     assert tables >= MATERIAL_TABLES
 
     run_alembic(database_url, "0025_public_profiles", downgrade=True)
-    assert asyncio.run(_tables(database_url)) == tables - MATERIAL_TABLES
+    # 0027 sits above, so its ``reasonings`` table goes too.
+    assert asyncio.run(_tables(database_url)) == (
+        tables - MATERIAL_TABLES - {"reasonings"}
+    )
     for table, added in MATERIAL_COLUMNS.items():
         assert asyncio.run(_columns(database_url, table)) == columns[table] - added
 
@@ -2058,3 +2067,24 @@ def test_linked_material_migration_downgrades_and_reapplies_cleanly(
     assert asyncio.run(_tables(database_url)) == tables
     for table in MATERIAL_COLUMNS:
         assert asyncio.run(_columns(database_url, table)) == columns[table]
+
+
+def test_quick_check_explanations_migration_downgrades_and_reapplies_cleanly(
+    isolated_database: str,
+) -> None:
+    """0027 adds ``quick_checks.grading_key`` and ``reasonings``, nothing else."""
+    database_url = isolated_database
+    tables = asyncio.run(_tables(database_url))
+    columns = asyncio.run(_columns(database_url, "quick_checks"))
+    assert "reasonings" in tables
+    assert "grading_key" in columns
+
+    run_alembic(database_url, "0026_linked_material", downgrade=True)
+    assert asyncio.run(_tables(database_url)) == tables - {"reasonings"}
+    assert asyncio.run(_columns(database_url, "quick_checks")) == columns - {
+        "grading_key"
+    }
+
+    run_alembic(database_url, "head")
+    assert asyncio.run(_tables(database_url)) == tables
+    assert asyncio.run(_columns(database_url, "quick_checks")) == columns

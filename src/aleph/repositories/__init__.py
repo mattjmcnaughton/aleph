@@ -35,6 +35,7 @@ from aleph.repositories.lessons import (
 )
 from aleph.repositories.paths import PathRepository
 from aleph.repositories.quick_checks import QuickCheckRepository
+from aleph.repositories.reasonings import ReasoningRepository
 from aleph.repositories.units import UnitRepository
 from aleph.repositories.usage import UsageRepository
 from aleph.repositories.users import UserRepository
@@ -61,6 +62,7 @@ __all__ = [
     "PathGenerationProgress",
     "PathRepository",
     "QuickCheckRepository",
+    "ReasoningRepository",
     "ThreadMessage",
     "UnitRepository",
     "UsageRepository",

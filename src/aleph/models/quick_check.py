@@ -40,6 +40,13 @@ class QuickCheck(Base, UUIDAuditMixin):
     options: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
     correct_index: Mapped[int] = mapped_column(Integer, nullable=False)
     explanation: Mapped[str] = mapped_column(Text, nullable=False)
+    # The **Grading key** (CONTEXT.md): ``{"points": [...], "misconceptions":
+    # [...]}``. Null on checks generated before it existed (and on a check an
+    # Undo restored from an older snapshot); such a check asks for no Reasoning.
+    # Hidden until the learner's Attempt, like ``correct_index``.
+    grading_key: Mapped[dict[str, list[str]] | None] = mapped_column(
+        JSONB, nullable=True
+    )
 
     lesson: Mapped[Lesson] = relationship(back_populates="quick_check")
     attempts: Mapped[list[Attempt]] = relationship(

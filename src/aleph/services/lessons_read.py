@@ -16,6 +16,7 @@ content view — one place derives "where this lesson sits on the learner's path
 
 from __future__ import annotations
 
+import datetime
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -32,6 +33,12 @@ from aleph.repositories import (
     LessonRepository,
     LessonVisualRepository,
     QuickCheckRepository,
+    ReasoningRepository,
+)
+from aleph.services.reasoning import (
+    ReasoningView,
+    asks_reasoning,
+    build_reasoning_view,
 )
 
 if TYPE_CHECKING:
@@ -39,26 +46,36 @@ if TYPE_CHECKING:
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from aleph.models import Lesson, LessonVisual
+    from aleph.models import Attempt, Lesson, LessonVisual, QuickCheck
     from aleph.services.generation import GenerationOrchestrator
 
 
 @dataclass(frozen=True)
 class AttemptResultView:
-    """The revealed Outcome of a recorded Attempt (post-Attempt only)."""
+    """The revealed Outcome of a recorded Attempt (post-Attempt only).
+
+    ``reasoning`` carries the Grading key too, so like ``correct_index`` it
+    exists only here, after the Attempt.
+    """
 
     selected_index: int
     outcome: Outcome
     correct_index: int
     explanation: str
+    reasoning: ReasoningView | None = None
 
 
 @dataclass(frozen=True)
 class QuickCheckView:
-    """The Quick check as shown pre-Attempt: stem + options, no keyed answer (W6)."""
+    """The Quick check as shown pre-Attempt: stem + options, no keyed answer (W6).
+
+    ``asks_reasoning`` says only *whether* a Reasoning is asked for; the
+    Grading key itself never appears before the Attempt.
+    """
 
     stem: str
     options: list[str]
+    asks_reasoning: bool = False
 
 
 @dataclass(frozen=True)
@@ -116,6 +133,7 @@ async def load_lesson_detail(
     *,
     lesson: Lesson,
     user_id: uuid.UUID,
+    reasoning_enabled: bool = False,
 ) -> LessonDetailView | None:
     """Poll + assemble the detail view for an already-owned lesson, or ``None``.
 
@@ -163,24 +181,16 @@ async def load_lesson_detail(
                 await LessonVisualRepository(session).list_for_lesson(lesson.id)
             )
             quick_check_view = QuickCheckView(
-                stem=quick_check.stem, options=list(quick_check.options)
+                stem=quick_check.stem,
+                options=list(quick_check.options),
+                asks_reasoning=asks_reasoning(quick_check, enabled=reasoning_enabled),
             )
             attempt = await AttemptRepository(session).get(
                 quick_check_id=quick_check.id, user_id=user_id
             )
             if attempt is not None:
-                # Re-derive the Outcome from the recorded (first-wins) selected
-                # index — never the stored ``is_correct`` bool, a write-time cache
-                # that could drift from the keyed answer (AL-012/domains/grading).
-                outcome = grade(
-                    GradingAttempt(selected_index=attempt.selected_index),
-                    correct_index=quick_check.correct_index,
-                )
-                attempt_view = AttemptResultView(
-                    selected_index=attempt.selected_index,
-                    outcome=outcome,
-                    correct_index=quick_check.correct_index,
-                    explanation=quick_check.explanation,
+                attempt_view = await attempt_result_view(
+                    session, quick_check=quick_check, attempt=attempt
                 )
 
     return LessonDetailView(
@@ -192,4 +202,38 @@ async def load_lesson_detail(
         attempt=attempt_view,
         generation_error=lesson.generation_error,
         visuals=visuals,
+    )
+
+
+async def attempt_result_view(
+    session: AsyncSession, *, quick_check: QuickCheck, attempt: Attempt
+) -> AttemptResultView:
+    """The reveal for a recorded Attempt, with its Reasoning when it has one.
+
+    The Outcome is re-derived from the recorded (first-wins) selected index —
+    never the stored ``is_correct`` bool, a write-time cache that could drift
+    from the keyed answer (AL-012/domains/grading). Shared by the lesson
+    detail and the attempt and follow-up routes, so all three reveal the same
+    shape.
+    """
+    outcome = grade(
+        GradingAttempt(selected_index=attempt.selected_index),
+        correct_index=quick_check.correct_index,
+    )
+    reasoning = await ReasoningRepository(session).get_for_attempt(attempt.id)
+    return AttemptResultView(
+        selected_index=attempt.selected_index,
+        outcome=outcome,
+        correct_index=quick_check.correct_index,
+        explanation=quick_check.explanation,
+        reasoning=(
+            build_reasoning_view(
+                reasoning,
+                quick_check,
+                outcome=outcome,
+                now=datetime.datetime.now(datetime.UTC),
+            )
+            if reasoning is not None
+            else None
+        ),
     )

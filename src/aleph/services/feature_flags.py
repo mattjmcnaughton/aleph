@@ -128,6 +128,10 @@ class FeatureFlag(StrEnum):
     # Linked Material (docs/prds/linked-material.md): building a path from
     # links or pasted text. Dark: off, on for admins.
     MATERIAL = "material"
+    # Reasoning on Quick checks (CONTEXT.md: *Reasoning*): asking the learner
+    # why, model-grading it against the Grading key, and the one follow-up.
+    # Ships dark (off, on for admins) until real gradings have been reviewed.
+    EXPLAIN_CHECKS = "explain_checks"
 
 
 # Code defaults per flag. Every FeatureFlag member gets an entry here; a flag
@@ -166,6 +170,8 @@ FLAG_DEFAULTS: dict[FeatureFlag, bool] = {
     # Off: dark until launched; admins dogfood it via ADMIN_DEFAULT_FLAGS.
     FeatureFlag.MCP: False,
     FeatureFlag.MATERIAL: False,
+    # Off: dark until real gradings are reviewed; admins dogfood it.
+    FeatureFlag.EXPLAIN_CHECKS: False,
 }
 
 
@@ -195,6 +201,7 @@ ADMIN_DEFAULT_FLAGS: frozenset[FeatureFlag] = frozenset(
         FeatureFlag.LEARNING_SUMMARY,
         FeatureFlag.MCP,
         FeatureFlag.MATERIAL,
+        FeatureFlag.EXPLAIN_CHECKS,
     }
 )
 

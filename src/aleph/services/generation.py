@@ -1064,6 +1064,11 @@ class GenerationOrchestrator:
                 options=list(ordered.options),
                 correct_index=ordered.correct_index,
                 explanation=quick_check.explanation,
+                grading_key=(
+                    quick_check.grading_key.model_dump()
+                    if quick_check.grading_key is not None
+                    else None
+                ),
             )
             await session.commit()
             return True

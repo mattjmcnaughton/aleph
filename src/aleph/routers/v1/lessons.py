@@ -46,11 +46,14 @@ from aleph.dtos.lessons import (
     AttemptRequest,
     AttemptResultDTO,
     CompleteLessonResponse,
+    FollowUpAnswerRequest,
+    FollowUpDTO,
     GenerateLessonResponse,
     LessonDetailResponse,
     MilestoneDTO,
     PathCompletionDTO,
     QuickCheckDTO,
+    ReasoningDTO,
     VisualDTO,
 )
 from aleph.dtos.progress import TzOffsetMinutes  # noqa: TC001 - FastAPI annotation.
@@ -58,19 +61,31 @@ from aleph.models import (  # noqa: TC001 - FastAPI resolves annotations.
     Lesson,
     User,
 )
-from aleph.repositories import AttemptRepository, LessonRepository, QuickCheckRepository
+from aleph.repositories import (
+    AttemptRepository,
+    LessonRepository,
+    QuickCheckRepository,
+    ReasoningRepository,
+)
+from aleph.services.feature_flags import FeatureFlag, FeatureFlagService
 from aleph.services.generation import generation_orchestrator
 from aleph.services.lesson_completion import complete_with_milestones
 from aleph.services.lessons_read import (
+    attempt_result_view,
     lesson_unlock_state,
     load_lesson_detail,
 )
 from aleph.services.rate_limit import build_daily_rate_limiter
+from aleph.services.reasoning import (
+    asks_reasoning,
+    follow_up_question,
+    reasoning_service,
+)
 
 if TYPE_CHECKING:
     from aleph.domains.milestones import Milestone
     from aleph.repositories.lessons import PathCompletion
-    from aleph.services.lessons_read import LessonDetailView
+    from aleph.services.lessons_read import AttemptResultView, LessonDetailView
 
 router = APIRouter(prefix="/api/v1", tags=["lessons"])
 
@@ -165,24 +180,60 @@ async def get_owned_lesson(
 OwnedLesson = Annotated[Lesson, Depends(get_owned_lesson)]
 
 
+def _attempt_dto(view: AttemptResultView) -> AttemptResultDTO:
+    """Translate a revealed Attempt (and its Reasoning, if any) to the wire."""
+    reasoning = view.reasoning
+    return AttemptResultDTO(
+        selected_index=view.selected_index,
+        outcome=view.outcome,
+        correct_index=view.correct_index,
+        explanation=view.explanation,
+        reasoning=(
+            ReasoningDTO(
+                text=reasoning.text,
+                state=reasoning.state,
+                grade=reasoning.grade,
+                feedback=reasoning.feedback,
+                key_points=list(reasoning.key_points),
+                covered_points=list(reasoning.covered_points),
+                misconceptions_shown=list(reasoning.misconceptions_shown),
+                follow_up=(
+                    FollowUpDTO(
+                        question=reasoning.follow_up.question,
+                        answer=reasoning.follow_up.answer,
+                        state=reasoning.follow_up.state,
+                        grade=reasoning.follow_up.grade,
+                        feedback=reasoning.follow_up.feedback,
+                    )
+                    if reasoning.follow_up is not None
+                    else None
+                ),
+            )
+            if reasoning is not None
+            else None
+        ),
+    )
+
+
+async def _reasoning_enabled(user: User, session: AsyncSession) -> bool:
+    """The ``explain_checks`` flag for this learner (asks for a Reasoning)."""
+    flags = await FeatureFlagService(session).resolve_for_user(user)
+    return flags.get(FeatureFlag.EXPLAIN_CHECKS, False)
+
+
 def _detail_response(view: LessonDetailView) -> LessonDetailResponse:
     """Translate the composed read-seam view to the wire DTO."""
     lesson = view.lesson
     quick_check = (
-        QuickCheckDTO(stem=view.quick_check.stem, options=view.quick_check.options)
+        QuickCheckDTO(
+            stem=view.quick_check.stem,
+            options=view.quick_check.options,
+            asks_reasoning=view.quick_check.asks_reasoning,
+        )
         if view.quick_check is not None
         else None
     )
-    attempt = (
-        AttemptResultDTO(
-            selected_index=view.attempt.selected_index,
-            outcome=view.attempt.outcome,
-            correct_index=view.attempt.correct_index,
-            explanation=view.attempt.explanation,
-        )
-        if view.attempt is not None
-        else None
-    )
+    attempt = _attempt_dto(view.attempt) if view.attempt is not None else None
     return LessonDetailResponse(
         id=lesson.id,
         path_id=lesson.path_id,
@@ -224,7 +275,11 @@ async def get_lesson(
     ``404``.
     """
     view = await load_lesson_detail(
-        session, generation_orchestrator, lesson=lesson, user_id=user.id
+        session,
+        generation_orchestrator,
+        lesson=lesson,
+        user_id=user.id,
+        reasoning_enabled=await _reasoning_enabled(user, session),
     )
     if view is None:
         raise _lesson_not_found()
@@ -312,7 +367,25 @@ async def attempt_lesson(
         selected_index=body.selected_index,
         is_correct=submitted_is_correct,
     )
+    # The Reasoning rides the first Attempt in the same transaction, so a
+    # resubmission can neither add one nor replace it (first wins). Optional on
+    # the wire: a check that asks for none, or an older client, sends nothing.
+    reasoning_text = (body.reasoning or "").strip()
+    reasoning = None
+    if (
+        created
+        and reasoning_text
+        and asks_reasoning(quick_check, enabled=await _reasoning_enabled(user, session))
+    ):
+        reasoning = await ReasoningRepository(session).create(
+            attempt_id=attempt_row.id, text=reasoning_text
+        )
     await session.commit()
+    if reasoning is not None:
+        # After the commit: the Attempt is durable whatever the grader does.
+        await reasoning_service.grade(
+            session, quick_check=quick_check, attempt=attempt_row, reasoning=reasoning
+        )
 
     # Resolve the Attempt of record + its Outcome through the domain's first-wins
     # encoding (``domains/grading.outcome_of_record``, the stated rule). The
@@ -324,7 +397,7 @@ async def attempt_lesson(
     prior = (
         None if created else GradingAttempt(selected_index=attempt_row.selected_index)
     )
-    of_record, outcome = outcome_of_record(
+    _, outcome = outcome_of_record(
         prior=prior, submitted=submitted, correct_index=quick_check.correct_index
     )
     # The Attempt with its Outcome of record (W6, PRD §5.7). This event is the
@@ -342,11 +415,63 @@ async def attempt_lesson(
             position_in_path=lesson.position_in_path,
             outcome=outcome.value,
         )
-    return AttemptResultDTO(
-        selected_index=of_record.selected_index,
-        outcome=outcome,
-        correct_index=quick_check.correct_index,
-        explanation=quick_check.explanation,
+    return _attempt_dto(
+        await attempt_result_view(session, quick_check=quick_check, attempt=attempt_row)
+    )
+
+
+@router.post("/lessons/{lesson_id}/reasoning/follow-up")
+async def answer_reasoning_follow_up(
+    body: FollowUpAnswerRequest,
+    lesson: OwnedLesson,
+    user: CurrentUser,
+    session: Session,
+) -> AttemptResultDTO:
+    """Answer the grader's one follow-up question and return the graded reveal.
+
+    ``404`` when ``explain_checks`` is off for this learner, as for any unknown
+    route. ``403`` on a locked lesson; ``409`` when there is nothing to answer
+    yet — no Attempt, no Reasoning, or a Reasoning whose grading asked no
+    follow-up. Only one answer is accepted: a repeat is ignored and returns the
+    same reveal. Formative only — the Outcome of record and progress are
+    untouched.
+    """
+    if not await _reasoning_enabled(user, session):
+        raise _lesson_not_found()
+    unlock_state = await lesson_unlock_state(
+        session, path_id=lesson.path_id, lesson_id=lesson.id
+    )
+    if unlock_state is None:
+        raise _lesson_not_found()
+    if unlock_state is UnlockState.LOCKED:
+        raise _lesson_locked()
+    quick_check = await QuickCheckRepository(session).get_for_lesson(lesson.id)
+    if quick_check is None:
+        raise _lesson_not_generated()
+    attempt = await AttemptRepository(session).get(
+        quick_check_id=quick_check.id, user_id=user.id
+    )
+    reasoning = (
+        await ReasoningRepository(session).get_for_attempt(attempt.id)
+        if attempt is not None
+        else None
+    )
+    question = follow_up_question(reasoning) if reasoning is not None else None
+    if attempt is None or reasoning is None or not question:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="There is no follow-up question to answer for this lesson.",
+        )
+    await reasoning_service.answer_follow_up(
+        session,
+        quick_check=quick_check,
+        attempt=attempt,
+        reasoning=reasoning,
+        question=question,
+        answer=body.answer.strip(),
+    )
+    return _attempt_dto(
+        await attempt_result_view(session, quick_check=quick_check, attempt=attempt)
     )
 
 

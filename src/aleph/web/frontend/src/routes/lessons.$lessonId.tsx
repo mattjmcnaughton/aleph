@@ -12,6 +12,7 @@ import {
   PROGRESS_QUERY_PREFIX,
   type ProgressSummary,
   type QuickCheck,
+  answerReasoningFollowUp,
   attemptLesson,
   completeLesson,
   generateLesson,
@@ -27,6 +28,7 @@ import { Breadcrumbs } from "../components/breadcrumbs";
 import { FlowAdvanceCard } from "../components/flow/flow-advance-card";
 import { FlowBar } from "../components/flow/flow-bar";
 import { Markdown } from "../components/markdown";
+import { ReasoningField, ReasoningReveal } from "../components/quick-check-reasoning";
 import { MilestoneCelebration } from "../components/milestone-celebration";
 import { PathCompleteCard, localDaySpan } from "../components/path-complete";
 import { Sidebar, SwitcherSection, OutlineSection } from "../components/sidebar";
@@ -243,11 +245,25 @@ function LessonContent({ lessonId }: { lessonId: string }) {
   const progressSummaryKey = progressSummaryQueryOptions(true).queryKey;
 
   const attemptMutation = useMutation({
-    mutationFn: ({ id, index }: { id: string; index: number }) => attemptLesson(id, index),
+    mutationFn: ({ id, index, reasoning }: { id: string; index: number; reasoning?: string }) =>
+      attemptLesson(id, index, reasoning),
     // Fold the reveal into the cached detail so everything derives from one
     // source of truth (matches revealed-on-return, where GET already carries it).
     // Cancel any in-flight GET first (C8): a poll that started before the Attempt
     // and resolves after it would carry `attempt: null` and briefly un-reveal.
+    onSuccess: async (attempt, { id }) => {
+      await queryClient.cancelQueries({ queryKey: lessonQueryKey(id) });
+      queryClient.setQueryData<LessonDetail>(lessonQueryKey(id), (old) =>
+        old ? { ...old, attempt } : old,
+      );
+    },
+  });
+
+  // The reasoning grader's one follow-up answer: folded into the cached reveal
+  // exactly like the Attempt above.
+  const followUpMutation = useMutation({
+    mutationFn: ({ id, answer }: { id: string; answer: string }) =>
+      answerReasoningFollowUp(id, answer),
     onSuccess: async (attempt, { id }) => {
       await queryClient.cancelQueries({ queryKey: lessonQueryKey(id) });
       queryClient.setQueryData<LessonDetail>(lessonQueryKey(id), (old) =>
@@ -502,9 +518,14 @@ function LessonContent({ lessonId }: { lessonId: string }) {
       ) : (
         <ReadyLesson
           detail={detail}
-          onAttempt={(index) => attemptMutation.mutate({ id: detail.id, index })}
+          onAttempt={(index, reasoning) =>
+            attemptMutation.mutate({ id: detail.id, index, reasoning })
+          }
           attempting={attemptMutation.isPending}
           attemptErrored={attemptMutation.isError}
+          onFollowUp={(answer) => followUpMutation.mutate({ id: detail.id, answer })}
+          answeringFollowUp={followUpMutation.isPending}
+          followUpErrored={followUpMutation.isError}
           onComplete={() => completeMutation.mutate(detail.id)}
           completing={completeMutation.isPending}
           completeErrored={completeMutation.isError}
@@ -700,6 +721,9 @@ function ReadyLesson({
   onAttempt,
   attempting,
   attemptErrored,
+  onFollowUp,
+  answeringFollowUp,
+  followUpErrored,
   onComplete,
   completing,
   completeErrored,
@@ -716,9 +740,12 @@ function ReadyLesson({
   detail: LessonDetail;
   /** "Lesson 5 of 11, Lifetimes in practice", once the path has loaded. */
   positionLabel: string | null;
-  onAttempt: (index: number) => void;
+  onAttempt: (index: number, reasoning?: string) => void;
   attempting: boolean;
   attemptErrored: boolean;
+  onFollowUp: (answer: string) => void;
+  answeringFollowUp: boolean;
+  followUpErrored: boolean;
   onComplete: () => void;
   completing: boolean;
   completeErrored: boolean;
@@ -769,6 +796,9 @@ function ReadyLesson({
           onAttempt={onAttempt}
           attempting={attempting}
           attemptErrored={attemptErrored}
+          onFollowUp={onFollowUp}
+          answeringFollowUp={answeringFollowUp}
+          followUpErrored={followUpErrored}
         />
       ) : null}
 
@@ -853,15 +883,26 @@ function QuickCheckBlock({
   onAttempt,
   attempting,
   attemptErrored,
+  onFollowUp,
+  answeringFollowUp,
+  followUpErrored,
 }: {
   quickCheck: QuickCheck;
   reveal: LessonAttempt | null;
-  onAttempt: (index: number) => void;
+  onAttempt: (index: number, reasoning?: string) => void;
   attempting: boolean;
   attemptErrored: boolean;
+  onFollowUp: (answer: string) => void;
+  answeringFollowUp: boolean;
+  followUpErrored: boolean;
 }) {
   const [selected, setSelected] = useState<number | null>(null);
+  const [reasoning, setReasoning] = useState("");
   const revealed = reveal !== null;
+  // A check that asks for a Reasoning needs one before it can be checked: the
+  // point is to say why before seeing whether.
+  const asksReasoning = quickCheck.asks_reasoning === true;
+  const ready = selected !== null && (!asksReasoning || reasoning.trim() !== "");
 
   return (
     <section data-testid="quick-check" className="mt-12 border-t border-divider pt-8">
@@ -941,9 +982,22 @@ function QuickCheckBlock({
       </fieldset>
 
       {revealed ? (
-        <OutcomeReveal reveal={reveal} />
+        <>
+          <OutcomeReveal reveal={reveal} />
+          {reveal.reasoning ? (
+            <ReasoningReveal
+              reasoning={reveal.reasoning}
+              onFollowUp={onFollowUp}
+              answering={answeringFollowUp}
+              answerErrored={followUpErrored}
+            />
+          ) : null}
+        </>
       ) : (
         <>
+          {asksReasoning ? (
+            <ReasoningField value={reasoning} onChange={setReasoning} disabled={attempting} />
+          ) : null}
           {attemptErrored ? (
             <p
               data-testid="quick-check-error"
@@ -956,8 +1010,10 @@ function QuickCheckBlock({
           <button
             type="button"
             data-testid="quick-check-submit"
-            onClick={() => selected !== null && onAttempt(selected)}
-            disabled={selected === null || attempting}
+            onClick={() =>
+              selected !== null && onAttempt(selected, asksReasoning ? reasoning.trim() : undefined)
+            }
+            disabled={!ready || attempting}
             className={`mt-4 ${PRIMARY_CTA}`}
           >
             {attempting ? "Checking…" : "Check answer"}

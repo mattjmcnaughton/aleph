@@ -173,7 +173,9 @@ async def test_generated_lesson_hides_answer_before_attempt(
         assert body["unlock_state"] == "available"
         assert body["read_passage"]
         assert body["quick_check"] is not None
-        assert set(body["quick_check"]) == {"stem", "options"}
+        # ``asks_reasoning`` only says whether a Reasoning is asked for; the
+        # Grading key itself is post-Attempt (checked below).
+        assert set(body["quick_check"]) == {"stem", "options", "asks_reasoning"}
         assert 3 <= len(body["quick_check"]["options"]) <= 4
         # No Attempt yet, so no revealed answer object.
         assert body["attempt"] is None
@@ -183,6 +185,8 @@ async def test_generated_lesson_hides_answer_before_attempt(
         # inspected, but absent from the raw JSON string entirely.
         raw = resp.text
         assert "correct_index" not in raw
+        assert "key_points" not in raw
+        assert "grading_key" not in raw
         assert "explanation" not in raw
         # And the stored keyed answer is genuinely non-trivial (the test would be
         # vacuous if the DB had no correct_index/explanation to leak).

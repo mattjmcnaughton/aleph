@@ -28,6 +28,7 @@ class QuickCheckRepository:
         options: list[str],
         correct_index: int,
         explanation: str,
+        grading_key: dict[str, list[str]] | None = None,
     ) -> QuickCheck:
         quick_check = QuickCheck(
             lesson_id=lesson_id,
@@ -35,6 +36,7 @@ class QuickCheckRepository:
             options=options,
             correct_index=correct_index,
             explanation=explanation,
+            grading_key=grading_key,
         )
         self.session.add(quick_check)
         await self.session.flush()

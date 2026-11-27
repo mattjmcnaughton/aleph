@@ -8,7 +8,13 @@
 // like "Lorem ipsum" or "Test 1". Never put this module in the app bundle.
 
 import { HttpResponse, http } from "msw";
-import { API_V1_BASE, type AuthSession, type PathUnit, type ProgressSummary } from "../lib/api";
+import {
+  API_V1_BASE,
+  type AuthSession,
+  type PathUnit,
+  type ProgressSummary,
+  type Reasoning,
+} from "../lib/api";
 import { seedBeat, seedBrief } from "../mocks/beats";
 import { learnerUser } from "../mocks/handlers";
 import { seedLesson } from "../mocks/lessons";
@@ -406,6 +412,63 @@ export function seedVisualLesson(source: string = BASE_RATE_SOURCE): void {
     visuals: [{ ...BASE_RATE_VISUAL, source }],
   });
 }
+
+/** The current Rust lesson asking for a Reasoning, graded as `graded`. */
+export function seedReasoningLesson(graded: Omit<Reasoning, "text">): void {
+  seedLessons();
+  seedLesson({
+    id: IDS.rustCurrentLesson,
+    path_id: IDS.rust,
+    title: "Reading lifetime annotations",
+    position_in_path: 5,
+    position_in_unit: 1,
+    readPassage: LIFETIMES_PASSAGE,
+    stem: "A function takes x: &'a str and y: &'b str and returns &'a str. A caller drops y right after the call. Is the returned reference still usable?",
+    options: [
+      "Yes: the result is tied only to x's lifetime, so dropping y is fine",
+      "No: every input must outlive any returned reference",
+      "Only if y was a string literal",
+      "No: the annotation keeps y alive until the result is dropped",
+    ],
+    correctIndex: 0,
+    explanation:
+      "The signature ties the result to `'a` alone, so only `x` has to outlive it; `y`'s lifetime is unrelated.",
+    asksReasoning: true,
+    gradedReasoning: graded,
+  });
+}
+
+export const REASONING_KEY_POINTS = [
+  "The return type names only 'a, so the result borrows from x alone.",
+  "So only x must outlive the result; dropping y cannot invalidate it.",
+];
+
+export const PARTIAL_REASONING: Omit<Reasoning, "text"> = {
+  state: "graded",
+  grade: "partial",
+  feedback:
+    "You're right that the result comes from x, but you didn't say why dropping y can't affect it: the signature ties the result to 'a only.",
+  key_points: REASONING_KEY_POINTS,
+  covered_points: [0],
+  misconceptions_shown: [],
+  follow_up: {
+    question: "What would the signature have to say for dropping y to be a problem?",
+    answer: null,
+    state: null,
+    grade: null,
+    feedback: null,
+  },
+};
+
+export const SOLID_REASONING: Omit<Reasoning, "text"> = {
+  state: "graded",
+  grade: "solid",
+  feedback: "Exactly: the result's lifetime is 'a, which only x carries, so y is free to go.",
+  key_points: REASONING_KEY_POINTS,
+  covered_points: [0, 1],
+  misconceptions_shown: [],
+  follow_up: null,
+};
 
 /** A visual whose source throws: the learner reads its alt text instead. */
 export const BROKEN_VISUAL_SOURCE = `<script>document.getElementById("missing").textContent = "x"; kit.ready();</script>`;

@@ -648,6 +648,38 @@ export type LessonOutcome = "correct" | "incorrect";
 export interface QuickCheck {
   stem: string;
   options: string[];
+  /** Ask for a Reasoning with the Attempt (`explain_checks`). Never the key itself. */
+  asks_reasoning?: boolean;
+}
+
+export type GradingState = "grading" | "graded" | "failed";
+export type ReasoningGrade = "solid" | "partial" | "missing";
+
+/** The grader's one follow-up question and the learner's graded answer. */
+export interface ReasoningFollowUp {
+  question: string;
+  answer: string | null;
+  /** Null until the learner answers. */
+  state: GradingState | null;
+  grade: ReasoningGrade | null;
+  feedback: string | null;
+}
+
+/**
+ * The learner's own-words "why" (CONTEXT.md: *Reasoning*), revealed with the
+ * Attempt. Formative only: the Outcome of record is still the option chosen.
+ * `key_points` (the Grading key) are shown whatever the grading state.
+ */
+export interface Reasoning {
+  text: string;
+  state: GradingState;
+  grade: ReasoningGrade | null;
+  feedback: string | null;
+  key_points: string[];
+  /** Indexes into `key_points`. */
+  covered_points: number[];
+  misconceptions_shown: string[];
+  follow_up: ReasoningFollowUp | null;
 }
 
 /**
@@ -660,6 +692,7 @@ export interface LessonAttempt {
   outcome: LessonOutcome;
   correct_index: number;
   explanation: string;
+  reasoning?: Reasoning | null;
 }
 
 /**
@@ -740,11 +773,26 @@ export function generateLesson(id: string): Promise<{ id: string }> {
 }
 
 /** Record the Attempt (first-wins) and get the graded reveal (the boundary). */
-export function attemptLesson(id: string, selectedIndex: number): Promise<LessonAttempt> {
+export function attemptLesson(
+  id: string,
+  selectedIndex: number,
+  reasoning?: string,
+): Promise<LessonAttempt> {
   return apiFetch<LessonAttempt>(apiV1Path(`/lessons/${id}/attempt`), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ selected_index: selectedIndex }),
+    body: JSON.stringify(
+      reasoning ? { selected_index: selectedIndex, reasoning } : { selected_index: selectedIndex },
+    ),
+  });
+}
+
+/** Answer the reasoning grader's one follow-up question; returns the new reveal. */
+export function answerReasoningFollowUp(id: string, answer: string): Promise<LessonAttempt> {
+  return apiFetch<LessonAttempt>(apiV1Path(`/lessons/${id}/reasoning/follow-up`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ answer }),
   });
 }
 

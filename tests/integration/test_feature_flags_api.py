@@ -77,6 +77,8 @@ LEARNING_SUMMARY = "learning_summary"
 MCP = "mcp"
 PUBLIC_PROFILES = "public_profiles"
 MATERIAL = "material"
+# Reasoning on Quick checks: dark (off, on for admins).
+EXPLAIN_CHECKS = "explain_checks"
 
 LEARNER = AuthIdentity(
     issuer="https://issuer.example.test",
@@ -158,6 +160,7 @@ def _resolved(
     mcp: bool = False,
     public_profiles: bool = False,
     material: bool = False,
+    explain_checks: bool = False,
 ) -> dict[str, bool]:
     """The full resolved map — the session carries **every** registered flag.
 
@@ -186,6 +189,7 @@ def _resolved(
         MCP: mcp,
         PUBLIC_PROFILES: public_profiles,
         MATERIAL: material,
+        EXPLAIN_CHECKS: explain_checks,
     }
 
 
@@ -241,6 +245,7 @@ async def test_admin_lists_every_registered_flag(
         assert response.json() == {
             "flags": [
                 _flag_row(ANALYST, enabled_default=False),
+                _flag_row(EXPLAIN_CHECKS, enabled_default=False),
                 _flag_row(FLOW, enabled_default=False),
                 _flag_row(LEARNING_SUMMARY, enabled_default=False),
                 _flag_row(MATERIAL, enabled_default=False),
@@ -363,12 +368,14 @@ async def test_dark_flags_resolve_on_for_admins(
             learning_summary=True,
             mcp=True,
             material=True,
+            explain_checks=True,
         )
         # The global defaults are still off — nothing was mutated to make the
         # admin's map true.
         listed = (await admin.get(FLAGS_URL)).json()["flags"]
         assert listed == [
             _flag_row(ANALYST, enabled_default=False),
+            _flag_row(EXPLAIN_CHECKS, enabled_default=False),
             _flag_row(FLOW, enabled_default=False),
             _flag_row(LEARNING_SUMMARY, enabled_default=False),
             _flag_row(MATERIAL, enabled_default=False),
@@ -406,6 +413,7 @@ async def test_override_flips_a_learner_on_and_clears_idempotently(
         assert await _override_count() == 1
         assert (await admin.get(FLAGS_URL)).json()["flags"] == [
             _flag_row(ANALYST, enabled_default=False),
+            _flag_row(EXPLAIN_CHECKS, enabled_default=False),
             _flag_row(FLOW, enabled_default=False),
             _flag_row(LEARNING_SUMMARY, enabled_default=False),
             _flag_row(MATERIAL, enabled_default=False),
@@ -436,6 +444,7 @@ async def test_override_flips_a_learner_on_and_clears_idempotently(
             learning_summary=True,
             mcp=True,
             material=True,
+            explain_checks=True,
         )
 
         # DELETE is idempotent: clearing an absent override is still a 204.
@@ -452,6 +461,7 @@ async def test_override_flips_a_learner_on_and_clears_idempotently(
             learning_summary=True,
             mcp=True,
             material=True,
+            explain_checks=True,
         )
         assert await _override_count() == 0
 
@@ -471,6 +481,7 @@ async def test_settings_default_flips_the_flag_without_a_deploy(
         assert await _flags_on_session(learner) == _resolved(tutor=True, shaping=False)
         assert (await admin.get(FLAGS_URL)).json()["flags"] == [
             _flag_row(ANALYST, enabled_default=False),
+            _flag_row(EXPLAIN_CHECKS, enabled_default=False),
             _flag_row(FLOW, enabled_default=False),
             _flag_row(LEARNING_SUMMARY, enabled_default=False),
             _flag_row(MATERIAL, enabled_default=False),

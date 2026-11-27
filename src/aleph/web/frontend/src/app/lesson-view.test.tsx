@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { configureLessons, seedLesson } from "../mocks/lessons";
+import type { Reasoning } from "../lib/api";
+import { configureLessons, seedLesson, sentReasoning } from "../mocks/lessons";
 import { FRESH_PATH_UNITS, MID_PATH_UNITS, seedPath } from "../mocks/paths";
 import { App } from "./app";
 
@@ -501,5 +502,106 @@ describe("Lesson view — /lessons/$lessonId", () => {
     expect(screen.queryByTestId("lesson-read-passage")).toBeNull();
     // The id seam is still present (path-view + e2e depend on it).
     expect(screen.getByTestId("lesson-view-id").textContent).toBe("les-missing-0000");
+  });
+});
+
+describe("Lesson view — Reasoning on a Quick check", () => {
+  const PARTIAL: Omit<Reasoning, "text"> = {
+    state: "graded",
+    grade: "partial",
+    feedback: "You name static types but not why they catch the bug early.",
+    key_points: ["Types are checked before the code runs.", "So the mismatch never ships."],
+    covered_points: [0],
+    misconceptions_shown: ["Thinks TypeScript changes how JavaScript runs."],
+    follow_up: {
+      question: "When would the mismatch be found without types?",
+      answer: null,
+      state: null,
+      grade: null,
+      feedback: null,
+    },
+  };
+
+  it("asks why before checking, and keeps Check answer disabled until it is said", async () => {
+    seedLesson({ id: "les-why", path_id: PATH_ID, asksReasoning: true, gradedReasoning: PARTIAL });
+    await gotoLesson("les-why");
+
+    fireEvent.click((await screen.findAllByTestId("quick-check-option"))[0]);
+    const submit = screen.getByTestId("quick-check-submit") as HTMLButtonElement;
+    expect(submit.disabled).toBe(true);
+    fireEvent.change(screen.getByTestId("quick-check-reasoning"), {
+      target: { value: "  Types catch it early.  " },
+    });
+    expect(submit.disabled).toBe(false);
+    fireEvent.click(submit);
+
+    const reveal = await screen.findByTestId("reasoning-reveal");
+    expect(sentReasoning("les-why")).toBe("Types catch it early.");
+    expect(reveal.getAttribute("data-grade")).toBe("partial");
+    expect(reveal.textContent).toContain("Types catch it early.");
+    const points = screen.getAllByTestId("reasoning-key-point");
+    expect(points.map((point) => point.getAttribute("data-covered"))).toEqual(["true", "false"]);
+    expect(screen.getByTestId("reasoning-misconceptions").textContent).toMatch(/changes how/);
+  });
+
+  it("answers the one follow-up and shows its feedback in place of the form", async () => {
+    seedLesson({
+      id: "les-follow",
+      path_id: PATH_ID,
+      asksReasoning: true,
+      gradedReasoning: PARTIAL,
+    });
+    await gotoLesson("les-follow");
+    fireEvent.click((await screen.findAllByTestId("quick-check-option"))[0]);
+    fireEvent.change(screen.getByTestId("quick-check-reasoning"), { target: { value: "Types." } });
+    fireEvent.click(screen.getByTestId("quick-check-submit"));
+
+    const answer = await screen.findByTestId("reasoning-follow-up-answer");
+    fireEvent.change(answer, { target: { value: "Only at runtime, in production." } });
+    fireEvent.click(screen.getByTestId("reasoning-follow-up-submit"));
+
+    const feedback = await screen.findByTestId("reasoning-follow-up-feedback");
+    expect(feedback.textContent).toMatch(/Solid reasoning\. That fills the gap\./);
+    expect(screen.queryByTestId("reasoning-follow-up-answer")).toBeNull();
+  });
+
+  it("a failed grading still shows what a good answer says", async () => {
+    seedLesson({
+      id: "les-failed",
+      path_id: PATH_ID,
+      asksReasoning: true,
+      gradedReasoning: {
+        ...PARTIAL,
+        state: "failed",
+        grade: null,
+        feedback: null,
+        covered_points: [],
+        misconceptions_shown: [],
+        follow_up: null,
+      },
+    });
+    await gotoLesson("les-failed");
+    fireEvent.click((await screen.findAllByTestId("quick-check-option"))[0]);
+    fireEvent.change(screen.getByTestId("quick-check-reasoning"), { target: { value: "Types." } });
+    fireEvent.click(screen.getByTestId("quick-check-submit"));
+
+    expect((await screen.findByTestId("reasoning-status")).textContent).toMatch(
+      /couldn't be checked/,
+    );
+    expect(screen.queryByTestId("reasoning-grade")).toBeNull();
+    expect(screen.getAllByTestId("reasoning-key-point")).toHaveLength(2);
+    // The Outcome of record still reveals.
+    expect(screen.getByTestId("outcome-reveal").getAttribute("data-outcome")).toBe("correct");
+  });
+
+  it("a check that asks for no Reasoning sends none and shows no field", async () => {
+    seedLesson({ id: "les-plain", path_id: PATH_ID });
+    await gotoLesson("les-plain");
+    fireEvent.click((await screen.findAllByTestId("quick-check-option"))[0]);
+    expect(screen.queryByTestId("quick-check-reasoning")).toBeNull();
+    fireEvent.click(screen.getByTestId("quick-check-submit"));
+    await screen.findByTestId("outcome-reveal");
+    expect(sentReasoning("les-plain")).toBeUndefined();
+    expect(screen.queryByTestId("reasoning-reveal")).toBeNull();
   });
 });

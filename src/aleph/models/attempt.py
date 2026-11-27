@@ -13,6 +13,7 @@ from aleph.models.base import UUIDAuditMixin
 
 if TYPE_CHECKING:
     from aleph.models.quick_check import QuickCheck
+    from aleph.models.reasoning import Reasoning
     from aleph.models.users import User
 
 
@@ -49,3 +50,8 @@ class Attempt(Base, UUIDAuditMixin):
 
     quick_check: Mapped[QuickCheck] = relationship(back_populates="attempts")
     user: Mapped[User] = relationship(back_populates="attempts")
+    reasoning: Mapped[Reasoning | None] = relationship(
+        back_populates="attempt",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )

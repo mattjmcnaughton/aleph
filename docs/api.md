@@ -245,7 +245,8 @@ disclosed). Same **trigger + poll** model: `POST /lessons/{id}/generate` returns
 | ------ | ---- | ---- | ------- | ----- |
 | `GET` | `/api/v1/lessons/{id}` | — | `200` | Poll target. Body below. The poll is itself a trigger: it spawns the idempotent resume **and** refills the prefetch window, so *viewing* a lesson advances prefetch (§5.4). `generation_state` is effective (a stale `generating` reads as `failed`); `unlock_state` is derived (`locked`/`available`/`complete`). |
 | `POST` | `/api/v1/lessons/{id}/generate` | — | `202 {id}` | Ensure/retry this lesson's generation (also refills the prefetch window). Rate-limited by the daily lesson cap (`check_lesson_generation`, `RATE_LIMIT_LESSON_GENERATIONS_PER_DAY`, default 100; admins exempt) → `429 rate_limited` at the cap. Note this cap (100) is now **below** `MAX_LESSONS_PER_PATH` (200): a learner working through a maximal path spans more than one day of lesson-generation quota — accepted, not a bug (the cap bounds daily spend, not path completion speed). Chain-head gated (§5.2/§5.5): it *ensures* a reached `ungenerated` lesson and *retries* a `failed` one only when all predecessors are `generated`; a trigger on a `generated` or non-chain-head lesson still returns `202` but only advances the window. |
-| `POST` | `/api/v1/lessons/{id}/attempt` | `{selected_index}` | `200` | Record the Attempt (first-wins) and grade it server-side. Gates on *not locked*, **not** available-only: **locked → `403`**, but a **complete** lesson stays attemptable (a learner may complete a lesson and still answer its Quick check — completion is orthogonal to the Attempt). An ungenerated lesson (no Quick check yet) → `409 conflict`. Returns `AttemptResult` (below) — the reveal boundary. A second submit never overwrites the first: the response is the first Attempt's Outcome, re-derived from its stored index (the `attempts.is_correct` column is a metrics cache, never trusted — AL-012). |
+| `POST` | `/api/v1/lessons/{id}/attempt` | `{selected_index, reasoning?}` | `200` | Record the Attempt (first-wins) and grade it server-side. Gates on *not locked*, **not** available-only: **locked → `403`**, but a **complete** lesson stays attemptable (a learner may complete a lesson and still answer its Quick check — completion is orthogonal to the Attempt). An ungenerated lesson (no Quick check yet) → `409 conflict`. Returns `AttemptResult` (below) — the reveal boundary. A second submit never overwrites the first: the response is the first Attempt's Outcome, re-derived from its stored index (the `attempts.is_correct` column is a metrics cache, never trusted — AL-012). `reasoning` (≤ 1000 chars) is stored only with the first Attempt and only when `quick_check.asks_reasoning`; it is graded inside this request, after the Attempt commits. |
+| `POST` | `/api/v1/lessons/{id}/reasoning/follow-up` | `{answer}` | `200` | Answer the reasoning grader's one follow-up question (≤ 1000 chars); returns `AttemptResult`. `404` when the `explain_checks` flag is off for this learner; locked → `403`; `409` when there is nothing to answer (no Attempt, no Reasoning, or no follow-up asked). Only the first answer is kept; a repeat returns the same result. |
 | `POST` | `/api/v1/lessons/{id}/complete` | — | `200 {id, unlock_state, path_completion, milestones}` | Mark complete (non-gating; orthogonal to the Quick-check Outcome). Optional `tz_offset_minutes` query uses the client's `getTimezoneOffset()` convention, -900…900, default 0 for older clients; invalid offsets → `422`. Only the **available** lesson may be completed (AL-012): **locked → `403`**; already-**complete → idempotent `200`** no-op (no re-stamp, empty milestones). On success the prefetch window advances after commit. `path_completion` is non-null when the path has no incomplete lesson left; `milestones` contains only newly earned recognition — see below. |
 
 **`GET /api/v1/lessons/{id}` body.**
@@ -257,9 +258,11 @@ disclosed). Same **trigger + poll** model: `POST /lessons/{id}/generate` returns
   "generation_state": "ungenerated|generating|generated|failed",
   "unlock_state": "locked|available|complete",
   "read_passage": "…str… | null",
-  "quick_check": { "stem": "…", "options": ["…", "…", "…"] } | null,
+  "quick_check": { "stem": "…", "options": ["…", "…", "…"],
+                   "asks_reasoning": false } | null,
   "attempt": { "selected_index": 0, "outcome": "correct|incorrect",
-               "correct_index": 2, "explanation": "…" } | null,
+               "correct_index": 2, "explanation": "…",
+               "reasoning": { … } | null } | null,
   "generation_error": "generic message | null",
   "visuals": [
     { "id": "uuid", "kind": "interactive", "title": "…", "alt": "…",
@@ -301,7 +304,9 @@ disclosed). Same **trigger + poll** model: `POST /lessons/{id}/generate` returns
   `options` — never the keyed answer. `correct_index` and `explanation` live
   **only** inside `attempt`, which is `null` until the learner records an
   Attempt. So a pre-Attempt payload contains no correct answer anywhere; grading
-  is server-side.
+  is server-side. The **Grading key** follows the same rule: `asks_reasoning`
+  says only whether a Reasoning is asked for, and the key's points appear only
+  inside `attempt.reasoning`.
 
 **`POST /api/v1/lessons/{id}/attempt` response (`AttemptResult`).**
 
@@ -313,6 +318,28 @@ disclosed). Same **trigger + poll** model: `POST /lessons/{id}/generate` returns
 `selected_index` is the recorded (first-wins) Attempt's index; `outcome` is
 re-derived deterministically from it (`domains/grading`). An incorrect Attempt
 still reveals `correct_index` + `explanation` (formative, non-gating).
+
+`reasoning` is `null` unless the Attempt carried a **Reasoning**:
+
+```json
+{ "text": "…", "state": "grading|graded|failed",
+  "grade": "solid|partial|missing" | null, "feedback": "…" | null,
+  "key_points": ["…", "…"], "covered_points": [0],
+  "misconceptions_shown": ["…"],
+  "follow_up": { "question": "…", "answer": "…" | null,
+                 "state": "grading|graded|failed" | null,
+                 "grade": "solid|partial|missing" | null,
+                 "feedback": "…" | null } | null }
+```
+
+A model grader reports which `key_points` the reasoning makes and which of the
+key's misconceptions it shows; `grade` is derived by the app from that
+(`domains/grading.grade_reasoning`): `solid` needs every point, no
+misconception, and a correct Outcome; `missing` means no point. `failed` means
+the grader errored or timed out (or a row was left ungraded for over two
+minutes); `key_points` are shown in every state. `follow_up` is present when a
+graded, non-solid Reasoning got one follow-up question. Formative only: it does
+not change `outcome`, progress, metrics or the Learning summary.
 
 **`POST /api/v1/lessons/{id}/complete` response (`path_completion`).**
 

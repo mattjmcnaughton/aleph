@@ -191,7 +191,7 @@ from aleph.agents.learning_summary import (
     Suggestion,
     SummaryArea,
 )
-from aleph.agents.lesson import LessonContent, QuickCheck, Visual
+from aleph.agents.lesson import GradingKey, LessonContent, QuickCheck, Visual
 from aleph.agents.outline import LessonOutline, PathOutline, Refusal, UnitOutline
 from aleph.agents.path_draft import (
     ANSWERS_BLOCK,
@@ -838,6 +838,7 @@ def _build_lesson(
                     f"This lesson's passage states that {LESSON_ERROR_FALSE_CLAIM}, "
                     f"so the Quick check expects **{LESSON_ERROR_FALSE_VALUE}**."
                 ),
+                grading_key=_stub_grading_key("the boiling point of water"),
             ),
         )
 
@@ -868,8 +869,82 @@ def _build_lesson(
                 f"**{options[correct_index]}** matches the passage's treatment "
                 f"of {topic}; the others distort or misattribute it."
             ),
+            grading_key=_stub_grading_key(topic),
         ),
     )
+
+
+def _stub_grading_key(topic: str) -> GradingKey:
+    """The stub's deterministic **Grading key**: two points, one misconception."""
+    return GradingKey(
+        points=[
+            f"States the lesson's core principle about {topic}.",
+            "Applies that principle to the scenario in the question.",
+        ],
+        misconceptions=[f"Thinks a partial account of {topic} is the whole story."],
+    )
+
+
+# --- the reasoning grader (agents/reasoning_grader.py) ---------------------------
+# Deterministic on the learner's own text, so e2e can steer every grade:
+# fewer than STUB_REASONING_MISSING_WORDS words covers no point; a reasoning
+# containing "because" and at least STUB_REASONING_SOLID_WORDS words covers
+# both; anything else covers the first only. A follow-up answer covers what
+# is left. FORCE_GRADER_FAILURE anywhere in the learner's text raises.
+
+FORCE_GRADER_FAILURE = "[force-grader-failure]"
+STUB_REASONING_MISSING_WORDS = 4
+STUB_REASONING_SOLID_WORDS = 12
+STUB_FOLLOW_UP_QUESTION = (
+    "What would change in the scenario if the principle did not hold?"
+)
+_REASONING_RE = re.compile(r"<learner_reasoning>\n(.*?)\n</learner_reasoning>", re.S)
+_FOLLOW_UP_RE = re.compile(r"<learner_follow_up>\n(.*?)\n</learner_follow_up>", re.S)
+
+
+def _stub_covered(reasoning: str) -> list[int]:
+    words = len(reasoning.split())
+    if words < STUB_REASONING_MISSING_WORDS:
+        return []
+    if "because" in reasoning.lower() and words >= STUB_REASONING_SOLID_WORDS:
+        return [0, 1]
+    return [0]
+
+
+def _build_reasoning_assessment(text: str) -> dict[str, object]:
+    reasoning_match = _REASONING_RE.search(text)
+    reasoning = reasoning_match.group(1) if reasoning_match else ""
+    follow_up_match = _FOLLOW_UP_RE.search(text)
+    if FORCE_GRADER_FAILURE in reasoning or (
+        follow_up_match and FORCE_GRADER_FAILURE in follow_up_match.group(1)
+    ):
+        raise StubModelForcedError("forced reasoning grader failure")
+    chose_correct = any(
+        "(correct)" in line and "(learner chose this)" in line
+        for line in text.splitlines()
+    )
+    misconceptions = [] if chose_correct else [0]
+    if follow_up_match is not None:
+        return {
+            "covered_points": [0, 1],
+            "misconceptions_shown": misconceptions,
+            "feedback": "Your follow-up answer fills the gap in your reasoning.",
+            "follow_up_question": "",
+        }
+    covered = _stub_covered(reasoning)
+    solid = covered == [0, 1] and chose_correct
+    if not covered:
+        feedback = "Your reasoning does not yet say why the answer holds."
+    elif solid:
+        feedback = "You state the principle and apply it to the scenario."
+    else:
+        feedback = "You name the principle but do not apply it to this scenario."
+    return {
+        "covered_points": covered,
+        "misconceptions_shown": misconceptions,
+        "feedback": feedback,
+        "follow_up_question": "" if solid else STUB_FOLLOW_UP_QUESTION,
+    }
 
 
 # --- the analyst pipeline: researcher findings + Brief writing (Phase 6, ------
@@ -1127,6 +1202,15 @@ def _stub_respond(messages: Sequence[ModelMessage], info: AgentInfo) -> ModelRes
     summary_tool = _tool_with(info.output_tools, "suggestions")
     draft_tool = _tool_with(info.output_tools, "teaching_style")
     questions_tool = _tool_with(info.output_tools, "questions")
+    grader_tool = _tool_with(info.output_tools, "covered_points")
+    if grader_tool is not None:
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    tool_name=grader_tool.name, args=_build_reasoning_assessment(text)
+                )
+            ]
+        )
     if draft_tool is not None:
         draft = _build_path_draft(text)
         return ModelResponse(

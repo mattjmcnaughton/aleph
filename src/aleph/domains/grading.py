@@ -25,6 +25,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Collection
 
 
 class Outcome(StrEnum):
@@ -78,3 +82,63 @@ def outcome_of_record(
     """
     of_record = prior if prior is not None else submitted
     return of_record, grade(of_record, correct_index=correct_index)
+
+
+# --- Reasoning grade (CONTEXT.md: *Reasoning*) ---------------------------------
+# The learner's own-words "why" behind an Attempt is judged by a model, but only
+# point by point: the grader reports which of the Quick check's **Grading key**
+# points the reasoning makes and which listed misconceptions it shows. The level
+# below is derived here, by the app, from those facts — so what counts as
+# "solid" is one stated rule rather than a model's mood, and a lenient grader
+# cannot award it without claiming every point.
+
+
+# A Reasoning (and its follow-up answer) is a sentence or two typed on a phone.
+REASONING_MAX_CHARS = 1000
+
+
+class GradingState(StrEnum):
+    """Where one round of Reasoning grading stands: distinct from its result.
+
+    ``failed`` covers a grader that errored, timed out, or was abandoned
+    mid-call — never shown as a grade (Constitution §4).
+    """
+
+    GRADING = "grading"
+    GRADED = "graded"
+    FAILED = "failed"
+
+
+class ReasoningGrade(StrEnum):
+    """How well a Reasoning explains the answer: formative, never progress."""
+
+    SOLID = "solid"
+    PARTIAL = "partial"
+    MISSING = "missing"
+
+
+def grade_reasoning(
+    *,
+    point_count: int,
+    covered_points: Collection[int],
+    misconceptions_shown: Collection[int],
+    outcome: Outcome,
+) -> ReasoningGrade:
+    """Derive a Reasoning's grade from the points it makes.
+
+    ``MISSING`` when it makes none of the ``point_count`` key points (indexes
+    outside the key are ignored). ``SOLID`` only when it makes every point,
+    shows no misconception, **and** the Attempt it explains was correct — a
+    sound argument for the wrong option is still a misapplication. Anything in
+    between is ``PARTIAL``.
+    """
+    covered = {index for index in covered_points if 0 <= index < point_count}
+    if not covered:
+        return ReasoningGrade.MISSING
+    if (
+        len(covered) == point_count
+        and not misconceptions_shown
+        and outcome is Outcome.CORRECT
+    ):
+        return ReasoningGrade.SOLID
+    return ReasoningGrade.PARTIAL

@@ -20,7 +20,12 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-from aleph.domains.grading import Outcome
+from aleph.domains.grading import (
+    REASONING_MAX_CHARS,
+    GradingState,
+    Outcome,
+    ReasoningGrade,
+)
 from aleph.domains.milestones import MilestoneMetric
 from aleph.domains.progression import UnlockState
 from aleph.models import LessonGenerationState, LessonVisualKind
@@ -36,6 +41,52 @@ class AttemptRequest(BaseModel):
     """
 
     selected_index: int
+    # The learner's own-words "why", written before the answer is revealed
+    # (CONTEXT.md: *Reasoning*). Stored only with the first Attempt, and only
+    # when the Quick check asks for one (``asks_reasoning``); ignored otherwise.
+    reasoning: str | None = Field(default=None, max_length=REASONING_MAX_CHARS)
+
+
+class FollowUpAnswerRequest(BaseModel):
+    """``POST /api/v1/lessons/{id}/reasoning/follow-up`` body: the one answer."""
+
+    answer: str = Field(min_length=1, max_length=REASONING_MAX_CHARS)
+
+
+class FollowUpDTO(BaseModel):
+    """The grader's one follow-up question and the learner's graded answer.
+
+    ``state`` is ``null`` until the learner answers; ``grade`` and ``feedback``
+    are set once that answer is ``graded``. Formative: the Reasoning's own
+    ``grade`` stays the first round's.
+    """
+
+    question: str
+    answer: str | None
+    state: GradingState | None
+    grade: ReasoningGrade | None
+    feedback: str | None
+
+
+class ReasoningDTO(BaseModel):
+    """A Reasoning after its Attempt: the text, its grading, and the key.
+
+    ``state`` is ``grading`` while the grader runs, ``graded`` with ``grade``
+    and ``feedback`` set, or ``failed`` when grading did not finish — the
+    ``key_points`` are shown either way. ``covered_points`` index
+    ``key_points``; ``misconceptions_shown`` are the key's misconception texts
+    the reasoning relied on. ``follow_up`` is set when a graded, non-solid
+    Reasoning got a follow-up question.
+    """
+
+    text: str
+    state: GradingState
+    grade: ReasoningGrade | None
+    feedback: str | None
+    key_points: list[str]
+    covered_points: list[int]
+    misconceptions_shown: list[str]
+    follow_up: FollowUpDTO | None
 
 
 class QuickCheckDTO(BaseModel):
@@ -50,6 +101,9 @@ class QuickCheckDTO(BaseModel):
 
     stem: str
     options: list[str]
+    # Whether to ask for a Reasoning with the Attempt. Says nothing about the
+    # answer; the Grading key itself appears only post-Attempt, in ``reasoning``.
+    asks_reasoning: bool = False
 
 
 class AttemptResultDTO(BaseModel):
@@ -68,6 +122,7 @@ class AttemptResultDTO(BaseModel):
     outcome: Outcome
     correct_index: int
     explanation: str
+    reasoning: ReasoningDTO | None = None
 
 
 class VisualDTO(BaseModel):

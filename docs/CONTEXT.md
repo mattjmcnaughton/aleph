@@ -42,6 +42,8 @@ synonym (say **path**, not "course"; **Quick check**, not "quiz question").
 | **Option** | One selectable answer choice of a Quick check; exactly one is the **correct option**. |
 | **Attempt** | A learner answering a Quick check: the option they selected (and when). The interaction/record, distinct from the question itself. |
 | **Outcome** | The result of an Attempt: **correct** or **incorrect**. Formative and non-gating — it reveals the explanation and lets the learner proceed either way. |
+| **Reasoning** | The learner's own-words "why" for their **Attempt**, written before the answer is revealed and graded by a model against the Quick check's **Grading key**: the model reports which key points it makes and which misconceptions it shows, and the app derives a grade of **solid** (every point, no misconception, correct Outcome), **partial**, or **missing** (no point). At most one follow-up question, answered once. One per Attempt, first wins. Formative only: never changes the Outcome, progress, metrics or the Learning summary. Behind the `explain_checks` flag. |
+| **Grading key** | Written with each Quick check: the 2–3 **points** a good Reasoning must make and the 1–3 **misconceptions** the wrong options encode. Hidden until the Attempt, like the correct option. Checks generated before it existed have none and ask for no Reasoning. |
 
 ## Generation
 

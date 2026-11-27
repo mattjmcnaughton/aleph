@@ -19,7 +19,10 @@ import {
   WORLD_TODAY,
   seedFailedLesson,
   seedGeneratingLesson,
+  PARTIAL_REASONING,
+  SOLID_REASONING,
   seedPathEdgeStates,
+  seedReasoningLesson,
   seedVisualLesson,
   seedWorld,
   sessionHandler,
@@ -340,6 +343,53 @@ export const LessonVisualFallback: Story = {
   args: { url: `/lessons/${IDS.bayesVisualLesson}` },
   beforeEach: () => {
     seedVisualLesson(BROKEN_VISUAL_SOURCE);
+  },
+};
+
+async function answerWithReasoning(canvasElement: HTMLElement, reasoning: string) {
+  const canvas = within(canvasElement);
+  await userEvent.click((await canvas.findAllByTestId("quick-check-option"))[0]);
+  await userEvent.type(canvas.getByTestId("quick-check-reasoning"), reasoning);
+  return canvas;
+}
+
+export const LessonReasoningAsked: Story = {
+  name: "Lesson — Quick check asks why",
+  args: { url: `/lessons/${IDS.rustCurrentLesson}` },
+  beforeEach: () => {
+    seedReasoningLesson(PARTIAL_REASONING);
+  },
+  play: async ({ canvasElement }) => {
+    await answerWithReasoning(canvasElement, "The result only comes from x.");
+  },
+};
+
+export const LessonReasoningPartial: Story = {
+  name: "Lesson — reasoning partial, follow-up asked",
+  args: { url: `/lessons/${IDS.rustCurrentLesson}` },
+  beforeEach: () => {
+    seedReasoningLesson(PARTIAL_REASONING);
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = await answerWithReasoning(canvasElement, "The result only comes from x.");
+    await userEvent.click(canvas.getByTestId("quick-check-submit"));
+    await expect(await canvas.findByTestId("reasoning-follow-up")).toBeInTheDocument();
+  },
+};
+
+export const LessonReasoningSolid: Story = {
+  name: "Lesson — reasoning solid",
+  args: { url: `/lessons/${IDS.rustCurrentLesson}` },
+  beforeEach: () => {
+    seedReasoningLesson(SOLID_REASONING);
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = await answerWithReasoning(
+      canvasElement,
+      "The return type only mentions 'a, which is x's, so y can be dropped safely.",
+    );
+    await userEvent.click(canvas.getByTestId("quick-check-submit"));
+    await expect(await canvas.findByTestId("reasoning-grade")).toBeInTheDocument();
   },
 };
 

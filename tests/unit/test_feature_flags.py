@@ -214,6 +214,7 @@ def test_the_registry_is_exactly_the_registered_flags() -> None:
             "mcp",
             "public_profiles",
             "material",
+            "explain_checks",
         }
     )
 

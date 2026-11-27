@@ -18,6 +18,7 @@ import {
   type LessonGenerationState,
   type LessonVisual,
   type LessonUnlockState,
+  type Reasoning,
 } from "../lib/api";
 
 /** Generic, learner-safe failure message (never raw provider text, §6). */
@@ -51,6 +52,12 @@ interface StoredLesson {
   generationError?: string;
   /** Visuals the passage's ```visual <id> fences name (served only when generated). */
   visuals: LessonVisual[];
+  /** Ask for a Reasoning (`explain_checks` on and a Grading key exists). */
+  asksReasoning: boolean;
+  /** The fake grader's verdict, minus the learner's text (filled in on Attempt). */
+  gradedReasoning?: Omit<Reasoning, "text">;
+  /** The reasoning text the last Attempt sent, for assertions. */
+  sentReasoning?: string;
 }
 
 interface LessonsConfig {
@@ -117,6 +124,9 @@ export interface SeedLessonInput {
   attemptSelectedIndex?: number;
   generationError?: string;
   visuals?: LessonVisual[];
+  /** Ask for a Reasoning; `gradedReasoning` is what the fake grader returns. */
+  asksReasoning?: boolean;
+  gradedReasoning?: Omit<Reasoning, "text">;
 }
 
 const DEFAULT_OPTIONS = ["A type-checked superset of JS", "A new runtime", "A CSS framework"];
@@ -151,11 +161,18 @@ export function seedLesson(input: SeedLessonInput): void {
     completedAt: (input.unlock_state ?? "available") === "complete" ? nowIso() : null,
     generationError: input.generationError,
     visuals: input.visuals ?? [],
+    asksReasoning: input.asksReasoning ?? false,
+    gradedReasoning: input.gradedReasoning,
   };
   if (input.attemptSelectedIndex !== undefined) {
     stored.attempt = gradeAttempt(stored, input.attemptSelectedIndex);
   }
   store.set(input.id, stored);
+}
+
+/** The reasoning text the last Attempt on `id` sent, if any (test assertions). */
+export function sentReasoning(id: string): string | undefined {
+  return store.get(id)?.sentReasoning;
 }
 
 /** Deterministic grading (mirrors domains/grading): index match → correct. */
@@ -182,7 +199,9 @@ function detailFor(lesson: StoredLesson): LessonDetail {
     unlock_state: lesson.unlock_state,
     read_passage: generated ? lesson.readPassage : null,
     // Answer-hiding (W6): stem + options only, never the keyed answer.
-    quick_check: generated ? { stem: lesson.stem, options: lesson.options } : null,
+    quick_check: generated
+      ? { stem: lesson.stem, options: lesson.options, asks_reasoning: lesson.asksReasoning }
+      : null,
     // The reveal appears only once an Attempt exists (revealed-on-return).
     attempt: lesson.attempt,
     generation_error:
@@ -278,10 +297,45 @@ export const lessonsHandlers = [
         { status: 409 },
       );
     }
-    const body = (await request.json()) as { selected_index: number };
+    const body = (await request.json()) as { selected_index: number; reasoning?: string };
     // First-wins: a re-submit returns the first Attempt, never overwrites it.
     if (lesson.attempt === null) {
       lesson.attempt = gradeAttempt(lesson, body.selected_index);
+      lesson.sentReasoning = body.reasoning;
+      if (lesson.asksReasoning && body.reasoning && lesson.gradedReasoning) {
+        lesson.attempt = {
+          ...lesson.attempt,
+          reasoning: { ...lesson.gradedReasoning, text: body.reasoning },
+        };
+      }
+    }
+    return HttpResponse.json(lesson.attempt);
+  }),
+
+  http.post(`${API_V1_BASE}/lessons/:id/reasoning/follow-up`, async ({ params, request }) => {
+    const lesson = store.get(params.id as string);
+    const reasoning = lesson?.attempt?.reasoning;
+    if (!lesson?.attempt || !reasoning?.follow_up) {
+      return HttpResponse.json(
+        { error: { code: "conflict", message: "No follow-up question." } },
+        { status: 409 },
+      );
+    }
+    const { answer } = (await request.json()) as { answer: string };
+    if (reasoning.follow_up.answer === null) {
+      lesson.attempt = {
+        ...lesson.attempt,
+        reasoning: {
+          ...reasoning,
+          follow_up: {
+            ...reasoning.follow_up,
+            answer,
+            state: "graded",
+            grade: "solid",
+            feedback: "That fills the gap.",
+          },
+        },
+      };
     }
     return HttpResponse.json(lesson.attempt);
   }),

@@ -38,6 +38,7 @@ from aleph.models.notification_preferences import NotificationPreferences
 from aleph.models.path import Path
 from aleph.models.path_change import PathChange
 from aleph.models.quick_check import QuickCheck
+from aleph.models.reasoning import Reasoning
 from aleph.models.reminder_scan_progress import ReminderScanProgress
 from aleph.models.reminder_send import ReminderSend
 from aleph.models.unit import Unit
@@ -73,6 +74,7 @@ __all__ = [
     "PathChangeStatus",
     "PathStatus",
     "QuickCheck",
+    "Reasoning",
     "ReminderScanProgress",
     "ReminderSend",
     "Unit",
