@@ -77,8 +77,10 @@ Hostile PDFs, read with pypdf in a child process with `RLIMIT_AS` 768 MB,
 - **D3. Papers ride the Material draft.** Placement check D1 adds
   `material_drafts`. Papers need two additive changes to it, sent to that
   thread on 2026-11-27:
-  - each item in `items` carries `state` (`reading`, `ready` or `failed`) and a
-    `reason`, so a failed paper is marked on its own item. The draft is
+  - each item has a `state` (`reading`, `ready` or `failed`) and a `reason`
+    in the draft's small `item_states` column (Placement check D3), so a
+    failed paper is marked on its own item. `items` holds only the sections
+    and digest. The draft is
     `ready` when every item is ready, and `failed` when any item failed;
   - `POST /api/v1/material-drafts` also accepts `multipart/form-data`: the
     `material` list as a JSON part, and one file part per
@@ -225,10 +227,15 @@ Specified here; the Space writes the migration.
   arXiv HTML or PDF URL actually read, for an arXiv item.
 - `lessons.material_concepts text[] NULL` (D8): the digest concept ids a lesson
   teaches. Prep lessons store none.
-- `material_drafts` as in Placement check D1, with the per-item `state` and
-  `reason` in `items` (D3). A draft's `items` holds the read sections and
-  digest until Build copies them, up to about 400,000 characters, so expired
-  and consumed drafts need deleting (a reconciler sweep), not just ignoring.
+- `material_drafts` as in Placement check D1 and D3: per-item `state` and
+  `reason` in `item_states`, sections and digest in `items` (up to about
+  400,000 characters). Build copies `items` into `materials` and
+  `material_sections` under `SELECT … FOR UPDATE`, then clears `items` and
+  `placement` in the same transaction; the hourly tick clears them on expired
+  drafts, and the slim row is deleted 48 hours after creation so the daily
+  draft limit still counts it. A PDF extraction that finishes after its draft
+  expired or was claimed writes nothing: its update requires the item still
+  `reading` and `consumed_at` null.
 
 Bulky text stays off the hot paths. Postgres compresses any value over about
 2 KB and stores it out of line in the table's TOAST table, leaving a small
@@ -236,8 +243,8 @@ pointer in the row, and reads it only when a query selects that column. So:
 the section text lives only in `material_sections`, which is read by
 `(path_id, position)` for one lesson at a time; `materials.digest` is
 `deferred()` in the ORM so the path detail's `list_for_path` doesn't load it;
-and the draft poll (`GET /material-drafts/{id}`) selects `state` and each
-item's `state` and `reason`, never the whole `items` value.
+and the draft poll (`GET /material-drafts/{id}`) selects only `state` and
+`item_states`; a jsonb projection of `items` would still decompress all of it.
 
 ## Size and slices
 
