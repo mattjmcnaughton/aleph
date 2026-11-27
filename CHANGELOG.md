@@ -1,3 +1,10 @@
+# [1.59.0](https://github.com/mattjmcnaughton/aleph/compare/v1.58.1...v1.59.0) (2026-11-27)
+
+
+### Features
+
+* **mcp:** connect MCP clients with OAuth, Aleph as the authorization server ([aa8ca1d](https://github.com/mattjmcnaughton/aleph/commit/aa8ca1d09b73e1f7e9e0c7e2a706a5250279aac7))
+
 ## [1.58.1](https://github.com/mattjmcnaughton/aleph/compare/v1.58.0...v1.58.1) (2026-11-27)
 
 
